@@ -1,0 +1,79 @@
+# 元聊 YuanChat — 服务端配置
+
+server:
+  name: yuanchat-server
+  env: development          # development | staging | production
+  host: 0.0.0.0
+  port: 8080
+  read_timeout: 30s
+  write_timeout: 30s
+  shutdown_timeout: 10s
+
+websocket:
+  port: 8081
+  read_timeout: 60s
+  write_timeout: 10s
+  ping_interval: 30s
+  pong_timeout: 90s
+  max_message_size: 65536   # 64KB
+  max_connections_per_user: 5
+
+database:
+  host: localhost
+  port: 5433
+  user: yuanchat
+  password: yuanchat_dev
+  dbname: yuanchat
+  sslmode: disable
+  max_open_conns: 100
+  max_idle_conns: 10
+  conn_max_lifetime: 1h
+  log_level: info           # silent | error | warn | info
+
+redis:
+  host: localhost
+  port: 6379
+  password: ""
+  db: 0
+  pool_size: 100
+  min_idle_conns: 10
+  dial_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
+
+jwt:
+  secret: yuanchat-dev-secret-change-in-production
+  access_token_ttl: 15m
+  refresh_token_ttl: 168h  # 7 days
+
+log:
+  level: debug              # debug | info | warn | error
+  format: console           # console | json
+  output: stdout            # stdout | file
+  file_path: logs/server.log
+  max_size: 100             # MB
+  max_backups: 3
+  max_age: 7                # days
+  compress: true
+
+asynq:
+  redis_addr: localhost:6379
+  redis_password: ""
+  redis_db: 1
+  concurrency: 10
+  queues:
+    critical: 6
+    default: 3
+    low: 1
+
+upload:
+  max_file_size: 104857600  # 100MB
+  allowed_types:
+    - image/jpeg
+    - image/png
+    - image/gif
+    - image/webp
+    - application/pdf
+    - application/msword
+    - application/vnd.openxmlformats-officedocument.wordprocessingml.document
+    - text/plain

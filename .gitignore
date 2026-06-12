@@ -68,3 +68,4 @@ logs/
 *.tar.gz
 coverage/
 .cache/
+.claude/settings.local.json
