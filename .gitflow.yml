@@ -1,0 +1,26 @@
+# GitFlow Configuration for YuanChat
+# 参考: https://github.com/nvie/gitflow
+
+main:
+  name: main
+  base: develop
+
+develop:
+  name: develop
+  base: main
+
+feature:
+  prefix: feature/
+  base: develop
+
+bugfix:
+  prefix: bugfix/
+  base: develop
+
+release:
+  prefix: release/
+  base: develop
+
+hotfix:
+  prefix: hotfix/
+  base: main

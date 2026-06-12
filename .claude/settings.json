@@ -1,0 +1,25 @@
+{
+  "project": {
+    "name": "yuanchat",
+    "description": "元聊 (YuanChat) — 企业级即时通讯软件",
+    "defaultBranch": "develop"
+  },
+  "gitflow": {
+    "enabled": true,
+    "mainBranch": "main",
+    "developBranch": "develop",
+    "featurePrefix": "feature/",
+    "bugfixPrefix": "bugfix/",
+    "releasePrefix": "release/",
+    "hotfixPrefix": "hotfix/"
+  },
+  "commitlint": {
+    "enabled": true,
+    "config": ".commitlintrc.js"
+  },
+  "blog": {
+    "path": "/home/liaojie1314/code/blog/liaojie1314'Blog",
+    "guide": "BLOG_POST_GUIDE.md",
+    "source": "source/_posts/"
+  }
+}

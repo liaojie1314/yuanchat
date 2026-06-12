@@ -1,0 +1,70 @@
+# ====================
+# Node.js / Frontend
+# ====================
+node_modules/
+dist/
+build/
+.vite/
+*.local
+
+# ====================
+# Go / Backend
+# ====================
+server/bin/
+server/tmp/
+server/vendor/
+*.exe
+*.test
+*.out
+
+# ====================
+# Environment
+# ====================
+.env
+.env.local
+.env.*.local
+
+# ====================
+# IDE
+# ====================
+.idea/
+*.swp
+*.swo
+*~
+.vscode/settings.json
+.DS_Store
+Thumbs.db
+
+# ====================
+# Docker
+# ====================
+deploy/data/
+deploy/logs/
+
+# ====================
+# Tauri / Desktop
+# ====================
+desktop/src-tauri/target/
+
+# ====================
+# Capacitor / Mobile
+# ====================
+mobile/android/app/build/
+mobile/android/.gradle/
+mobile/android/build/
+mobile/ios/App/build/
+mobile/ios/Pods/
+
+# ====================
+# Logs
+# ====================
+*.log
+logs/
+
+# ====================
+# Misc
+# ====================
+*.tgz
+*.tar.gz
+coverage/
+.cache/
