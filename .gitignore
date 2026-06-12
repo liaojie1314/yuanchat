@@ -44,7 +44,17 @@ deploy/logs/
 # ====================
 # Tauri / Desktop
 # ====================
-desktop/src-tauri/target/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+apps/desktop/dist/
+apps/web/dist/
+*.tsbuildinfo
+vite.config.d.ts
+
+# ====================
+# Turborepo
+# ====================
+.turbo/
 
 # ====================
 # Capacitor / Mobile

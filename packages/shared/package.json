@@ -1,0 +1,33 @@
+{
+  "name": "@yuanchat/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "元聊共享层 — Zustand stores + hooks + types + utils + WebSocket client",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./store/*": "./src/store/*.ts",
+    "./hooks/*": "./src/hooks/*.ts",
+    "./types": "./src/types/index.ts",
+    "./utils": "./src/utils/index.ts",
+    "./ws": "./src/ws/client.ts"
+  },
+  "scripts": {
+    "build": "echo 'shared: no build needed'",
+    "lint": "echo 'shared: no lint'",
+    "typecheck": "tsc --noEmit",
+    "clean": "echo 'shared: clean'"
+  },
+  "dependencies": {
+    "@yuanchat/design-system": "workspace:*",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.6.0",
+    "zustand": "^5.0.0",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.6.0"
+  }
+}
