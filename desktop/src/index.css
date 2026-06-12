@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ========================================
+   元聊 YuanChat — 全局基础样式
+   ======================================== */
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html {
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    min-height: 100vh;
+    overflow: hidden; /* IM 应用不需要页面滚动，内部滚动由各面板管理 */
+  }
+
+  #root {
+    width: 100%;
+    height: 100vh;
+  }
+
+  /* 自定义滚动条 */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(0 0% 70% / 0.5);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(0 0% 60% / 0.7);
+  }
+
+  .dark ::-webkit-scrollbar-thumb {
+    background: hsl(0 0% 30% / 0.5);
+  }
+
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: hsl(0 0% 40% / 0.7);
+  }
+
+  /* 选中文本颜色 */
+  ::selection {
+    background: theme("colors.primary.200");
+    color: theme("colors.primary.900");
+  }
+
+  .dark ::selection {
+    background: theme("colors.primary.700");
+    color: theme("colors.primary.100");
+  }
+}
+
+@layer components {
+  /* 消息气泡基础样式 */
+  .msg-bubble {
+    @apply relative max-w-[70%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed;
+    word-break: break-word;
+  }
+
+  .msg-bubble-sent {
+    @apply msg-bubble bg-primary-500 text-white rounded-br-md;
+  }
+
+  .msg-bubble-received {
+    @apply msg-bubble bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-bl-md shadow-subtle;
+  }
+
+  /* 输入框基础样式 */
+  .input-base {
+    @apply w-full rounded-lg border border-neutral-200 dark:border-neutral-700
+           bg-white dark:bg-neutral-800
+           px-3 py-2 text-sm
+           placeholder:text-neutral-400 dark:placeholder:text-neutral-500
+           focus:outline-none focus:ring-2 focus:ring-primary-500/40 focus:border-primary-500
+           transition-colors duration-150;
+  }
+}
+
+@layer utilities {
+  /* 禁止文本选中（用于聊天列表等场景） */
+  .no-select {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+}
