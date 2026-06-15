@@ -105,26 +105,28 @@
   .md3-icon-btn:hover { background: rgb(var(--md-sys-color-on-surface-variant-rgb) / 0.08); }
   .md3-icon-btn:active { background: rgb(var(--md-sys-color-on-surface-variant-rgb) / 0.12); }
 
-  /* 品牌渐变 */
+  /* 品牌渐变 — 天蓝渐变 */
   .brand-gradient {
-    background: linear-gradient(135deg,
-      rgb(var(--md-sys-color-primary-rgb)),
-      rgb(var(--md-sys-color-tertiary-rgb)));
+    background: linear-gradient(135deg, #5B9BD5 0%, #7EC8E3 50%, #A8CFFF 100%);
   }
   .brand-gradient-soft {
     background: linear-gradient(135deg,
-      rgb(var(--md-sys-color-primary-rgb) / 0.08),
-      rgb(var(--md-sys-color-tertiary-rgb) / 0.05));
+      rgb(var(--md-sys-color-primary-rgb) / 0.10),
+      rgb(var(--md-sys-color-tertiary-rgb) / 0.06));
   }
+  /* 导航栏渐变 — 天蓝 */
   .nav-gradient {
-    background: linear-gradient(180deg,
-      rgb(var(--md-sys-color-primary-rgb)),
-      rgb(var(--md-sys-color-primary-rgb) / 0.85));
+    background: linear-gradient(180deg, #5B9BD5 0%, #4A8BC5 100%);
   }
+  /* 页面背景 — 天空渐变 */
   .surface-gradient {
-    background: linear-gradient(180deg,
-      rgb(var(--md-sys-color-surface-bright-rgb)),
-      rgb(var(--md-sys-color-surface-container-low-rgb)));
+    background: linear-gradient(180deg, #F0F7FF 0%, #E8F4FD 40%, #E0F0FA 100%);
+  }
+  .dark .surface-gradient {
+    background: linear-gradient(180deg, #0E141B 0%, #111820 40%, #141C24 100%);
+  }
+  .dark .nav-gradient {
+    background: linear-gradient(180deg, #1B4B6F 0%, #153D5A 100%);
   }
 
   /* 玻璃态 */
