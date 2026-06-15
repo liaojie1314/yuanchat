@@ -1,11 +1,11 @@
-# 元聊 (YuanChat) — 企业级即时通讯软件 总体计划书
+# 元聊 (YuanChat) — 即时通讯软件 总体计划书
 
 ## 一、项目概述
 
 | 项目 | 说明 |
 |------|------|
 | 项目名称 | 元聊 (YuanChat) |
-| 项目类型 | 企业级即时通讯 (IM) 软件 |
+| 项目类型 | 即时通讯 (IM) 软件 |
 | 开发模式 | GitFlow 工作流 |
 | 目标平台 | Web / Windows / macOS / Linux / Android / iOS / 平板 |
 | 前端语言 | TypeScript |

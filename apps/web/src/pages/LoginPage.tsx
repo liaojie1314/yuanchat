@@ -17,7 +17,7 @@ export function LoginPage() {
             <MessageCircle size={40} />
           </div>
           <h1 className="text-headline-lg font-semibold text-on-surface">元聊</h1>
-          <p className="text-body-lg text-on-surface-variant mt-2">企业级即时通讯 · Web 版</p>
+          <p className="text-body-lg text-on-surface-variant mt-2">即时通讯 </p>
         </div>
 
         {/* 玻璃态卡片 */}
