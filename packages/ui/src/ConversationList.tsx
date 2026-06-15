@@ -43,7 +43,7 @@ export function ConversationList() {
                          placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
           </div>
-          <button className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 transition-colors">
+          <button className="md3-icon-btn">
             <Plus size={18} />
           </button>
         </div>
@@ -95,12 +95,12 @@ function ConversationItem({
           <span className="text-body-lg font-medium text-on-surface truncate">
             {conv.name}
           </span>
-          <span className="text-xs text-neutral-400 shrink-0 ml-2">
+          <span className="text-label-sm text-on-surface-variant shrink-0 ml-2">
             {conv.lastTime}
           </span>
         </div>
         <div className="flex items-center justify-between mt-0.5">
-          <span className="text-xs text-neutral-500 truncate">
+          <span className="text-body-sm text-on-surface-variant truncate">
             {conv.lastMessage || "暂无消息"}
           </span>
           {conv.unreadCount > 0 && (

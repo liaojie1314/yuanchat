@@ -38,8 +38,9 @@ export function MainLayout() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-surface">
-      {/* M3 导航栏 — surface-container + outline-variant 边框 */}
-      <nav className="flex flex-col items-center w-16 shrink-0 bg-surface-container border-r border-outline-variant py-4 gap-1">
+      {/* 导航栏 — 使用 primary-container 背景，突出品牌色 */}
+      <nav className="flex flex-col items-center w-16 shrink-0 py-4 gap-1"
+        style={{ background: `linear-gradient(180deg, rgb(var(--md-sys-color-primary-container)) 0%, rgb(var(--md-sys-color-surface-container-low)) 100%)` }}>
         {NAV_ITEMS.map(({ to, icon: Icon, label }) => {
           const isActive = to === "/chat"
             ? location.pathname.startsWith("/chat")
@@ -50,7 +51,7 @@ export function MainLayout() {
               to={to}
               className={`flex flex-col items-center gap-1 px-2 py-2 rounded-2xl text-label-sm transition-all duration-200 ${
                 isActive
-                  ? "bg-primary-container text-primary-on-container shadow-elevation-1"
+                  ? "bg-primary text-primary-on shadow-elevation-2"
                   : "text-on-surface-variant hover:bg-surface-container-high"
               }`}
               title={label}
@@ -63,7 +64,6 @@ export function MainLayout() {
 
         <div className="flex-1" />
 
-        {/* 主题切换 — M3 图标按钮 */}
         <button
           onClick={toggleMode}
           className="md3-icon-btn text-on-surface-variant"

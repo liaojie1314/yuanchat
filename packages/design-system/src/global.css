@@ -3,278 +3,232 @@
 @tailwind utilities;
 
 /* ========================================
-   元聊 YuanChat — 绚丽视觉增强
-   玻璃态 / 渐变 / 辉光 / 动画 / 霓虹
+   元聊 YuanChat — M3 全局样式
    ======================================== */
 
 @layer base {
-  *,*::before,*::after { margin:0; padding:0; box-sizing:border-box; }
+  *,
+  *::before,
+  *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
   html {
     font-size: 14px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+
   body {
-    min-height: 100vh; overflow: hidden;
-    background: rgb(var(--md-sys-color-background));
+    min-height: 100vh;
+    overflow: hidden;
+    /* M3 surface background */
+    background-color: rgb(var(--md-sys-color-background));
     color: rgb(var(--md-sys-color-on-background));
   }
-  #root { width:100%; height:100vh; }
-  ::-webkit-scrollbar { width:6px; height:6px; }
-  ::-webkit-scrollbar-track { background:transparent; }
+
+  #root {
+    width: 100%;
+    height: 100vh;
+  }
+
+  /* M3 滚动条样式 */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg,
-      rgb(var(--md-sys-color-primary)/.4),
-      rgb(var(--md-sys-color-tertiary)/.4));
+    background: rgb(var(--md-sys-color-outline-variant) / 0.5);
     border-radius: 3px;
   }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--md-sys-color-outline) / 0.7);
+  }
+
+  /* 选中文本颜色 */
   ::selection {
     background: rgb(var(--md-sys-color-primary-container));
     color: rgb(var(--md-sys-color-on-primary-container));
   }
 }
 
+/* ========================================
+   M3 高度系统 (Elevation)
+   ======================================== */
+
 :root {
-  --md-elevation-1: 0px 1px 2px 0px rgba(0,0,0,.3), 0px 1px 3px 1px rgba(0,0,0,.15);
-  --md-elevation-2: 0px 1px 2px 0px rgba(0,0,0,.3), 0px 2px 6px 2px rgba(0,0,0,.15);
-  --md-elevation-3: 0px 4px 8px 3px rgba(0,0,0,.15), 0px 1px 3px 0px rgba(0,0,0,.3);
-  --md-elevation-4: 0px 6px 10px 4px rgba(0,0,0,.15), 0px 2px 3px 0px rgba(0,0,0,.3);
-  --md-elevation-5: 0px 8px 12px 6px rgba(0,0,0,.15), 0px 4px 4px 0px rgba(0,0,0,.3);
-  --md-easing-standard: cubic-bezier(.2,0,0,1);
-  --md-easing-emphasized: cubic-bezier(.2,0,0,1);
-  --md-easing-bounce: cubic-bezier(.34,1.56,.64,1);
+  /* ===== M3 Elevation ===== */
+  --md-elevation-1: 0px 1px 3px 0px rgba(0,0,0,0.08), 0px 1px 2px -1px rgba(0,0,0,0.05);
+  --md-elevation-2: 0px 2px 6px 0px rgba(0,0,0,0.08), 0px 1px 4px -1px rgba(0,0,0,0.06);
+  --md-elevation-3: 0px 6px 16px 0px rgba(0,0,0,0.10), 0px 2px 6px -2px rgba(0,0,0,0.06);
+  --md-elevation-4: 0px 12px 24px 0px rgba(0,0,0,0.12), 0px 4px 10px -3px rgba(0,0,0,0.08);
+  --md-elevation-5: 0px 20px 36px 0px rgba(0,0,0,0.16), 0px 8px 16px -4px rgba(0,0,0,0.10);
+  --md-easing-standard: cubic-bezier(0.2, 0, 0, 1.0);
+  --md-easing-emphasized: cubic-bezier(0.2, 0, 0, 1.0);
   --font-scale: 1;
+
+  /* ===== M3 颜色默认值（首帧可见，applyTheme 后覆盖） ===== */
+  --md-sys-color-primary: 74 92 196;
+  --md-sys-color-on-primary: 255 255 255;
+  --md-sys-color-primary-container: 222 225 255;
+  --md-sys-color-on-primary-container: 0 18 90;
+  --md-sys-color-secondary: 91 93 114;
+  --md-sys-color-on-secondary: 255 255 255;
+  --md-sys-color-secondary-container: 224 225 249;
+  --md-sys-color-on-secondary-container: 24 26 44;
+  --md-sys-color-tertiary: 117 84 111;
+  --md-sys-color-on-tertiary: 255 255 255;
+  --md-sys-color-error: 186 26 26;
+  --md-sys-color-on-error: 255 255 255;
+  --md-sys-color-error-container: 255 218 214;
+  --md-sys-color-background: 254 251 255;
+  --md-sys-color-on-background: 27 27 33;
+  --md-sys-color-surface: 254 251 255;
+  --md-sys-color-on-surface: 27 27 33;
+  --md-sys-color-surface-variant: 227 225 236;
+  --md-sys-color-on-surface-variant: 70 70 79;
+  --md-sys-color-outline: 118 118 128;
+  --md-sys-color-outline-variant: 199 197 208;
+  --md-sys-color-surface-dim: 221 219 227;
+  --md-sys-color-surface-bright: 254 251 255;
+  --md-sys-color-surface-container: 241 239 247;
+  --md-sys-color-surface-container-low: 247 245 253;
+  --md-sys-color-surface-container-high: 235 233 241;
 }
 
+.dark {
+  --md-sys-color-primary: 184 196 255;
+  --md-sys-color-on-primary: 0 39 122;
+  --md-sys-color-primary-container: 47 67 169;
+  --md-sys-color-on-primary-container: 222 225 255;
+  --md-sys-color-secondary: 196 197 221;
+  --md-sys-color-on-secondary: 45 47 66;
+  --md-sys-color-secondary-container: 67 70 89;
+  --md-sys-color-on-secondary-container: 224 225 249;
+  --md-sys-color-tertiary: 229 186 216;
+  --md-sys-color-on-tertiary: 67 39 63;
+  --md-sys-color-tertiary-container: 92 61 86;
+  --md-sys-color-error: 255 180 171;
+  --md-sys-color-on-error: 105 0 5;
+  --md-sys-color-error-container: 147 0 10;
+  --md-sys-color-background: 19 19 24;
+  --md-sys-color-on-background: 229 225 230;
+  --md-sys-color-surface: 19 19 24;
+  --md-sys-color-on-surface: 229 225 230;
+  --md-sys-color-surface-variant: 70 70 79;
+  --md-sys-color-on-surface-variant: 199 197 208;
+  --md-sys-color-outline: 144 144 154;
+  --md-sys-color-outline-variant: 70 70 79;
+  --md-sys-color-surface-dim: 19 19 24;
+  --md-sys-color-surface-bright: 57 57 63;
+  --md-sys-color-surface-container: 31 31 37;
+  --md-sys-color-surface-container-low: 27 27 33;
+  --md-sys-color-surface-container-high: 42 41 48;
+}
+
+/* M3 状态层（hover/focus/pressed 叠加） */
+.state-layer-hover { position: relative; }
+.state-layer-hover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  border-radius: inherit;
+}
+.state-layer-hover:hover::after { opacity: 0.08; }
+.state-layer-hover:active::after { opacity: 0.12; }
+
 /* ========================================
-   绚丽组件类
+   消息气泡 (M3 风格)
    ======================================== */
 
 @layer components {
-
-  /* ── 玻璃态卡片 ── */
-  .glass {
-    background: rgb(var(--md-sys-color-surface-container)/.65);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border: 1px solid rgb(var(--md-sys-color-outline-variant)/.3);
-    box-shadow: 0 8px 32px rgba(0,0,0,.08),
-                inset 0 1px 0 rgb(255 255 255/.1);
-  }
-  .glass-strong {
-    background: rgb(var(--md-sys-color-surface-container)/.85);
-    backdrop-filter: blur(40px) saturate(180%);
-    -webkit-backdrop-filter: blur(40px) saturate(180%);
-    border: 1px solid rgb(var(--md-sys-color-outline-variant)/.2);
-  }
-  .dark .glass-strong {
-    background: rgb(var(--md-sys-color-surface-container)/.9);
-  }
-
-  /* ── 渐变动画背景 ── */
-  .gradient-shift {
-    background: linear-gradient(
-      135deg,
-      rgb(var(--md-sys-color-primary-container)),
-      rgb(var(--md-sys-color-tertiary-container)),
-      rgb(var(--md-sys-color-secondary-container)),
-      rgb(var(--md-sys-color-primary-container))
-    );
-    background-size: 400% 400%;
-    animation: gradientShift 8s ease infinite;
-  }
-
-  /* ── 辉光按钮 ── */
-  .btn-glow {
-    position: relative;
-    overflow: hidden;
-  }
-  .btn-glow::before {
-    content: '';
-    position: absolute;
-    top: -50%; left: -50%;
-    width: 200%; height: 200%;
-    background: conic-gradient(
-      from 0deg, transparent,
-      rgb(var(--md-sys-color-primary)/.3),
-      transparent,
-      rgb(var(--md-sys-color-tertiary)/.3),
-      transparent
-    );
-    animation: glowSpin 3s linear infinite;
-  }
-  .btn-glow::after {
-    content: '';
-    position: absolute;
-    inset: 2px;
-    border-radius: inherit;
-    background: inherit;
-  }
-  .btn-glow > * { position: relative; z-index: 1; }
-
-  /* ── 辉光边框 ── */
-  .glow-border {
-    box-shadow:
-      0 0 15px rgb(var(--md-sys-color-primary)/.15),
-      0 0 45px rgb(var(--md-sys-color-primary)/.05),
-      inset 0 0 15px rgb(var(--md-sys-color-primary)/.05);
-  }
-
-  /* ── 消息气泡 (绚丽版) ── */
   .msg-bubble {
     @apply relative max-w-[70%] rounded-2xl px-4 py-2.5;
     word-break: break-word;
-    animation: msgIn .3s var(--md-easing-bounce);
+    transition: transform 0.15s var(--md-easing-standard);
   }
+
   .msg-bubble-sent {
     @apply msg-bubble;
-    background: linear-gradient(135deg,
-      rgb(var(--md-sys-color-primary)),
-      rgb(var(--md-sys-color-tertiary)));
+    /* 发送方：使用 Primary 主色，凸显品牌色 */
+    background: rgb(var(--md-sys-color-primary));
     color: rgb(var(--md-sys-color-on-primary));
     border-bottom-right-radius: 4px;
     margin-left: auto;
-    box-shadow: 0 4px 15px rgb(var(--md-sys-color-primary)/.25);
-  }
-  .msg-bubble-received {
-    @apply msg-bubble;
-    background: linear-gradient(135deg,
-      rgb(var(--md-sys-color-surface-container-high)),
-      rgb(var(--md-sys-color-surface-container)));
-    color: rgb(var(--md-sys-color-on-surface));
-    border-bottom-left-radius: 4px;
-    box-shadow: var(--md-elevation-1);
   }
 
-  /* ── 输入框 (绚丽版) ── */
-  .input-base {
-    @apply w-full rounded-xl px-4 py-3;
-    background: rgb(var(--md-sys-color-surface-container-high)/.8);
-    backdrop-filter: blur(12px);
+  .msg-bubble-received {
+    @apply msg-bubble;
+    background: rgb(var(--md-sys-color-surface-container-high));
     color: rgb(var(--md-sys-color-on-surface));
-    border: 2px solid rgb(var(--md-sys-color-outline-variant)/.4);
-    transition: all .3s var(--md-easing-standard);
+    border-bottom-left-radius: 4px;
   }
-  .input-base::placeholder { color: rgb(var(--md-sys-color-on-surface-variant)/.6); }
+
+  /* M3 输入框 */
+  .input-base {
+    @apply w-full rounded-xl border border-outline-variant px-4 py-3;
+    background: rgb(var(--md-sys-color-surface-container-high));
+    color: rgb(var(--md-sys-color-on-surface));
+    border-color: rgb(var(--md-sys-color-outline-variant));
+    transition: border-color 0.2s var(--md-easing-standard),
+                box-shadow 0.2s var(--md-easing-standard);
+  }
+  .input-base::placeholder {
+    color: rgb(var(--md-sys-color-on-surface-variant));
+  }
   .input-base:focus {
     outline: none;
     border-color: rgb(var(--md-sys-color-primary));
-    box-shadow:
-      0 0 20px rgb(var(--md-sys-color-primary)/.2),
-      0 0 40px rgb(var(--md-sys-color-primary)/.05);
+    box-shadow: 0 0 0 2px rgb(var(--md-sys-color-primary) / 0.3);
   }
 
-  /* ── 头像光环 ── */
-  .avatar-glow-ring {
-    position: relative;
+  /* M3 卡片 */
+  .md3-card {
+    background: rgb(var(--md-sys-color-surface-container));
+    border-radius: 12px;
+    transition: box-shadow 0.2s var(--md-easing-standard);
   }
-  .avatar-glow-ring::before {
-    content: '';
-    position: absolute;
-    inset: -3px;
-    border-radius: 50%;
-    background: conic-gradient(
-      rgb(var(--md-sys-color-primary)),
-      rgb(var(--md-sys-color-tertiary)),
-      rgb(var(--md-sys-color-secondary)),
-      rgb(var(--md-sys-color-primary))
-    );
-    animation: glowSpin 4s linear infinite;
-    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
-    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  .md3-card:hover {
+    box-shadow: var(--md-elevation-2);
   }
 
-  /* ── 图标按钮 ── */
+  /* 面板分割线 — 代替 border 的微弱分割 */
+  .divider-subtle {
+    border-color: rgb(var(--md-sys-color-surface-variant) / 0.4);
+  }
+
+  /* M3 图标按钮涟漪 */
   .md3-icon-btn {
     @apply inline-flex items-center justify-center rounded-full;
-    width: 40px; height: 40px;
-    position: relative; overflow: hidden;
-    transition: all .2s var(--md-easing-standard);
+    width: 40px;
+    height: 40px;
+    position: relative;
+    overflow: hidden;
+    transition: background 0.15s var(--md-easing-standard);
   }
   .md3-icon-btn:hover {
-    background: rgb(var(--md-sys-color-on-surface-variant)/.08);
-    transform: scale(1.08);
+    background: rgb(var(--md-sys-color-on-surface-variant) / 0.08);
   }
   .md3-icon-btn:active {
-    background: rgb(var(--md-sys-color-on-surface-variant)/.12);
-    transform: scale(.95);
+    background: rgb(var(--md-sys-color-on-surface-variant) / 0.12);
   }
 
-  /* ── FAB ── */
+  /* FAB 悬浮按钮 */
   .md3-fab {
     @apply inline-flex items-center justify-center rounded-2xl;
-    background: linear-gradient(135deg,
-      rgb(var(--md-sys-color-primary-container)),
-      rgb(var(--md-sys-color-tertiary-container)));
+    background: rgb(var(--md-sys-color-primary-container));
     color: rgb(var(--md-sys-color-on-primary-container));
-    box-shadow: var(--md-elevation-3), 0 0 20px rgb(var(--md-sys-color-primary)/.2);
-    transition: all .3s var(--md-easing-bounce);
+    box-shadow: var(--md-elevation-3);
+    transition: box-shadow 0.2s var(--md-easing-standard),
+                background 0.2s var(--md-easing-standard);
   }
   .md3-fab:hover {
-    box-shadow: var(--md-elevation-5), 0 0 35px rgb(var(--md-sys-color-primary)/.3);
-    transform: translateY(-2px);
+    box-shadow: var(--md-elevation-4);
+    background: rgb(var(--md-sys-color-primary-container) / 0.8);
   }
-
-  /* ── 活跃导航项 ── */
-  .nav-active {
-    background: linear-gradient(135deg,
-      rgb(var(--md-sys-color-primary-container)),
-      rgb(var(--md-sys-color-secondary-container)));
-    box-shadow: 0 4px 15px rgb(var(--md-sys-color-primary)/.25);
-  }
-}
-
-/* ========================================
-   关键帧动画
-   ======================================== */
-
-@keyframes gradientShift {
-  0%,100% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-}
-@keyframes glowSpin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-@keyframes msgIn {
-  0% { opacity: 0; transform: translateY(12px) scale(.95); }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
-}
-@keyframes float {
-  0%,100% { transform: translateY(0px); }
-  50% { transform: translateY(-6px); }
-}
-@keyframes pulseGlow {
-  0%,100% { box-shadow: 0 0 5px rgb(var(--md-sys-color-primary)/.2); }
-  50% { box-shadow: 0 0 25px rgb(var(--md-sys-color-primary)/.4); }
-}
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-
-/* ── 通用动画工具类 ── */
-.animate-float { animation: float 3s ease-in-out infinite; }
-.animate-msg-in { animation: msgIn .3s var(--md-easing-bounce); }
-.animate-pulse-glow { animation: pulseGlow 2s ease-in-out infinite; }
-
-/* ── 骨架屏 shimmer ── */
-.skeleton {
-  background: linear-gradient(90deg,
-    rgb(var(--md-sys-color-surface-container)/0),
-    rgb(var(--md-sys-color-surface-container-high)/.6),
-    rgb(var(--md-sys-color-surface-container)/0));
-  background-size: 200% 100%;
-  animation: shimmer 1.5s ease-in-out infinite;
-  border-radius: 8px;
-}
-
-/* ── 艳丽的在线状态指示 ── */
-.online-dot {
-  display: inline-block; width:10px; height:10px; border-radius:50%;
-  background: #22c55e;
-  box-shadow: 0 0 6px #22c55e, 0 0 12px #22c55e88;
-  animation: pulseGlow 2s ease-in-out infinite;
 }
 
 @layer utilities {
