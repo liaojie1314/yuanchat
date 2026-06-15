@@ -24,7 +24,6 @@ import { Link, useLocation, Outlet } from "react-router-dom";
 import { MessageCircle, Users, Settings, Sun, Moon } from "lucide-react";
 import { useThemeStore } from "@yuanchat/shared";
 
-/** 左侧导航栏配置：路径、图标组件、中文标签 */
 const NAV_ITEMS = [
   { to: "/chat", icon: MessageCircle, label: "消息" },
   { to: "/contacts", icon: Users, label: "通讯录" },
@@ -32,17 +31,16 @@ const NAV_ITEMS = [
 ];
 
 export function MainLayout() {
-  // useLocation：React Router Hook，返回当前浏览器 URL 信息
   const location = useLocation();
-  // 从 Zustand 主题 Store 读取暗色模式状态和切换函数
-  const { isDark, toggle } = useThemeStore();
+  // 新 API: mode("light"/"dark"), toggleMode()
+  const { mode, toggleMode } = useThemeStore();
+  const isDark = mode === "dark";
 
   return (
-    <div className="flex h-screen overflow-hidden bg-white dark:bg-neutral-900">
-      {/* 左侧导航栏 */}
-      <nav className="flex flex-col items-center w-16 shrink-0 bg-neutral-100 dark:bg-neutral-900 border-r border-neutral-200 dark:border-neutral-800 py-4 gap-2">
+    <div className="flex h-screen overflow-hidden bg-surface">
+      {/* M3 导航栏 — surface-container + outline-variant 边框 */}
+      <nav className="flex flex-col items-center w-16 shrink-0 bg-surface-container border-r border-outline-variant py-4 gap-1">
         {NAV_ITEMS.map(({ to, icon: Icon, label }) => {
-          // 判断当前路由是否与导航项匹配（"/chat" 也匹配 "/chat/xxx"）
           const isActive = to === "/chat"
             ? location.pathname.startsWith("/chat")
             : location.pathname.startsWith(to);
@@ -50,14 +48,14 @@ export function MainLayout() {
             <Link
               key={to}
               to={to}
-              className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl text-xs transition-colors ${
+              className={`flex flex-col items-center gap-1 px-2 py-2 rounded-2xl text-label-sm transition-all duration-200 ${
                 isActive
-                  ? "text-primary-500 bg-primary-50 dark:bg-primary-900/30"
-                  : "text-neutral-500 hover:text-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-800"
+                  ? "bg-primary-container text-primary-on-container shadow-elevation-1"
+                  : "text-on-surface-variant hover:bg-surface-container-high"
               }`}
               title={label}
             >
-              <Icon size={22} strokeWidth={isActive ? 2.5 : 1.5} />
+              <Icon size={24} strokeWidth={isActive ? 2.5 : 1.5} />
               <span className="leading-none">{label}</span>
             </Link>
           );
@@ -65,17 +63,16 @@ export function MainLayout() {
 
         <div className="flex-1" />
 
-        {/* 主题切换 */}
+        {/* 主题切换 — M3 图标按钮 */}
         <button
-          onClick={toggle}
-          className="p-2 rounded-xl text-neutral-500 hover:text-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors"
+          onClick={toggleMode}
+          className="md3-icon-btn text-on-surface-variant"
           title={isDark ? "切换亮色模式" : "切换暗色模式"}
         >
           {isDark ? <Sun size={20} /> : <Moon size={20} />}
         </button>
       </nav>
 
-      {/* 主内容区域 */}
       <Outlet />
     </div>
   );

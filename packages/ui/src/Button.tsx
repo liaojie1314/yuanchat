@@ -32,15 +32,16 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 /** 各变体的 Tailwind 样式映射 */
+/** M3 按钮变体样式 — 使用 CSS 变量支持皮肤切换 */
 const variantStyles: Record<ButtonVariant, string> = {
   primary:
-    "bg-primary-500 text-white hover:bg-primary-600 active:bg-primary-700 shadow-sm",
+    "bg-primary text-primary-on shadow-elevation-1 hover:shadow-elevation-2 active:shadow-none",
   secondary:
-    "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-700",
+    "bg-surface-container-low text-on-surface hover:bg-surface-container-high border border-outline-variant",
   ghost:
-    "text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800",
+    "text-on-surface hover:bg-surface-container-low",
   danger:
-    "bg-error text-white hover:bg-red-600 active:bg-red-700 shadow-sm",
+    "bg-error text-error-on shadow-elevation-1",
 };
 
 /**
@@ -55,17 +56,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       <button
         ref={ref}
         className={cn(
-          // 基础布局：内联弹性盒，居中内容
-          "inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium",
-          // 过渡动画：颜色变化 150ms
-          "transition-colors duration-150",
-          // 焦点环：蓝色半透明，不影响布局（outline 不占空间）
-          "focus:outline-none focus:ring-2 focus:ring-primary-500/40",
-          // 禁用态：半透明 + 禁止点击
-          "disabled:opacity-50 disabled:cursor-not-allowed",
-          // 变体样式：根据 variant 选择对应的颜色方案
+          "inline-flex items-center justify-center rounded-xl px-6 py-3 text-label-lg font-medium",
+          "transition-all duration-200",
+          "focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2",
+          "disabled:opacity-[0.38] disabled:cursor-not-allowed",
           variantStyles[variant],
-          // 外部传入的类名放在最后，允许覆盖默认样式
           className,
         )}
         disabled={disabled}

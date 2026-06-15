@@ -2,6 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ========================================
+   元聊 YuanChat — M3 全局样式
+   ======================================== */
+
 @layer base {
   *,
   *::before,
@@ -10,49 +14,167 @@
     padding: 0;
     box-sizing: border-box;
   }
+
   html {
     font-size: 14px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+
   body {
     min-height: 100vh;
     overflow: hidden;
+    /* M3 surface background */
+    background-color: rgb(var(--md-sys-color-background));
+    color: rgb(var(--md-sys-color-on-background));
   }
+
   #root {
     width: 100%;
     height: 100vh;
   }
+
+  /* M3 滚动条样式 */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    background: hsl(0 0% 70% / 0.5);
+    background: rgb(var(--md-sys-color-outline-variant) / 0.5);
     border-radius: 3px;
   }
-  ::-webkit-scrollbar-thumb:hover { background: hsl(0 0% 60% / 0.7); }
-  .dark ::-webkit-scrollbar-thumb { background: hsl(0 0% 30% / 0.5); }
-  .dark ::-webkit-scrollbar-thumb:hover { background: hsl(0 0% 40% / 0.7); }
-  ::selection { background: theme("colors.primary.200"); color: theme("colors.primary.900"); }
-  .dark ::selection { background: theme("colors.primary.700"); color: theme("colors.primary.100"); }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--md-sys-color-outline) / 0.7);
+  }
+
+  /* 选中文本颜色 */
+  ::selection {
+    background: rgb(var(--md-sys-color-primary-container));
+    color: rgb(var(--md-sys-color-on-primary-container));
+  }
 }
+
+/* ========================================
+   M3 高度系统 (Elevation)
+   ======================================== */
+
+:root {
+  --md-elevation-1: 0px 1px 2px 0px rgba(0,0,0,0.3), 0px 1px 3px 1px rgba(0,0,0,0.15);
+  --md-elevation-2: 0px 1px 2px 0px rgba(0,0,0,0.3), 0px 2px 6px 2px rgba(0,0,0,0.15);
+  --md-elevation-3: 0px 4px 8px 3px rgba(0,0,0,0.15), 0px 1px 3px 0px rgba(0,0,0,0.3);
+  --md-elevation-4: 0px 6px 10px 4px rgba(0,0,0,0.15), 0px 2px 3px 0px rgba(0,0,0,0.3);
+  --md-elevation-5: 0px 8px 12px 6px rgba(0,0,0,0.15), 0px 4px 4px 0px rgba(0,0,0,0.3);
+  --md-easing-standard: cubic-bezier(0.2, 0, 0, 1.0);
+  --md-easing-emphasized: cubic-bezier(0.2, 0, 0, 1.0);
+  --font-scale: 1;
+}
+
+/* M3 状态层（hover/focus/pressed 叠加） */
+.state-layer-hover { position: relative; }
+.state-layer-hover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  border-radius: inherit;
+}
+.state-layer-hover:hover::after { opacity: 0.08; }
+.state-layer-hover:active::after { opacity: 0.12; }
+
+/* ========================================
+   消息气泡 (M3 风格)
+   ======================================== */
 
 @layer components {
   .msg-bubble {
-    @apply relative max-w-[70%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed;
+    @apply relative max-w-[70%] rounded-2xl px-4 py-2.5;
     word-break: break-word;
+    transition: transform 0.15s var(--md-easing-standard);
   }
+
   .msg-bubble-sent {
-    @apply msg-bubble bg-primary-500 text-white rounded-br-md;
+    @apply msg-bubble;
+    background: rgb(var(--md-sys-color-primary-container));
+    color: rgb(var(--md-sys-color-on-primary-container));
+    border-bottom-right-radius: 4px;
+    margin-left: auto;
   }
+
   .msg-bubble-received {
-    @apply msg-bubble bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-bl-md shadow-subtle;
+    @apply msg-bubble;
+    background: rgb(var(--md-sys-color-surface-container-high));
+    color: rgb(var(--md-sys-color-on-surface));
+    border-bottom-left-radius: 4px;
+    box-shadow: var(--md-elevation-1);
   }
+
+  .msg-bubble-sent:hover,
+  .msg-bubble-received:hover {
+    transform: scale(1.005);
+  }
+
+  /* M3 输入框 */
   .input-base {
-    @apply w-full rounded-lg border border-neutral-200 dark:border-neutral-700
-           bg-white dark:bg-neutral-800 px-3 py-2 text-sm
-           placeholder:text-neutral-400 dark:placeholder:text-neutral-500
-           focus:outline-none focus:ring-2 focus:ring-primary-500/40 focus:border-primary-500
-           transition-colors duration-150;
+    @apply w-full rounded-xl border border-outline-variant px-4 py-3;
+    background: rgb(var(--md-sys-color-surface-container-high));
+    color: rgb(var(--md-sys-color-on-surface));
+    border-color: rgb(var(--md-sys-color-outline-variant));
+    transition: border-color 0.2s var(--md-easing-standard),
+                box-shadow 0.2s var(--md-easing-standard);
+  }
+  .input-base::placeholder {
+    color: rgb(var(--md-sys-color-on-surface-variant));
+  }
+  .input-base:focus {
+    outline: none;
+    border-color: rgb(var(--md-sys-color-primary));
+    box-shadow: 0 0 0 2px rgb(var(--md-sys-color-primary) / 0.3);
+  }
+
+  /* M3 卡片 */
+  .md3-card {
+    background: rgb(var(--md-sys-color-surface-container));
+    border-radius: 12px;
+    transition: box-shadow 0.2s var(--md-easing-standard);
+  }
+  .md3-card:hover {
+    box-shadow: var(--md-elevation-2);
+  }
+
+  /* M3 导航栏 */
+  .md3-navigation {
+    background: rgb(var(--md-sys-color-surface-container));
+    border-color: rgb(var(--md-sys-color-outline-variant));
+  }
+
+  /* M3 图标按钮涟漪 */
+  .md3-icon-btn {
+    @apply inline-flex items-center justify-center rounded-full;
+    width: 40px;
+    height: 40px;
+    position: relative;
+    overflow: hidden;
+    transition: background 0.15s var(--md-easing-standard);
+  }
+  .md3-icon-btn:hover {
+    background: rgb(var(--md-sys-color-on-surface-variant) / 0.08);
+  }
+  .md3-icon-btn:active {
+    background: rgb(var(--md-sys-color-on-surface-variant) / 0.12);
+  }
+
+  /* FAB 悬浮按钮 */
+  .md3-fab {
+    @apply inline-flex items-center justify-center rounded-2xl;
+    background: rgb(var(--md-sys-color-primary-container));
+    color: rgb(var(--md-sys-color-on-primary-container));
+    box-shadow: var(--md-elevation-3);
+    transition: box-shadow 0.2s var(--md-easing-standard),
+                background 0.2s var(--md-easing-standard);
+  }
+  .md3-fab:hover {
+    box-shadow: var(--md-elevation-4);
+    background: rgb(var(--md-sys-color-primary-container) / 0.8);
   }
 }
 

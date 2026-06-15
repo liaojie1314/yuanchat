@@ -3,19 +3,25 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "元聊设计系统 — Tailwind config + design tokens + global CSS",
+  "description": "元聊 M3 设计系统 — Tailwind config + tokens + skins + i18n + global CSS",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
     "./tailwind": "./src/tailwind.config.ts",
     "./tokens": "./src/tokens.ts",
+    "./skins": "./src/skins.ts",
+    "./i18n": "./src/i18n/index.ts",
     "./global.css": "./src/global.css"
   },
   "scripts": {
     "build": "echo 'design-system: no build needed'",
     "lint": "echo 'design-system: no lint'",
     "clean": "echo 'design-system: clean'"
+  },
+  "dependencies": {
+    "i18next": "^24.0.0",
+    "react-i18next": "^15.0.0"
   },
   "devDependencies": {
     "tailwindcss": "^3.4.17",

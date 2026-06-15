@@ -39,8 +39,8 @@ export function ConversationList() {
             />
             <input
               placeholder="搜索会话..."
-              className="w-full pl-9 pr-3 py-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-sm
-                         placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+              className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-surface-container-high text-body-md
+                         placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
           </div>
           <button className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 transition-colors">
@@ -85,14 +85,14 @@ function ConversationItem({
       className={cn(
         "flex items-center gap-3 w-full px-3 py-3 text-left transition-colors",
         isActive
-          ? "bg-primary-50 dark:bg-primary-900/20"
-          : "hover:bg-neutral-50 dark:hover:bg-neutral-800/50",
+          ? "bg-primary-container/30"
+          : "hover:bg-surface-container-high",
       )}
     >
       <Avatar name={conv.name} src={conv.avatarUrl} online={conv.isOnline} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">
+          <span className="text-body-lg font-medium text-on-surface truncate">
             {conv.name}
           </span>
           <span className="text-xs text-neutral-400 shrink-0 ml-2">

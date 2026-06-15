@@ -1,78 +1,142 @@
 /**
- * 主题状态管理 Store
+ * 增强版主题状态管理 Store — 皮肤 + 亮暗 + 字号 + locale
  *
  * @description
- * 使用 Zustand 管理应用的主题模式（亮色/暗色）。
- * 通过 `persist` 中间件将用户的主题选择持久化到 localStorage，
- * 页面刷新后自动恢复上次选择的主题。
+ * 管理应用的完整视觉配置：皮肤 ID、亮暗模式、字号缩放、locale。
+ * 通过 Zustand persist 中间件持久化到 localStorage。
  *
- * 工作原理：
- * 1. 初始化时读取系统偏好（prefers-color-scheme），若无则默认亮色
- * 2. 切换时操作 `<html>` 元素的 `dark` class，触发 Tailwind 的暗色模式
- * 3. Zustand 的 persist 中间件自动将状态序列化存入 localStorage
+ * 核心方法 applyTheme() 将当前皮肤的颜色方案批量写入 CSS 自定义属性，
+ * 所有组件通过 CSS 变量引用颜色，因此切换皮肤不触发组件重渲染。
  *
- * 使用方式：
+ * 皮肤系统基于 SkinDefinition 接口，支持动态注册新皮肤。
+ *
+ * @example
  * ```tsx
- * const { isDark, toggle } = useThemeStore();
- * // isDark: 当前是否为暗色模式（boolean）
- * // toggle(): 切换亮色/暗色
+ * const { setSkin, toggleMode, fontScale } = useThemeStore();
+ * setSkin("ocean-light");  // 切换到海洋亮色
+ * toggleMode();            // 切换亮暗
  * ```
  */
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type { M3ColorScheme } from "@yuanchat/design-system/tokens";
+import {
+  lightScheme,
+  darkScheme,
+  type FontScale,
+} from "@yuanchat/design-system/tokens";
+import { findSkin, getDefaultSkin } from "@yuanchat/design-system/skins";
+import type { SupportedLocale } from "@yuanchat/design-system/i18n";
 
 interface ThemeState {
-  /** 当前是否为暗色模式 */
-  isDark: boolean;
-  /** 切换亮色/暗色模式 */
-  toggle: () => void;
-  /** 直接设置暗色模式状态 */
-  setDark: (dark: boolean) => void;
+  skinId: string;
+  mode: "light" | "dark";
+  fontScale: FontScale;
+  locale: SupportedLocale;
+
+  setSkin: (skinId: string) => void;
+  toggleMode: () => void;
+  setFontScale: (scale: FontScale) => void;
+  setLocale: (locale: SupportedLocale) => void;
+  getCurrentScheme: () => M3ColorScheme;
+  /** 将当前皮肤颜色写入 CSS 变量，切换暗色 class */
+  applyTheme: () => void;
 }
 
-/**
- * 主题 Store Hook
- *
- * @example
- * // 基础用法
- * const { isDark, toggle } = useThemeStore();
- * console.log(isDark); // false
- * toggle(); // 切换到暗色模式
- *
- * @example
- * // 在组件中使用
- * function ThemeButton() {
- *   const isDark = useThemeStore((s) => s.isDark); // 选择器写法，避免不必要的重渲染
- *   const toggle = useThemeStore((s) => s.toggle);
- *   return <button onClick={toggle}>{isDark ? '☀️' : '🌙'}</button>;
- * }
- */
+/** 检测系统亮暗偏好 */
+function prefersDark(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-color-scheme: dark)").matches
+  );
+}
+
 export const useThemeStore = create<ThemeState>()(
   persist(
-    (set) => ({
-      // 初始化：读取系统偏好，若不可用则默认亮色
-      isDark:
-        typeof window !== "undefined" &&
-        window.matchMedia?.("(prefers-color-scheme: dark)").matches,
-      toggle: () =>
-        set((s) => {
-          const next = !s.isDark;
-          // 操作 DOM class 来触发 Tailwind 暗色模式切换
-          // Tailwind 的 darkMode: "class" 策略依赖此 class
-          if (typeof document !== "undefined") {
-            document.documentElement.classList.toggle("dark", next);
+    (set, get) => {
+      const isDark = prefersDark();
+      const defaultSkin = getDefaultSkin();
+
+      return {
+        skinId: isDark ? "yuan-dark" : defaultSkin.id,
+        mode: isDark ? "dark" : "light",
+        fontScale: "normal",
+        locale:
+          typeof navigator !== "undefined" && navigator.language?.startsWith("zh")
+            ? "zh-CN"
+            : "en-US",
+
+        setSkin: (skinId: string) => {
+          const skin = findSkin(skinId);
+          if (skin) {
+            set({ skinId, mode: skin.mode });
+            get().applyTheme();
           }
-          return { isDark: next };
-        }),
-      setDark: (dark: boolean) =>
-        set(() => {
-          if (typeof document !== "undefined") {
-            document.documentElement.classList.toggle("dark", dark);
-          }
-          return { isDark: dark };
-        }),
-    }),
-    // persist 中间件配置：自动存到 localStorage，key 为 'yuanchat-theme'
-    { name: "yuanchat-theme" },
+        },
+
+        toggleMode: () => {
+          set((s) => ({
+            mode: s.mode === "light" ? "dark" : "light",
+            skinId: s.mode === "light" ? "yuan-dark" : "yuan-light",
+          }));
+          get().applyTheme();
+        },
+
+        setFontScale: (scale: FontScale) => {
+          set({ fontScale: scale });
+          document.documentElement.style.setProperty("--font-scale", String(scale));
+        },
+
+        setLocale: (locale: SupportedLocale) => {
+          set({ locale });
+        },
+
+        getCurrentScheme: (): M3ColorScheme => {
+          const { skinId, mode } = get();
+          const skin = findSkin(skinId);
+          if (skin) return skin.scheme;
+          return mode === "dark" ? darkScheme : lightScheme;
+        },
+
+        applyTheme: () => {
+          const scheme = get().getCurrentScheme();
+          const root = document.documentElement;
+
+          // 批量写入 M3 颜色 CSS 变量
+          const vars: Record<string, string> = {
+            "--md-sys-color-primary": scheme.primary,
+            "--md-sys-color-on-primary": scheme.onPrimary,
+            "--md-sys-color-primary-container": scheme.primaryContainer,
+            "--md-sys-color-on-primary-container": scheme.onPrimaryContainer,
+            "--md-sys-color-secondary": scheme.secondary,
+            "--md-sys-color-on-secondary": scheme.onSecondary,
+            "--md-sys-color-secondary-container": scheme.secondaryContainer,
+            "--md-sys-color-on-secondary-container": scheme.onSecondaryContainer,
+            "--md-sys-color-tertiary": scheme.tertiary,
+            "--md-sys-color-on-tertiary": scheme.onTertiary,
+            "--md-sys-color-error": scheme.error,
+            "--md-sys-color-on-error": scheme.onError,
+            "--md-sys-color-error-container": scheme.errorContainer,
+            "--md-sys-color-background": scheme.background,
+            "--md-sys-color-on-background": scheme.onBackground,
+            "--md-sys-color-surface": scheme.surface,
+            "--md-sys-color-on-surface": scheme.onSurface,
+            "--md-sys-color-surface-variant": scheme.surfaceVariant,
+            "--md-sys-color-on-surface-variant": scheme.onSurfaceVariant,
+            "--md-sys-color-outline": scheme.outline,
+            "--md-sys-color-outline-variant": scheme.outlineVariant,
+            "--md-sys-color-surface-container": scheme.surfaceContainer,
+            "--md-sys-color-surface-container-low": scheme.surfaceContainerLow,
+            "--md-sys-color-surface-container-high": scheme.surfaceContainerHigh,
+          };
+
+          Object.entries(vars).forEach(([key, val]) => root.style.setProperty(key, val));
+
+          root.classList.toggle("dark", get().mode === "dark");
+          root.style.setProperty("--font-scale", String(get().fontScale));
+        },
+      };
+    },
+    { name: "yuanchat-theme-v2" },
   ),
 );
