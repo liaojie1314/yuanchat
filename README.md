@@ -4,14 +4,14 @@
 
 ## 平台支持
 
-| 平台 | 技术 | 状态 |
-|------|------|------|
-| Web | React + Vite + PWA | 🚧 开发中 |
-| Windows | Tauri + React | 📋 计划中 |
-| macOS | Tauri + React | 📋 计划中 |
-| Linux | Tauri + React | 📋 计划中 |
-| Android | Capacitor | 📋 计划中 |
-| iOS | Capacitor | 📋 计划中 |
+| 平台    | 技术               | 状态      |
+| ------- | ------------------ | --------- |
+| Web     | React + Vite + PWA | 🚧 开发中 |
+| Windows | Tauri + React      | 📋 计划中 |
+| macOS   | Tauri + React      | 📋 计划中 |
+| Linux   | Tauri + React      | 📋 计划中 |
+| Android | Capacitor          | 📋 计划中 |
+| iOS     | Capacitor          | 📋 计划中 |
 
 ## 技术栈
 

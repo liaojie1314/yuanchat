@@ -28,19 +28,18 @@ export function ConversationList() {
   const setActive = useConversationStore((s) => s.setActive);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full flex-col">
       {/* 搜索栏 */}
-      <div className="p-3 border-b border-outline-variant">
+      <div className="border-outline-variant border-b p-3">
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
             <Search
               size={16}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant"
+              className="text-on-surface-variant absolute top-1/2 left-3 -translate-y-1/2"
             />
             <input
               placeholder="搜索会话..."
-              className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-surface-container-high text-body-md
-                         placeholder:text-on-surface-variant focus:outline-none"
+              className="bg-surface-container-high text-body-md placeholder:text-on-surface-variant w-full rounded-xl py-2.5 pr-3 pl-9 focus:outline-none"
             />
           </div>
           <button className="md3-icon-btn text-on-surface-variant">
@@ -83,28 +82,24 @@ function ConversationItem({
     <button
       onClick={onClick}
       className={cn(
-        "flex items-center gap-3 w-full px-3 py-3 text-left transition-colors",
-        isActive
-          ? "bg-primary-container/30"
-          : "hover:bg-surface-container-high",
+        "flex w-full items-center gap-3 px-3 py-3 text-left transition-colors",
+        isActive ? "bg-primary-container/30" : "hover:bg-surface-container-high",
       )}
     >
       <Avatar name={conv.name} src={conv.avatarUrl} online={conv.isOnline} />
-      <div className="flex-1 min-w-0">
+      <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between">
-          <span className="text-body-lg font-medium text-on-surface truncate">
-            {conv.name}
-          </span>
-          <span className="text-label-sm text-on-surface-variant shrink-0 ml-2">
+          <span className="text-body-lg text-on-surface truncate font-medium">{conv.name}</span>
+          <span className="text-label-sm text-on-surface-variant ml-2 shrink-0">
             {conv.lastTime}
           </span>
         </div>
-        <div className="flex items-center justify-between mt-0.5">
+        <div className="mt-0.5 flex items-center justify-between">
           <span className="text-body-sm text-on-surface-variant truncate">
             {conv.lastMessage || "暂无消息"}
           </span>
           {conv.unreadCount > 0 && (
-            <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-on text-[11px] font-medium ml-2 shrink-0">
+            <span className="bg-primary text-primary-on ml-2 inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full px-1 text-[11px] font-medium">
               {conv.unreadCount > 99 ? "99+" : conv.unreadCount}
             </span>
           )}

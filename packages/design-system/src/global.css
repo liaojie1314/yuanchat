@@ -9,7 +9,13 @@
    ======================================== */
 
 @layer base {
-  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  *,
+  *::before,
+  *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
 
   html {
     font-size: 14px;
@@ -24,16 +30,26 @@
     color: rgb(var(--md-sys-color-on-background-rgb));
   }
 
-  #root { width: 100%; height: 100vh; }
+  #root {
+    width: 100%;
+    height: 100vh;
+  }
 
   /* 滚动条 */
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
   ::-webkit-scrollbar-thumb {
     background: rgb(var(--md-sys-color-outline-variant-rgb) / 0.5);
     border-radius: 3px;
   }
-  ::-webkit-scrollbar-thumb:hover { background: rgb(var(--md-sys-color-outline-rgb) / 0.7); }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--md-sys-color-outline-rgb) / 0.7);
+  }
 
   /* 选中文本 */
   ::selection {
@@ -46,13 +62,13 @@
    M3 高度 & 动效
    ======================================== */
 :root {
-  --md-elevation-1: 0px 1px 2px rgba(0,0,0,0.3), 0px 1px 3px rgba(0,0,0,0.15);
-  --md-elevation-2: 0px 2px 6px 2px rgba(0,0,0,0.15), 0px 1px 2px rgba(0,0,0,0.3);
-  --md-elevation-3: 0px 4px 8px 3px rgba(0,0,0,0.15), 0px 1px 3px rgba(0,0,0,0.3);
-  --md-elevation-4: 0px 6px 10px 4px rgba(0,0,0,0.15), 0px 2px 3px rgba(0,0,0,0.3);
-  --md-elevation-5: 0px 8px 12px 6px rgba(0,0,0,0.15), 0px 4px 4px rgba(0,0,0,0.3);
-  --md-easing-standard: cubic-bezier(0.2, 0, 0, 1.0);
-  --md-easing-emphasized: cubic-bezier(0.2, 0, 0, 1.0);
+  --md-elevation-1: 0px 1px 2px rgba(0, 0, 0, 0.3), 0px 1px 3px rgba(0, 0, 0, 0.15);
+  --md-elevation-2: 0px 2px 6px 2px rgba(0, 0, 0, 0.15), 0px 1px 2px rgba(0, 0, 0, 0.3);
+  --md-elevation-3: 0px 4px 8px 3px rgba(0, 0, 0, 0.15), 0px 1px 3px rgba(0, 0, 0, 0.3);
+  --md-elevation-4: 0px 6px 10px 4px rgba(0, 0, 0, 0.15), 0px 2px 3px rgba(0, 0, 0, 0.3);
+  --md-elevation-5: 0px 8px 12px 6px rgba(0, 0, 0, 0.15), 0px 4px 4px rgba(0, 0, 0, 0.3);
+  --md-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --md-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
   --font-scale: 1;
 }
 
@@ -68,9 +84,11 @@
   }
   .msg-bubble-sent {
     @apply msg-bubble;
-    background: linear-gradient(135deg,
+    background: linear-gradient(
+      135deg,
       rgb(var(--md-sys-color-primary-rgb)),
-      rgb(var(--md-sys-color-primary-rgb) / 0.85));
+      rgb(var(--md-sys-color-primary-rgb) / 0.85)
+    );
     color: rgb(var(--md-sys-color-on-primary-rgb));
     border-bottom-right-radius: 4px;
     margin-left: auto;
@@ -86,47 +104,61 @@
 
   /* 输入框 */
   .input-base {
-    @apply w-full rounded-xl border border-outline-variant px-4 py-3;
+    @apply border-outline-variant w-full rounded-xl border px-4 py-3;
     background: rgb(var(--md-sys-color-surface-container-high-rgb));
     color: rgb(var(--md-sys-color-on-surface-rgb));
     border-color: rgb(var(--md-sys-color-outline-variant-rgb));
-    transition: border-color 0.2s var(--md-easing-standard), box-shadow 0.2s var(--md-easing-standard);
+    transition:
+      border-color 0.2s var(--md-easing-standard),
+      box-shadow 0.2s var(--md-easing-standard);
   }
-  .input-base::placeholder { color: rgb(var(--md-sys-color-on-surface-variant-rgb)); }
-  .input-base:focus { outline: none; }
+  .input-base::placeholder {
+    color: rgb(var(--md-sys-color-on-surface-variant-rgb));
+  }
+  .input-base:focus {
+    outline: none;
+  }
 
   /* M3 图标按钮 */
   .md3-icon-btn {
     @apply inline-flex items-center justify-center rounded-full;
-    width: 40px; height: 40px;
-    position: relative; overflow: hidden;
+    width: 40px;
+    height: 40px;
+    position: relative;
+    overflow: hidden;
     transition: background 0.15s var(--md-easing-standard);
   }
-  .md3-icon-btn:hover { background: rgb(var(--md-sys-color-on-surface-variant-rgb) / 0.08); }
-  .md3-icon-btn:active { background: rgb(var(--md-sys-color-on-surface-variant-rgb) / 0.12); }
+  .md3-icon-btn:hover {
+    background: rgb(var(--md-sys-color-on-surface-variant-rgb) / 0.08);
+  }
+  .md3-icon-btn:active {
+    background: rgb(var(--md-sys-color-on-surface-variant-rgb) / 0.12);
+  }
 
   /* 品牌渐变 — 天蓝渐变 */
   .brand-gradient {
-    background: linear-gradient(135deg, #5B9BD5 0%, #7EC8E3 50%, #A8CFFF 100%);
+    background: linear-gradient(135deg, #5b9bd5 0%, #7ec8e3 50%, #a8cfff 100%);
   }
   .brand-gradient-soft {
-    background: linear-gradient(135deg,
-      rgb(var(--md-sys-color-primary-rgb) / 0.10),
-      rgb(var(--md-sys-color-tertiary-rgb) / 0.06));
+    background: linear-gradient(
+      135deg,
+      rgb(var(--md-sys-color-primary-rgb) / 0.1),
+      rgb(var(--md-sys-color-tertiary-rgb) / 0.06)
+    );
   }
   /* 导航栏渐变 — 天蓝 */
   .nav-gradient {
-    background: linear-gradient(180deg, #5B9BD5 0%, #4A8BC5 100%);
+    background: linear-gradient(180deg, #5b9bd5 0%, #4a8bc5 100%);
   }
   /* 页面背景 — 天空渐变 */
   .surface-gradient {
-    background: linear-gradient(180deg, #F0F7FF 0%, #E8F4FD 40%, #E0F0FA 100%);
+    background: linear-gradient(180deg, #f0f7ff 0%, #e8f4fd 40%, #e0f0fa 100%);
   }
   .dark .surface-gradient {
-    background: linear-gradient(180deg, #0E141B 0%, #111820 40%, #141C24 100%);
+    background: linear-gradient(180deg, #0e141b 0%, #111820 40%, #141c24 100%);
   }
   .dark .nav-gradient {
-    background: linear-gradient(180deg, #1B4B6F 0%, #153D5A 100%);
+    background: linear-gradient(180deg, #1b4b6f 0%, #153d5a 100%);
   }
 
   /* ========================================
@@ -142,14 +174,29 @@
     pointer-events: none;
     animation: auroraFloat 12s ease-in-out infinite;
   }
-  .aurora-orb:nth-child(1) { animation-delay: 0s; }
-  .aurora-orb:nth-child(2) { animation-delay: -4s; animation-duration: 15s; }
-  .aurora-orb:nth-child(3) { animation-delay: -8s; animation-duration: 18s; }
+  .aurora-orb:nth-child(1) {
+    animation-delay: 0s;
+  }
+  .aurora-orb:nth-child(2) {
+    animation-delay: -4s;
+    animation-duration: 15s;
+  }
+  .aurora-orb:nth-child(3) {
+    animation-delay: -8s;
+    animation-duration: 18s;
+  }
 
   @keyframes auroraFloat {
-    0%, 100% { transform: translate(0, 0) scale(1); }
-    33% { transform: translate(30px, -20px) scale(1.1); }
-    66% { transform: translate(-20px, 15px) scale(0.9); }
+    0%,
+    100% {
+      transform: translate(0, 0) scale(1);
+    }
+    33% {
+      transform: translate(30px, -20px) scale(1.1);
+    }
+    66% {
+      transform: translate(-20px, 15px) scale(0.9);
+    }
   }
 
   /* 微尘网格 — 半透明圆点矩阵 */
@@ -190,8 +237,12 @@
     animation: sweepDown 10s ease-in-out infinite;
   }
   @keyframes sweepDown {
-    0% { top: -100%; }
-    100% { top: 150%; }
+    0% {
+      top: -100%;
+    }
+    100% {
+      top: 150%;
+    }
   }
 
   /* 鼠标跟随光晕 — 需要 JS 配合，这里只提供基础样式 */
@@ -214,18 +265,23 @@
   /* 玻璃态 */
   .glass-card {
     background: rgb(var(--md-sys-color-surface-rgb) / 0.7);
-    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     border: 1px solid rgb(var(--md-sys-color-outline-variant-rgb) / 0.3);
     border-radius: 16px;
   }
 
   /* 发光 */
   .glow-brand {
-    box-shadow: 0 0 30px rgb(var(--md-sys-color-primary-rgb) / 0.25),
-                0 0 60px rgb(var(--md-sys-color-primary-rgb) / 0.08);
+    box-shadow:
+      0 0 30px rgb(var(--md-sys-color-primary-rgb) / 0.25),
+      0 0 60px rgb(var(--md-sys-color-primary-rgb) / 0.08);
   }
 }
 
 @layer utilities {
-  .no-select { user-select: none; -webkit-user-select: none; }
+  .no-select {
+    user-select: none;
+    -webkit-user-select: none;
+  }
 }

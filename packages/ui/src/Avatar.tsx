@@ -50,19 +50,13 @@ export function Avatar({ src, name, size = "md", online }: AvatarProps) {
     <div className="relative inline-flex shrink-0">
       <RadixAvatar.Root
         className={cn(
-          "rounded-full overflow-hidden bg-primary-100 dark:bg-primary-900/40",
+          "bg-primary-100 dark:bg-primary-900/40 overflow-hidden rounded-full",
           sizeMap[size],
         )}
       >
         {/* 仅当 src 存在时才渲染 Image，否则直接显示 Fallback */}
-        {src && (
-          <RadixAvatar.Image
-            className="w-full h-full object-cover"
-            src={src}
-            alt={name}
-          />
-        )}
-        <RadixAvatar.Fallback className="flex items-center justify-center w-full h-full text-primary-600 dark:text-primary-300 font-medium">
+        {src && <RadixAvatar.Image className="h-full w-full object-cover" src={src} alt={name} />}
+        <RadixAvatar.Fallback className="text-primary-600 dark:text-primary-300 flex h-full w-full items-center justify-center font-medium">
           {initials}
         </RadixAvatar.Fallback>
       </RadixAvatar.Root>
@@ -71,7 +65,7 @@ export function Avatar({ src, name, size = "md", online }: AvatarProps) {
       {online !== undefined && (
         <span
           className={cn(
-            "absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-neutral-900",
+            "absolute -right-0.5 -bottom-0.5 h-3 w-3 rounded-full border-2 border-white dark:border-neutral-900",
             online ? "bg-success" : "bg-neutral-300 dark:bg-neutral-600",
           )}
         />

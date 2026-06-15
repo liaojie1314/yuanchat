@@ -37,20 +37,21 @@ export function MainLayout() {
   const isDark = mode === "dark";
 
   return (
-    <div className="flex h-screen overflow-hidden bg-surface">
+    <div className="bg-surface flex h-screen overflow-hidden">
       {/* 左侧品牌色导航栏 — 渐变背景 */}
-      <nav className="flex flex-col items-center w-16 shrink-0 nav-gradient text-white py-4 gap-1 shadow-elevation-2">
+      <nav className="nav-gradient shadow-elevation-2 flex w-16 shrink-0 flex-col items-center gap-1 py-4 text-white">
         {NAV_ITEMS.map(({ to, icon: Icon, label }) => {
-          const isActive = to === "/chat"
-            ? location.pathname.startsWith("/chat")
-            : location.pathname.startsWith(to);
+          const isActive =
+            to === "/chat"
+              ? location.pathname.startsWith("/chat")
+              : location.pathname.startsWith(to);
           return (
             <Link
               key={to}
               to={to}
-              className={`flex flex-col items-center gap-1 px-2 py-2 rounded-2xl text-label-sm transition-all duration-200 ${
+              className={`text-label-sm flex flex-col items-center gap-1 rounded-2xl px-2 py-2 transition-all duration-200 ${
                 isActive
-                  ? "bg-white/25 text-white shadow-elevation-1 backdrop-blur-sm"
+                  ? "shadow-elevation-1 bg-white/25 text-white backdrop-blur-sm"
                   : "text-white/70 hover:bg-white/15 hover:text-white"
               }`}
               title={label}
@@ -66,7 +67,7 @@ export function MainLayout() {
         {/* 主题切换 — M3 图标按钮 */}
         <button
           onClick={toggleMode}
-          className="w-10 h-10 inline-flex items-center justify-center rounded-full text-white/70 hover:text-white hover:bg-white/15 transition-all duration-200"
+          className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white/70 transition-all duration-200 hover:bg-white/15 hover:text-white"
           title={isDark ? "切换亮色模式" : "切换暗色模式"}
         >
           {isDark ? <Sun size={20} /> : <Moon size={20} />}

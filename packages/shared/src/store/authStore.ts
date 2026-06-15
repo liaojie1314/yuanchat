@@ -66,9 +66,13 @@ interface AuthState {
 // ========================================
 
 /** 后端 API 地址，由各 app 的 .env 文件配置 */
-const API_BASE = typeof import.meta !== "undefined"
-  ? (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:8080"
-  : "http://localhost:8080";
+interface ImportMetaEnv {
+  VITE_API_BASE_URL?: string;
+}
+const API_BASE: string =
+  typeof import.meta !== "undefined"
+    ? (import.meta as { env?: ImportMetaEnv }).env?.VITE_API_BASE_URL || "http://localhost:8080"
+    : "http://localhost:8080";
 
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {

@@ -111,7 +111,8 @@ export function formatNumber(n: number, locale: string): string {
  */
 export function formatFileSize(bytes: number, locale: string): string {
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1048576) return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(bytes / 1024)} KB`;
+  if (bytes < 1048576)
+    return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(bytes / 1024)} KB`;
   return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(bytes / 1048576)} MB`;
 }
 

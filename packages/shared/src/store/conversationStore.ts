@@ -114,15 +114,12 @@ export const useConversationStore = create<ConversationState>()((set) => ({
   setActive: (id) => set({ activeId: id }),
 
   // 新会话插入到列表最前面（最近聊天排最上）
-  addConversation: (conv) =>
-    set((s) => ({ conversations: [conv, ...s.conversations] })),
+  addConversation: (conv) => set((s) => ({ conversations: [conv, ...s.conversations] })),
 
   // 使用 Partial<Conversation> 实现部分更新，无需传递完整对象
   updateConversation: (id, partial) =>
     set((s) => ({
-      conversations: s.conversations.map((c) =>
-        c.id === id ? { ...c, ...partial } : c,
-      ),
+      conversations: s.conversations.map((c) => (c.id === id ? { ...c, ...partial } : c)),
     })),
 
   incrementUnread: (id) =>
@@ -134,8 +131,6 @@ export const useConversationStore = create<ConversationState>()((set) => ({
 
   clearUnread: (id) =>
     set((s) => ({
-      conversations: s.conversations.map((c) =>
-        c.id === id ? { ...c, unreadCount: 0 } : c,
-      ),
+      conversations: s.conversations.map((c) => (c.id === id ? { ...c, unreadCount: 0 } : c)),
     })),
 }));

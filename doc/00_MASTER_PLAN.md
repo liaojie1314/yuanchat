@@ -2,18 +2,18 @@
 
 ## 一、项目概述
 
-| 项目 | 说明 |
-|------|------|
-| 项目名称 | 元聊 (YuanChat) |
-| 项目类型 | 即时通讯 (IM) 软件 |
-| 开发模式 | GitFlow 工作流 |
-| 目标平台 | Web / Windows / macOS / Linux / Android / iOS / 平板 |
-| 前端语言 | TypeScript |
-| 前端框架 | React |
-| 后端语言 | Go (Golang) |
-| 容器化 | Docker Compose（开发环境），Kubernetes（生产环境可选） |
-| 文档位置 | `doc/` 目录（本文档所在目录） |
-| AI 辅助文档 | `.claude/` 目录、`AGENTS.md`、`CLAUDE.md` |
+| 项目        | 说明                                                   |
+| ----------- | ------------------------------------------------------ |
+| 项目名称    | 元聊 (YuanChat)                                        |
+| 项目类型    | 即时通讯 (IM) 软件                                     |
+| 开发模式    | GitFlow 工作流                                         |
+| 目标平台    | Web / Windows / macOS / Linux / Android / iOS / 平板   |
+| 前端语言    | TypeScript                                             |
+| 前端框架    | React                                                  |
+| 后端语言    | Go (Golang)                                            |
+| 容器化      | Docker Compose（开发环境），Kubernetes（生产环境可选） |
+| 文档位置    | `doc/` 目录（本文档所在目录）                          |
+| AI 辅助文档 | `.claude/` 目录、`AGENTS.md`、`CLAUDE.md`              |
 
 ---
 
@@ -21,14 +21,15 @@
 
 ### 2.1 前端技术方案
 
-| 方案 | 适用范围 | 推荐度 | 说明 |
-|------|----------|--------|------|
-| **React (Vite) + Capacitor** | Web / iOS / Android | ⭐⭐⭐⭐⭐ | 一套 React 代码，Capacitor 打包为移动端原生应用；PWA 支持离线；维护成本最低 |
-| **React (Vite) + Tauri** | Desktop (Win/Mac/Linux) | ⭐⭐⭐⭐⭐ | Rust 内核，体积小，性能高，比 Electron 轻量 |
-| **React Native** | Mobile (Android/iOS) | ⭐⭐⭐ | 原生体验更好，但需要维护两套代码（Web + RN），仅当 Capacitor 性能不足时考虑 |
-| **Electron** | Desktop (Win/Mac/Linux) | ⭐⭐⭐ | 成熟但体积大，Tauri 是更好的替代品 |
+| 方案                         | 适用范围                | 推荐度     | 说明                                                                        |
+| ---------------------------- | ----------------------- | ---------- | --------------------------------------------------------------------------- |
+| **React (Vite) + Capacitor** | Web / iOS / Android     | ⭐⭐⭐⭐⭐ | 一套 React 代码，Capacitor 打包为移动端原生应用；PWA 支持离线；维护成本最低 |
+| **React (Vite) + Tauri**     | Desktop (Win/Mac/Linux) | ⭐⭐⭐⭐⭐ | Rust 内核，体积小，性能高，比 Electron 轻量                                 |
+| **React Native**             | Mobile (Android/iOS)    | ⭐⭐⭐     | 原生体验更好，但需要维护两套代码（Web + RN），仅当 Capacitor 性能不足时考虑 |
+| **Electron**                 | Desktop (Win/Mac/Linux) | ⭐⭐⭐     | 成熟但体积大，Tauri 是更好的替代品                                          |
 
 **最终推荐组合：**
+
 - **Web 端**：React + TypeScript + Vite + PWA
 - **桌面端**：Tauri（React 作为 UI 层）
 - **移动端**：Capacitor（复用 Web 端 React 代码）
@@ -37,11 +38,11 @@
 
 ### 2.2 后端技术方案
 
-| 方案 | 推荐度 | 说明 |
-|------|--------|------|
-| **Go 微服务架构** | ⭐⭐⭐⭐⭐ | 高性能、低资源消耗、类型安全；单仓库多服务（Monorepo） |
-| **API 网关 + gRPC 内部通信** | ⭐⭐⭐⭐ | Kong / 自研网关；服务间使用 gRPC 高效通信 |
-| **WebSocket 长连接服务** | ⭐⭐⭐⭐⭐ | Go 的 goroutine 天然适合管理海量 WebSocket 连接 |
+| 方案                         | 推荐度     | 说明                                                   |
+| ---------------------------- | ---------- | ------------------------------------------------------ |
+| **Go 微服务架构**            | ⭐⭐⭐⭐⭐ | 高性能、低资源消耗、类型安全；单仓库多服务（Monorepo） |
+| **API 网关 + gRPC 内部通信** | ⭐⭐⭐⭐   | Kong / 自研网关；服务间使用 gRPC 高效通信              |
+| **WebSocket 长连接服务**     | ⭐⭐⭐⭐⭐ | Go 的 goroutine 天然适合管理海量 WebSocket 连接        |
 
 ### 2.3 通信协议
 
@@ -207,6 +208,7 @@ yuanchat/
 ## 五、核心功能清单
 
 ### 阶段一：基础能力（MVP — 第1~3个月）
+
 - [ ] 用户注册/登录（手机号 + 验证码 / 邮箱）
 - [ ] 单聊消息（文本、表情）
 - [ ] 联系人管理（添加/删除/搜索）
@@ -215,6 +217,7 @@ yuanchat/
 - [ ] 消息持久化存储
 
 ### 阶段二：核心体验（第3~6个月）
+
 - [ ] 群组聊天（创建/加入/管理群组）
 - [ ] 图片/文件消息
 - [ ] 语音消息
@@ -224,6 +227,7 @@ yuanchat/
 - [ ] 消息搜索
 
 ### 阶段三：进阶功能（第6~9个月）
+
 - [ ] 语音/视频通话 (WebRTC)
 - [ ] 端到端加密 (E2EE)
 - [ ] 多设备消息同步
@@ -233,6 +237,7 @@ yuanchat/
 - [ ] 消息撤回/编辑
 
 ### 阶段四：企业级特性（第9~12个月）
+
 - [ ] 组织架构/企业通讯录
 - [ ] 审批/公告等企业应用
 - [ ] 开放 API / Webhook
@@ -246,6 +251,7 @@ yuanchat/
 ## 六、设计原则
 
 ### 6.1 视觉设计
+
 - **不过度参考 QQ/微信**：采用现代、简约的北欧风格（干净线条、留白、柔和阴影）
 - **色彩方案**：以蓝灰为主色调，传达专业与可靠
 - **暗黑模式**：从 Day 1 就支持
@@ -253,6 +259,7 @@ yuanchat/
 - **无障碍**：满足 WCAG 2.1 AA 级标准
 
 ### 6.2 工程规范
+
 - **GitFlow 工作流**：`main` / `develop` / `feature/*` / `bugfix/*` / `release/*` / `hotfix/*`
 - **Commit 规范**：Conventional Commits（`feat:` / `fix:` / `docs:` / `refactor:` 等）
 - **Code Review**：每个 PR 至少一人 Review 通过后方可合并
@@ -263,14 +270,14 @@ yuanchat/
 
 ## 七、GitFlow 分支规范
 
-| 分支 | 用途 | 命名示例 |
-|------|------|----------|
-| `main` | 生产环境代码 | `main` |
-| `develop` | 开发主线 | `develop` |
-| `feature/*` | 新功能开发 | `feature/user-login`、`feature/message-search` |
-| `bugfix/*` | Bug 修复 | `bugfix/login-error-handling` |
-| `release/*` | 发布准备 | `release/v1.0.0` |
-| `hotfix/*` | 紧急生产修复 | `hotfix/v1.0.1-security-patch` |
+| 分支        | 用途         | 命名示例                                       |
+| ----------- | ------------ | ---------------------------------------------- |
+| `main`      | 生产环境代码 | `main`                                         |
+| `develop`   | 开发主线     | `develop`                                      |
+| `feature/*` | 新功能开发   | `feature/user-login`、`feature/message-search` |
+| `bugfix/*`  | Bug 修复     | `bugfix/login-error-handling`                  |
+| `release/*` | 发布准备     | `release/v1.0.0`                               |
+| `hotfix/*`  | 紧急生产修复 | `hotfix/v1.0.1-security-patch`                 |
 
 ---
 
@@ -287,6 +294,7 @@ yuanchat/
 ```
 
 **类型 (type)** ：
+
 - `feat`: 新功能
 - `fix`: Bug 修复
 - `docs`: 文档更新
@@ -298,6 +306,7 @@ yuanchat/
 - `ci`: CI/CD 配置变更
 
 **示例：**
+
 ```
 feat(chat): add real-time message delivery via WebSocket
 fix(auth): resolve token refresh expiration bug
@@ -310,15 +319,15 @@ docs(api): update WebSocket protocol documentation
 
 ### 9.1 所需工具
 
-| 工具 | 版本要求 | 用途 |
-|------|----------|------|
-| Go | ≥ 1.23 | 后端服务 |
-| Node.js | ≥ 20 LTS | 前端构建 |
-| Docker | ≥ 26.x | 容器运行时 |
-| Docker Compose | ≥ v2.27 | 服务编排 |
-| Rust | latest stable | Tauri 桌面端 |
-| Android Studio | latest | Android 构建 |
-| Xcode | latest | iOS 构建（仅 macOS） |
+| 工具           | 版本要求      | 用途                 |
+| -------------- | ------------- | -------------------- |
+| Go             | ≥ 1.23        | 后端服务             |
+| Node.js        | ≥ 20 LTS      | 前端构建             |
+| Docker         | ≥ 26.x        | 容器运行时           |
+| Docker Compose | ≥ v2.27       | 服务编排             |
+| Rust           | latest stable | Tauri 桌面端         |
+| Android Studio | latest        | Android 构建         |
+| Xcode          | latest        | iOS 构建（仅 macOS） |
 
 ### 9.2 快速启动（Docker Compose）
 
@@ -341,13 +350,13 @@ cd web && npm install && npm run dev
 
 ## 十、数据库选型
 
-| 数据库 | 用途 | 推荐度 |
-|--------|------|--------|
-| **PostgreSQL** | 用户、群组、关系等结构化数据 | ⭐⭐⭐⭐⭐ |
-| **Redis** | 会话缓存、在线状态、消息队列 | ⭐⭐⭐⭐⭐ |
-| **MinIO** | 文件/图片/语音存储（兼容 S3） | ⭐⭐⭐⭐⭐ |
-| **Elasticsearch** | 消息全文搜索 | ⭐⭐⭐⭐ |
-| **MongoDB** | 消息历史归档（可选替代 PostgreSQL） | ⭐⭐⭐ |
+| 数据库            | 用途                                | 推荐度     |
+| ----------------- | ----------------------------------- | ---------- |
+| **PostgreSQL**    | 用户、群组、关系等结构化数据        | ⭐⭐⭐⭐⭐ |
+| **Redis**         | 会话缓存、在线状态、消息队列        | ⭐⭐⭐⭐⭐ |
+| **MinIO**         | 文件/图片/语音存储（兼容 S3）       | ⭐⭐⭐⭐⭐ |
+| **Elasticsearch** | 消息全文搜索                        | ⭐⭐⭐⭐   |
+| **MongoDB**       | 消息历史归档（可选替代 PostgreSQL） | ⭐⭐⭐     |
 
 ---
 
@@ -383,15 +392,15 @@ Month 12   │  正式上线、性能优化、安全审计
 
 ## 十三、文档索引
 
-| 文档 | 内容 | 状态 |
-|------|------|------|
-| [00_MASTER_PLAN.md](./00_MASTER_PLAN.md) | 总体计划书 | ✅ 已完成 |
-| [01_ARCHITECTURE.md](./01_ARCHITECTURE.md) | 详细架构设计 | 📝 待编写 |
-| [02_API_DESIGN.md](./02_API_DESIGN.md) | API 接口设计 | 📝 待编写 |
-| [03_DB_SCHEMA.md](./03_DB_SCHEMA.md) | 数据库设计 | 📝 待编写 |
+| 文档                                           | 内容         | 状态      |
+| ---------------------------------------------- | ------------ | --------- |
+| [00_MASTER_PLAN.md](./00_MASTER_PLAN.md)       | 总体计划书   | ✅ 已完成 |
+| [01_ARCHITECTURE.md](./01_ARCHITECTURE.md)     | 详细架构设计 | 📝 待编写 |
+| [02_API_DESIGN.md](./02_API_DESIGN.md)         | API 接口设计 | 📝 待编写 |
+| [03_DB_SCHEMA.md](./03_DB_SCHEMA.md)           | 数据库设计   | 📝 待编写 |
 | [04_FRONTEND_GUIDE.md](./04_FRONTEND_GUIDE.md) | 前端开发指南 | 📝 待编写 |
-| [05_DEPLOYMENT.md](./05_DEPLOYMENT.md) | 部署运维文档 | 📝 待编写 |
-| [06_CHANGELOG.md](./06_CHANGELOG.md) | 开发变更日志 | 📝 待编写 |
+| [05_DEPLOYMENT.md](./05_DEPLOYMENT.md)         | 部署运维文档 | 📝 待编写 |
+| [06_CHANGELOG.md](./06_CHANGELOG.md)           | 开发变更日志 | 📝 待编写 |
 
 ---
 

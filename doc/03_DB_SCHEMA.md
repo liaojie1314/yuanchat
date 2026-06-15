@@ -288,13 +288,13 @@ Value: 序列化的消息 JSON（最多保留 50 条）
   "index": "yuanchat_messages",
   "mappings": {
     "properties": {
-      "message_id":    { "type": "keyword" },
+      "message_id": { "type": "keyword" },
       "conversation_id": { "type": "keyword" },
-      "sender_id":     { "type": "keyword" },
-      "content_text":  { "type": "text", "analyzer": "ik_max_word" },
-      "message_type":  { "type": "integer" },
-      "file_name":     { "type": "text" },
-      "created_at":    { "type": "date" }
+      "sender_id": { "type": "keyword" },
+      "content_text": { "type": "text", "analyzer": "ik_max_word" },
+      "message_type": { "type": "integer" },
+      "file_name": { "type": "text" },
+      "created_at": { "type": "date" }
     }
   }
 }

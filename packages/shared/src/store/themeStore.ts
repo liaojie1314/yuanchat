@@ -20,11 +20,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { M3ColorScheme } from "@yuanchat/design-system/tokens";
-import {
-  lightScheme,
-  darkScheme,
-  type FontScale,
-} from "@yuanchat/design-system/tokens";
+import { lightScheme, darkScheme, type FontScale } from "@yuanchat/design-system/tokens";
 import { findSkin, getDefaultSkin } from "@yuanchat/design-system/skins";
 import type { SupportedLocale } from "@yuanchat/design-system/i18n";
 
@@ -46,8 +42,7 @@ interface ThemeState {
 /** 检测系统亮暗偏好 */
 function prefersDark(): boolean {
   return (
-    typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-color-scheme: dark)").matches
+    typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches
   );
 }
 
@@ -117,20 +112,32 @@ export const useThemeStore = create<ThemeState>()(
 
           /** M3ColorScheme 属性名与 CSS 变量名的映射 (camelCase → kebab-case) */
           const colorProps: [string, string][] = [
-            ["primary", "primary"], ["onPrimary", "on-primary"],
-            ["primaryContainer", "primary-container"], ["onPrimaryContainer", "on-primary-container"],
-            ["secondary", "secondary"], ["onSecondary", "on-secondary"],
-            ["secondaryContainer", "secondary-container"], ["onSecondaryContainer", "on-secondary-container"],
-            ["tertiary", "tertiary"], ["onTertiary", "on-tertiary"],
-            ["error", "error"], ["onError", "on-error"], ["errorContainer", "error-container"],
-            ["background", "background"], ["onBackground", "on-background"],
-            ["surface", "surface"], ["onSurface", "on-surface"],
-            ["surfaceVariant", "surface-variant"], ["onSurfaceVariant", "on-surface-variant"],
-            ["surfaceBright", "surface-bright"], ["surfaceDim", "surface-dim"],
+            ["primary", "primary"],
+            ["onPrimary", "on-primary"],
+            ["primaryContainer", "primary-container"],
+            ["onPrimaryContainer", "on-primary-container"],
+            ["secondary", "secondary"],
+            ["onSecondary", "on-secondary"],
+            ["secondaryContainer", "secondary-container"],
+            ["onSecondaryContainer", "on-secondary-container"],
+            ["tertiary", "tertiary"],
+            ["onTertiary", "on-tertiary"],
+            ["error", "error"],
+            ["onError", "on-error"],
+            ["errorContainer", "error-container"],
+            ["background", "background"],
+            ["onBackground", "on-background"],
+            ["surface", "surface"],
+            ["onSurface", "on-surface"],
+            ["surfaceVariant", "surface-variant"],
+            ["onSurfaceVariant", "on-surface-variant"],
+            ["surfaceBright", "surface-bright"],
+            ["surfaceDim", "surface-dim"],
             ["surfaceContainer", "surface-container"],
             ["surfaceContainerLow", "surface-container-low"],
             ["surfaceContainerHigh", "surface-container-high"],
-            ["outline", "outline"], ["outlineVariant", "outline-variant"],
+            ["outline", "outline"],
+            ["outlineVariant", "outline-variant"],
           ];
 
           colorProps.forEach(([propName, cssName]) => {

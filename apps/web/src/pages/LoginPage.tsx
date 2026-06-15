@@ -34,19 +34,15 @@ export function LoginPage() {
   };
 
   return (
-    <div className="relative flex items-center justify-center min-h-screen surface-gradient overflow-hidden">
+    <div className="surface-gradient relative flex min-h-screen items-center justify-center overflow-hidden">
       {/* 鼠标跟随光晕 */}
-      <div
-        ref={glowRef}
-        className="cursor-glow"
-        style={{ left: mousePos.x, top: mousePos.y }}
-      />
+      <div ref={glowRef} className="cursor-glow" style={{ left: mousePos.x, top: mousePos.y }} />
 
       {/* 极光光斑 — 3 个彩色大光球漂浮动画 */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="aurora-orb -top-20 -left-20 w-[500px] h-[500px] bg-[#7EC8E3]" />
-        <div className="aurora-orb top-1/2 -right-32 w-[400px] h-[400px] bg-[#A8CFFF]" />
-        <div className="aurora-orb -bottom-20 left-1/3 w-[350px] h-[350px] bg-[#B8D8F0]" />
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="aurora-orb -left-20 -top-20 h-[500px] w-[500px] bg-[#7EC8E3]" />
+        <div className="aurora-orb -right-32 top-1/2 h-[400px] w-[400px] bg-[#A8CFFF]" />
+        <div className="aurora-orb -bottom-20 left-1/3 h-[350px] w-[350px] bg-[#B8D8F0]" />
       </div>
 
       {/* 微尘网格 */}
@@ -56,15 +52,15 @@ export function LoginPage() {
       <div className="light-sweep" />
 
       <div className="relative w-full max-w-md p-8">
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl brand-gradient text-white mb-5 glow-brand">
+        <div className="mb-10 text-center">
+          <div className="brand-gradient glow-brand mb-5 inline-flex h-20 w-20 items-center justify-center rounded-2xl text-white">
             <MessageCircle size={40} />
           </div>
           <h1 className="text-headline-lg font-semibold text-on-surface">元聊</h1>
-          <p className="text-body-lg text-on-surface-variant mt-2">即时通讯</p>
+          <p className="text-on-surface-variant mt-2 text-body-lg">即时通讯</p>
         </div>
 
-        <div className="glass-card p-6 space-y-4">
+        <div className="glass-card space-y-4 p-6">
           <Input
             placeholder="手机号或邮箱"
             type="text"
@@ -85,9 +81,9 @@ export function LoginPage() {
           </Button>
         </div>
 
-        <p className="text-center text-label-md text-on-surface-variant mt-6">
+        <p className="text-on-surface-variant mt-6 text-center text-label-md">
           还没有账号？{" "}
-          <span className="text-primary cursor-pointer hover:underline font-medium">立即注册</span>
+          <span className="cursor-pointer font-medium text-primary hover:underline">立即注册</span>
         </p>
       </div>
     </div>

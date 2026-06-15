@@ -7,7 +7,8 @@ describe("cn", () => {
   });
 
   it("filters falsy values", () => {
-    expect(cn("a", false && "hidden", "b")).toBe("a b");
+    const hidden: string | false = false;
+    expect(cn("a", hidden && "hidden", "b")).toBe("a b");
   });
 
   it("handles conditional objects", () => {
