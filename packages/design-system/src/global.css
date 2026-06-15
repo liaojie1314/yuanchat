@@ -21,12 +21,21 @@
     font-size: 14px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    scrollbar-gutter: stable;
+    border-radius: 12px;
   }
 
   body {
     min-height: 100vh;
     background-color: rgb(var(--md-sys-color-background-rgb));
     color: rgb(var(--md-sys-color-on-background-rgb));
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  img {
+    -webkit-user-drag: none;
+    user-drag: none;
   }
 
   #root {

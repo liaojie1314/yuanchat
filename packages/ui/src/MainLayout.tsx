@@ -23,6 +23,7 @@
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { MessageCircle, Users, Settings, Sun, Moon } from "lucide-react";
 import { useThemeStore } from "@yuanchat/shared";
+import type { ReactNode } from "react";
 
 const NAV_ITEMS = [
   { to: "/chat", icon: MessageCircle, label: "消息" },
@@ -30,7 +31,7 @@ const NAV_ITEMS = [
   { to: "/settings", icon: Settings, label: "设置" },
 ];
 
-export function MainLayout() {
+export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
   const location = useLocation();
   // 新 API: mode("light"/"dark"), toggleMode()
   const { mode, toggleMode } = useThemeStore();
@@ -74,7 +75,12 @@ export function MainLayout() {
         </button>
       </nav>
 
-      <Outlet />
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {titleBar}
+        <div className="flex-1 overflow-hidden">
+          <Outlet />
+        </div>
+      </div>
     </div>
   );
 }

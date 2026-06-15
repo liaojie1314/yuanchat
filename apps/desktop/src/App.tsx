@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { MainLayout } from "@yuanchat/ui";
 import { useAuthStore } from "@yuanchat/shared";
+import { TitleBar } from "./components/TitleBar";
 import { ChatPage } from "./pages/ChatPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
@@ -20,7 +21,7 @@ function App() {
 
   return (
     <Routes>
-      <Route element={<MainLayout />}>
+      <Route element={<MainLayout titleBar={<TitleBar />} />}>
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/chat/:conversationId" element={<ChatPage />} />
         <Route path="/contacts" element={<ChatPage />} />

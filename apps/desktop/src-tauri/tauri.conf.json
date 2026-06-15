@@ -13,13 +13,12 @@
     "windows": [
       {
         "title": "元聊 YuanChat",
-        "width": 1200,
-        "height": 780,
-        "minWidth": 800,
-        "minHeight": 640,
-        "resizable": true,
+        "width": 540,
+        "height": 600,
+        "resizable": false,
         "fullscreen": false,
-        "center": true
+        "center": true,
+        "decorations": false
       }
     ],
     "security": {
