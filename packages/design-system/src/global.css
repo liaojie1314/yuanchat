@@ -25,14 +25,13 @@
 
   body {
     min-height: 100vh;
-    overflow: hidden;
     background-color: rgb(var(--md-sys-color-background-rgb));
     color: rgb(var(--md-sys-color-on-background-rgb));
   }
 
   #root {
     width: 100%;
-    height: 100vh;
+    min-height: 100vh;
   }
 
   /* 滚动条 */
