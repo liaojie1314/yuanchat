@@ -2,31 +2,29 @@ import { ConversationList, ChatWindow, ChatDetail } from "@yuanchat/ui";
 import { useConversationStore } from "@yuanchat/shared";
 
 export function ChatPage() {
-  const activeConversationId = useConversationStore((s) => s.activeId);
+  const activeId = useConversationStore((s) => s.activeId);
 
   return (
     <div className="flex flex-1 overflow-hidden">
-      <div className="w-72 shrink-0 border-r border-outline-variant bg-surface-container-low">
+      {/* 会话列表面板 */}
+      <div className="w-72 shrink-0 border-r border-surface-200 dark:border-slate-700">
         <ConversationList />
       </div>
-      <div className="flex-1 min-w-0">
-        {activeConversationId ? (
+
+      {/* 聊天主区域 */}
+      <div className="flex-1 min-w-0 bg-surface-50 dark:bg-slate-900">
+        {activeId ? (
           <ChatWindow />
         ) : (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-surface-container-high flex items-center justify-center">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                </svg>
-              </div>
-              <p className="text-body-md text-on-surface-variant">选择一条会话开始聊天</p>
-            </div>
+          <div className="flex items-center justify-center h-full text-slate-400">
+            <p className="text-body-md">选择一条会话开始聊天</p>
           </div>
         )}
       </div>
-      {activeConversationId && (
-        <div className="w-72 shrink-0 border-l border-outline-variant bg-surface-container-low">
+
+      {/* 详情面板 */}
+      {activeId && (
+        <div className="w-72 shrink-0 border-l border-surface-200 dark:border-slate-700 bg-white dark:bg-slate-800">
           <ChatDetail />
         </div>
       )}

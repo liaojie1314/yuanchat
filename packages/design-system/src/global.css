@@ -2,147 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ========================================
-   元聊 YuanChat — M3 全局样式
-   所有颜色通过 --md-sys-color-*-rgb 变量引用（存储 "r, g, b" 格式的值）
-   applyTheme() 在启动时将 hex 颜色转为 rgb 并写入 CSS 变量
-   ======================================== */
-
 @layer base {
   *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-
-  html {
-    font-size: 14px;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-  }
-
-  body {
-    min-height: 100vh;
-    overflow: hidden;
-    background-color: rgb(var(--md-sys-color-background-rgb));
-    color: rgb(var(--md-sys-color-on-background-rgb));
-  }
-
+  html { font-size: 14px; -webkit-font-smoothing: antialiased; }
+  body { min-height: 100vh; overflow: hidden; }
   #root { width: 100%; height: 100vh; }
 
-  /* 滚动条 */
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar { width: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb {
-    background: rgb(var(--md-sys-color-outline-variant-rgb) / 0.5);
-    border-radius: 3px;
-  }
-  ::-webkit-scrollbar-thumb:hover { background: rgb(var(--md-sys-color-outline-rgb) / 0.7); }
+  ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+  .dark ::-webkit-scrollbar-thumb { background: #475569; }
 
-  /* 选中文本 */
-  ::selection {
-    background: rgb(var(--md-sys-color-primary-container-rgb));
-    color: rgb(var(--md-sys-color-on-primary-container-rgb));
-  }
+  ::selection { background: #E0E7FF; color: #3730A3; }
 }
 
-/* ========================================
-   M3 高度 & 动效
-   ======================================== */
-:root {
-  --md-elevation-1: 0px 1px 2px rgba(0,0,0,0.3), 0px 1px 3px rgba(0,0,0,0.15);
-  --md-elevation-2: 0px 2px 6px 2px rgba(0,0,0,0.15), 0px 1px 2px rgba(0,0,0,0.3);
-  --md-elevation-3: 0px 4px 8px 3px rgba(0,0,0,0.15), 0px 1px 3px rgba(0,0,0,0.3);
-  --md-elevation-4: 0px 6px 10px 4px rgba(0,0,0,0.15), 0px 2px 3px rgba(0,0,0,0.3);
-  --md-elevation-5: 0px 8px 12px 6px rgba(0,0,0,0.15), 0px 4px 4px rgba(0,0,0,0.3);
-  --md-easing-standard: cubic-bezier(0.2, 0, 0, 1.0);
-  --md-easing-emphasized: cubic-bezier(0.2, 0, 0, 1.0);
-  --font-scale: 1;
-}
-
-/* ========================================
-   组件样式
-   ======================================== */
 @layer components {
-  /* 消息气泡 — 发送 (品牌渐变蓝) */
   .msg-bubble {
     @apply relative max-w-[70%] rounded-2xl px-4 py-2.5;
     word-break: break-word;
-    transition: transform 0.15s var(--md-easing-standard);
   }
   .msg-bubble-sent {
-    @apply msg-bubble;
-    background: linear-gradient(135deg,
-      rgb(var(--md-sys-color-primary-rgb)),
-      rgb(var(--md-sys-color-primary-rgb) / 0.85));
-    color: rgb(var(--md-sys-color-on-primary-rgb));
-    border-bottom-right-radius: 4px;
-    margin-left: auto;
-    box-shadow: 0 2px 12px rgb(var(--md-sys-color-primary-rgb) / 0.3);
+    @apply msg-bubble bg-brand-500 text-white rounded-br-md;
   }
   .msg-bubble-received {
-    @apply msg-bubble;
-    background: rgb(var(--md-sys-color-surface-container-high-rgb));
-    color: rgb(var(--md-sys-color-on-surface-rgb));
-    border-bottom-left-radius: 4px;
-    box-shadow: var(--md-elevation-1);
-  }
-
-  /* 输入框 */
-  .input-base {
-    @apply w-full rounded-xl border border-outline-variant px-4 py-3;
-    background: rgb(var(--md-sys-color-surface-container-high-rgb));
-    color: rgb(var(--md-sys-color-on-surface-rgb));
-    border-color: rgb(var(--md-sys-color-outline-variant-rgb));
-    transition: border-color 0.2s var(--md-easing-standard), box-shadow 0.2s var(--md-easing-standard);
-  }
-  .input-base::placeholder { color: rgb(var(--md-sys-color-on-surface-variant-rgb)); }
-  .input-base:focus-visible {
-    outline: none;
-    border-color: rgb(var(--md-sys-color-primary-rgb));
-    box-shadow: 0 0 0 1px rgb(var(--md-sys-color-primary-rgb) / 0.3);
-  }
-
-  /* M3 图标按钮 */
-  .md3-icon-btn {
-    @apply inline-flex items-center justify-center rounded-full;
-    width: 40px; height: 40px;
-    position: relative; overflow: hidden;
-    transition: background 0.15s var(--md-easing-standard);
-  }
-  .md3-icon-btn:hover { background: rgb(var(--md-sys-color-on-surface-variant-rgb) / 0.08); }
-  .md3-icon-btn:active { background: rgb(var(--md-sys-color-on-surface-variant-rgb) / 0.12); }
-
-  /* 品牌渐变 */
-  .brand-gradient {
-    background: linear-gradient(135deg,
-      rgb(var(--md-sys-color-primary-rgb)),
-      rgb(var(--md-sys-color-tertiary-rgb)));
-  }
-  .brand-gradient-soft {
-    background: linear-gradient(135deg,
-      rgb(var(--md-sys-color-primary-rgb) / 0.08),
-      rgb(var(--md-sys-color-tertiary-rgb) / 0.05));
-  }
-  .nav-gradient {
-    background: linear-gradient(180deg,
-      rgb(var(--md-sys-color-primary-rgb)),
-      rgb(var(--md-sys-color-primary-rgb) / 0.85));
-  }
-  .surface-gradient {
-    background: linear-gradient(180deg,
-      rgb(var(--md-sys-color-surface-bright-rgb)),
-      rgb(var(--md-sys-color-surface-container-low-rgb)));
-  }
-
-  /* 玻璃态 */
-  .glass-card {
-    background: rgb(var(--md-sys-color-surface-rgb) / 0.7);
-    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgb(var(--md-sys-color-outline-variant-rgb) / 0.3);
-    border-radius: 16px;
-  }
-
-  /* 发光 */
-  .glow-brand {
-    box-shadow: 0 0 30px rgb(var(--md-sys-color-primary-rgb) / 0.25),
-                0 0 60px rgb(var(--md-sys-color-primary-rgb) / 0.08);
+    @apply msg-bubble bg-white text-slate-800 rounded-bl-md shadow-elevation-1;
+    .dark & { @apply bg-slate-800 text-slate-100; }
   }
 }
 
