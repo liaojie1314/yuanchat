@@ -11,6 +11,9 @@ import (
 )
 
 // Claims JWT 声明
+//
+// 嵌入 jwt.RegisteredClaims 提供标准的 exp/iat/nbf 等字段。
+// UserID 和 DeviceID 是元聊扩展的自定义声明。
 type Claims struct {
 	UserID   uuid.UUID `json:"user_id"`
 	DeviceID string    `json:"device_id"`
@@ -18,6 +21,10 @@ type Claims struct {
 }
 
 // AuthRequired JWT 认证中间件
+//
+// 从 Authorization Header 提取 Bearer Token，解析 JWT 后将 user_id 和 device_id
+// 注入到 Gin Context 中（通过 c.Set），后续 handler 可通过 GetUserID 获取。
+// Token 无效或缺失时返回 401。
 func AuthRequired(cfg config.JWTConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString := extractToken(c)
@@ -53,6 +60,9 @@ func AuthRequired(cfg config.JWTConfig) gin.HandlerFunc {
 }
 
 // extractToken 从 Authorization Header 提取 Bearer Token
+//
+// 支持格式: "Bearer <token>"（大小写不敏感）。
+// 返回空字符串表示未提供或格式错误。
 func extractToken(c *gin.Context) string {
 	authHeader := c.GetHeader("Authorization")
 	if authHeader == "" {
@@ -67,7 +77,9 @@ func extractToken(c *gin.Context) string {
 	return ""
 }
 
-// GetUserID 从上下文中获取用户 ID
+// GetUserID 从 Gin Context 中获取经过 AuthRequired 中间件注入的用户 ID
+//
+// 返回值第二个参数为 false 表示 Context 中不存在 user_id（中间件未执行或类型错误）。
 func GetUserID(c *gin.Context) (uuid.UUID, bool) {
 	userID, exists := c.Get("user_id")
 	if !exists {

@@ -1,3 +1,17 @@
+/**
+ * ChatDetail 组件 — 聊天详情侧边面板
+ *
+ * @description
+ * 位于三栏布局的最右侧，展示当前选中会话的：
+ * - 头像和名称（大尺寸展示）
+ * - 操作按钮：免打扰切换、搜索聊天记录、邀请成员（群聊专属）
+ *
+ * 仅在 activeId 非空时渲染（由父组件 ChatPage 控制显示/隐藏）。
+ * 菜单项点击后直接操作 Zustand Store 更新状态。
+ *
+ * @example
+ * <ChatDetail />
+ */
 import { useConversationStore } from "@yuanchat/shared";
 import { Avatar } from "./Avatar";
 import { Bell, BellOff, Search, UserPlus } from "lucide-react";
@@ -8,6 +22,7 @@ export function ChatDetail() {
   const updateConversation = useConversationStore((s) => s.updateConversation);
   const conv = conversations.find((c) => c.id === activeId);
 
+  // 防御：如果找不到对应会话（数据不一致），不渲染任何内容
   if (!conv) return null;
 
   return (

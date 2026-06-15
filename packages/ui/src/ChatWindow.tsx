@@ -1,9 +1,27 @@
+/**
+ * ChatWindow 组件 — 聊天消息窗口
+ *
+ * @description
+ * IM 应用最主要的交互界面，位于三栏布局的中间。
+ * 由三个区域组成：
+ * 1. **顶部标题栏**：显示对方/群聊名称和在线状态
+ * 2. **消息列表**：滚动显示历史消息，
+ *    - 自己发送的消息靠右（蓝色气泡，msg-bubble-sent）
+ *    - 对方的消息靠左（白色/深色气泡，msg-bubble-received）
+ * 3. **底部输入区**：工具栏按钮（图片/文件/表情）+ 文本输入框 + 发送按钮
+ *
+ * 气泡样式由 `@yuanchat/design-system` 的 `.msg-bubble-sent` 和
+ * `.msg-bubble-received` CSS 类定义。
+ *
+ * @example
+ * <ChatWindow />
+ */
 import { Send, Paperclip, Image, Smile } from "lucide-react";
 import { useConversationStore } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
 
-/** 临时消息数据 */
+/** 开发阶段使用的模拟消息数据，后续替换为 API 获取 */
 const DEMO_MESSAGES = [
   { id: "1", senderId: "user1", text: "你好，明天的会议准备得怎么样了？", time: "14:15", isSelf: false },
   { id: "2", senderId: "me", text: "已经准备差不多了，PPT 还在完善", time: "14:18", isSelf: true },
@@ -13,10 +31,13 @@ const DEMO_MESSAGES = [
 ];
 
 export function ChatWindow() {
+  // 从 Zustand Store 中读取当前活跃会话 ID 和会话列表
   const activeId = useConversationStore((s) => s.activeId);
   const conversations = useConversationStore((s) => s.conversations);
+  // 根据 activeId 找到对应的会话对象
   const conv = conversations.find((c) => c.id === activeId);
 
+  // 防御：如果没找到会话（activeId 无效或为 null），不渲染
   if (!conv) return null;
 
   return (
@@ -37,8 +58,9 @@ export function ChatWindow() {
       {/* 消息列表 */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-neutral-50/50 dark:bg-neutral-950/30">
         {DEMO_MESSAGES.map((msg, i) => {
-          // 判断是否显示时间分隔（与上一条消息间隔超过5分钟时显示）
-          const showTime = i === 0; // 简化处理
+          // TODO: 根据与上一条消息的时间差判断是否显示时间分隔
+          // 当前简化处理：仅第一条消息显示时间
+          const showTime = i === 0;
 
           return (
             <div key={msg.id}>

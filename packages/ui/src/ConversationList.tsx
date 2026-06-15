@@ -1,3 +1,21 @@
+/**
+ * ConversationList 组件 — 会话列表
+ *
+ * @description
+ * IM 应用的核心导航组件，位于三栏布局的最左侧。
+ * 显示当前用户的所有会话（单聊和群聊混合排列），每条会话展示：
+ * - 头像（含在线状态指示）
+ * - 会话名称（单聊是对方昵称，群聊是群名）
+ * - 最后一条消息的预览文本
+ * - 时间标签
+ * - 未读消息计数角标（红色圆形，超过99显示 "99+"）
+ *
+ * 包含顶部搜索栏（搜索功能待实现）和创建新会话按钮。
+ * 点击会话条目后，通过 Zustand Store 的 `setActive` 切换到该会话。
+ *
+ * @example
+ * <ConversationList />
+ */
 import { Search, Plus } from "lucide-react";
 import { useConversationStore } from "@yuanchat/shared";
 import type { Conversation } from "@yuanchat/shared";
@@ -46,6 +64,12 @@ export function ConversationList() {
   );
 }
 
+/**
+ * ConversationItem — 单条会话条目
+ *
+ * @description 内部私有组件，不对外导出。接收会话数据和交互回调。
+ * 当前选中项有蓝色高亮背景。
+ */
 function ConversationItem({
   conv,
   isActive,

@@ -76,6 +76,10 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 // --- 请求/响应结构体 ---
 
 // RegisterRequest 注册请求
+//
+// Phone 和 Email 至少填写一个（由 omitempty 标记允许为空）。
+// 验证码 Code 为 6 位数字字符串。
+// 密码最小 8 位，最长 64 位（适应 Bcrypt 72 字节限制）。
 type RegisterRequest struct {
 	Phone    string `json:"phone" binding:"omitempty,len=11"`
 	Email    string `json:"email" binding:"omitempty,email"`
@@ -85,12 +89,16 @@ type RegisterRequest struct {
 }
 
 // LoginRequest 登录请求
+//
+// Account 可以是手机号或邮箱，由服务端自动识别。
 type LoginRequest struct {
 	Account  string `json:"account" binding:"required"` // 手机号或邮箱
 	Password string `json:"password" binding:"required"`
 }
 
 // UpdateProfileRequest 更新资料请求
+//
+// 所有字段使用指针类型，nil 表示不修改该字段（PATCH 语义）。
 type UpdateProfileRequest struct {
 	Nickname  *string `json:"nickname" binding:"omitempty,min=1,max=50"`
 	AvatarURL *string `json:"avatar_url" binding:"omitempty,url"`
