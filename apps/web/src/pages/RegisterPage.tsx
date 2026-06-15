@@ -142,14 +142,12 @@ export function RegisterPage() {
           </Button>
         </div>
 
-        {!isDesktop && (
-          <p className="text-on-surface-variant mt-6 text-center text-label-md">
-            已有账号？{" "}
-            <Link to="/login" className="font-medium text-primary hover:underline">
-              立即登录
-            </Link>
-          </p>
-        )}
+        <p className="text-on-surface-variant mt-6 text-center text-label-md">
+          已有账号？{" "}
+          <Link to="/login" className="font-medium text-primary hover:underline">
+            立即登录
+          </Link>
+        </p>
       </div>
     </div>
   );

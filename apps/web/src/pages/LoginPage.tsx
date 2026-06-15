@@ -1,11 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { Button, Input } from "@yuanchat/ui";
-import { useAuthStore, useIsDesktop } from "@yuanchat/shared";
+import { useAuthStore } from "@yuanchat/shared";
 import { MessageCircle } from "lucide-react";
 
 export function LoginPage() {
-  const isDesktop = useIsDesktop();
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -83,17 +82,12 @@ export function LoginPage() {
           </Button>
         </div>
 
-        {!isDesktop && (
-          <p className="text-on-surface-variant mt-6 text-center text-label-md">
-            还没有账号？{" "}
-            <Link
-              to="/register"
-              className="cursor-pointer font-medium text-primary hover:underline"
-            >
-              立即注册
-            </Link>
-          </p>
-        )}
+        <p className="text-on-surface-variant mt-6 text-center text-label-md">
+          还没有账号？{" "}
+          <Link to="/register" className="cursor-pointer font-medium text-primary hover:underline">
+            立即注册
+          </Link>
+        </p>
       </div>
     </div>
   );
