@@ -40,7 +40,7 @@ export function ConversationList() {
             <input
               placeholder="搜索会话..."
               className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-surface-container-high text-body-md
-                         placeholder:text-on-surface-variant focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
+                         placeholder:text-on-surface-variant focus:outline-none"
             />
           </div>
           <button className="md3-icon-btn text-on-surface-variant">
