@@ -38,7 +38,6 @@ type RegisterRequest struct {
 	Phone    string `json:"phone"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
-	Code     string `json:"code"`     // verification code (TODO: SMS/email verification)
 	Nickname string `json:"nickname"`
 }
 
@@ -59,8 +58,6 @@ type AuthResult struct {
 
 // Register creates a new user account and returns JWT tokens.
 func (s *UserService) Register(ctx context.Context, req RegisterRequest) (*AuthResult, error) {
-	// TODO: verify verification code before creating account
-
 	// Check for duplicate
 	exists, err := s.repo.ExistsByPhoneOrEmail(ctx, req.Phone, req.Email)
 	if err != nil {

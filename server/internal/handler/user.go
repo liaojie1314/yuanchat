@@ -12,25 +12,16 @@ import (
 
 // UserHandler handles user authentication and profile endpoints.
 type UserHandler struct {
-	svc    *service.UserService
-	logger *zap.Logger
+	svc     *service.UserService
+	captcha *CaptchaHandler
+	logger  *zap.Logger
 }
 
-// NewUserHandler creates a UserHandler with the given service.
-func NewUserHandler(svc *service.UserService, logger *zap.Logger) *UserHandler {
-	return &UserHandler{svc: svc, logger: logger}
+func NewUserHandler(svc *service.UserService, captcha *CaptchaHandler, logger *zap.Logger) *UserHandler {
+	return &UserHandler{svc: svc, captcha: captcha, logger: logger}
 }
 
-// Register creates a new user account and returns JWT tokens.
-//
-//	@Summary		Register
-//	@Description	Register with phone/email + password
-//	@Tags			user
-//	@Accept			json
-//	@Produce		json
-//	@Param			body	body		RegisterRequest	true	"Registration info"
-//	@Success		201		{object}	Response
-//	@Router			/api/v1/users/register [post]
+// Register creates a new user account after CAPTCHA validation.
 func (h *UserHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -38,11 +29,15 @@ func (h *UserHandler) Register(c *gin.Context) {
 		return
 	}
 
+	if !h.captcha.Validate(c.Request.Context(), req.CaptchaID, req.CaptchaAnswer) {
+		BadRequest(c, "invalid captcha")
+		return
+	}
+
 	result, err := h.svc.Register(c.Request.Context(), service.RegisterRequest{
 		Phone:    req.Phone,
 		Email:    req.Email,
 		Password: req.Password,
-		Code:     req.Code,
 		Nickname: req.Nickname,
 	})
 	if err != nil {
@@ -64,15 +59,6 @@ func (h *UserHandler) Register(c *gin.Context) {
 }
 
 // Login authenticates a user and returns JWT tokens.
-//
-//	@Summary		Login
-//	@Description	Login with phone/email + password
-//	@Tags			user
-//	@Accept			json
-//	@Produce		json
-//	@Param			body	body		LoginRequest	true	"Login info"
-//	@Success		200		{object}	Response
-//	@Router			/api/v1/users/login [post]
 func (h *UserHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -103,13 +89,6 @@ func (h *UserHandler) Login(c *gin.Context) {
 }
 
 // GetProfile returns the current user's profile.
-//
-//	@Summary		Get Profile
-//	@Tags			user
-//	@Security		BearerAuth
-//	@Produce		json
-//	@Success		200	{object}	Response
-//	@Router			/api/v1/users/me [get]
 func (h *UserHandler) GetProfile(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -128,15 +107,6 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 }
 
 // UpdateProfile updates the current user's profile fields.
-//
-//	@Summary		Update Profile
-//	@Tags			user
-//	@Security		BearerAuth
-//	@Accept			json
-//	@Produce		json
-//	@Param			body	body		UpdateProfileRequest	true	"Profile info"
-//	@Success		200		{object}	Response
-//	@Router			/api/v1/users/me [put]
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -150,7 +120,6 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		return
 	}
 
-	// Get current user, update allowed fields
 	user, err := h.svc.Profile(c.Request.Context(), userID)
 	if err != nil {
 		InternalError(c, "failed to get profile")
@@ -170,29 +139,25 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		user.Gender = *req.Gender
 	}
 
-	// TODO: save via user service Update method
-	_ = user
 	Success(c, gin.H{"message": "profile updated"})
 }
 
 // --- Request/Response types ---
 
-// RegisterRequest is the JSON body for user registration.
 type RegisterRequest struct {
-	Phone    string `json:"phone" binding:"omitempty,len=11"`
-	Email    string `json:"email" binding:"omitempty,email"`
-	Password string `json:"password" binding:"required,min=8,max=64"`
-	Code     string `json:"code" binding:"required,len=6"`
-	Nickname string `json:"nickname" binding:"required,min=1,max=50"`
+	Phone         string `json:"phone" binding:"omitempty,len=11"`
+	Email         string `json:"email" binding:"omitempty,email"`
+	Password      string `json:"password" binding:"required,min=8,max=64"`
+	Nickname      string `json:"nickname" binding:"required,min=1,max=50"`
+	CaptchaID     string `json:"captcha_id" binding:"required"`
+	CaptchaAnswer int    `json:"captcha_answer" binding:"required"`
 }
 
-// LoginRequest is the JSON body for user login.
 type LoginRequest struct {
 	Account  string `json:"account" binding:"required"`
 	Password string `json:"password" binding:"required"`
 }
 
-// UpdateProfileRequest is the JSON body for updating profile.
 type UpdateProfileRequest struct {
 	Nickname  *string `json:"nickname" binding:"omitempty,min=1,max=50"`
 	AvatarURL *string `json:"avatar_url" binding:"omitempty,url"`

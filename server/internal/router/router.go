@@ -3,6 +3,7 @@ package router
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/yuanchat/server/internal/config"
+	"github.com/redis/go-redis/v9"
 	"github.com/yuanchat/server/internal/handler"
 	"github.com/yuanchat/server/internal/middleware"
 	"github.com/yuanchat/server/internal/pkg/jwt"
@@ -13,7 +14,7 @@ import (
 )
 
 // Setup wires all dependencies and returns the Gin engine.
-func Setup(db *gorm.DB, cfg *config.Config, logger *zap.Logger) *gin.Engine {
+func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logger) *gin.Engine {
 	if cfg.Server.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -30,11 +31,13 @@ func Setup(db *gorm.DB, cfg *config.Config, logger *zap.Logger) *gin.Engine {
 	userSvc := service.NewUserService(userRepo, jwtGen, logger)
 
 	healthH := handler.NewHealthHandler()
-	userH := handler.NewUserHandler(userSvc, logger)
+	captchaH := handler.NewCaptchaHandler(rdb)
+	userH := handler.NewUserHandler(userSvc, captchaH, logger)
 
 	// --- Routes ---
 	api := r.Group("/api/v1")
 	api.GET("/health", healthH.Check)
+	api.GET("/captcha", captchaH.Generate)
 
 	users := api.Group("/users")
 	{

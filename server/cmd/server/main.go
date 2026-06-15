@@ -65,7 +65,7 @@ func main() {
 	_ = rdb // 后续传递给 repository/service 层
 
 	// 5. 设置路由
-	r := router.Setup(db, cfg, zapLogger)
+	r := router.Setup(db, rdb, cfg, zapLogger)
 
 	// 6. 启动 HTTP 服务器
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
