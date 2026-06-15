@@ -111,7 +111,7 @@ export function ChatWindow() {
             rows={3}
             placeholder="输入消息..."
             className="flex-1 resize-none rounded-xl bg-surface-container-high px-4 py-2.5 text-body-md
-                       placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/30"
+                       placeholder:text-on-surface-variant focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
           />
           <button className="shrink-0 p-2.5 rounded-xl bg-primary text-primary-on hover:opacity-90 transition-opacity shadow-elevation-2">
             <Send size={18} />

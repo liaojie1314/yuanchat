@@ -48,7 +48,7 @@ export function MainLayout() {
             <Link
               key={to}
               to={to}
-              className={`flex flex-col items-center gap-1 px-2 py-2 rounded-2xl text-label-sm transition-all duration-200 outline-none ${
+              className={`flex flex-col items-center gap-1 px-2 py-2 rounded-2xl text-label-sm transition-all duration-200 ${
                 isActive
                   ? "bg-white/25 text-white shadow-elevation-1 backdrop-blur-sm"
                   : "text-white/70 hover:bg-white/15 hover:text-white"
@@ -66,7 +66,7 @@ export function MainLayout() {
         {/* 主题切换 — M3 图标按钮 */}
         <button
           onClick={toggleMode}
-          className="w-10 h-10 inline-flex items-center justify-center rounded-full text-white/70 hover:text-white hover:bg-white/15 transition-all duration-200 outline-none"
+          className="w-10 h-10 inline-flex items-center justify-center rounded-full text-white/70 hover:text-white hover:bg-white/15 transition-all duration-200"
           title={isDark ? "切换亮色模式" : "切换暗色模式"}
         >
           {isDark ? <Sun size={20} /> : <Moon size={20} />}

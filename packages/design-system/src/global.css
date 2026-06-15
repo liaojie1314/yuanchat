@@ -93,10 +93,10 @@
     transition: border-color 0.2s var(--md-easing-standard), box-shadow 0.2s var(--md-easing-standard);
   }
   .input-base::placeholder { color: rgb(var(--md-sys-color-on-surface-variant-rgb)); }
-  .input-base:focus {
+  .input-base:focus-visible {
     outline: none;
     border-color: rgb(var(--md-sys-color-primary-rgb));
-    box-shadow: 0 0 0 2px rgb(var(--md-sys-color-primary-rgb) / 0.3);
+    box-shadow: 0 0 0 1px rgb(var(--md-sys-color-primary-rgb) / 0.3);
   }
 
   /* M3 图标按钮 */
