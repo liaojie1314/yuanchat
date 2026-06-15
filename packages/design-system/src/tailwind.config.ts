@@ -15,44 +15,44 @@ export const yuanchatPreset: Partial<Config> = {
       colors: {
         // M3 Primary — 主色
         primary: {
-          DEFAULT: "rgb(var(--md-sys-color-primary) / <alpha-value>)",
-          on: "rgb(var(--md-sys-color-on-primary) / <alpha-value>)",
-          container: "rgb(var(--md-sys-color-primary-container) / <alpha-value>)",
-          "on-container": "rgb(var(--md-sys-color-on-primary-container) / <alpha-value>)",
+          DEFAULT: "rgb(var(--md-sys-color-primary-rgb) / <alpha-value>)",
+          on: "rgb(var(--md-sys-color-on-primary-rgb) / <alpha-value>)",
+          container: "rgb(var(--md-sys-color-primary-container-rgb) / <alpha-value>)",
+          "on-container": "rgb(var(--md-sys-color-on-primary-container-rgb) / <alpha-value>)",
         },
         // M3 Surface — 表面
         surface: {
-          DEFAULT: "rgb(var(--md-sys-color-surface) / <alpha-value>)",
-          dim: "rgb(var(--md-sys-color-surface-dim) / <alpha-value>)",
-          bright: "rgb(var(--md-sys-color-surface-bright) / <alpha-value>)",
-          container: "rgb(var(--md-sys-color-surface-container) / <alpha-value>)",
-          "container-low": "rgb(var(--md-sys-color-surface-container-low) / <alpha-value>)",
-          "container-high": "rgb(var(--md-sys-color-surface-container-high) / <alpha-value>)",
-          variant: "rgb(var(--md-sys-color-surface-variant) / <alpha-value>)",
-          "on-variant": "rgb(var(--md-sys-color-on-surface-variant) / <alpha-value>)",
+          DEFAULT: "rgb(var(--md-sys-color-surface-rgb) / <alpha-value>)",
+          dim: "rgb(var(--md-sys-color-surface-dim-rgb) / <alpha-value>)",
+          bright: "rgb(var(--md-sys-color-surface-bright-rgb) / <alpha-value>)",
+          container: "rgb(var(--md-sys-color-surface-container-rgb) / <alpha-value>)",
+          "container-low": "rgb(var(--md-sys-color-surface-container-low-rgb) / <alpha-value>)",
+          "container-high": "rgb(var(--md-sys-color-surface-container-high-rgb) / <alpha-value>)",
+          variant: "rgb(var(--md-sys-color-surface-variant-rgb) / <alpha-value>)",
+          "on-variant": "rgb(var(--md-sys-color-on-surface-variant-rgb) / <alpha-value>)",
         },
         // On-surface text
-        "on-surface": "rgb(var(--md-sys-color-on-surface) / <alpha-value>)",
-        "on-background": "rgb(var(--md-sys-color-on-background) / <alpha-value>)",
+        "on-surface": "rgb(var(--md-sys-color-on-surface-rgb) / <alpha-value>)",
+        "on-background": "rgb(var(--md-sys-color-on-background-rgb) / <alpha-value>)",
         // M3 Secondary
         secondary: {
-          DEFAULT: "rgb(var(--md-sys-color-secondary) / <alpha-value>)",
-          container: "rgb(var(--md-sys-color-secondary-container) / <alpha-value>)",
+          DEFAULT: "rgb(var(--md-sys-color-secondary-rgb) / <alpha-value>)",
+          container: "rgb(var(--md-sys-color-secondary-container-rgb) / <alpha-value>)",
         },
         // M3 Tertiary
-        tertiary: "rgb(var(--md-sys-color-tertiary) / <alpha-value>)",
+        tertiary: "rgb(var(--md-sys-color-tertiary-rgb) / <alpha-value>)",
         // M3 Error
         error: {
-          DEFAULT: "rgb(var(--md-sys-color-error) / <alpha-value>)",
-          container: "rgb(var(--md-sys-color-error-container) / <alpha-value>)",
+          DEFAULT: "rgb(var(--md-sys-color-error-rgb) / <alpha-value>)",
+          container: "rgb(var(--md-sys-color-error-container-rgb) / <alpha-value>)",
         },
         // M3 Outline
         outline: {
-          DEFAULT: "rgb(var(--md-sys-color-outline) / <alpha-value>)",
-          variant: "rgb(var(--md-sys-color-outline-variant) / <alpha-value>)",
+          DEFAULT: "rgb(var(--md-sys-color-outline-rgb) / <alpha-value>)",
+          variant: "rgb(var(--md-sys-color-outline-variant-rgb) / <alpha-value>)",
         },
         // Background
-        background: "rgb(var(--md-sys-color-background) / <alpha-value>)",
+        background: "rgb(var(--md-sys-color-background-rgb) / <alpha-value>)",
       },
       fontSize: {
         // 动态字号 = 基准 × font-scale CSS 变量

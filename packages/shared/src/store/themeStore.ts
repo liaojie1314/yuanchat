@@ -102,35 +102,48 @@ export const useThemeStore = create<ThemeState>()(
           const scheme = get().getCurrentScheme();
           const root = document.documentElement;
 
-          // 批量写入 M3 颜色 CSS 变量
-          const vars: Record<string, string> = {
-            "--md-sys-color-primary": scheme.primary,
-            "--md-sys-color-on-primary": scheme.onPrimary,
-            "--md-sys-color-primary-container": scheme.primaryContainer,
-            "--md-sys-color-on-primary-container": scheme.onPrimaryContainer,
-            "--md-sys-color-secondary": scheme.secondary,
-            "--md-sys-color-on-secondary": scheme.onSecondary,
-            "--md-sys-color-secondary-container": scheme.secondaryContainer,
-            "--md-sys-color-on-secondary-container": scheme.onSecondaryContainer,
-            "--md-sys-color-tertiary": scheme.tertiary,
-            "--md-sys-color-on-tertiary": scheme.onTertiary,
-            "--md-sys-color-error": scheme.error,
-            "--md-sys-color-on-error": scheme.onError,
-            "--md-sys-color-error-container": scheme.errorContainer,
-            "--md-sys-color-background": scheme.background,
-            "--md-sys-color-on-background": scheme.onBackground,
-            "--md-sys-color-surface": scheme.surface,
-            "--md-sys-color-on-surface": scheme.onSurface,
-            "--md-sys-color-surface-variant": scheme.surfaceVariant,
-            "--md-sys-color-on-surface-variant": scheme.onSurfaceVariant,
-            "--md-sys-color-outline": scheme.outline,
-            "--md-sys-color-outline-variant": scheme.outlineVariant,
-            "--md-sys-color-surface-container": scheme.surfaceContainer,
-            "--md-sys-color-surface-container-low": scheme.surfaceContainerLow,
-            "--md-sys-color-surface-container-high": scheme.surfaceContainerHigh,
+          /** hex → rgb 转换，输出 "r, g, b" 格式供 CSS rgb() 使用 */
+          const hexToRgb = (hex: string): string => {
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+            return `${r}, ${g}, ${b}`;
           };
 
-          Object.entries(vars).forEach(([key, val]) => root.style.setProperty(key, val));
+          // 写入 hex 值（直接使用：background: var(--...-hex)）
+          const hexKeys: Record<string, string> = {};
+          // 写入 rgb 值（配合透明度：rgb(var(--...-rgb) / 0.5)）
+          const rgbKeys: Record<string, string> = {};
+
+          /** M3ColorScheme 属性名与 CSS 变量名的映射 (camelCase → kebab-case) */
+          const colorProps: [string, string][] = [
+            ["primary", "primary"], ["onPrimary", "on-primary"],
+            ["primaryContainer", "primary-container"], ["onPrimaryContainer", "on-primary-container"],
+            ["secondary", "secondary"], ["onSecondary", "on-secondary"],
+            ["secondaryContainer", "secondary-container"], ["onSecondaryContainer", "on-secondary-container"],
+            ["tertiary", "tertiary"], ["onTertiary", "on-tertiary"],
+            ["error", "error"], ["onError", "on-error"], ["errorContainer", "error-container"],
+            ["background", "background"], ["onBackground", "on-background"],
+            ["surface", "surface"], ["onSurface", "on-surface"],
+            ["surfaceVariant", "surface-variant"], ["onSurfaceVariant", "on-surface-variant"],
+            ["surfaceBright", "surface-bright"], ["surfaceDim", "surface-dim"],
+            ["surfaceContainer", "surface-container"],
+            ["surfaceContainerLow", "surface-container-low"],
+            ["surfaceContainerHigh", "surface-container-high"],
+            ["outline", "outline"], ["outlineVariant", "outline-variant"],
+          ];
+
+          colorProps.forEach(([propName, cssName]) => {
+            const cssKey = `--md-sys-color-${cssName}`;
+            const hexVal = (scheme as unknown as Record<string, string>)[propName];
+            if (hexVal) {
+              hexKeys[cssKey] = hexVal;
+              rgbKeys[`${cssKey}-rgb`] = hexToRgb(hexVal);
+            }
+          });
+
+          Object.entries(hexKeys).forEach(([k, v]) => root.style.setProperty(k, v));
+          Object.entries(rgbKeys).forEach(([k, v]) => root.style.setProperty(k, v));
 
           root.classList.toggle("dark", get().mode === "dark");
           root.style.setProperty("--font-scale", String(get().fontScale));
