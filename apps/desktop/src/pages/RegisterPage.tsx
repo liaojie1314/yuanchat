@@ -2,11 +2,14 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button, Input } from "@yuanchat/ui";
 import { useAuthStore, useIsDesktop } from "@yuanchat/shared";
+import { useCloseAuthWindow, useOpenAuthWindow } from "../hooks/useTauriAuth";
 import { UserPlus, ArrowLeft, RefreshCw } from "lucide-react";
 
 export function RegisterPage() {
   const navigate = useNavigate();
   const isDesktop = useIsDesktop();
+  const closeAuthWindow = useCloseAuthWindow();
+  const openAuthWindow = useOpenAuthWindow();
   const registerWithPassword = useAuthStore((s) => s.registerWithPassword);
 
   const [phone, setPhone] = useState("");
@@ -42,7 +45,11 @@ export function RegisterPage() {
     setLoading(true);
     try {
       await registerWithPassword(phone, password, captchaID, Number(captchaAnswer), nickname);
-      navigate("/chat", { replace: true });
+      if (isDesktop) {
+        await closeAuthWindow();
+      } else {
+        navigate("/chat", { replace: true });
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "注册失败");
       fetchCaptcha();
@@ -144,9 +151,18 @@ export function RegisterPage() {
 
         <p className="text-on-surface-variant mt-6 text-center text-label-md">
           已有账号？{" "}
-          <Link to="/login" className="font-medium text-primary hover:underline">
-            立即登录
-          </Link>
+          {isDesktop ? (
+            <button
+              onClick={() => openAuthWindow("/login", "登录元聊")}
+              className="font-medium text-primary hover:underline"
+            >
+              立即登录
+            </button>
+          ) : (
+            <Link to="/login" className="font-medium text-primary hover:underline">
+              立即登录
+            </Link>
+          )}
         </p>
       </div>
     </div>
