@@ -129,6 +129,88 @@
     background: linear-gradient(180deg, #1B4B6F 0%, #153D5A 100%);
   }
 
+  /* ========================================
+     背景装饰 — 流光、光斑、网格
+     ======================================== */
+
+  /* 流动光斑 — 大尺寸模糊彩色光球，缓慢漂移 */
+  .aurora-orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.4;
+    pointer-events: none;
+    animation: auroraFloat 12s ease-in-out infinite;
+  }
+  .aurora-orb:nth-child(1) { animation-delay: 0s; }
+  .aurora-orb:nth-child(2) { animation-delay: -4s; animation-duration: 15s; }
+  .aurora-orb:nth-child(3) { animation-delay: -8s; animation-duration: 18s; }
+
+  @keyframes auroraFloat {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    33% { transform: translate(30px, -20px) scale(1.1); }
+    66% { transform: translate(-20px, 15px) scale(0.9); }
+  }
+
+  /* 微尘网格 — 半透明圆点矩阵 */
+  .dot-grid {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: radial-gradient(
+      circle at 1px 1px,
+      rgb(var(--md-sys-color-primary-rgb) / 0.06) 1px,
+      transparent 0
+    );
+    background-size: 32px 32px;
+  }
+
+  /* 流光扫描线 — 从上往下缓慢移动的光带 */
+  .light-sweep {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .light-sweep::after {
+    content: "";
+    position: absolute;
+    top: -100%;
+    left: -10%;
+    width: 120%;
+    height: 60%;
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      rgb(var(--md-sys-color-primary-rgb) / 0.04) 40%,
+      rgb(var(--md-sys-color-primary-rgb) / 0.06) 50%,
+      rgb(var(--md-sys-color-primary-rgb) / 0.04) 60%,
+      transparent 100%
+    );
+    animation: sweepDown 10s ease-in-out infinite;
+  }
+  @keyframes sweepDown {
+    0% { top: -100%; }
+    100% { top: 150%; }
+  }
+
+  /* 鼠标跟随光晕 — 需要 JS 配合，这里只提供基础样式 */
+  .cursor-glow {
+    position: fixed;
+    width: 400px;
+    height: 400px;
+    border-radius: 50%;
+    background: radial-gradient(
+      circle,
+      rgb(var(--md-sys-color-primary-rgb) / 0.08) 0%,
+      transparent 70%
+    );
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    transition: opacity 0.3s;
+    z-index: 0;
+  }
+
   /* 玻璃态 */
   .glass-card {
     background: rgb(var(--md-sys-color-surface-rgb) / 0.7);
