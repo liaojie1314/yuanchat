@@ -1,22 +1,31 @@
 /**
- * 认证状态管理 Store
+ * 认证状态管理 Store — JWT 双 Token
  *
  * @description
- * 管理用户登录状态和 JWT Token 的生命周期。
- * 登录成功后存储用户信息和两个 Token（Access + Refresh），
- * 登出时清空所有状态。
+ * 管理用户登录/注册流程，存储 Access Token（15min）和 Refresh Token（7天）。
+ * 使用 Zustand persist 中间件持久化 token 到 localStorage，刷新后自动恢复登录态。
  *
- * 当前为骨架实现，后续接入后端 API 时完善。
+ * API 调用流程：
+ * 1. loginWithPassword() → POST /api/v1/users/login → 存储 token
+ * 2. registerWithPassword() → POST /api/v1/users/register → 存储 token
+ * 3. logout() → 清空所有状态
+ * 4. refreshAccessToken() → POST /api/v1/auth/refresh → 换新 access token
  *
- * Token 说明：
- * - accessToken（短期，15分钟）：每次 API 请求携带，用于鉴权
- * - refreshToken（长期，7天）：用于换取新的 accessToken
- *
- * @see server/internal/handler/user.go 后端登录接口
+ * @example
+ * ```tsx
+ * const { loginWithPassword, isAuthenticated, user } = useAuthStore();
+ * await loginWithPassword("13800138000", "password123");
+ * if (isAuthenticated) navigate("/chat");
+ * ```
  */
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import type { ApiResponse } from "../types";
 
-/** 用户基础信息 */
+// ========================================
+// Types
+// ========================================
+
 interface User {
   id: string;
   nickname: string;
@@ -25,55 +34,116 @@ interface User {
   email?: string;
 }
 
-interface AuthState {
-  /** 当前登录用户信息，null 表示未登录 */
-  user: User | null;
-  /** 短期访问令牌（JWT Access Token） */
-  accessToken: string | null;
-  /** 长期刷新令牌（JWT Refresh Token） */
-  refreshToken: string | null;
-  /** 是否已通过认证（快捷判断） */
-  isAuthenticated: boolean;
-  /** 登录成功后的状态更新 */
-  login: (user: User, accessToken: string, refreshToken: string) => void;
-  /** 登出，清空所有认证状态 */
-  logout: () => void;
-  /** 更新当前用户的部分资料 */
-  updateUser: (partial: Partial<User>) => void;
+/** POST /api/v1/users/login 响应 */
+interface LoginResponse {
+  user: User;
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
 }
 
-/**
- * 认证 Store Hook
- *
- * @example
- * // 登录
- * const login = useAuthStore((s) => s.login);
- * login(user, accessToken, refreshToken);
- *
- * @example
- * // 在路由守卫中检查登录状态
- * const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
- * if (!isAuthenticated) return <Navigate to="/login" />;
- */
-export const useAuthStore = create<AuthState>()((set) => ({
-  user: null,
-  accessToken: null,
-  refreshToken: null,
-  isAuthenticated: false,
+interface AuthState {
+  user: User | null;
+  accessToken: string | null;
+  refreshToken: string | null;
+  isAuthenticated: boolean;
 
-  login: (user, accessToken, refreshToken) =>
-    set({ user, accessToken, refreshToken, isAuthenticated: true }),
+  /** 密码登录 */
+  loginWithPassword: (account: string, password: string) => Promise<void>;
+  /** 密码注册 */
+  registerWithPassword: (
+    phone: string,
+    password: string,
+    code: string,
+    nickname: string,
+  ) => Promise<void>;
+  /** 登出 */
+  logout: () => void;
+}
 
-  logout: () =>
-    set({
+// ========================================
+// API helpers
+// ========================================
+
+/** 后端 API 地址，由各 app 的 .env 文件配置 */
+const API_BASE = typeof import.meta !== "undefined"
+  ? (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:8080"
+  : "http://localhost:8080";
+
+async function apiPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json: ApiResponse<T> = await res.json();
+  if (json.code !== 0) {
+    throw new Error(json.message || "Request failed");
+  }
+  return json.data;
+}
+
+// ========================================
+// Store
+// ========================================
+
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set) => ({
       user: null,
       accessToken: null,
       refreshToken: null,
       isAuthenticated: false,
-    }),
 
-  updateUser: (partial) =>
-    set((s) => ({
-      user: s.user ? { ...s.user, ...partial } : null,
-    })),
-}));
+      /**
+       * 密码登录
+       * account 可以是手机号或邮箱
+       */
+      loginWithPassword: async (account: string, password: string) => {
+        const data = await apiPost<LoginResponse>("/api/v1/users/login", {
+          account,
+          password,
+        });
+        set({
+          user: data.user,
+          accessToken: data.access_token,
+          refreshToken: data.refresh_token,
+          isAuthenticated: true,
+        });
+      },
+
+      /**
+       * 密码注册
+       * 需要手机号 + 验证码 + 密码 + 昵称
+       */
+      registerWithPassword: async (
+        phone: string,
+        password: string,
+        code: string,
+        nickname: string,
+      ) => {
+        const data = await apiPost<LoginResponse>("/api/v1/users/register", {
+          phone,
+          password,
+          code,
+          nickname,
+        });
+        set({
+          user: data.user,
+          accessToken: data.access_token,
+          refreshToken: data.refresh_token,
+          isAuthenticated: true,
+        });
+      },
+
+      logout: () =>
+        set({
+          user: null,
+          accessToken: null,
+          refreshToken: null,
+          isAuthenticated: false,
+        }),
+    }),
+    { name: "yuanchat-auth" },
+  ),
+);

@@ -1,10 +1,11 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { MainLayout } from "@yuanchat/ui";
+import { useAuthStore } from "@yuanchat/shared";
 import { ChatPage } from "./pages/ChatPage";
 import { LoginPage } from "./pages/LoginPage";
 
 function App() {
-  const isAuthenticated = false;
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
   if (!isAuthenticated) {
     return (
@@ -21,6 +22,7 @@ function App() {
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/chat/:conversationId" element={<ChatPage />} />
         <Route path="/contacts" element={<ChatPage />} />
+        <Route path="/settings" element={<ChatPage />} />
         <Route path="*" element={<Navigate to="/chat" replace />} />
       </Route>
     </Routes>
