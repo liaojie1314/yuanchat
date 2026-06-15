@@ -1,13 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { Button, Input } from "@yuanchat/ui";
-import { useAuthStore, useIsDesktop } from "@yuanchat/shared";
-import { useOpenAuthWindow } from "../hooks/useTauriAuth";
+import { useAuthStore } from "@yuanchat/shared";
 import { MessageCircle } from "lucide-react";
 
 export function LoginPage() {
-  const isDesktop = useIsDesktop();
-  const openAuthWindow = useOpenAuthWindow();
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -87,21 +84,9 @@ export function LoginPage() {
 
         <p className="text-on-surface-variant mt-6 text-center text-label-md">
           还没有账号？{" "}
-          {isDesktop ? (
-            <button
-              onClick={() => openAuthWindow("/register", "注册元聊")}
-              className="cursor-pointer font-medium text-primary hover:underline"
-            >
-              立即注册
-            </button>
-          ) : (
-            <Link
-              to="/register"
-              className="cursor-pointer font-medium text-primary hover:underline"
-            >
-              立即注册
-            </Link>
-          )}
+          <Link to="/register" className="cursor-pointer font-medium text-primary hover:underline">
+            立即注册
+          </Link>
         </p>
       </div>
     </div>
