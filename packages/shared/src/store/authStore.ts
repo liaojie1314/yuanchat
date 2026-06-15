@@ -54,7 +54,8 @@ interface AuthState {
   registerWithPassword: (
     phone: string,
     password: string,
-    code: string,
+    captchaID: string,
+    captchaAnswer: number,
     nickname: string,
   ) => Promise<void>;
   /** 登出 */
@@ -123,13 +124,15 @@ export const useAuthStore = create<AuthState>()(
       registerWithPassword: async (
         phone: string,
         password: string,
-        code: string,
+        captchaID: string,
+        captchaAnswer: number,
         nickname: string,
       ) => {
         const data = await apiPost<LoginResponse>("/api/v1/users/register", {
           phone,
           password,
-          code,
+          captcha_id: captchaID,
+          captcha_answer: captchaAnswer,
           nickname,
         });
         set({

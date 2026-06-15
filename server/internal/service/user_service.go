@@ -10,6 +10,7 @@ import (
 	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/pkg/jwt"
 	"github.com/yuanchat/server/internal/pkg/password"
+	"github.com/yuanchat/server/internal/pkg/shortid"
 	"github.com/yuanchat/server/internal/repository"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -26,11 +27,12 @@ var (
 type UserService struct {
 	repo      *repository.UserRepository
 	jwtGen    *jwt.Generator
+	sidGen    *shortid.Generator
 	logger    *zap.Logger
 }
 
-func NewUserService(repo *repository.UserRepository, jwtGen *jwt.Generator, logger *zap.Logger) *UserService {
-	return &UserService{repo: repo, jwtGen: jwtGen, logger: logger}
+func NewUserService(repo *repository.UserRepository, jwtGen *jwt.Generator, sidGen *shortid.Generator, logger *zap.Logger) *UserService {
+	return &UserService{repo: repo, jwtGen: jwtGen, sidGen: sidGen, logger: logger}
 }
 
 // RegisterRequest is the input for creating a new account.
@@ -58,6 +60,12 @@ type AuthResult struct {
 
 // Register creates a new user account and returns JWT tokens.
 func (s *UserService) Register(ctx context.Context, req RegisterRequest) (*AuthResult, error) {
+	// 生成短号
+	shortID, err := s.sidGen.Next(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("generate short id: %w", err)
+	}
+
 	// Check for duplicate
 	exists, err := s.repo.ExistsByPhoneOrEmail(ctx, req.Phone, req.Email)
 	if err != nil {
@@ -75,6 +83,7 @@ func (s *UserService) Register(ctx context.Context, req RegisterRequest) (*AuthR
 
 	user := &model.User{
 		ID:           uuid.New(),
+		ShortID:      shortID,
 		Phone:        strPtr(req.Phone),
 		Email:        strPtr(req.Email),
 		PasswordHash: hash,
