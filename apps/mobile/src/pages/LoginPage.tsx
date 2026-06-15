@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
 import { Button, Input } from "@yuanchat/ui";
 import { useAuthStore } from "@yuanchat/shared";
 import { MessageCircle } from "lucide-react";
@@ -83,7 +84,9 @@ export function LoginPage() {
 
         <p className="text-on-surface-variant mt-6 text-center text-label-md">
           还没有账号？{" "}
-          <span className="cursor-pointer font-medium text-primary hover:underline">立即注册</span>
+          <Link to="/register" className="cursor-pointer font-medium text-primary hover:underline">
+            立即注册
+          </Link>
         </p>
       </div>
     </div>

@@ -7,6 +7,7 @@ import (
 	"github.com/yuanchat/server/internal/handler"
 	"github.com/yuanchat/server/internal/middleware"
 	"github.com/yuanchat/server/internal/pkg/jwt"
+	"github.com/yuanchat/server/internal/pkg/shortid"
 	"github.com/yuanchat/server/internal/repository"
 	"github.com/yuanchat/server/internal/service"
 	"go.uber.org/zap"
@@ -28,7 +29,8 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logge
 	// --- Dependency wiring ---
 	jwtGen := jwt.NewGenerator(cfg.JWT.Secret, cfg.JWT.AccessTokenTTL, cfg.JWT.RefreshTokenTTL)
 	userRepo := repository.NewUserRepository(db)
-	userSvc := service.NewUserService(userRepo, jwtGen, logger)
+	sidGen := shortid.NewGenerator(db)
+	userSvc := service.NewUserService(userRepo, jwtGen, sidGen, logger)
 
 	healthH := handler.NewHealthHandler()
 	captchaH := handler.NewCaptchaHandler(rdb)
