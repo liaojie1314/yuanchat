@@ -18,6 +18,8 @@
     "build": "echo 'shared: no build needed'",
     "lint": "echo 'shared: no lint'",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "echo 'shared: clean'"
   },
   "dependencies": {
@@ -28,6 +30,7 @@
     "react": "^19.0.0"
   },
   "devDependencies": {
-    "typescript": "~5.6.0"
+    "typescript": "~5.6.0",
+    "vitest": "^2.1.0"
   }
 }
