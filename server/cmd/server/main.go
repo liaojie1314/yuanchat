@@ -19,7 +19,7 @@ import (
 
 // @title           元聊 YuanChat API
 // @version         1.0.0
-// @description     元聊企业级即时通讯软件后端 API 文档
+// @description     元聊即时通讯软件后端 API 文档
 // @contact.name    YuanChat Dev Team
 // @contact.email   dev@yuanyuan.blog
 // @license.name    Proprietary

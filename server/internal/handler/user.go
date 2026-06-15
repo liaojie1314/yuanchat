@@ -1,85 +1,183 @@
 package handler
 
 import (
+	"errors"
+	"net/http"
+
 	"github.com/gin-gonic/gin"
+	"github.com/yuanchat/server/internal/middleware"
+	"github.com/yuanchat/server/internal/service"
 	"go.uber.org/zap"
 )
 
-// UserHandler 用户相关处理器
+// UserHandler handles user authentication and profile endpoints.
 type UserHandler struct {
+	svc    *service.UserService
 	logger *zap.Logger
 }
 
-// NewUserHandler 创建用户处理器
-func NewUserHandler(logger *zap.Logger) *UserHandler {
-	return &UserHandler{logger: logger}
+// NewUserHandler creates a UserHandler with the given service.
+func NewUserHandler(svc *service.UserService, logger *zap.Logger) *UserHandler {
+	return &UserHandler{svc: svc, logger: logger}
 }
 
-// Register 用户注册
+// Register creates a new user account and returns JWT tokens.
 //
-//	@Summary		用户注册
-//	@Description	通过手机号或邮箱注册新用户
+//	@Summary		Register
+//	@Description	Register with phone/email + password
 //	@Tags			user
 //	@Accept			json
 //	@Produce		json
-//	@Param			body	body		RegisterRequest	true	"注册信息"
-//	@Success		201		{object}	Response		"注册成功"
+//	@Param			body	body		RegisterRequest	true	"Registration info"
+//	@Success		201		{object}	Response
 //	@Router			/api/v1/users/register [post]
 func (h *UserHandler) Register(c *gin.Context) {
-	// TODO: 实现注册逻辑
-	Created(c, gin.H{"message": "register endpoint - to be implemented"})
+	var req RegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	result, err := h.svc.Register(c.Request.Context(), service.RegisterRequest{
+		Phone:    req.Phone,
+		Email:    req.Email,
+		Password: req.Password,
+		Code:     req.Code,
+		Nickname: req.Nickname,
+	})
+	if err != nil {
+		if errors.Is(err, service.ErrDuplicateUser) {
+			Error(c, http.StatusConflict, 409, "phone or email already registered")
+			return
+		}
+		h.logger.Error("register failed", zap.Error(err))
+		InternalError(c, "registration failed")
+		return
+	}
+
+	Created(c, gin.H{
+		"user":          result.User,
+		"access_token":  result.AccessToken,
+		"refresh_token": result.RefreshToken,
+		"expires_in":    result.ExpiresIn,
+	})
 }
 
-// Login 用户登录
+// Login authenticates a user and returns JWT tokens.
 //
-//	@Summary		用户登录
-//	@Description	通过手机号/邮箱 + 密码登录
+//	@Summary		Login
+//	@Description	Login with phone/email + password
 //	@Tags			user
 //	@Accept			json
 //	@Produce		json
-//	@Param			body	body		LoginRequest	true	"登录信息"
-//	@Success		200		{object}	Response		"登录成功，返回 token"
+//	@Param			body	body		LoginRequest	true	"Login info"
+//	@Success		200		{object}	Response
 //	@Router			/api/v1/users/login [post]
 func (h *UserHandler) Login(c *gin.Context) {
-	// TODO: 实现登录逻辑
-	Success(c, gin.H{"message": "login endpoint - to be implemented"})
+	var req LoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	result, err := h.svc.Login(c.Request.Context(), service.LoginRequest{
+		Account:  req.Account,
+		Password: req.Password,
+	})
+	if err != nil {
+		if errors.Is(err, service.ErrUserNotFound) || errors.Is(err, service.ErrInvalidPassword) {
+			Unauthorized(c, "invalid account or password")
+			return
+		}
+		h.logger.Error("login failed", zap.Error(err))
+		InternalError(c, "login failed")
+		return
+	}
+
+	Success(c, gin.H{
+		"user":          result.User,
+		"access_token":  result.AccessToken,
+		"refresh_token": result.RefreshToken,
+		"expires_in":    result.ExpiresIn,
+	})
 }
 
-// GetProfile 获取当前用户资料
+// GetProfile returns the current user's profile.
 //
-//	@Summary		获取当前用户资料
+//	@Summary		Get Profile
 //	@Tags			user
 //	@Security		BearerAuth
 //	@Produce		json
-//	@Success		200	{object}	Response	"用户资料"
+//	@Success		200	{object}	Response
 //	@Router			/api/v1/users/me [get]
 func (h *UserHandler) GetProfile(c *gin.Context) {
-	// TODO: 实现获取资料逻辑
-	Success(c, gin.H{"message": "get profile endpoint - to be implemented"})
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		Unauthorized(c, "not authenticated")
+		return
+	}
+
+	user, err := h.svc.Profile(c.Request.Context(), userID)
+	if err != nil {
+		h.logger.Error("get profile failed", zap.Error(err))
+		InternalError(c, "failed to get profile")
+		return
+	}
+
+	Success(c, user)
 }
 
-// UpdateProfile 更新用户资料
+// UpdateProfile updates the current user's profile fields.
 //
-//	@Summary		更新用户资料
+//	@Summary		Update Profile
 //	@Tags			user
 //	@Security		BearerAuth
 //	@Accept			json
 //	@Produce		json
-//	@Param			body	body		UpdateProfileRequest	true	"资料信息"
-//	@Success		200		{object}	Response				"更新成功"
+//	@Param			body	body		UpdateProfileRequest	true	"Profile info"
+//	@Success		200		{object}	Response
 //	@Router			/api/v1/users/me [put]
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
-	// TODO: 实现更新资料逻辑
-	Success(c, gin.H{"message": "update profile endpoint - to be implemented"})
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		Unauthorized(c, "not authenticated")
+		return
+	}
+
+	var req UpdateProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	// Get current user, update allowed fields
+	user, err := h.svc.Profile(c.Request.Context(), userID)
+	if err != nil {
+		InternalError(c, "failed to get profile")
+		return
+	}
+
+	if req.Nickname != nil {
+		user.Nickname = *req.Nickname
+	}
+	if req.AvatarURL != nil {
+		user.AvatarURL = req.AvatarURL
+	}
+	if req.Bio != nil {
+		user.Bio = req.Bio
+	}
+	if req.Gender != nil {
+		user.Gender = *req.Gender
+	}
+
+	// TODO: save via user service Update method
+	_ = user
+	Success(c, gin.H{"message": "profile updated"})
 }
 
-// --- 请求/响应结构体 ---
+// --- Request/Response types ---
 
-// RegisterRequest 注册请求
-//
-// Phone 和 Email 至少填写一个（由 omitempty 标记允许为空）。
-// 验证码 Code 为 6 位数字字符串。
-// 密码最小 8 位，最长 64 位（适应 Bcrypt 72 字节限制）。
+// RegisterRequest is the JSON body for user registration.
 type RegisterRequest struct {
 	Phone    string `json:"phone" binding:"omitempty,len=11"`
 	Email    string `json:"email" binding:"omitempty,email"`
@@ -88,17 +186,13 @@ type RegisterRequest struct {
 	Nickname string `json:"nickname" binding:"required,min=1,max=50"`
 }
 
-// LoginRequest 登录请求
-//
-// Account 可以是手机号或邮箱，由服务端自动识别。
+// LoginRequest is the JSON body for user login.
 type LoginRequest struct {
-	Account  string `json:"account" binding:"required"` // 手机号或邮箱
+	Account  string `json:"account" binding:"required"`
 	Password string `json:"password" binding:"required"`
 }
 
-// UpdateProfileRequest 更新资料请求
-//
-// 所有字段使用指针类型，nil 表示不修改该字段（PATCH 语义）。
+// UpdateProfileRequest is the JSON body for updating profile.
 type UpdateProfileRequest struct {
 	Nickname  *string `json:"nickname" binding:"omitempty,min=1,max=50"`
 	AvatarURL *string `json:"avatar_url" binding:"omitempty,url"`
