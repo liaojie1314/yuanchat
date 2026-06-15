@@ -1,0 +1,30 @@
+{
+  "$schema": "https://unpkg.com/release-it/schema/release-it.json",
+  "git": {
+    "requireBranch": "dev",
+    "commitMessage": "chore(release): release v${version}",
+    "tagName": "v${version}",
+    "tagAnnotation": "Release v${version}",
+    "push": true
+  },
+  "github": {
+    "release": true,
+    "releaseName": "v${version}",
+    "web": true
+  },
+  "npm": {
+    "publish": false
+  },
+  "plugins": {
+    "@release-it/conventional-changelog": {
+      "preset": "angular",
+      "infile": "CHANGELOG.md",
+      "header": "# 更新日志",
+      "ignoreRecommendedBump": true
+    }
+  },
+  "hooks": {
+    "before:init": ["pnpm check", "pnpm --filter @yuanchat/web build"],
+    "after:release": "echo 'Release v${version} completed. GitHub release created: https://github.com/liaojie1314/yuanchat/releases/tag/v${version}'"
+  }
+}
