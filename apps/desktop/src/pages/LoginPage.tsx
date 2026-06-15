@@ -35,7 +35,7 @@ export function LoginPage() {
   };
 
   return (
-    <div className="surface-gradient relative flex min-h-screen items-center justify-center overflow-hidden">
+    <div className="surface-gradient relative flex min-h-screen items-center justify-center overflow-y-auto py-8">
       {/* 鼠标跟随光晕 */}
       <div ref={glowRef} className="cursor-glow" style={{ left: mousePos.x, top: mousePos.y }} />
 

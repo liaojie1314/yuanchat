@@ -53,7 +53,7 @@ export function RegisterPage() {
   };
 
   return (
-    <div className="surface-gradient relative flex min-h-screen items-center justify-center overflow-hidden">
+    <div className="surface-gradient relative flex min-h-screen items-center justify-center overflow-y-auto py-8">
       {/* 背景装饰 */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="aurora-orb -left-20 -top-20 h-[500px] w-[500px] bg-[#7EC8E3]" />
