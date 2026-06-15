@@ -38,9 +38,8 @@ export function MainLayout() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-surface">
-      {/* 导航栏 — 使用 primary-container 背景，突出品牌色 */}
-      <nav className="flex flex-col items-center w-16 shrink-0 py-4 gap-1"
-        style={{ background: `linear-gradient(180deg, rgb(var(--md-sys-color-primary-container)) 0%, rgb(var(--md-sys-color-surface-container-low)) 100%)` }}>
+      {/* 左侧品牌色导航栏 — 渐变背景 */}
+      <nav className="flex flex-col items-center w-16 shrink-0 nav-gradient text-white py-4 gap-1 shadow-elevation-2">
         {NAV_ITEMS.map(({ to, icon: Icon, label }) => {
           const isActive = to === "/chat"
             ? location.pathname.startsWith("/chat")
@@ -51,8 +50,8 @@ export function MainLayout() {
               to={to}
               className={`flex flex-col items-center gap-1 px-2 py-2 rounded-2xl text-label-sm transition-all duration-200 ${
                 isActive
-                  ? "bg-primary text-primary-on shadow-elevation-2"
-                  : "text-on-surface-variant hover:bg-surface-container-high"
+                  ? "bg-white/25 text-white shadow-elevation-1 backdrop-blur-sm"
+                  : "text-white/70 hover:bg-white/15 hover:text-white"
               }`}
               title={label}
             >
@@ -64,9 +63,10 @@ export function MainLayout() {
 
         <div className="flex-1" />
 
+        {/* 主题切换 — M3 图标按钮 */}
         <button
           onClick={toggleMode}
-          className="md3-icon-btn text-on-surface-variant"
+          className="w-10 h-10 inline-flex items-center justify-center rounded-full text-white/70 hover:text-white hover:bg-white/15 transition-all duration-200"
           title={isDark ? "切换亮色模式" : "切换暗色模式"}
         >
           {isDark ? <Sun size={20} /> : <Moon size={20} />}

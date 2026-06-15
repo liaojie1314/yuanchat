@@ -42,21 +42,21 @@ export function ChatWindow() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* 顶部标题栏 */}
-      <header className="flex items-center gap-3 px-4 py-3 border-b border-neutral-200 dark:border-neutral-800">
+      {/* 顶部标题栏 — 品牌渐变 */}
+      <header className="flex items-center gap-3 px-4 py-3 border-b border-outline-variant brand-gradient-soft">
         <Avatar name={conv.name} src={conv.avatarUrl} online={conv.isOnline} />
         <div>
-          <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+          <h2 className="text-title-md font-semibold text-on-surface">
             {conv.name}
           </h2>
-          <p className="text-xs text-neutral-400">
+          <p className="text-label-sm text-on-surface-variant">
             {conv.type === "group" ? "群聊" : conv.isOnline ? "在线" : "离线"}
           </p>
         </div>
       </header>
 
-      {/* 消息列表 */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-neutral-50/50 dark:bg-neutral-950/30">
+      {/* 消息列表 — 微渐变背景 */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 surface-gradient">
         {DEMO_MESSAGES.map((msg, i) => {
           // TODO: 根据与上一条消息的时间差判断是否显示时间分隔
           // 当前简化处理：仅第一条消息显示时间
@@ -94,15 +94,15 @@ export function ChatWindow() {
       </div>
 
       {/* 底部输入区 */}
-      <div className="px-4 py-3 border-t border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
+      <div className="px-4 py-3 border-t border-outline-variant bg-surface">
         <div className="flex items-center gap-1 mb-2">
-          <button className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors">
+          <button className="md3-icon-btn text-on-surface-variant">
             <Image size={18} />
           </button>
-          <button className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors">
+          <button className="md3-icon-btn text-on-surface-variant">
             <Paperclip size={18} />
           </button>
-          <button className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors">
+          <button className="md3-icon-btn text-on-surface-variant">
             <Smile size={18} />
           </button>
         </div>
@@ -110,10 +110,10 @@ export function ChatWindow() {
           <textarea
             rows={3}
             placeholder="输入消息..."
-            className="flex-1 resize-none rounded-xl bg-neutral-100 dark:bg-neutral-800 px-4 py-2.5 text-sm
-                       placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+            className="flex-1 resize-none rounded-xl bg-surface-container-high px-4 py-2.5 text-body-md
+                       placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/30"
           />
-          <button className="shrink-0 p-2.5 rounded-xl bg-primary-500 text-white hover:bg-primary-600 transition-colors">
+          <button className="shrink-0 p-2.5 rounded-xl bg-primary text-primary-on hover:opacity-90 transition-opacity shadow-elevation-2">
             <Send size={18} />
           </button>
         </div>
