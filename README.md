@@ -10,8 +10,8 @@
 | Windows | Tauri + React      | 📋 计划中 |
 | macOS   | Tauri + React      | 📋 计划中 |
 | Linux   | Tauri + React      | 📋 计划中 |
-| Android | Capacitor          | 📋 计划中 |
-| iOS     | Capacitor          | 📋 计划中 |
+| Android | Tauri 2 + React    | 📋 计划中 |
+| iOS     | Tauri 2 + React    | 📋 计划中 |
 
 ## 技术栈
 

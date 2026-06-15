@@ -20,8 +20,7 @@
 ## 技术栈速查
 
 - **前端**：React + TypeScript + Vite + Tailwind CSS + Zustand
-- **桌面端**：Tauri (Rust 内核 + React UI)
-- **移动端**：Capacitor (复用 Web 代码)
+- **桌面端 + 移动端**：Tauri 2（桌面 Win/Mac/Linux + 移动 Android/iOS，同一套 Rust 内核 + React UI）
 - **后端**：Go 微服务 + gRPC + WebSocket
 - **数据库**：PostgreSQL + Redis + MinIO + Elasticsearch
 - **部署**：Docker Compose (开发) → Kubernetes (生产)

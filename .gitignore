@@ -57,13 +57,6 @@ vite.config.d.ts
 .turbo/
 
 # ====================
-# Capacitor / Mobile
-# ====================
-mobile/android/app/build/
-mobile/android/.gradle/
-mobile/android/build/
-mobile/ios/App/build/
-mobile/ios/Pods/
 
 # ====================
 # Logs
