@@ -118,7 +118,12 @@ pnpm --filter @yuanchat/desktop tauri android dev
 # ⚠️ 保持终端运行！关闭终端 = Vite 停止 = 白屏
 ```
 
-> **工作原理**：Tauri 通过 `adb forward` 将模拟器的 `localhost:1420` 转发到宿主机，所以无需设置 `TAURI_DEV_HOST`。`vite.config.ts` 中 `host` 固定为 `"0.0.0.0"` 确保所有接口可达。
+> **工作原理**：Tauri 通过 `adb forward` 将模拟器的 `localhost:1420` 转发到宿主机，所以无需设置 `TAURI_DEV_HOST`。`vite.config.ts` 中 `host` 固定为 `"0.0.0.0"` 确保所有接口可达；HMR WebSocket 复用同一 `localhost:1420` 隧道（`hmr.host: "localhost"`、`hmr.port: 1420`）。
+>
+> **HMR 热重载失败**：若页面能打开但改代码不刷新、控制台报
+> `ws://0.0.0.0:1421 ... ERR_CONNECTION_REFUSED` —— `hmr.host` **不能**设为 `"0.0.0.0"`
+> （那是服务端绑定地址，浏览器无法作为连接目标），且 1421 端口未被 `adb reverse` 转发。
+> 正确做法：`hmr` 复用页面所在的 `localhost:1420` 隧道。
 >
 > **白屏问题**：如果应用白屏，分两类排查：
 >
@@ -131,7 +136,9 @@ pnpm --filter @yuanchat/desktop tauri android dev
 >   **不能**用 `chrome105`/`es2020`，否则 esbuild 原样保留 → 旧 WebView 解析期 SyntaxError → 白屏。
 > - **`tauri android dev`（开发模式）**：Vite 自带的 `@vite/client`、`@react-refresh` 本身就用
 >   `?.`/`??`，无法转译，因此 **dev 模式无法在 Chrome 74 上运行**。请使用搭载现代 WebView 的
->   模拟器/真机（Android 7+ 且 System WebView ≥ Chrome 80，建议 API 30+ Google Play 镜像并更新 WebView）。
+>   模拟器/真机（Android 7+ 且 System WebView ≥ Chrome 80）。已实测可用：
+>   **`Medium_Phone`（API 35 / Android 15 / WebView Chrome 124）** —— dev 模式登录页正常渲染、HMR 正常。
+>   旧的 `Medium_Phone_API_29`（Chrome 74）仅可用于 `tauri android build` 出的生产 APK。
 >
 > **B. 连接/可达性问题**：
 >
