@@ -17,11 +17,15 @@ export default defineConfig({
     // TAURI_DEV_HOST 仅用于告诉 Tauri WebView 加载哪个 URL，
     // 不应用于 Vite 自身的 host（模拟器中 10.0.2.2 在宿主机上不存在）
     host: "0.0.0.0",
-    // HMR WebSocket 也监听 0.0.0.0，避免模拟器中 10.0.2.2 不可达
+    // HMR WebSocket 复用页面所在的 localhost:1420 隧道：
+    // tauri android dev 通过 `adb reverse tcp:1420` 把设备 localhost:1420 转发到宿主机，
+    // HMR 走同一端口即可被设备访问；桌面端 WebView 直接走 localhost 同样生效。
+    // ⚠️ host 不能用 "0.0.0.0"——那是服务端绑定地址，浏览器无法把它作为连接目标，
+    // 会导致 ws://0.0.0.0:1421 ERR_CONNECTION_REFUSED、热重载失效（页面能开但改代码不刷新）。
     hmr: {
       protocol: "ws",
-      host: "0.0.0.0",
-      port: 1421,
+      host: "localhost",
+      port: 1420,
     },
     watch: {
       ignored: ["**/src-tauri/**"],
