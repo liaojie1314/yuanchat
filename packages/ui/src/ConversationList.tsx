@@ -30,7 +30,7 @@ export function ConversationList() {
   return (
     <div className="flex h-full flex-col">
       {/* 搜索栏 */}
-      <div className="border-outline-variant border-b p-3">
+      <div className="border-b border-gray-200 p-3 dark:border-gray-700">
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
             <Search
@@ -83,7 +83,7 @@ function ConversationItem({
       onClick={onClick}
       className={cn(
         "flex w-full items-center gap-3 px-3 py-3 text-left transition-colors",
-        isActive ? "bg-primary-container/30" : "hover:bg-surface-container-high",
+        isActive ? "bg-gray-300 dark:bg-gray-600" : "hover:bg-gray-200 dark:hover:bg-gray-700",
       )}
     >
       <Avatar name={conv.name} src={conv.avatarUrl} online={conv.isOnline} />

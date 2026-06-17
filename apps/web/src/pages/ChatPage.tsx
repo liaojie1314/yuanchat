@@ -1,14 +1,24 @@
-import { ConversationList, ChatWindow, ChatDetail } from "@yuanchat/ui";
-import { useConversationStore } from "@yuanchat/shared";
+import { ConversationList, ChatWindow, ResizeHandle } from "@yuanchat/ui";
+import { useConversationStore, useResizable } from "@yuanchat/shared";
 
 export function ChatPage() {
   const activeConversationId = useConversationStore((s) => s.activeId);
 
+  const leftPanel = useResizable(260, 200, 360);
+
   return (
     <div className="flex flex-1 overflow-hidden">
-      <div className="w-72 shrink-0 border-r border-outline-variant bg-surface-container-low">
+      {/* 左侧会话列表 — 白色底 + 灰色右边线，暗色模式适配 */}
+      <div
+        style={{ width: leftPanel.width }}
+        className="shrink-0 overflow-hidden border-r border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900"
+      >
         <ConversationList />
       </div>
+
+      <ResizeHandle {...leftPanel.handleProps} isDragging={leftPanel.isDragging} />
+
+      {/* 聊天窗口 — 弹性填充剩余空间 */}
       <div className="min-w-0 flex-1">
         {activeConversationId ? (
           <ChatWindow />
@@ -32,11 +42,6 @@ export function ChatPage() {
           </div>
         )}
       </div>
-      {activeConversationId && (
-        <div className="w-72 shrink-0 border-l border-outline-variant bg-surface-container-low">
-          <ChatDetail />
-        </div>
-      )}
     </div>
   );
 }

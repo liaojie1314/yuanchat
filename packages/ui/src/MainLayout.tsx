@@ -50,7 +50,7 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
             <Link
               key={to}
               to={to}
-              className={`text-label-sm flex flex-col items-center gap-1 rounded-2xl px-2 py-2 transition-all duration-200 ${
+              className={`text-label-sm flex w-14 flex-col items-center gap-1 rounded-2xl py-2 transition-all duration-200 ${
                 isActive
                   ? "shadow-elevation-1 bg-white/25 text-white backdrop-blur-sm"
                   : "text-white/70 hover:bg-white/15 hover:text-white"
@@ -77,7 +77,7 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
 
       <div className="flex flex-1 flex-col overflow-hidden">
         {titleBar}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex flex-1 flex-col overflow-hidden">
           <Outlet />
         </div>
       </div>

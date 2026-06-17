@@ -18,6 +18,7 @@ export { Button } from "./Button";
 export type { ButtonVariant } from "./Button";
 export { Input } from "./Input";
 export { Avatar } from "./Avatar";
+export { ResizeHandle } from "./ResizeHandle";
 
 // 聊天组件
 export { ConversationList } from "./ConversationList";

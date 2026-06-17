@@ -50,12 +50,37 @@ pnpm install                # 安装所有 workspace 依赖
 
 ## 一、Web 端
 
-| 命令                                    | 说明                                           |
-| --------------------------------------- | ---------------------------------------------- |
-| `pnpm --filter @yuanchat/web dev`       | 启动 Vite dev server → `http://localhost:5173` |
-| `pnpm --filter @yuanchat/web build`     | 生产构建 → `apps/web/dist/`                    |
-| `pnpm --filter @yuanchat/web preview`   | 预览生产构建                                   |
-| `pnpm --filter @yuanchat/web typecheck` | TypeScript 类型检查                            |
+| 命令                                    | 说明                                                           |
+| --------------------------------------- | -------------------------------------------------------------- |
+| `pnpm --filter @yuanchat/web dev`       | 启动 Vite dev server（**Mock 模式**）→ `http://localhost:5173` |
+| `pnpm --filter @yuanchat/web dev:mock`  | 同 `dev`，显式 Mock 模式                                       |
+| `pnpm --filter @yuanchat/web dev:real`  | 启动 Vite dev server（**连接真实后端**）                       |
+| `pnpm --filter @yuanchat/web build`     | 生产构建 → `apps/web/dist/`                                    |
+| `pnpm --filter @yuanchat/web preview`   | 预览生产构建                                                   |
+| `pnpm --filter @yuanchat/web typecheck` | TypeScript 类型检查                                            |
+
+### Mock 接口 vs 真实后端
+
+前端开发阶段使用 **MSW (Mock Service Worker)** 拦截 API 请求，无需启动后端即可完成登录/注册/首页全流程。
+
+| 命令               | `VITE_ENABLE_MOCK` | 行为                                                     |
+| ------------------ | ------------------ | -------------------------------------------------------- |
+| `dev` / `dev:mock` | 未设置（默认启用） | 浏览器 Service Worker 拦截 API，返回 mock 数据           |
+| `dev:real`         | `false`            | 所有请求直连 `http://localhost:8080`（需先启动 Go 后端） |
+
+**切换方式**：
+
+- 命令行：`pnpm --filter @yuanchat/web dev:real`
+- 环境变量：`VITE_ENABLE_MOCK=false pnpm --filter @yuanchat/web dev`
+- 已登录状态下刷新页面不影响 mock/real 模式
+
+**Mock 覆盖的接口**：
+
+- `POST /api/v1/users/login` — 元聊号 + 密码登录（密码 `wrong` 测试错误）
+- `POST /api/v1/users/register` — 手机号 + 密码 + 验证码 + 昵称注册
+- `GET /api/v1/captcha` — SVG 验证码
+
+> **桌面端同理**：`pnpm --filter @yuanchat/desktop dev:mock` / `dev:real`，或 `pnpm tauri:dev` 前设置 `VITE_ENABLE_MOCK`。
 
 ---
 
@@ -67,15 +92,18 @@ Tauri 2 桌面端同时承担**桌面端**（Windows / macOS / Linux）和**移�
 
 | 命令                                          | 说明                                                      |
 | --------------------------------------------- | --------------------------------------------------------- |
+| `pnpm --filter @yuanchat/desktop dev`         | 仅启动 Vite dev server（**Mock 模式**）                   |
+| `pnpm --filter @yuanchat/desktop dev:mock`    | 同 `dev`，显式 Mock 模式                                  |
+| `pnpm --filter @yuanchat/desktop dev:real`    | Vite dev server（**连接真实后端**）                       |
 | `pnpm --filter @yuanchat/desktop tauri:dev`   | 启动 Vite + Tauri 窗口（devUrl: `http://localhost:1420`） |
 | `pnpm --filter @yuanchat/desktop tauri:build` | 编译 Rust + 打包前端 → 生成安装包                         |
 | `pnpm --filter @yuanchat/desktop typecheck`   | TypeScript 类型检查                                       |
 
 窗口配置：
 
-- 尺寸：540 × 600（固定，不可拉伸）
-- 圆角：12px（CSS `html { border-radius: 12px }`）
-- 标题栏：自定义（`decorations: false`）
+- 登录页尺寸：540 × 600（固定，不可拉伸）
+- 登录后自动切换为首页尺寸：1200 × 800（可拉伸，最小 900 × 600）
+- 标题栏：自定义（`decorations: false`），含最小化/最大化/关闭按钮
 
 构建产物位置：`apps/desktop/src-tauri/target/release/bundle/`
 
@@ -231,10 +259,11 @@ docker compose -f deploy/docker-compose.yml down      # 停止
 
 ### 前端
 
-| 变量                | 默认值                  | 说明           |
-| ------------------- | ----------------------- | -------------- |
-| `VITE_API_BASE_URL` | `http://localhost:8080` | 后端 API 地址  |
-| `VITE_WS_URL`       | `ws://localhost:8081`   | WebSocket 地址 |
+| 变量                | 默认值                  | 说明                    |
+| ------------------- | ----------------------- | ----------------------- |
+| `VITE_API_BASE_URL` | `http://localhost:8080` | 后端 API 地址           |
+| `VITE_WS_URL`       | `ws://localhost:8081`   | WebSocket 地址          |
+| `VITE_ENABLE_MOCK`  | —                       | `false` 时关闭 MSW Mock |
 
 ---
 
