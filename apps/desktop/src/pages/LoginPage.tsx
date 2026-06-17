@@ -3,11 +3,13 @@ import { Link } from "react-router-dom";
 import { Button, Input } from "@yuanchat/ui";
 import { useAuthStore, useIsDesktop } from "@yuanchat/shared";
 import { useOpenAuthWindow } from "../hooks/useTauriAuth";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { TitleBar } from "../components/TitleBar";
 import { MessageCircle } from "lucide-react";
 
 export function LoginPage() {
   const isDesktop = useIsDesktop();
+  const isMobile = useIsMobile();
   const openAuthWindow = useOpenAuthWindow();
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
@@ -50,8 +52,8 @@ export function LoginPage() {
       <div className="dot-grid" />
       <div className="light-sweep" />
 
-      {/* 自定义操作栏 */}
-      {isDesktop && <TitleBar />}
+      {/* 自定义操作栏 — 仅桌面端显示 */}
+      {isDesktop && !isMobile && <TitleBar />}
 
       {/* 表单区域 */}
       <div className="relative flex flex-1 items-center justify-center overflow-hidden">
@@ -98,6 +100,7 @@ export function LoginPage() {
             ) : (
               <Link
                 to="/register"
+                replace
                 className="cursor-pointer font-medium text-primary hover:underline"
               >
                 立即注册
