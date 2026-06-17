@@ -2,12 +2,14 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { MainLayout } from "@yuanchat/ui";
 import { useAuthStore } from "@yuanchat/shared";
 import { TitleBar } from "./components/TitleBar";
+import { useIsMobile } from "./hooks/useIsMobile";
 import { ChatPage } from "./pages/ChatPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 
 function App() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const isMobile = useIsMobile();
 
   if (!isAuthenticated) {
     return (
@@ -21,7 +23,7 @@ function App() {
 
   return (
     <Routes>
-      <Route element={<MainLayout titleBar={<TitleBar />} />}>
+      <Route element={<MainLayout titleBar={isMobile ? undefined : <TitleBar />} />}>
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/chat/:conversationId" element={<ChatPage />} />
         <Route path="/contacts" element={<ChatPage />} />

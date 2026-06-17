@@ -14,17 +14,18 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@yuanchat/ui": "workspace:*",
-    "@yuanchat/shared": "workspace:*",
-    "@yuanchat/design-system": "workspace:*",
     "@tauri-apps/api": "^2.2.0",
     "@tauri-apps/plugin-dialog": "^2.2.0",
     "@tauri-apps/plugin-fs": "^2.2.0",
     "@tauri-apps/plugin-notification": "^2.2.0",
+    "@tauri-apps/plugin-os": "^2.3.2",
     "@tauri-apps/plugin-shell": "^2.2.0",
+    "@yuanchat/design-system": "workspace:*",
+    "@yuanchat/shared": "workspace:*",
+    "@yuanchat/ui": "workspace:*",
+    "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "lucide-react": "^0.468.0",
     "react-router-dom": "^7.0.0"
   },
   "devDependencies": {

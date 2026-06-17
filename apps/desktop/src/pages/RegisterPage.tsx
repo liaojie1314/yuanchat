@@ -3,14 +3,33 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button, Input } from "@yuanchat/ui";
 import { useAuthStore, useIsDesktop } from "@yuanchat/shared";
 import { useCloseAuthWindow } from "../hooks/useTauriAuth";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { TitleBar } from "../components/TitleBar";
 import { UserPlus, ArrowLeft, RefreshCw } from "lucide-react";
 
 export function RegisterPage() {
   const navigate = useNavigate();
   const isDesktop = useIsDesktop();
+  const isMobile = useIsMobile();
   const closeAuthWindow = useCloseAuthWindow();
   const registerWithPassword = useAuthStore((s) => s.registerWithPassword);
+
+  /** 回到登录页：聚焦主窗口（label="main"）并关闭当前注册窗口 */
+  const goToLogin = async () => {
+    try {
+      const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const mainWindow = await WebviewWindow.getByLabel("main");
+      if (mainWindow) {
+        await mainWindow.setFocus();
+        await mainWindow.center();
+      }
+      await getCurrentWindow().close();
+    } catch {
+      // 非 Tauri 环境 fallback 到路由跳转
+      navigate("/login", { replace: true });
+    }
+  };
 
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
@@ -69,13 +88,14 @@ export function RegisterPage() {
       </div>
       <div className="dot-grid pointer-events-none fixed inset-0" />
 
-      {/* 自定义操作栏 */}
-      {isDesktop && <TitleBar />}
+      {/* 自定义操作栏 — 仅桌面端显示，移动端隐藏（避免与状态栏重叠、无需窗口控制） */}
+      {isDesktop && !isMobile && <TitleBar />}
 
       {/* 返回按钮 — 桌面端（无浏览器导航）不显示 */}
       {!isDesktop && (
         <Link
           to="/login"
+          replace
           className="text-on-surface-variant absolute left-6 top-6 inline-flex items-center gap-1.5 rounded-full bg-surface-container/80 px-4 py-2 text-label-lg backdrop-blur-sm transition-all hover:bg-surface-container-high hover:text-on-surface"
         >
           <ArrowLeft size={16} /> 返回登录
@@ -154,15 +174,23 @@ export function RegisterPage() {
             </Button>
           </div>
 
-          {/* 桌面端注册窗口不需要"立即登录"按钮，因为登录窗口还在 */}
-          {!isDesktop && (
-            <p className="text-on-surface-variant mt-6 text-center text-label-md">
-              已有账号？{" "}
-              <Link to="/login" className="font-medium text-primary hover:underline">
+          {/* 已有账号？桌面端聚焦/打开登录窗口，Web 端路由跳转 */}
+          <p className="text-on-surface-variant mt-6 text-center text-label-md">
+            已有账号？{" "}
+            {isDesktop ? (
+              <button
+                type="button"
+                onClick={goToLogin}
+                className="font-medium text-primary hover:underline"
+              >
+                立即登录
+              </button>
+            ) : (
+              <Link to="/login" replace className="font-medium text-primary hover:underline">
                 立即登录
               </Link>
-            </p>
-          )}
+            )}
+          </p>
         </div>
       </div>
     </div>

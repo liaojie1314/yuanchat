@@ -84,7 +84,11 @@ export function LoginPage() {
 
         <p className="text-on-surface-variant mt-6 text-center text-label-md">
           还没有账号？{" "}
-          <Link to="/register" className="cursor-pointer font-medium text-primary hover:underline">
+          <Link
+            to="/register"
+            replace
+            className="cursor-pointer font-medium text-primary hover:underline"
+          >
             立即注册
           </Link>
         </p>

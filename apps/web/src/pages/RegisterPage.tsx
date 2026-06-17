@@ -2,11 +2,11 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button, Input } from "@yuanchat/ui";
 import { useAuthStore, useIsDesktop } from "@yuanchat/shared";
-import { UserPlus, ArrowLeft, RefreshCw } from "lucide-react";
+import { UserPlus, RefreshCw } from "lucide-react";
 
 export function RegisterPage() {
   const navigate = useNavigate();
-  const isDesktop = useIsDesktop();
+  const _isDesktop = useIsDesktop();
   const registerWithPassword = useAuthStore((s) => s.registerWithPassword);
 
   const [phone, setPhone] = useState("");
@@ -61,16 +61,6 @@ export function RegisterPage() {
         <div className="aurora-orb -bottom-20 left-1/3 h-[350px] w-[350px] bg-[#B8D8F0]" />
       </div>
       <div className="dot-grid pointer-events-none fixed inset-0" />
-
-      {/* 返回按钮 — 桌面端（无浏览器导航）不显示 */}
-      {!isDesktop && (
-        <Link
-          to="/login"
-          className="text-on-surface-variant absolute left-6 top-6 inline-flex items-center gap-1.5 rounded-full bg-surface-container/80 px-4 py-2 text-label-lg backdrop-blur-sm transition-all hover:bg-surface-container-high hover:text-on-surface"
-        >
-          <ArrowLeft size={16} /> 返回登录
-        </Link>
-      )}
 
       <div className="relative w-full max-w-md px-8 py-12">
         {/* Logo */}
@@ -144,7 +134,7 @@ export function RegisterPage() {
 
         <p className="text-on-surface-variant mt-6 text-center text-label-md">
           已有账号？{" "}
-          <Link to="/login" className="font-medium text-primary hover:underline">
+          <Link to="/login" replace className="font-medium text-primary hover:underline">
             立即登录
           </Link>
         </p>
