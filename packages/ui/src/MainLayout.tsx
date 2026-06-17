@@ -21,8 +21,9 @@
  * <MainLayout />
  */
 import { Link, useLocation, Outlet } from "react-router-dom";
-import { MessageCircle, Users, Settings, Sun, Moon } from "lucide-react";
-import { useThemeStore } from "@yuanchat/shared";
+import { MessageCircle, Users, Settings, Sun, Moon, LogOut } from "lucide-react";
+import { useThemeStore, useAuthStore } from "@yuanchat/shared";
+import { useTranslation } from "react-i18next";
 import type { ReactNode } from "react";
 
 const NAV_ITEMS = [
@@ -36,6 +37,8 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
   // 新 API: mode("light"/"dark"), toggleMode()
   const { mode, toggleMode } = useThemeStore();
   const isDark = mode === "dark";
+  const { logout } = useAuthStore();
+  const { t } = useTranslation();
 
   return (
     <div className="bg-surface flex h-screen overflow-hidden">
@@ -72,6 +75,15 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
           title={isDark ? "切换亮色模式" : "切换暗色模式"}
         >
           {isDark ? <Sun size={20} /> : <Moon size={20} />}
+        </button>
+
+        {/* 登出 */}
+        <button
+          onClick={logout}
+          className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white/70 transition-all duration-200 hover:bg-white/15 hover:text-white"
+          title={t("settings.logout")}
+        >
+          <LogOut size={20} />
         </button>
       </nav>
 

@@ -19,7 +19,7 @@ describe("authStore", () => {
     expect(state.accessToken).toBeNull();
   });
 
-  it("logout clears all auth state", () => {
+  it("logout clears all auth state", async () => {
     // 先设置为已登录
     useAuthStore.setState({
       user: { id: "1", nickname: "Test" },
@@ -28,7 +28,7 @@ describe("authStore", () => {
       isAuthenticated: true,
     });
 
-    useAuthStore.getState().logout();
+    await useAuthStore.getState().logout();
 
     const state = useAuthStore.getState();
     expect(state.isAuthenticated).toBe(false);

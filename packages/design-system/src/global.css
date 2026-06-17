@@ -121,7 +121,7 @@
   /* 输入框 */
   .input-base {
     @apply border-outline-variant w-full rounded-xl border px-4 py-3;
-    background: rgb(var(--md-sys-color-surface-container-high-rgb));
+    background: rgb(var(--md-sys-color-surface-container-low-rgb));
     color: rgb(var(--md-sys-color-on-surface-rgb));
     border-color: rgb(var(--md-sys-color-outline-variant-rgb));
     transition:

@@ -1,6 +1,6 @@
 # 元聊 YuanChat — 开发与打包指南
 
-> **最后更新**：2026-06-16
+> **最后更新**：2026-06-17
 >
 > ⚠️ **文档维护规则**：任何 `package.json` scripts、Tauri 配置、环境变量的变更，**必须同步更新本文档**。此规则对所有会话生效。
 
@@ -50,14 +50,16 @@ pnpm install                # 安装所有 workspace 依赖
 
 ## 一、Web 端
 
-| 命令                                    | 说明                                                           |
-| --------------------------------------- | -------------------------------------------------------------- |
-| `pnpm --filter @yuanchat/web dev`       | 启动 Vite dev server（**Mock 模式**）→ `http://localhost:5173` |
-| `pnpm --filter @yuanchat/web dev:mock`  | 同 `dev`，显式 Mock 模式                                       |
-| `pnpm --filter @yuanchat/web dev:real`  | 启动 Vite dev server（**连接真实后端**）                       |
-| `pnpm --filter @yuanchat/web build`     | 生产构建 → `apps/web/dist/`                                    |
-| `pnpm --filter @yuanchat/web preview`   | 预览生产构建                                                   |
-| `pnpm --filter @yuanchat/web typecheck` | TypeScript 类型检查                                            |
+| 命令                                     | 说明                                                           |
+| ---------------------------------------- | -------------------------------------------------------------- |
+| `pnpm --filter @yuanchat/web dev`        | 启动 Vite dev server（**Mock 模式**）→ `http://localhost:5173` |
+| `pnpm --filter @yuanchat/web dev:mock`   | 同 `dev`，显式 Mock 模式                                       |
+| `pnpm --filter @yuanchat/web dev:real`   | 启动 Vite dev server（**连接真实后端**）                       |
+| `pnpm --filter @yuanchat/web dev:test`   | 启动 Vite dev server（**test 环境**，连接测试服务器）          |
+| `pnpm --filter @yuanchat/web build`      | 生产构建 → `apps/web/dist/`                                    |
+| `pnpm --filter @yuanchat/web build:test` | 测试环境构建 → `apps/web/dist/`                                |
+| `pnpm --filter @yuanchat/web preview`    | 预览生产构建                                                   |
+| `pnpm --filter @yuanchat/web typecheck`  | TypeScript 类型检查                                            |
 
 ### Mock 接口 vs 真实后端
 
@@ -78,6 +80,7 @@ pnpm install                # 安装所有 workspace 依赖
 
 - `POST /api/v1/users/login` — 元聊号 + 密码登录（密码 `wrong` 测试错误）
 - `POST /api/v1/users/register` — 手机号 + 密码 + 验证码 + 昵称注册
+- `POST /api/v1/auth/logout` — 登出（始终返回成功，300ms 延迟）
 - `GET /api/v1/captcha` — SVG 验证码
 
 > **桌面端同理**：`pnpm --filter @yuanchat/desktop dev:mock` / `dev:real`，或 `pnpm tauri:dev` 前设置 `VITE_ENABLE_MOCK`。
@@ -95,6 +98,9 @@ Tauri 2 桌面端同时承担**桌面端**（Windows / macOS / Linux）和**移�
 | `pnpm --filter @yuanchat/desktop dev`         | 仅启动 Vite dev server（**Mock 模式**）                   |
 | `pnpm --filter @yuanchat/desktop dev:mock`    | 同 `dev`，显式 Mock 模式                                  |
 | `pnpm --filter @yuanchat/desktop dev:real`    | Vite dev server（**连接真实后端**）                       |
+| `pnpm --filter @yuanchat/desktop dev:test`    | Vite dev server（**test 环境**，连接测试服务器）          |
+| `pnpm --filter @yuanchat/desktop build`       | 生产构建（含 tsc 检查）                                   |
+| `pnpm --filter @yuanchat/desktop build:test`  | 测试环境构建                                              |
 | `pnpm --filter @yuanchat/desktop tauri:dev`   | 启动 Vite + Tauri 窗口（devUrl: `http://localhost:1420`） |
 | `pnpm --filter @yuanchat/desktop tauri:build` | 编译 Rust + 打包前端 → 生成安装包                         |
 | `pnpm --filter @yuanchat/desktop typecheck`   | TypeScript 类型检查                                       |
@@ -258,6 +264,16 @@ docker compose -f deploy/docker-compose.yml down      # 停止
 | `MINIO_ENDPOINT` | `localhost:9000` | MinIO S3 端点   |
 
 ### 前端
+
+前端通过 Vite 的 `--mode` 自动加载对应的 `.env.[mode]` 文件：
+
+| 模式          | 配置文件                   | Mock | API 地址示例                   |
+| ------------- | -------------------------- | ---- | ------------------------------ |
+| `development` | `apps/*/\.env.development` | 开启 | `http://localhost:8080`        |
+| `test`        | `apps/*/\.env.test`        | 关闭 | `http://test-api.yuanchat.com` |
+| `production`  | `apps/*/\.env.production`  | 关闭 | `https://api.yuanchat.com`     |
+
+> **注意**：`--mode test` 时 `import.meta.env.DEV` 为 `false`，MSW 不会启动。`--mode development` 为 Vite 默认模式，无需显式指定。
 
 | 变量                | 默认值                  | 说明                    |
 | ------------------- | ----------------------- | ----------------------- |

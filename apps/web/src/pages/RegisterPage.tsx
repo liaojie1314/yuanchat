@@ -108,7 +108,7 @@ export function RegisterPage() {
           </p>
         </div>
 
-        <div className="glass-card space-y-5 p-6">
+        <div className="space-y-5">
           <Input
             placeholder="昵称"
             value={nickname}

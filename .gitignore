@@ -16,6 +16,8 @@ server/vendor/
 *.exe
 *.test
 *.out
+# 但 .env.test 等环境配置文件不受 *.test 限制
+!.env.*
 
 # ====================
 # Environment

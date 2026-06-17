@@ -8,7 +8,7 @@
  * API 调用流程：
  * 1. loginWithPassword() → POST /api/v1/users/login → 存储 token
  * 2. registerWithPassword() → POST /api/v1/users/register → 存储 token
- * 3. logout() → 清空所有状态
+ * 3. logout() → POST /api/v1/auth/logout → 清空所有状态
  * 4. refreshAccessToken() → POST /api/v1/auth/refresh → 换新 access token
  *
  * @example
@@ -58,8 +58,8 @@ interface AuthState {
     captchaAnswer: number,
     nickname: string,
   ) => Promise<void>;
-  /** 登出 */
-  logout: () => void;
+  /** 登出（异步：先调 API 再清本地状态） */
+  logout: () => Promise<void>;
 }
 
 // ========================================
@@ -143,13 +143,25 @@ export const useAuthStore = create<AuthState>()(
         });
       },
 
-      logout: () =>
+      /**
+       * 登出
+       *
+       * 先调用服务端登出接口使 token 失效，
+       * 无论服务端是否成功都清除本地登录态。
+       */
+      logout: async () => {
+        try {
+          await apiPost("/api/v1/auth/logout", {});
+        } catch {
+          // 即使服务端调用失败也清除本地状态
+        }
         set({
           user: null,
           accessToken: null,
           refreshToken: null,
           isAuthenticated: false,
-        }),
+        });
+      },
     }),
     { name: "yuanchat-auth" },
   ),

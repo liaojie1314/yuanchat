@@ -82,7 +82,7 @@ export function LoginPage() {
           <p className="text-on-surface-variant mt-2 text-body-lg">即时通讯</p>
         </div>
 
-        <div className="glass-card space-y-4 p-6">
+        <div className="space-y-4">
           <Input
             placeholder="元聊号"
             type="text"
