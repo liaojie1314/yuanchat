@@ -283,7 +283,85 @@ docker compose -f deploy/docker-compose.yml down      # 停止
 
 ---
 
-## 八、文档更新规则
+## 八、测试
+
+### 前端测试
+
+| 包                       | 测试框架                 | 环境  | 覆盖内容                                                                                    |
+| ------------------------ | ------------------------ | ----- | ------------------------------------------------------------------------------------------- |
+| `packages/shared`        | Vitest                   | node  | Store（auth/theme/conversation）、Utils（cn/formatTime/truncate/validate\*/getAvatarColor） |
+| `packages/ui`            | Vitest + Testing Library | jsdom | React 组件（Avatar/Button/Input/ChatWindow 等）                                             |
+| `packages/design-system` | Vitest                   | node  | Tokens、Skins、i18n                                                                         |
+
+#### 常用命令
+
+| 命令                                           | 说明                                     |
+| ---------------------------------------------- | ---------------------------------------- |
+| `pnpm test`                                    | 运行**全部**测试（通过 Turborepo 编排）  |
+| `pnpm test:coverage`                           | 运行全部测试 + 生成覆盖率报告            |
+| `pnpm --filter @yuanchat/shared test`          | 仅运行 shared 包测试                     |
+| `pnpm --filter @yuanchat/shared test:watch`    | shared 包 watch 模式（改代码自动重跑）   |
+| `pnpm --filter @yuanchat/shared test:coverage` | shared 包测试 + 覆盖率（text/html/lcov） |
+| `pnpm --filter @yuanchat/shared test:ui`       | shared 包 Vitest UI 界面模式             |
+| `pnpm --filter @yuanchat/ui test`              | 仅运行 UI 组件测试                       |
+| `pnpm --filter @yuanchat/design-system test`   | 仅运行设计系统测试                       |
+
+#### 覆盖率报告
+
+```
+packages/shared/coverage/
+├── index.html          # HTML 覆盖率报告（浏览器打开）
+├── lcov.info           # LCOV 格式（CI 集成用）
+└── coverage-summary.json
+```
+
+在浏览器打开 `packages/shared/coverage/index.html` 可逐行查看覆盖情况。
+
+#### 测试文件规范
+
+- 测试文件与源文件同目录，放在 `__tests__/` 子目录下
+- 命名：`<模块名>.test.ts` 或 `<模块名>.test.tsx`
+- Vitest 配置：各包根目录下的 `vitest.config.ts`
+- UI 组件测试 setup：`packages/ui/src/__tests__/setup.ts`（引入 `@testing-library/jest-dom`）
+
+#### 覆盖率阈值
+
+`packages/shared` 设置了最低覆盖率阈值（`vitest.config.ts`）：
+
+| 指标       | 阈值 |
+| ---------- | ---- |
+| statements | 60%  |
+| branches   | 50%  |
+| functions  | 60%  |
+| lines      | 60%  |
+
+低于阈值时 CI 失败。
+
+### Go 后端测试
+
+| 命令                                                    | 说明                                          |
+| ------------------------------------------------------- | --------------------------------------------- |
+| `cd server && go test ./...`                            | 运行所有测试                                  |
+| `cd server && go test -v -race ./...`                   | 详细输出 + 竞态检测                           |
+| `cd server && go test -coverprofile=coverage.out ./...` | 生成覆盖率文件                                |
+| `cd server && go tool cover -html=coverage.out`         | 浏览器查看覆盖率（逐行标注）                  |
+| `cd server && go tool cover -func=coverage.out`         | 终端查看各函数覆盖率                          |
+| `cd server && make test`                                | Makefile 封装的测试命令（含 race + coverage） |
+| `cd server && go test -short ./...`                     | 跳过集成测试，仅跑单元测试                    |
+
+#### 已有测试覆盖
+
+| 包                      | 测试文件               | 内容                       |
+| ----------------------- | ---------------------- | -------------------------- |
+| `internal/pkg/jwt`      | `jwt_test.go`          | Token 生成/验证/过期/无效  |
+| `internal/pkg/password` | `password_test.go`     | bcrypt 哈希/验证/盐值      |
+| `internal/service`      | `user_service_test.go` | 密码哈希、strPtr、错误常量 |
+
+> **注意**：`UserService` 依赖具体的 `*repository.UserRepository` 而非接口，完整的 Register/Login/Profile 集成测试需要连接测试数据库或重构为接口注入。
+
+---
+
+## 九、文档更新规则
 
 1. 任何 `package.json` scripts 的**增删改**，必须同步更新本文档的对应章节
 2. 任何 Tauri 配置（`tauri.conf.json`、`capabilities/`）的变更，必须同步更新本文档

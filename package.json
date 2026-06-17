@@ -18,6 +18,8 @@
     "release:major": "release-it major",
     "release:dry": "release-it --dry-run",
     "clean": "turbo clean",
+    "test": "turbo test",
+    "test:coverage": "turbo test:coverage",
     "prepare": "husky"
   },
   "devDependencies": {

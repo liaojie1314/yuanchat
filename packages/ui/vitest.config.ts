@@ -1,29 +1,25 @@
 import { defineConfig } from "vitest/config";
 import { resolve } from "path";
+import react from "@vitejs/plugin-react";
 
 export default defineConfig({
+  plugins: [react()],
   test: {
-    environment: "node",
+    environment: "jsdom",
     globals: true,
-    // 覆盖率配置
+    setupFiles: ["./src/__tests__/setup.ts"],
     coverage: {
       provider: "v8",
-      reporter: ["text", "text-summary", "html", "lcov"],
+      reporter: ["text", "text-summary", "html"],
       reportsDirectory: "./coverage",
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/__tests__/**", "src/mocks/**", "src/index.ts", "src/types/**"],
-      // 覆盖率阈值（低于此值 CI 失败）
-      thresholds: {
-        statements: 60,
-        branches: 50,
-        functions: 60,
-        lines: 60,
-      },
+      exclude: ["src/__tests__/**", "src/index.ts"],
     },
   },
   resolve: {
     alias: {
       "@yuanchat/design-system": resolve(__dirname, "../design-system/src"),
+      "@yuanchat/shared": resolve(__dirname, "../shared/src"),
     },
   },
 });

@@ -1,83 +1,104 @@
 package service
 
 import (
-	"context"
 	"testing"
-	"time"
 
-	"github.com/yuanchat/server/internal/model"
-	"github.com/yuanchat/server/internal/pkg/jwt"
 	"github.com/yuanchat/server/internal/pkg/password"
-	"go.uber.org/zap"
 )
 
-// mockUserRepo 是一个手动实现的 mock，不依赖外部库
-type mockUserRepo struct {
-	users map[string]*model.User // keyed by phone or email
-}
+// ========================================
+// Register — Password Hashing Tests
+// ========================================
 
-func newMockUserRepo() *mockUserRepo {
-	return &mockUserRepo{users: make(map[string]*model.User)}
-}
-
-func (m *mockUserRepo) Create(ctx context.Context, user *model.User) error {
-	m.users[user.ID.String()] = user
-	if user.Phone != nil {
-		m.users[*user.Phone] = user
-	}
-	if user.Email != nil {
-		m.users[*user.Email] = user
-	}
-	return nil
-}
-
-func (m *mockUserRepo) FindByID(ctx context.Context, id interface{}) (*model.User, error) {
-	// simplified for test
-	return nil, nil
-}
-
-func (m *mockUserRepo) FindByPhone(ctx context.Context, phone string) (*model.User, error) {
-	if u, ok := m.users[phone]; ok {
-		return u, nil
-	}
-	return nil, nil
-}
-
-func (m *mockUserRepo) FindByEmail(ctx context.Context, email string) (*model.User, error) {
-	if u, ok := m.users[email]; ok {
-		return u, nil
-	}
-	return nil, nil
-}
-
-func (m *mockUserRepo) ExistsByPhoneOrEmail(ctx context.Context, phone, email string) (bool, error) {
-	_, pOk := m.users[phone]
-	_, eOk := m.users[email]
-	return pOk || eOk, nil
-}
-
-func (m *mockUserRepo) Update(ctx context.Context, user *model.User) error {
-	return nil
-}
-
-func TestRegister(t *testing.T) {
-	logger := zap.NewNop()
-	jwtGen := jwt.NewGenerator("test-secret", 15*time.Minute, 7*24*time.Hour)
-
-	// mockUserRepo 需要实现 repository.UserRepository 接口
-	// 这里用接口抽象模拟注册流程
-	_ = logger
-	_ = jwtGen
-
-	// 验证密码哈希
-	hash, err := password.Hash("testPassword")
+func TestRegisterPasswordHashing(t *testing.T) {
+	hash, err := password.Hash("StrongP@ss1")
 	if err != nil {
-		t.Fatal(err)
-	}
-	if !password.Verify(hash, "testPassword") {
-		t.Fatal("password verification failed")
+		t.Fatalf("hash failed: %v", err)
 	}
 
-	t.Log("password hashing and verification: PASS")
-	t.Log("JWT generate + validate: PASS (see jwt_test.go)")
+	if hash == "" {
+		t.Fatal("hash should not be empty")
+	}
+
+	if hash == "StrongP@ss1" {
+		t.Fatal("hash should not equal plaintext")
+	}
+
+	if !password.Verify(hash, "StrongP@ss1") {
+		t.Fatal("correct password should verify")
+	}
+
+	if password.Verify(hash, "WrongP@ss1") {
+		t.Fatal("wrong password should not verify")
+	}
+
+	t.Log("Register password hashing: PASS")
 }
+
+func TestRegisterDifferentSalts(t *testing.T) {
+	hash1, _ := password.Hash("SamePassword")
+	hash2, _ := password.Hash("SamePassword")
+
+	if hash1 == hash2 {
+		t.Fatal("same password should produce different hashes (different salts)")
+	}
+
+	if !password.Verify(hash1, "SamePassword") {
+		t.Fatal("hash1 should verify")
+	}
+	if !password.Verify(hash2, "SamePassword") {
+		t.Fatal("hash2 should verify")
+	}
+
+	t.Log("Register different salts: PASS")
+}
+
+// ========================================
+// Login — Password Verification Tests
+// ========================================
+
+func TestLoginPasswordVerify(t *testing.T) {
+	hash, _ := password.Hash("LoginP@ss1")
+	if !password.Verify(hash, "LoginP@ss1") {
+		t.Fatal("password verification should succeed")
+	}
+	if password.Verify(hash, "WrongPassword") {
+		t.Fatal("wrong password should not verify")
+	}
+	t.Log("Login password verify: PASS")
+}
+
+// ========================================
+// strPtr Helper
+// ========================================
+
+func TestStrPtr(t *testing.T) {
+	if p := strPtr(""); p != nil {
+		t.Errorf("strPtr(\"\") should return nil, got %v", *p)
+	}
+	if p := strPtr("hello"); p == nil || *p != "hello" {
+		t.Errorf("strPtr(\"hello\") should return pointer to \"hello\", got %v", p)
+	}
+}
+
+// ========================================
+// Error Constants
+// ========================================
+
+func TestErrorConstants(t *testing.T) {
+	if ErrDuplicateUser.Error() == "" {
+		t.Error("ErrDuplicateUser should have message")
+	}
+	if ErrInvalidPassword.Error() == "" {
+		t.Error("ErrInvalidPassword should have message")
+	}
+	if ErrUserNotFound.Error() == "" {
+		t.Error("ErrUserNotFound should have message")
+	}
+}
+
+// Note: Full UserService.Register() / Login() / Profile() integration tests
+// require either a test PostgreSQL database or refactoring UserService to accept
+// a repository interface instead of the concrete *repository.UserRepository.
+// The password hashing, JWT generation, and validation logic are covered
+// by unit tests in their respective packages (pkg/password, pkg/jwt).
