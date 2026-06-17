@@ -17,7 +17,7 @@
  * <ChatWindow />
  */
 import { Send, Paperclip, Image, Smile } from "lucide-react";
-import { useConversationStore } from "@yuanchat/shared";
+import { useConversationStore, useAuthStore } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
 
@@ -46,8 +46,17 @@ export function ChatWindow() {
   // 从 Zustand Store 中读取当前活跃会话 ID 和会话列表
   const activeId = useConversationStore((s) => s.activeId);
   const conversations = useConversationStore((s) => s.conversations);
+  const currentUser = useAuthStore((s) => s.user);
   // 根据 activeId 找到对应的会话对象
   const conv = conversations.find((c) => c.id === activeId);
+
+  /** 点击消息列表空白区域时清除文本选中 */
+  const handleMessageListMouseDown = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    // 如果点击的是气泡内部，保留选中（让用户可以用键盘复制等）
+    if (target.closest(".msg-bubble")) return;
+    window.getSelection()?.removeAllRanges();
+  };
 
   // 防御：如果没找到会话（activeId 无效或为 null），不渲染
   if (!conv) return null;
@@ -55,7 +64,7 @@ export function ChatWindow() {
   return (
     <div className="flex h-full flex-col">
       {/* 顶部标题栏 — 品牌渐变 */}
-      <header className="border-outline-variant brand-gradient-soft flex items-center gap-3 border-b px-4 py-3">
+      <header className="brand-gradient-soft flex items-center gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
         <Avatar name={conv.name} src={conv.avatarUrl} online={conv.isOnline} />
         <div>
           <h2 className="text-title-md text-on-surface font-semibold">{conv.name}</h2>
@@ -65,8 +74,11 @@ export function ChatWindow() {
         </div>
       </header>
 
-      {/* 消息列表 — 微渐变背景 */}
-      <div className="surface-gradient flex-1 space-y-4 overflow-y-auto px-4 py-4">
+      {/* 消息列表 — 灰底衬托白色 received 气泡 */}
+      <div
+        className="flex-1 space-y-4 overflow-y-auto bg-slate-100 px-4 py-4 dark:bg-gray-950"
+        onMouseDown={handleMessageListMouseDown}
+      >
         {DEMO_MESSAGES.map((msg, i) => {
           // TODO: 根据与上一条消息的时间差判断是否显示时间分隔
           // 当前简化处理：仅第一条消息显示时间
@@ -82,7 +94,11 @@ export function ChatWindow() {
                 </div>
               )}
               <div className={cn("flex gap-3", msg.isSelf ? "flex-row-reverse" : "flex-row")}>
-                {!msg.isSelf && <Avatar name={conv.name} src={conv.avatarUrl} size="sm" />}
+                <Avatar
+                  name={msg.isSelf ? currentUser?.nickname || "我" : conv.name}
+                  src={msg.isSelf ? (currentUser?.avatarUrl ?? undefined) : conv.avatarUrl}
+                  size="md"
+                />
                 <div className={cn(msg.isSelf ? "msg-bubble-sent" : "msg-bubble-received")}>
                   {msg.text}
                 </div>
@@ -93,7 +109,7 @@ export function ChatWindow() {
       </div>
 
       {/* 底部输入区 */}
-      <div className="border-outline-variant bg-surface border-t px-4 py-3">
+      <div className="border-t border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900">
         <div className="mb-2 flex items-center gap-1">
           <button className="md3-icon-btn text-on-surface-variant">
             <Image size={18} />
@@ -109,7 +125,7 @@ export function ChatWindow() {
           <textarea
             rows={3}
             placeholder="输入消息..."
-            className="bg-surface-container-high text-body-md placeholder:text-on-surface-variant flex-1 resize-none rounded-xl px-4 py-2.5 focus:outline-none"
+            className="text-body-md text-on-surface placeholder:text-on-surface-variant flex-1 resize-none bg-transparent px-4 py-2.5 focus:outline-none"
           />
           <button className="bg-primary text-primary-on shadow-elevation-2 shrink-0 rounded-xl p-2.5 transition-opacity hover:opacity-90">
             <Send size={18} />

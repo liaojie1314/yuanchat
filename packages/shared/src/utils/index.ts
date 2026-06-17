@@ -86,3 +86,6 @@ export {
   validateNickname,
 } from "./validation";
 export type { ValidationResult } from "./validation";
+
+// 头像颜色
+export { getAvatarColor } from "./avatarColor";

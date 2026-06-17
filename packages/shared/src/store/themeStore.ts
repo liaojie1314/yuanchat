@@ -97,12 +97,18 @@ export const useThemeStore = create<ThemeState>()(
           const scheme = get().getCurrentScheme();
           const root = document.documentElement;
 
-          /** hex → rgb 转换，输出 "r, g, b" 格式供 CSS rgb() 使用 */
+          /**
+           * hex → rgb 转换，输出空格分隔的 "r g b" 格式。
+           *
+           * 必须使用空格分隔（而非逗号），因为 CSS 变量会被替换到
+           * `rgb(var(--...) / <alpha>)` 中，只有空格分隔才能兼容带
+           * alpha 值的 modern CSS Color Level 4 语法。
+           */
           const hexToRgb = (hex: string): string => {
             const r = parseInt(hex.slice(1, 3), 16);
             const g = parseInt(hex.slice(3, 5), 16);
             const b = parseInt(hex.slice(5, 7), 16);
-            return `${r}, ${g}, ${b}`;
+            return `${r} ${g} ${b}`;
           };
 
           // 写入 hex 值（直接使用：background: var(--...-hex)）

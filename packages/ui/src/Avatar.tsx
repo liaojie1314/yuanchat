@@ -22,7 +22,7 @@
  * <Avatar name="李四" /> // 显示 "李四" 首字母，无在线状态
  */
 import * as RadixAvatar from "@radix-ui/react-avatar";
-import { cn } from "@yuanchat/shared/utils";
+import { cn, getAvatarColor } from "@yuanchat/shared/utils";
 
 interface AvatarProps {
   /** 头像图片 URL */
@@ -45,18 +45,18 @@ const sizeMap = {
 export function Avatar({ src, name, size = "md", online }: AvatarProps) {
   // 提取用户名的前两个字符作为头像文字（如 "张三" → "张三"）
   const initials = name.slice(0, 2).toUpperCase();
+  // 基于用户名哈希的稳定随机背景色
+  const bgColor = getAvatarColor(name);
 
   return (
     <div className="relative inline-flex shrink-0">
       <RadixAvatar.Root
-        className={cn(
-          "bg-primary-100 dark:bg-primary-900/40 overflow-hidden rounded-full",
-          sizeMap[size],
-        )}
+        className={cn("inline-flex overflow-hidden rounded-full", sizeMap[size])}
+        style={{ backgroundColor: bgColor }}
       >
         {/* 仅当 src 存在时才渲染 Image，否则直接显示 Fallback */}
         {src && <RadixAvatar.Image className="h-full w-full object-cover" src={src} alt={name} />}
-        <RadixAvatar.Fallback className="text-primary-600 dark:text-primary-300 flex h-full w-full items-center justify-center font-medium">
+        <RadixAvatar.Fallback className="flex h-full w-full items-center justify-center font-medium text-white">
           {initials}
         </RadixAvatar.Fallback>
       </RadixAvatar.Root>
@@ -66,7 +66,7 @@ export function Avatar({ src, name, size = "md", online }: AvatarProps) {
         <span
           className={cn(
             "absolute -right-0.5 -bottom-0.5 h-3 w-3 rounded-full border-2 border-white dark:border-neutral-900",
-            online ? "bg-success" : "bg-neutral-300 dark:bg-neutral-600",
+            online ? "bg-primary" : "bg-neutral-300 dark:bg-neutral-600",
           )}
         />
       )}
