@@ -78,4 +78,10 @@ coverage/
 .kun/
 server/server
 
+# ====================
+# Playwright E2E
+# ====================
+test-results/
+playwright-report/
+
 .agents/

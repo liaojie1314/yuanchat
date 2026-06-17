@@ -359,6 +359,51 @@ packages/shared/coverage/
 
 > **注意**：`UserService` 依赖具体的 `*repository.UserRepository` 而非接口，完整的 Register/Login/Profile 集成测试需要连接测试数据库或重构为接口注入。
 
+### E2E 端到端测试
+
+**框架**：Playwright（Chromium，headless）
+**环境**：测试自动启动 Vite dev server（Mock 模式，`VITE_ENABLE_MOCK=true`），使用 MSW Service Worker 拦截所有 API 调用，无需真实后端。
+
+**测试文件位置**：`apps/web/e2e/`
+
+#### 命令
+
+| 命令                                                      | 说明                               |
+| --------------------------------------------------------- | ---------------------------------- |
+| `pnpm --filter @yuanchat/web test:e2e`                    | 运行 E2E 测试（headless Chromium） |
+| `pnpm --filter @yuanchat/web test:e2e:ui`                 | 交互式 UI 模式运行                 |
+| `pnpm --filter @yuanchat/web test:e2e:debug`              | 调试模式（逐个断点）               |
+| `pnpm --filter @yuanchat/web exec playwright show-report` | 打开最新测试报告                   |
+
+#### 覆盖范围
+
+| 测试文件                   | 覆盖内容                                                   |
+| -------------------------- | ---------------------------------------------------------- |
+| `e2e/login.spec.ts`        | 登录成功/失败、表单校验错误、API 错误、Enter 快捷键        |
+| `e2e/register.spec.ts`     | 注册成功/失败、表单校验、验证码加载/刷新、Enter 快捷键     |
+| `e2e/logout.spec.ts`       | 登出跳转、localStorage 清除、登出后路由守卫                |
+| `e2e/route-guards.spec.ts` | 未登录重定向（/ → /login）、已登录重定向（/login → /chat） |
+| `e2e/navigation.spec.ts`   | 登录/注册页间跳转、表单状态独立                            |
+
+#### 测试文件结构
+
+```
+apps/web/e2e/
+├── playwright.config.ts          # Playwright 配置（webServer 自动启动 Vite）
+├── fixtures/
+│   └── auth.fixture.ts           # localStorage 认证状态设置/清除
+├── pages/
+│   ├── LoginPage.ts              # 登录页 Page Object Model
+│   └── RegisterPage.ts           # 注册页 Page Object Model
+├── utils/
+│   └── msw.ts                    # MSW Service Worker 就绪等待工具
+├── login.spec.ts
+├── register.spec.ts
+├── logout.spec.ts
+├── route-guards.spec.ts
+└── navigation.spec.ts
+```
+
 ---
 
 ## 九、文档更新规则

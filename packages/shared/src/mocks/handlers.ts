@@ -153,8 +153,10 @@ export const handlers = [
       return apiError(40002, "密码长度至少 6 位");
     }
 
-    // 演示：错误的密码 或 root
-    if (body.password === "wrong") {
+    // 演示：错误的密码
+    // "wrong" — 短密码，走客户端校验
+    // "Wrong@1234" — 满足客户端校验但服务端返回认证失败
+    if (body.password === "wrong" || body.password === "Wrong@1234") {
       return apiError(40101, "元聊号或密码错误");
     }
 
