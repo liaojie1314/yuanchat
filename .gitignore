@@ -73,4 +73,7 @@ coverage/
 .cache/
 .claude/settings.local.json
 .claude/
+.kun/
 server/server
+
+.agents/
