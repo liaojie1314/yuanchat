@@ -14,7 +14,7 @@
  * @example
  * ```tsx
  * const { loginWithPassword, isAuthenticated, user } = useAuthStore();
- * await loginWithPassword("13800138000", "password123");
+ * await loginWithPassword("yuanchat_001", "password123");
  * if (isAuthenticated) navigate("/chat");
  * ```
  */
@@ -48,8 +48,8 @@ interface AuthState {
   refreshToken: string | null;
   isAuthenticated: boolean;
 
-  /** 密码登录 */
-  loginWithPassword: (account: string, password: string) => Promise<void>;
+  /** 元聊号 + 密码登录 */
+  loginWithPassword: (yuanchatId: string, password: string) => Promise<void>;
   /** 密码注册 */
   registerWithPassword: (
     phone: string,
@@ -101,12 +101,12 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
 
       /**
-       * 密码登录
-       * account 可以是手机号或邮箱
+       * 元聊号 + 密码登录
+       * yuanchatId 为注册时分配的元聊号
        */
-      loginWithPassword: async (account: string, password: string) => {
+      loginWithPassword: async (yuanchatId: string, password: string) => {
         const data = await apiPost<LoginResponse>("/api/v1/users/login", {
-          account,
+          yuanchat_id: yuanchatId,
           password,
         });
         set({

@@ -58,6 +58,7 @@ export interface TranslationKeys {
   "auth.account": string;
   "auth.password": string;
   "auth.phoneOrEmail": string;
+  "auth.yuanchatId": string;
   "auth.verificationCode": string;
   "auth.sendCode": string;
   "auth.noAccount": string;
@@ -67,6 +68,8 @@ export interface TranslationKeys {
   "auth.loginSuccess": string;
   "auth.loginFailed": string;
   "auth.registerSuccess": string;
+  "auth.showPassword": string;
+  "auth.hidePassword": string;
 
   // ========== 聊天 ==========
   "chat.title": string;

@@ -1,5 +1,5 @@
 /**
- * Web 端入口 — 初始化 i18n、M3 主题，挂载 React 应用
+ * Web 端入口 — 初始化 i18n、M3 主题、MSW Mock（仅 dev），挂载 React 应用
  */
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -15,10 +15,22 @@ import App from "./App";
 // 必须在 React 渲染前执行，避免首屏颜色闪烁
 useThemeStore.getState().applyTheme();
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </StrictMode>,
-);
+async function bootstrap() {
+  // 开发阶段启动 MSW Mock Service Worker，拦截 API 返回模拟数据
+  // 后端就绪后设置 VITE_ENABLE_MOCK=false 即可关闭
+  // 动态 import 确保 MSW 在 production build 中被 tree-shake
+  if (import.meta.env.DEV) {
+    const { startMockWorker } = await import("@yuanchat/shared/mocks/browser");
+    await startMockWorker();
+  }
+
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </StrictMode>,
+  );
+}
+
+bootstrap();

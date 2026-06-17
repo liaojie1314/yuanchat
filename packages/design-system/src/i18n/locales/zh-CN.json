@@ -43,6 +43,7 @@
   "auth.account": "账号",
   "auth.password": "密码",
   "auth.phoneOrEmail": "手机号或邮箱",
+  "auth.yuanchatId": "元聊号",
   "auth.verificationCode": "验证码",
   "auth.sendCode": "发送验证码",
   "auth.noAccount": "还没有账号？",
@@ -52,6 +53,8 @@
   "auth.loginSuccess": "登录成功",
   "auth.loginFailed": "登录失败",
   "auth.registerSuccess": "注册成功",
+  "auth.showPassword": "显示密码",
+  "auth.hidePassword": "隐藏密码",
 
   "chat.title": "消息",
   "chat.selectConversation": "选择一条会话开始聊天",

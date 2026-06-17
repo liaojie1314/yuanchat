@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { MainLayout } from "@yuanchat/ui";
 import { useAuthStore } from "@yuanchat/shared";
@@ -10,6 +11,25 @@ import { RegisterPage } from "./pages/RegisterPage";
 function App() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const isMobile = useIsMobile();
+
+  // 已认证时（含从持久化恢复的登录态）将窗口切换为首页尺寸
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const resize = async () => {
+      try {
+        const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
+        const win = getCurrentWindow();
+        await win.setSize(new LogicalSize(1200, 800));
+        await win.setResizable(true);
+        await win.setMinSize(new LogicalSize(900, 600));
+        await win.center();
+      } catch {
+        /* 非 Tauri 环境忽略 */
+      }
+    };
+    resize();
+  }, [isAuthenticated]);
 
   if (!isAuthenticated) {
     return (

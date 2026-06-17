@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button, Input } from "@yuanchat/ui";
 import { useAuthStore, useIsDesktop } from "@yuanchat/shared";
+import { validatePassword, validatePhone, validateNickname } from "@yuanchat/shared/utils";
 import { useCloseAuthWindow } from "../hooks/useTauriAuth";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { TitleBar } from "../components/TitleBar";
@@ -37,7 +38,10 @@ export function RegisterPage() {
   const [captchaImg, setCaptchaImg] = useState("");
   const [captchaID, setCaptchaID] = useState("");
   const [captchaAnswer, setCaptchaAnswer] = useState("");
-  const [error, setError] = useState("");
+  const [nicknameError, setNicknameError] = useState("");
+  const [phoneError, setPhoneError] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [captchaError, setCaptchaError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const fetchCaptcha = async () => {
@@ -54,13 +58,43 @@ export function RegisterPage() {
     fetchCaptcha();
   }, []);
 
+  /** 清除所有校验错误 */
+  const clearErrors = () => {
+    setNicknameError("");
+    setPhoneError("");
+    setPasswordError("");
+    setCaptchaError("");
+  };
+
   const handleRegister = async () => {
-    if (!phone || !password || !nickname) return;
-    if (!captchaAnswer) {
-      setError("请输入验证码");
-      return;
+    clearErrors();
+    let valid = true;
+
+    // 逐字段校验
+    const nnResult = validateNickname(nickname);
+    if (!nnResult.valid) {
+      setNicknameError(nnResult.errors[0]);
+      valid = false;
     }
-    setError("");
+
+    const phResult = validatePhone(phone);
+    if (!phResult.valid) {
+      setPhoneError(phResult.errors[0]);
+      valid = false;
+    }
+
+    const pwResult = validatePassword(password);
+    if (!pwResult.valid) {
+      setPasswordError(pwResult.errors[0]);
+      valid = false;
+    }
+
+    if (!captchaAnswer.trim()) {
+      setCaptchaError("请输入验证码");
+      valid = false;
+    }
+    if (!valid) return;
+
     setLoading(true);
     try {
       await registerWithPassword(phone, password, captchaID, Number(captchaAnswer), nickname);
@@ -70,7 +104,7 @@ export function RegisterPage() {
         navigate("/chat", { replace: true });
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "注册失败");
+      setPasswordError(e instanceof Error ? e.message : "注册失败");
       fetchCaptcha();
       setCaptchaAnswer("");
     } finally {
@@ -120,19 +154,31 @@ export function RegisterPage() {
             <Input
               placeholder="昵称"
               value={nickname}
-              onChange={(e) => setNickname(e.target.value)}
+              onChange={(e) => {
+                setNickname(e.target.value);
+                if (nicknameError) setNicknameError("");
+              }}
+              error={nicknameError}
             />
             <Input
               placeholder="手机号"
               type="tel"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => {
+                setPhone(e.target.value);
+                if (phoneError) setPhoneError("");
+              }}
+              error={phoneError}
             />
             <Input
               placeholder="密码（至少 8 位）"
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (passwordError) setPasswordError("");
+              }}
+              error={passwordError}
             />
 
             {/* 验证码 */}
@@ -141,15 +187,18 @@ export function RegisterPage() {
                 <Input
                   placeholder="验证码答案"
                   value={captchaAnswer}
-                  onChange={(e) => setCaptchaAnswer(e.target.value)}
+                  onChange={(e) => {
+                    setCaptchaAnswer(e.target.value);
+                    if (captchaError) setCaptchaError("");
+                  }}
                   onKeyDown={(e) => e.key === "Enter" && handleRegister()}
-                  error={error}
+                  error={captchaError}
                 />
               </div>
               <button
                 type="button"
                 onClick={fetchCaptcha}
-                className="group relative h-12 w-[140px] shrink-0 overflow-hidden rounded-xl border border-outline-variant bg-surface-container-low"
+                className="group relative h-12 w-[140px] shrink-0 overflow-hidden rounded-xl bg-surface-container-low"
                 title="点击刷新验证码"
               >
                 <span
@@ -165,9 +214,6 @@ export function RegisterPage() {
                 </span>
               </button>
             </div>
-            {!error && captchaImg && (
-              <p className="text-on-surface-variant -mt-3 text-label-sm">点击右侧图片刷新验证码</p>
-            )}
 
             <Button className="w-full" onClick={handleRegister} disabled={loading}>
               {loading ? "注册中…" : "注 册"}

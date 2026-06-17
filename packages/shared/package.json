@@ -12,7 +12,8 @@
     "./hooks/*": "./src/hooks/*.ts",
     "./types": "./src/types/index.ts",
     "./utils": "./src/utils/index.ts",
-    "./ws": "./src/ws/client.ts"
+    "./ws": "./src/ws/client.ts",
+    "./mocks/*": "./src/mocks/*.ts"
   },
   "scripts": {
     "build": "echo 'shared: no build needed'",
@@ -25,12 +26,13 @@
   "dependencies": {
     "@yuanchat/design-system": "workspace:*",
     "clsx": "^2.1.1",
+    "react": "^19.0.0",
     "tailwind-merge": "^2.6.0",
-    "zustand": "^5.0.0",
-    "react": "^19.0.0"
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
+    "msw": "^2.14.6",
     "typescript": "~5.6.0",
     "vitest": "^2.1.0"
   }

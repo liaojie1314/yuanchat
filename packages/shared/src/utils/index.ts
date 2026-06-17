@@ -77,3 +77,12 @@ export function truncate(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
   return text.slice(0, maxLength) + "…";
 }
+
+// 表单校验
+export {
+  validatePassword,
+  validateYuanchatId,
+  validatePhone,
+  validateNickname,
+} from "./validation";
+export type { ValidationResult } from "./validation";

@@ -1,36 +1,61 @@
-import { Minus, X } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Minus, Maximize2, Minimize2, X } from "lucide-react";
 
 /**
  * 自定义窗口操作栏 — 替代原生标题栏
  *
  * @description
  * 在 Tauri v2 桌面端替代系统原生标题栏（通过 `decorations: false` 隐藏原生装饰）。
- * 提供三个核心能力：
- * - **窗口拖拽**：通过 `data-tauri-drag-region` 属性标记整个 bar 为拖拽区域
- * - **最小化**：调用 `getCurrentWindow().minimize()` 最小化当前窗口
- * - **关闭**：调用 `getCurrentWindow().close()` 关闭当前窗口（hover 时变红提示）
+ * 提供：
+ * - **窗口拖拽**：`data-tauri-drag-region`
+ * - **最小化**：`getCurrentWindow().minimize()`
+ * - **最大化/还原**：`getCurrentWindow().toggleMaximize()` + 乐观切换图标
+ * - **关闭**：`getCurrentWindow().close()`
  *
- * 所有 Tauri API 调用通过 try-catch 兜底，在非 Tauri 环境（Web 端）点击按钮无操作。
- *
- * @example
- * ```tsx
- * // 直接放在页面顶部
- * <div className="flex h-screen flex-col">
- *   <TitleBar />
- *   <div className="flex-1">页面内容</div>
- * </div>
- *
- * // 或通过 MainLayout 的 titleBar 属性传递（已认证页面）
- * <MainLayout titleBar={<TitleBar />} />
- * ```
+ * 所有 Tauri API 通过 try-catch 兜底，非 Tauri 环境无操作。
  */
 export function TitleBar() {
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  // 启动时检测初始状态 + 监听窗口事件同步最大化图标
+  // onResized 覆盖所有场景：按钮点击 / 拖拽到顶部 / 双击标题栏 / 快捷键
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    (async () => {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const win = getCurrentWindow();
+        setIsMaximized(await win.isMaximized());
+        unlisten = await win.onResized(async () => {
+          setIsMaximized(await win.isMaximized());
+        });
+      } catch {
+        /* 非 Tauri 环境 */
+      }
+    })();
+
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
   const handleMinimize = async () => {
     try {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       await getCurrentWindow().minimize();
     } catch {
-      /* 非 Tauri 环境，无操作 */
+      /* 非 Tauri 环境 */
+    }
+  };
+
+  const handleToggleMaximize = async () => {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().toggleMaximize();
+      // 图标由 onResized 事件统一同步，无需手动翻转
+    } catch {
+      /* 非 Tauri 环境 */
     }
   };
 
@@ -39,7 +64,7 @@ export function TitleBar() {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       await getCurrentWindow().close();
     } catch {
-      /* 非 Tauri 环境，无操作 */
+      /* 非 Tauri 环境 */
     }
   };
 
@@ -51,6 +76,7 @@ export function TitleBar() {
       <span className="text-on-surface-variant pl-2 text-label-sm font-medium">元聊 YuanChat</span>
 
       <div className="flex items-center">
+        {/* 最小化 */}
         <button
           type="button"
           onClick={handleMinimize}
@@ -59,6 +85,18 @@ export function TitleBar() {
         >
           <Minus size={16} />
         </button>
+
+        {/* 最大化 / 还原 */}
+        <button
+          type="button"
+          onClick={handleToggleMaximize}
+          className="text-on-surface-variant inline-flex h-7 w-10 items-center justify-center rounded-md transition-colors hover:bg-surface-container-high hover:text-on-surface"
+          title={isMaximized ? "还原" : "最大化"}
+        >
+          {isMaximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+        </button>
+
+        {/* 关闭 */}
         <button
           type="button"
           onClick={handleClose}

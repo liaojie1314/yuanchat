@@ -43,6 +43,7 @@
   "auth.account": "Account",
   "auth.password": "Password",
   "auth.phoneOrEmail": "Phone or Email",
+  "auth.yuanchatId": "YuanChat ID",
   "auth.verificationCode": "Verification Code",
   "auth.sendCode": "Send Code",
   "auth.noAccount": "Don't have an account?",
@@ -52,6 +53,8 @@
   "auth.loginSuccess": "Sign in successful",
   "auth.loginFailed": "Sign in failed",
   "auth.registerSuccess": "Registration successful",
+  "auth.showPassword": "Show password",
+  "auth.hidePassword": "Hide password",
 
   "chat.title": "Messages",
   "chat.selectConversation": "Select a conversation to start chatting",

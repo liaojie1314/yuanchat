@@ -2,12 +2,14 @@ import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { Button, Input } from "@yuanchat/ui";
 import { useAuthStore } from "@yuanchat/shared";
+import { validatePassword } from "@yuanchat/shared/utils";
 import { MessageCircle } from "lucide-react";
 
 export function LoginPage() {
-  const [account, setAccount] = useState("");
+  const [yuanchatId, setYuanchatId] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [yuanchatIdError, setYuanchatIdError] = useState("");
+  const [passwordError, setPasswordError] = useState("");
   const [loading, setLoading] = useState(false);
   const loginWithPassword = useAuthStore((s) => s.loginWithPassword);
 
@@ -21,14 +23,33 @@ export function LoginPage() {
     return () => window.removeEventListener("mousemove", onMove);
   }, []);
 
+  /** 清除所有校验错误 */
+  const clearErrors = () => {
+    setYuanchatIdError("");
+    setPasswordError("");
+  };
+
   const handleLogin = async () => {
-    if (!account || !password) return;
-    setError("");
+    clearErrors();
+    let valid = true;
+
+    // 逐字段校验
+    if (!yuanchatId.trim()) {
+      setYuanchatIdError("请输入元聊号");
+      valid = false;
+    }
+    const pwResult = validatePassword(password);
+    if (!pwResult.valid) {
+      setPasswordError(pwResult.errors[0]);
+      valid = false;
+    }
+    if (!valid) return;
+
     setLoading(true);
     try {
-      await loginWithPassword(account, password);
+      await loginWithPassword(yuanchatId, password);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "登录失败");
+      setPasswordError(e instanceof Error ? e.message : "登录失败");
     } finally {
       setLoading(false);
     }
@@ -63,19 +84,26 @@ export function LoginPage() {
 
         <div className="glass-card space-y-4 p-6">
           <Input
-            placeholder="手机号或邮箱"
+            placeholder="元聊号"
             type="text"
-            value={account}
-            onChange={(e) => setAccount(e.target.value)}
+            value={yuanchatId}
+            onChange={(e) => {
+              setYuanchatId(e.target.value);
+              if (yuanchatIdError) setYuanchatIdError("");
+            }}
             onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+            error={yuanchatIdError}
           />
           <Input
             placeholder="密码"
             type="password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              if (passwordError) setPasswordError("");
+            }}
             onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-            error={error}
+            error={passwordError}
           />
           <Button className="w-full" onClick={handleLogin} disabled={loading}>
             {loading ? "登录中…" : "登 录"}

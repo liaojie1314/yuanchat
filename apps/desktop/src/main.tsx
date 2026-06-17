@@ -1,5 +1,5 @@
 /**
- * 桌面端入口 — 初始化 i18n、M3 主题，挂载 React 应用
+ * 桌面端入口 — 初始化 i18n、M3 主题、MSW Mock（仅 dev），挂载 React 应用
  *
  * 与 Web 端的区别：
  * - 监听 auth-success 事件（来自注册窗口），自动跳转到聊天页
@@ -26,10 +26,21 @@ if ("__TAURI_INTERNALS__" in window) {
   });
 }
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </StrictMode>,
-);
+async function bootstrap() {
+  // 开发阶段启动 MSW Mock Service Worker，拦截 API 返回模拟数据
+  // 动态 import 确保 MSW 在 production build 中被 tree-shake
+  if (import.meta.env.DEV) {
+    const { startMockWorker } = await import("@yuanchat/shared/mocks/browser");
+    await startMockWorker();
+  }
+
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </StrictMode>,
+  );
+}
+
+bootstrap();
