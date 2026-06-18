@@ -78,6 +78,11 @@
   --md-easing-standard: cubic-bezier(0.2, 0, 0, 1);
   --md-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
   --font-scale: 1;
+  /* 可见视口高度 —— 由 useKeyboardAwareViewport 在移动端软键盘弹出时实时更新；
+     未支持 VisualViewport / 桌面端时回退 100vh，行为与改造前一致 */
+  --app-height: 100vh;
+  /* 软键盘占据高度，默认 0；供需要精确避让的组件按需引用 */
+  --keyboard-inset: 0px;
 }
 
 /* ========================================
@@ -299,5 +304,13 @@
   .no-select {
     user-select: none;
     -webkit-user-select: none;
+  }
+
+  /* 键盘感知的全屏高度容器 —— 替代 h-screen(100vh)。
+     移动端软键盘弹出时 --app-height 收缩，容器随之变矮，
+     内部 flex 布局（居中表单 / 底部输入区）自然上移到键盘之上。
+     桌面端 / 旧 WebView 下 --app-height 恒为 100vh，等价于原 h-screen。 */
+  .app-screen {
+    height: var(--app-height, 100vh);
   }
 }

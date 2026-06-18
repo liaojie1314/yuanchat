@@ -214,6 +214,22 @@ pnpm --filter @yuanchat/desktop tauri android build
 
 > 常见问题排查见 [`.claude/TROUBLESHOOTING.md`](../.claude/TROUBLESHOOTING.md)
 
+### `gen/android` 的版本控制约定
+
+`apps/desktop/src-tauri/gen/android` **纳入版本控制**（不整体忽略），因为它含手改源码：
+
+- `app/src/main/java/.../MainActivity.kt` — 用户扩展点，Tauri **只生成一次、构建不覆盖**
+  （被覆盖的是 `generated/TauriActivity.kt`）。当前含**软键盘适配**的 `WindowInsets` 监听，
+  软键盘弹起时把 IME 高度作为 padding 应用到内容区（详见 `.claude/TROUBLESHOOTING.md`
+  「软键盘遮挡输入框」）。
+- `app/src/main/AndroidManifest.xml`、`build.gradle.kts`、`res/`、Gradle Wrapper 等。
+
+构建产物（`build/`、`.gradle/`、`.cxx/`、`jniLibs/**/*.so`、`generated/`）由 Tauri 内置于
+`gen/android/.gitignore` 与 `gen/android/app/.gitignore` 精确排除，**勿**手动 `git add -f` 这些目录。
+
+> ⚠️ 不要对已有工程重跑 `tauri android init`（会覆盖脚手架）。若必须重跑，在干净分支上做，
+> 再 diff 回填 `MainActivity.kt` 的软键盘改动。
+
 ---
 
 ## 四、Go 后端

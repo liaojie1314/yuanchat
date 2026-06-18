@@ -113,7 +113,7 @@ export function RegisterPage() {
   };
 
   return (
-    <div className="surface-gradient relative flex h-screen flex-col overflow-hidden">
+    <div className="surface-gradient app-screen relative flex flex-col overflow-hidden">
       {/* 背景装饰 */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="aurora-orb -left-20 -top-20 h-[500px] w-[500px] bg-[#7EC8E3]" />
@@ -136,9 +136,11 @@ export function RegisterPage() {
         </Link>
       )}
 
-      {/* 表单区域 */}
-      <div className="relative flex flex-1 items-center justify-center overflow-hidden">
-        <div className="relative w-full max-w-md px-8 py-12">
+      {/* 表单区域 —— flex-col + overflow-y-auto + 卡片 m-auto：
+          有余量时垂直居中；软键盘弹起视口收缩、内容超高时 auto 外边距归零，
+          回退为顶部对齐并可滚动，保证被键盘遮挡的字段可滚到可见区 */}
+      <div className="relative flex flex-1 flex-col overflow-y-auto">
+        <div className="relative m-auto w-full max-w-md px-8 py-12">
           {/* Logo */}
           <div className="mb-8 text-center">
             <div className="brand-gradient glow-brand mx-auto mb-5 inline-flex h-20 w-20 items-center justify-center rounded-2xl text-white">

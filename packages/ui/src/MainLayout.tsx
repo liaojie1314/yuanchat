@@ -41,7 +41,7 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
   const { t } = useTranslation();
 
   return (
-    <div className="bg-surface flex h-screen overflow-hidden">
+    <div className="bg-surface app-screen flex overflow-hidden">
       {/* 左侧品牌色导航栏 — 渐变背景 */}
       <nav className="nav-gradient shadow-elevation-2 flex w-16 shrink-0 flex-col items-center gap-1 py-4 text-white">
         {NAV_ITEMS.map(({ to, icon: Icon, label }) => {

@@ -56,7 +56,7 @@ export function LoginPage() {
   };
 
   return (
-    <div className="surface-gradient relative flex min-h-screen items-center justify-center overflow-y-auto py-8">
+    <div className="surface-gradient relative flex min-h-[var(--app-height,100vh)] flex-col overflow-y-auto py-8">
       {/* 鼠标跟随光晕 */}
       <div ref={glowRef} className="cursor-glow" style={{ left: mousePos.x, top: mousePos.y }} />
 
@@ -73,7 +73,7 @@ export function LoginPage() {
       {/* 流光扫描 */}
       <div className="light-sweep" />
 
-      <div className="relative w-full max-w-md p-8">
+      <div className="relative m-auto w-full max-w-md p-8">
         <div className="mb-10 text-center">
           <div className="brand-gradient glow-brand mb-5 inline-flex h-20 w-20 items-center justify-center rounded-2xl text-white">
             <MessageCircle size={40} />

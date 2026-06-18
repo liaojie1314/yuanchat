@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { MainLayout } from "@yuanchat/ui";
-import { useAuthStore } from "@yuanchat/shared";
+import { useAuthStore, useKeyboardAwareViewport } from "@yuanchat/shared";
 import { TitleBar } from "./components/TitleBar";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { ChatPage } from "./pages/ChatPage";
@@ -11,6 +11,9 @@ import { RegisterPage } from "./pages/RegisterPage";
 function App() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const isMobile = useIsMobile();
+
+  // 移动端软键盘弹出时把内容顶起（桌面端 / 旧 WebView 自动降级为无操作）
+  useKeyboardAwareViewport();
 
   // 已认证时（含从持久化恢复的登录态）将窗口切换为首页尺寸
   useEffect(() => {

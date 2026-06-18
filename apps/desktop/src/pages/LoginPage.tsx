@@ -85,7 +85,7 @@ export function LoginPage() {
   };
 
   return (
-    <div className="surface-gradient relative flex h-screen flex-col overflow-hidden">
+    <div className="surface-gradient app-screen relative flex flex-col overflow-hidden">
       {/* 背景装饰 */}
       <div ref={glowRef} className="cursor-glow" style={{ left: mousePos.x, top: mousePos.y }} />
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -99,9 +99,11 @@ export function LoginPage() {
       {/* 自定义操作栏 — 仅桌面端显示 */}
       {isDesktop && !isMobile && <TitleBar />}
 
-      {/* 表单区域 */}
-      <div className="relative flex flex-1 items-center justify-center overflow-hidden">
-        <div className="relative w-full max-w-md p-8">
+      {/* 表单区域 —— flex-col + overflow-y-auto + 卡片 m-auto：
+          有余量时垂直居中；软键盘弹起视口收缩、内容超高时 auto 外边距归零，
+          回退为顶部对齐并可滚动，保证被键盘遮挡的字段可滚到可见区 */}
+      <div className="relative flex flex-1 flex-col overflow-y-auto">
+        <div className="relative m-auto w-full max-w-md p-8">
           <div className="mb-10 text-center">
             <div className="brand-gradient glow-brand mb-5 inline-flex h-20 w-20 items-center justify-center rounded-2xl text-white">
               <MessageCircle size={40} />

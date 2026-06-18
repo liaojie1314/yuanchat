@@ -87,7 +87,7 @@ export function RegisterPage() {
   };
 
   return (
-    <div className="surface-gradient relative flex min-h-screen items-center justify-center overflow-y-auto py-8">
+    <div className="surface-gradient relative flex min-h-[var(--app-height,100vh)] flex-col overflow-y-auto py-8">
       {/* 背景装饰 */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="aurora-orb -left-20 -top-20 h-[500px] w-[500px] bg-[#7EC8E3]" />
@@ -96,7 +96,7 @@ export function RegisterPage() {
       </div>
       <div className="dot-grid pointer-events-none fixed inset-0" />
 
-      <div className="relative w-full max-w-md px-8 py-12">
+      <div className="relative m-auto w-full max-w-md px-8 py-12">
         {/* Logo */}
         <div className="mb-8 text-center">
           <div className="brand-gradient glow-brand mx-auto mb-5 inline-flex h-20 w-20 items-center justify-center rounded-2xl text-white">
