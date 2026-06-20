@@ -1,6 +1,6 @@
 # 元聊 YuanChat — 开发与打包指南
 
-> **最后更新**：2026-06-17
+> **最后更新**：2026-06-18
 >
 > ⚠️ **文档维护规则**：任何 `package.json` scripts、Tauri 配置、环境变量的变更，**必须同步更新本文档**。此规则对所有会话生效。
 
@@ -252,18 +252,127 @@ docker compose -f deploy/docker-compose.yml down      # 停止
 
 ---
 
-## 六、Monorepo 全局命令
+## 六、打包构建（Desktop + Android）
 
-| 命令             | 说明                       |
-| ---------------- | -------------------------- |
-| `pnpm install`   | 安装所有 workspace 依赖    |
-| `pnpm typecheck` | 所有包 TypeScript 类型检查 |
-| `pnpm lint`      | ESLint 全量检查            |
-| `pnpm build`     | 构建所有应用               |
+`pnpm build`（即 `turbo build`）**仅构建前端代码**（Vite → JS/CSS 产物），不生成安装包。
+
+生成可安装的桌面端/安卓端安装包，使用**交互式打包脚本**：
+
+```bash
+pnpm build:pkg
+# 或直接运行
+node scripts/build.mjs
+```
+
+### 交互流程
+
+脚本会逐步询问以下选项：
+
+1. **构建目标**：桌面端 / 安卓端 / 全平台
+2. **构建类型**：正式包（Release）/ 调试包（Debug）
+3. **桌面端格式**（当前平台自动检测可用格式）：
+
+   | 平台    | 可选格式                 |
+   | ------- | ------------------------ |
+   | Linux   | `deb`, `AppImage`, `rpm` |
+   | macOS   | `dmg`, `app`             |
+   | Windows | `msi`, `nsis`            |
+
+4. **安卓端输出**：`APK` / `AAB` / 两者
+5. **安卓端架构**：ARM64、ARMv7、x86（模拟器）、x86_64
+6. **安卓端拆分**：是否按 ABI 拆分（减小 APK 体积）
+7. **确认摘要** → 开始构建
+
+### 示例
+
+```bash
+$ pnpm build:pkg
+
+╔══════════════════════════════════════╗
+║   元聊 YuanChat — 交互式打包工具   ║
+╚══════════════════════════════════════╝
+
+当前平台: linux
+
+1. 选择构建目标
+  [1] 桌面端 (Windows/macOS/Linux)
+  [2] 安卓端 (APK / AAB)
+  [3] 全平台 (桌面 + 安卓)
+请输入选项编号: 1
+
+2. 选择构建类型
+  [1] 正式包 (Release) — 优化体积和性能
+  [2] 调试包 (Debug) — 包含调试符号，方便排查问题
+请输入选项编号: 1
+
+3. 选择桌面端打包格式
+  [1] deb — Debian/Ubuntu (推荐 Linux)
+  [2] AppImage — 通用 Linux 免安装
+  [3] rpm — Fedora/RHEL/CentOS
+  输入编号（逗号分隔），或直接回车选择全部
+请输入: 1
+
+╔══════════════════════════════════════╗
+║           构建摘要                  ║
+╚══════════════════════════════════════╝
+  构建目标:     桌面端
+  构建类型:     正式包 (Release)
+  桌面端格式:   deb
+  工作目录: apps/desktop
+
+确认开始构建？[Y/n]: y
+
+▶ npx tauri build --bundles deb
+...
+✅ 桌面端构建完成！
+```
+
+### 构建产物位置
+
+| 平台   | 路径                                                                          |
+| ------ | ----------------------------------------------------------------------------- |
+| 桌面端 | `apps/desktop/src-tauri/target/release/bundle/`（debug 时为 `debug/bundle/`） |
+| 安卓端 | `apps/desktop/src-tauri/gen/android/app/build/outputs/`                       |
+
+### 纯命令行打包（不使用交互脚本）
+
+如果需要 CI/CD 集成，可直接使用 Tauri 命令行：
+
+```bash
+# 桌面端正式包
+npx tauri build                          # apps/desktop 目录下执行
+
+# 桌面端调试包
+npx tauri build --debug
+
+# 仅打 deb
+npx tauri build --bundles deb
+
+# 安卓端正式包
+npx tauri android build
+
+# 安卓端调试包（APK）
+npx tauri android build --debug --apk
+
+# 安卓端 AAB + 按 ABI 拆分
+npx tauri android build --aab --split-per-abi --target aarch64
+```
 
 ---
 
-## 七、环境变量
+## 七、Monorepo 全局命令
+
+| 命令             | 说明                                   |
+| ---------------- | -------------------------------------- |
+| `pnpm install`   | 安装所有 workspace 依赖                |
+| `pnpm typecheck` | 所有包 TypeScript 类型检查             |
+| `pnpm lint`      | ESLint 全量检查                        |
+| `pnpm build`     | 构建所有应用（**仅前端 JS/CSS**）      |
+| `pnpm build:pkg` | **交互式打包**（桌面安装包 + APK/AAB） |
+
+---
+
+## 八、环境变量
 
 ### 后端
 
@@ -299,7 +408,7 @@ docker compose -f deploy/docker-compose.yml down      # 停止
 
 ---
 
-## 八、测试
+## 九、测试
 
 ### 前端测试
 
@@ -422,7 +531,7 @@ apps/web/e2e/
 
 ---
 
-## 九、文档更新规则
+## 十、文档更新规则
 
 1. 任何 `package.json` scripts 的**增删改**，必须同步更新本文档的对应章节
 2. 任何 Tauri 配置（`tauri.conf.json`、`capabilities/`）的变更，必须同步更新本文档

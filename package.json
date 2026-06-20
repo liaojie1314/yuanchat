@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
+    "build:pkg": "node scripts/build.mjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint . --ext ts,tsx --fix",
     "format": "prettier --write \"**/*.{ts,tsx,css,json,md}\" --ignore-path .gitignore",

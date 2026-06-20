@@ -89,4 +89,4 @@ server/server
 test-results/
 playwright-report/
 
-.agents/
+.design/
