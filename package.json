@@ -49,7 +49,7 @@
   },
   "packageManager": "pnpm@10.22.0",
   "engines": {
-    "node": ">=20",
+    "node": ">=20.19.0",
     "pnpm": ">=10"
   },
   "lint-staged": {

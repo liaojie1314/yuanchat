@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -36,16 +37,19 @@ if (engines.node) {
 if (engines.pnpm) {
   const required = engines.pnpm.replace(/[>=<~\s]/g, "");
   try {
-    const stdout = await import("node:child_process").then((m) =>
-      m.execSync("pnpm --version", { encoding: "utf-8" }),
-    );
-    const current = stdout.trim().split(".").map(Number);
+    const stdout = execSync("pnpm --version", { encoding: "utf-8" }).trim();
+    const current = stdout.split(".").map(Number);
     const requiredMajor = Number(required);
 
-    if (current[0] < requiredMajor) {
+    if (Number.isNaN(current[0])) {
+      errors.push(
+        `⚠️  无法解析 pnpm 版本号: "${stdout}"\n` +
+          `   请确保 pnpm 已正确安装`,
+      );
+    } else if (current[0] < requiredMajor) {
       errors.push(
         `❌ pnpm 版本不匹配！\n` +
-          `   当前版本: v${stdout.trim()}\n` +
+          `   当前版本: v${stdout}\n` +
           `   项目要求: ${engines.pnpm}\n` +
           `\n   请升级 pnpm 到 ${required} 或更高版本：\n` +
           `   • npm:  npm install -g pnpm@latest\n` +
