@@ -16,7 +16,7 @@
  *   node scripts/build.mjs
  *   npm run build:pkg         # 通过 package.json scripts 调用
  *
- * @see doc/DEVELOPMENT.md
+ * @see docs/DEVELOPMENT.md
  */
 
 import readline from "node:readline";

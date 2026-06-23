@@ -12,7 +12,7 @@
 | 前端框架    | React                                                  |
 | 后端语言    | Go (Golang)                                            |
 | 容器化      | Docker Compose（开发环境），Kubernetes（生产环境可选） |
-| 文档位置    | `doc/` 目录（本文档所在目录）                          |
+| 文档位置    | `docs/` 目录（本文档所在目录）                         |
 | AI 辅助文档 | `.claude/` 目录、`AGENTS.md`、`CLAUDE.md`              |
 
 ---
@@ -115,7 +115,7 @@
 
 ```
 yuanchat/
-├── doc/                          # 📖 项目文档
+├── docs/                          # 📖 项目文档
 │   ├── 00_MASTER_PLAN.md         # 总体计划书（本文件）
 │   ├── 01_ARCHITECTURE.md        # 详细架构设计
 │   ├── 02_API_DESIGN.md          # API 接口设计

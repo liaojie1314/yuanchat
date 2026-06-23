@@ -40,10 +40,10 @@ cd apps/desktop && pnpm tauri:dev
 
 ## 文档
 
-- [总体计划书](doc/00_MASTER_PLAN.md)
-- [详细架构设计](doc/01_ARCHITECTURE.md)
-- [数据库设计](doc/03_DB_SCHEMA.md)
-- **[开发与打包指南](doc/DEVELOPMENT.md)** ← 启动/构建/打包命令看这里
+- [总体计划书](docs/00_MASTER_PLAN.md)
+- [详细架构设计](docs/01_ARCHITECTURE.md)
+- [数据库设计](docs/03_DB_SCHEMA.md)
+- **[开发与打包指南](docs/DEVELOPMENT.md)** ← 启动/构建/打包命令看这里
 
 ## 开发规范
 

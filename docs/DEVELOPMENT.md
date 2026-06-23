@@ -22,7 +22,7 @@ yuanchat/
 │   └── design-system/    # Material 3 设计 Tokens、i18n、全局样式
 ├── server/               # Go 后端
 ├── deploy/               # Docker Compose 部署配置
-├── doc/                  # 项目文档
+├── docs/                 # 项目文档
 ├── pnpm-workspace.yaml   # pnpm monorepo 配置
 └── turbo.json            # Turborepo 任务编排
 ```
