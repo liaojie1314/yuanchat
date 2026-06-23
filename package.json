@@ -21,6 +21,7 @@
     "clean": "turbo clean",
     "test": "turbo test",
     "test:coverage": "turbo test:coverage",
+    "preinstall": "node scripts/check-env.mjs",
     "prepare": "husky"
   },
   "devDependencies": {
