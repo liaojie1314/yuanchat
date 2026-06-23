@@ -10,5 +10,11 @@ export default {
     "selector-pseudo-class-no-unknown": [true, { ignorePseudoClasses: ["global"] }],
     // 允许项目已有的 camelCase keyframes（如 auroraFloat、sweepDown）
     "keyframes-name-pattern": /^[a-z][a-zA-Z0-9-]*$/,
+    // 禁用 vendor-prefix 检查 — 本项目需兼容旧 WebView（Chrome 74），
+    // 自动移除 -webkit- 前缀会破坏兼容性
+    "property-no-vendor-prefix": null,
+    // word-break: break-word 虽被标为废弃，但在 Chrome 74 中是唯一有效的
+    // 换行方案（overflow-wrap: anywhere 需要 Chrome 80+）
+    "declaration-property-value-keyword-no-deprecated": null,
   },
 };
