@@ -137,7 +137,8 @@
   .input-base {
     @apply border-outline-variant w-full rounded-xl border px-4 py-3;
 
-    background: rgb(var(--md-sys-color-surface-container-low-rgb));
+    /* 亮色：surfaceContainerLowest = #FFFFFF，比原来的 #EBF2FC 更浅更干净 */
+    background: rgb(var(--md-sys-color-surface-container-lowest-rgb));
     color: rgb(var(--md-sys-color-on-surface-rgb));
     border-color: rgb(var(--md-sys-color-outline-variant-rgb));
     transition:
@@ -145,8 +146,14 @@
       box-shadow 0.2s var(--md-easing-standard);
   }
 
+  /* 暗色：surfaceContainerLowest = #090F15 太深，改用 surfaceContainerHigh = #252B33 */
+  .dark .input-base {
+    background: rgb(var(--md-sys-color-surface-container-high-rgb));
+  }
+
   .input-base::placeholder {
-    color: rgb(var(--md-sys-color-on-surface-variant-rgb));
+    /* 50% 透明度让 placeholder 比正文更灰、更弱 */
+    color: rgb(var(--md-sys-color-on-surface-variant-rgb) / 50%);
   }
 
   .input-base:focus {

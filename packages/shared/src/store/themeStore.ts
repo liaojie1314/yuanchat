@@ -140,6 +140,7 @@ export const useThemeStore = create<ThemeState>()(
             ["surfaceBright", "surface-bright"],
             ["surfaceDim", "surface-dim"],
             ["surfaceContainer", "surface-container"],
+            ["surfaceContainerLowest", "surface-container-lowest"],
             ["surfaceContainerLow", "surface-container-low"],
             ["surfaceContainerHigh", "surface-container-high"],
             ["outline", "outline"],
