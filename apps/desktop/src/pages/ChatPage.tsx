@@ -1,5 +1,6 @@
 import { ConversationList, ChatWindow, ResizeHandle } from "@yuanchat/ui";
 import { useConversationStore, useResizable } from "@yuanchat/shared";
+import { MessageSquare } from "lucide-react";
 
 export function ChatPage() {
   const activeConversationId = useConversationStore((s) => s.activeId);
@@ -26,16 +27,7 @@ export function ChatPage() {
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
               <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-surface-container-high">
-                <svg
-                  width="40"
-                  height="40"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                >
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                </svg>
+                <MessageSquare size={40} strokeWidth={1.5} />
               </div>
               <p className="text-on-surface-variant text-body-md">选择一条会话开始聊天</p>
             </div>
