@@ -1,16 +1,17 @@
 import { useState, useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Button, Input } from "@yuanchat/ui";
 import { useAuthStore, useIsDesktop } from "@yuanchat/shared";
 import { validatePassword } from "@yuanchat/shared/utils";
 import { useOpenAuthWindow } from "../hooks/useTauriAuth";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { TitleBar } from "../components/TitleBar";
-import { MessageCircle } from "lucide-react";
+import { MessageCircle, QrCode } from "lucide-react";
 
 export function LoginPage() {
   const isDesktop = useIsDesktop();
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
   const openAuthWindow = useOpenAuthWindow();
   const [yuanchatId, setYuanchatId] = useState("");
   const [password, setPassword] = useState("");
@@ -19,7 +20,6 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
   const loginWithPassword = useAuthStore((s) => s.loginWithPassword);
 
-  // 鼠标跟随光晕
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const glowRef = useRef<HTMLDivElement>(null);
 
@@ -29,14 +29,6 @@ export function LoginPage() {
     return () => window.removeEventListener("mousemove", onMove);
   }, []);
 
-  /**
-   * 登录成功后切换窗口为首页尺寸
-   *
-   * 登录页窗口 540×600（紧凑表单），
-   * 首页需要更大的空间展示三栏布局（侧边栏 | 聊天窗 | 详情）。
-   * Tauri 环境下调用原生 API 调整窗口大小；
-   * 非 Tauri（浏览器开发）下仅跳转路由，App 自动切换页面。
-   */
   const resizeToHomepage = async () => {
     try {
       const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
@@ -50,7 +42,22 @@ export function LoginPage() {
     }
   };
 
-  /** 清除所有校验错误 */
+  // 关闭登录窗口时同时关闭所有子窗口（注册、忘记密码等）
+  const handleCloseAll = async () => {
+    try {
+      const { getAllWindows } = await import("@tauri-apps/api/window");
+      const windows = await getAllWindows();
+      await Promise.all(windows.map((w) => w.close()));
+    } catch {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        await getCurrentWindow().close();
+      } catch {
+        /* 非 Tauri 环境 */
+      }
+    }
+  };
+
   const clearErrors = () => {
     setYuanchatIdError("");
     setPasswordError("");
@@ -60,7 +67,6 @@ export function LoginPage() {
     clearErrors();
     let valid = true;
 
-    // 逐字段校验
     if (!yuanchatId.trim()) {
       setYuanchatIdError("请输入元聊号");
       valid = false;
@@ -75,7 +81,6 @@ export function LoginPage() {
     setLoading(true);
     try {
       await loginWithPassword(yuanchatId, password);
-      // 桌面端登录成功 → 窗口切换为首页尺寸
       if (isDesktop) await resizeToHomepage();
     } catch (e) {
       setPasswordError(e instanceof Error ? e.message : "登录失败");
@@ -86,7 +91,6 @@ export function LoginPage() {
 
   return (
     <div className="surface-gradient app-screen relative flex flex-col overflow-hidden">
-      {/* 背景装饰 */}
       <div ref={glowRef} className="cursor-glow" style={{ left: mousePos.x, top: mousePos.y }} />
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="aurora-orb -left-20 -top-20 h-[500px] w-[500px] bg-[#7EC8E3]" />
@@ -96,23 +100,19 @@ export function LoginPage() {
       <div className="dot-grid" />
       <div className="light-sweep" />
 
-      {/* 自定义操作栏 — 仅桌面端显示 */}
-      {isDesktop && !isMobile && <TitleBar />}
+      {isDesktop && !isMobile && <TitleBar showMaximize={false} onClose={handleCloseAll} />}
 
-      {/* 表单区域 —— flex-col + overflow-y-auto + 卡片 m-auto：
-          有余量时垂直居中；软键盘弹起视口收缩、内容超高时 auto 外边距归零，
-          回退为顶部对齐并可滚动，保证被键盘遮挡的字段可滚到可见区 */}
       <div className="relative flex flex-1 flex-col overflow-y-auto">
         <div className="relative m-auto w-full max-w-md p-8">
-          <div className="mb-10 text-center">
-            <div className="brand-gradient glow-brand mb-5 inline-flex h-20 w-20 items-center justify-center rounded-2xl text-white">
-              <MessageCircle size={40} />
+          <div className="mb-8 text-center">
+            <div className="brand-gradient glow-brand mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl text-white">
+              <MessageCircle size={30} />
             </div>
-            <h1 className="text-headline-lg font-semibold text-on-surface">元聊</h1>
-            <p className="text-on-surface-variant mt-2 text-body-lg">即时通讯</p>
+            <h1 className="text-2xl font-bold text-on-surface">元聊</h1>
+            <p className="text-on-surface-variant mt-1 text-sm">即时通讯</p>
           </div>
 
-          <div className="space-y-4">
+          <div className="space-y-1">
             <Input
               placeholder="元聊号"
               type="text"
@@ -135,30 +135,41 @@ export function LoginPage() {
               onKeyDown={(e) => e.key === "Enter" && handleLogin()}
               error={passwordError}
             />
-            <Button className="w-full" onClick={handleLogin} disabled={loading}>
+            <Button className="mt-1 w-full" onClick={handleLogin} disabled={loading}>
               {loading ? "登录中…" : "登 录"}
             </Button>
           </div>
 
-          <p className="text-on-surface-variant mt-6 text-center text-label-md">
-            还没有账号？{" "}
-            {isDesktop ? (
+          {/* 辅助链接行 — 手机端只有忘记密码靠右，桌面端左右各一 */}
+          <div className="mt-4 flex items-center text-sm">
+            <button
+              type="button"
+              onClick={() => openAuthWindow("/forgot-password", "忘记密码", 540, 680)}
+              className={`text-on-surface-variant hover:text-primary${isMobile ? "ml-auto" : ""}`}
+            >
+              忘记密码
+            </button>
+            {!isMobile && (
               <button
                 type="button"
-                onClick={() => openAuthWindow("/register", "注册元聊")}
-                className="cursor-pointer font-medium text-primary hover:underline"
+                onClick={() => navigate("/qr-login")}
+                className="text-on-surface-variant ml-auto inline-flex items-center gap-1.5 hover:text-primary"
               >
-                立即注册
+                <QrCode size={14} />
+                扫码登录
               </button>
-            ) : (
-              <Link
-                to="/register"
-                replace
-                className="cursor-pointer font-medium text-primary hover:underline"
-              >
-                立即注册
-              </Link>
             )}
+          </div>
+
+          <p className="text-on-surface-variant mt-4 text-center text-sm">
+            还没有账号？{" "}
+            <button
+              type="button"
+              onClick={() => openAuthWindow("/register", "注册元聊")}
+              className="cursor-pointer font-medium text-primary"
+            >
+              立即注册
+            </button>
           </p>
         </div>
       </div>

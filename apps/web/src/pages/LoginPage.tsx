@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Button, Input } from "@yuanchat/ui";
 import { useAuthStore } from "@yuanchat/shared";
 import { validatePassword } from "@yuanchat/shared/utils";
-import { MessageCircle } from "lucide-react";
+import { MessageCircle, QrCode } from "lucide-react";
 
 export function LoginPage() {
+  const navigate = useNavigate();
   const [yuanchatId, setYuanchatId] = useState("");
   const [password, setPassword] = useState("");
   const [yuanchatIdError, setYuanchatIdError] = useState("");
@@ -13,7 +14,6 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
   const loginWithPassword = useAuthStore((s) => s.loginWithPassword);
 
-  // 鼠标跟随光晕
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const glowRef = useRef<HTMLDivElement>(null);
 
@@ -23,7 +23,6 @@ export function LoginPage() {
     return () => window.removeEventListener("mousemove", onMove);
   }, []);
 
-  /** 清除所有校验错误 */
   const clearErrors = () => {
     setYuanchatIdError("");
     setPasswordError("");
@@ -33,7 +32,6 @@ export function LoginPage() {
     clearErrors();
     let valid = true;
 
-    // 逐字段校验
     if (!yuanchatId.trim()) {
       setYuanchatIdError("请输入元聊号");
       valid = false;
@@ -56,70 +54,79 @@ export function LoginPage() {
   };
 
   return (
-    <div className="surface-gradient relative flex min-h-[var(--app-height,100vh)] flex-col overflow-y-auto py-8">
-      {/* 鼠标跟随光晕 */}
+    <div className="surface-gradient relative flex min-h-[var(--app-height,100vh)] flex-col overflow-y-auto">
       <div ref={glowRef} className="cursor-glow" style={{ left: mousePos.x, top: mousePos.y }} />
 
-      {/* 极光光斑 — 3 个彩色大光球漂浮动画 */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="aurora-orb -left-20 -top-20 h-[500px] w-[500px] bg-[#7EC8E3]" />
         <div className="aurora-orb -right-32 top-1/2 h-[400px] w-[400px] bg-[#A8CFFF]" />
         <div className="aurora-orb -bottom-20 left-1/3 h-[350px] w-[350px] bg-[#B8D8F0]" />
       </div>
-
-      {/* 微尘网格 */}
       <div className="dot-grid" />
-
-      {/* 流光扫描 */}
       <div className="light-sweep" />
 
-      <div className="relative m-auto w-full max-w-md p-8">
-        <div className="mb-10 text-center">
-          <div className="brand-gradient glow-brand mb-5 inline-flex h-20 w-20 items-center justify-center rounded-2xl text-white">
-            <MessageCircle size={40} />
+      <div className="relative m-auto w-full max-w-md px-5 py-8">
+        {/* 磨砂玻璃卡片 */}
+        <div className="rounded-3xl border border-white/60 bg-white/70 px-10 py-12 shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl">
+          {/* Logo */}
+          <div className="mb-8 text-center">
+            <div className="brand-gradient glow-brand mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl text-white shadow-lg">
+              <MessageCircle size={30} />
+            </div>
+            <h1 className="text-2xl font-bold text-on-surface">元聊</h1>
+            <p className="text-on-surface-variant mt-1 text-sm">即时通讯</p>
           </div>
-          <h1 className="text-headline-lg font-semibold text-on-surface">元聊</h1>
-          <p className="text-on-surface-variant mt-2 text-body-lg">即时通讯</p>
-        </div>
 
-        <div className="space-y-4">
-          <Input
-            placeholder="元聊号"
-            type="text"
-            value={yuanchatId}
-            onChange={(e) => {
-              setYuanchatId(e.target.value);
-              if (yuanchatIdError) setYuanchatIdError("");
-            }}
-            onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-            error={yuanchatIdError}
-          />
-          <Input
-            placeholder="密码"
-            type="password"
-            value={password}
-            onChange={(e) => {
-              setPassword(e.target.value);
-              if (passwordError) setPasswordError("");
-            }}
-            onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-            error={passwordError}
-          />
-          <Button className="w-full" onClick={handleLogin} disabled={loading}>
-            {loading ? "登录中…" : "登 录"}
-          </Button>
-        </div>
+          <div className="space-y-1">
+            <Input
+              placeholder="元聊号"
+              type="text"
+              value={yuanchatId}
+              onChange={(e) => {
+                setYuanchatId(e.target.value);
+                if (yuanchatIdError) setYuanchatIdError("");
+              }}
+              onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+              error={yuanchatIdError}
+            />
+            <Input
+              placeholder="密码"
+              type="password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (passwordError) setPasswordError("");
+              }}
+              onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+              error={passwordError}
+            />
+            <Button className="mt-1 w-full" onClick={handleLogin} disabled={loading}>
+              {loading ? "登录中…" : "登 录"}
+            </Button>
+          </div>
 
-        <p className="text-on-surface-variant mt-6 text-center text-label-md">
-          还没有账号？{" "}
-          <Link
-            to="/register"
-            replace
-            className="cursor-pointer font-medium text-primary hover:underline"
-          >
-            立即注册
-          </Link>
-        </p>
+          {/* 辅助链接行 */}
+          <div className="mt-4 flex items-center justify-between text-sm">
+            <Link to="/forgot-password" className="text-on-surface-variant hover:text-primary">
+              忘记密码
+            </Link>
+            <button
+              type="button"
+              onClick={() => navigate("/qr-login")}
+              className="text-on-surface-variant inline-flex items-center gap-1.5 hover:text-primary"
+            >
+              <QrCode size={14} />
+              扫码登录
+            </button>
+          </div>
+
+          <p className="text-on-surface-variant mt-4 text-center text-sm">
+            还没有账号？{" "}
+            <Link to="/register" replace className="cursor-pointer font-medium text-primary">
+              立即注册
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
   );

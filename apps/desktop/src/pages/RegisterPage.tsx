@@ -15,7 +15,6 @@ export function RegisterPage() {
   const closeAuthWindow = useCloseAuthWindow();
   const registerWithPassword = useAuthStore((s) => s.registerWithPassword);
 
-  /** 回到登录页：聚焦主窗口（label="main"）并关闭当前注册窗口 */
   const goToLogin = async () => {
     try {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
@@ -27,7 +26,6 @@ export function RegisterPage() {
       }
       await getCurrentWindow().close();
     } catch {
-      // 非 Tauri 环境 fallback 到路由跳转
       navigate("/login", { replace: true });
     }
   };
@@ -58,7 +56,6 @@ export function RegisterPage() {
     fetchCaptcha();
   }, []);
 
-  /** 清除所有校验错误 */
   const clearErrors = () => {
     setNicknameError("");
     setPhoneError("");
@@ -70,25 +67,21 @@ export function RegisterPage() {
     clearErrors();
     let valid = true;
 
-    // 逐字段校验
     const nnResult = validateNickname(nickname);
     if (!nnResult.valid) {
       setNicknameError(nnResult.errors[0]);
       valid = false;
     }
-
     const phResult = validatePhone(phone);
     if (!phResult.valid) {
       setPhoneError(phResult.errors[0]);
       valid = false;
     }
-
     const pwResult = validatePassword(password);
     if (!pwResult.valid) {
       setPasswordError(pwResult.errors[0]);
       valid = false;
     }
-
     if (!captchaAnswer.trim()) {
       setCaptchaError("请输入验证码");
       valid = false;
@@ -122,10 +115,8 @@ export function RegisterPage() {
       </div>
       <div className="dot-grid pointer-events-none fixed inset-0" />
 
-      {/* 自定义操作栏 — 仅桌面端显示，移动端隐藏（避免与状态栏重叠、无需窗口控制） */}
-      {isDesktop && !isMobile && <TitleBar />}
+      {isDesktop && !isMobile && <TitleBar showMaximize={false} />}
 
-      {/* 返回按钮 — 桌面端（无浏览器导航）不显示 */}
       {!isDesktop && (
         <Link
           to="/login"
@@ -136,23 +127,19 @@ export function RegisterPage() {
         </Link>
       )}
 
-      {/* 表单区域 —— flex-col + overflow-y-auto + 卡片 m-auto：
-          有余量时垂直居中；软键盘弹起视口收缩、内容超高时 auto 外边距归零，
-          回退为顶部对齐并可滚动，保证被键盘遮挡的字段可滚到可见区 */}
       <div className="relative flex flex-1 flex-col overflow-y-auto">
-        <div className="relative m-auto w-full max-w-md px-8 py-12">
-          {/* Logo */}
-          <div className="mb-8 text-center">
-            <div className="brand-gradient glow-brand mx-auto mb-5 inline-flex h-20 w-20 items-center justify-center rounded-2xl text-white">
-              <UserPlus size={38} />
+        <div className="relative m-auto w-full max-w-md px-8 py-10">
+          <div className="mb-7 text-center">
+            <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl text-white">
+              <UserPlus size={30} />
             </div>
-            <h1 className="text-headline-lg font-semibold text-on-surface">创建账号</h1>
-            <p className="text-on-surface-variant mt-2 text-body-lg">
-              注册后将获得专属 <span className="font-medium text-primary">元聊号</span>
+            <h1 className="text-2xl font-bold text-on-surface">创建账号</h1>
+            <p className="text-on-surface-variant mt-1 text-sm">
+              注册后获得专属 <span className="font-medium text-primary">元聊号</span>
             </p>
           </div>
 
-          <div className="space-y-5">
+          <div className="space-y-1">
             <Input
               placeholder="昵称"
               value={nickname}
@@ -183,11 +170,10 @@ export function RegisterPage() {
               error={passwordError}
             />
 
-            {/* 验证码 */}
-            <div className="flex items-start gap-3">
+            <div className="flex items-start gap-2">
               <div className="flex-1">
                 <Input
-                  placeholder="验证码答案"
+                  placeholder="验证码"
                   value={captchaAnswer}
                   onChange={(e) => {
                     setCaptchaAnswer(e.target.value);
@@ -200,7 +186,7 @@ export function RegisterPage() {
               <button
                 type="button"
                 onClick={fetchCaptcha}
-                className="group relative h-12 w-[140px] shrink-0 overflow-hidden rounded-xl bg-surface-container-low"
+                className="group relative mt-[1px] h-12 w-[120px] shrink-0 overflow-hidden rounded-xl border border-outline-variant bg-surface-container-low"
                 title="点击刷新验证码"
               >
                 <span
@@ -208,33 +194,32 @@ export function RegisterPage() {
                   dangerouslySetInnerHTML={{
                     __html:
                       captchaImg ||
-                      '<span class="flex h-full items-center justify-center text-label-sm text-on-surface-variant">点击获取</span>',
+                      '<span class="flex h-full items-center justify-center text-xs text-on-surface-variant">点击获取</span>',
                   }}
                 />
                 <span className="absolute inset-0 flex items-center justify-center bg-surface/80 opacity-0 transition-opacity group-hover:opacity-100">
-                  <RefreshCw size={16} className="text-primary" />
+                  <RefreshCw size={14} className="text-primary" />
                 </span>
               </button>
             </div>
 
-            <Button className="w-full" onClick={handleRegister} disabled={loading}>
+            <Button className="mt-1 w-full" onClick={handleRegister} disabled={loading}>
               {loading ? "注册中…" : "注 册"}
             </Button>
           </div>
 
-          {/* 已有账号？桌面端聚焦/打开登录窗口，Web 端路由跳转 */}
-          <p className="text-on-surface-variant mt-6 text-center text-label-md">
+          <p className="text-on-surface-variant mt-6 text-center text-sm">
             已有账号？{" "}
             {isDesktop ? (
               <button
                 type="button"
                 onClick={goToLogin}
-                className="font-medium text-primary hover:underline"
+                className="font-medium text-primary hover:opacity-80"
               >
                 立即登录
               </button>
             ) : (
-              <Link to="/login" replace className="font-medium text-primary hover:underline">
+              <Link to="/login" replace className="font-medium text-primary hover:opacity-80">
                 立即登录
               </Link>
             )}
