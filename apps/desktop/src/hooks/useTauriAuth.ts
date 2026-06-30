@@ -8,7 +8,7 @@ import { useCallback } from "react";
  * Web 端 fallback 为普通页面跳转。
  */
 export function useOpenAuthWindow() {
-  return useCallback(async (route: string, title: string) => {
+  return useCallback(async (route: string, title: string, width = 540, height = 760) => {
     try {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
       const label = route.replace(/\//g, "");
@@ -29,8 +29,8 @@ export function useOpenAuthWindow() {
       new WebviewWindow(label, {
         url,
         title,
-        width: 540,
-        height: 760,
+        width,
+        height,
         center: true,
         resizable: false,
         decorations: false,

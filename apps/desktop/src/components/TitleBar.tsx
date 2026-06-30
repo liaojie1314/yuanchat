@@ -1,20 +1,14 @@
 import { useState, useEffect } from "react";
 import { Minus, Maximize2, Minimize2, X } from "lucide-react";
 
-/**
- * 自定义窗口操作栏 — 替代原生标题栏
- *
- * @description
- * 在 Tauri v2 桌面端替代系统原生标题栏（通过 `decorations: false` 隐藏原生装饰）。
- * 提供：
- * - **窗口拖拽**：`data-tauri-drag-region`
- * - **最小化**：`getCurrentWindow().minimize()`
- * - **最大化/还原**：`getCurrentWindow().toggleMaximize()` + 乐观切换图标
- * - **关闭**：`getCurrentWindow().close()`
- *
- * 所有 Tauri API 通过 try-catch 兜底，非 Tauri 环境无操作。
- */
-export function TitleBar() {
+interface TitleBarProps {
+  /** 是否显示最大化/还原按钮，固定尺寸窗口（登录/注册/忘记密码）传 false */
+  showMaximize?: boolean;
+  /** 自定义关闭处理器；不传时默认关闭当前窗口 */
+  onClose?: () => Promise<void>;
+}
+
+export function TitleBar({ showMaximize = true, onClose }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
 
   // 启动时检测初始状态 + 监听窗口事件同步最大化图标
@@ -60,6 +54,10 @@ export function TitleBar() {
   };
 
   const handleClose = async () => {
+    if (onClose) {
+      await onClose();
+      return;
+    }
     try {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       await getCurrentWindow().close();
@@ -86,15 +84,17 @@ export function TitleBar() {
           <Minus size={16} />
         </button>
 
-        {/* 最大化 / 还原 */}
-        <button
-          type="button"
-          onClick={handleToggleMaximize}
-          className="text-on-surface-variant inline-flex h-7 w-10 items-center justify-center rounded-md transition-colors hover:bg-surface-container-high hover:text-on-surface"
-          title={isMaximized ? "还原" : "最大化"}
-        >
-          {isMaximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-        </button>
+        {/* 最大化 / 还原 — 固定尺寸窗口隐藏 */}
+        {showMaximize && (
+          <button
+            type="button"
+            onClick={handleToggleMaximize}
+            className="text-on-surface-variant inline-flex h-7 w-10 items-center justify-center rounded-md transition-colors hover:bg-surface-container-high hover:text-on-surface"
+            title={isMaximized ? "还原" : "最大化"}
+          >
+            {isMaximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          </button>
+        )}
 
         {/* 关闭 */}
         <button
