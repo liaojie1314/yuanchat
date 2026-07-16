@@ -94,5 +94,6 @@ server/server
 # ====================
 test-results/
 playwright-report/
+.playwright-mcp/
 
-.design/.playwright-mcp/
+.design/

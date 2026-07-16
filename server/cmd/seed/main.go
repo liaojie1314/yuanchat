@@ -166,7 +166,8 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convType int16, name *
 	}
 
 	// 查找同类型且成员集合完全一致的会话
-	var convID uuid.UUID
+	// 注意：gorm Raw().Scan 不能直接扫进 uuid.UUID（驱动返回 string），用 string 中转
+	var convIDStr string
 	err := db.WithContext(ctx).Raw(`
 		SELECT c.id FROM conversations c
 		WHERE c.type = ? AND c.deleted_at IS NULL
@@ -175,13 +176,13 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convType int16, name *
 		    SELECT 1 FROM conversation_members m
 		    WHERE m.conversation_id = c.id AND m.user_id NOT IN ?
 		  )
-		LIMIT 1`, convType, len(members), memberIDs).Scan(&convID).Error
+		LIMIT 1`, convType, len(members), memberIDs).Scan(&convIDStr).Error
 	if err != nil {
 		return nil, err
 	}
-	if convID != uuid.Nil {
+	if convIDStr != "" {
 		var existing model.Conversation
-		if err := db.WithContext(ctx).First(&existing, "id = ?", convID).Error; err != nil {
+		if err := db.WithContext(ctx).First(&existing, "id = ?", convIDStr).Error; err != nil {
 			return nil, err
 		}
 		return &existing, nil

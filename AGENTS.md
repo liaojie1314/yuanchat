@@ -34,7 +34,21 @@
 
 ## 当前状态
 
-项目处于**初始化阶段**，正在搭建项目骨架和基础设施。
+> 更新于 2026-07-16
+
+**MVP 核心链路已打通**（阶段一进行中）：
+
+- ✅ 认证：注册/登录（手机号/邮箱 + 密码 + SVG 验证码）、JWT 双 Token
+- ✅ 聊天核心闭环：会话列表、文本消息 WebSocket 实时收发、已读回执、
+  正在输入、历史游标分页、断线重连、失败重试（协议见 `docs/02_CHAT_API.md`）
+- ✅ 三端响应式聊天主界面（`packages/ui/src/ChatScreen.tsx` 编排）
+- ✅ 一键启动：`pnpm dev:web` / `dev:web:mock` / `dev:desktop` / `dev:android` /
+  `dev:server` / `dev:stop`（`scripts/dev.mjs`，见 `docs/DEVELOPMENT.md` 第零章）
+- ⏳ 未做：token 刷新（access 15min 过期后需重新登录，最高优先）、
+  联系人/好友、建群流程、图片/文件/语音消息（需 MinIO）、撤回、presence
+
+后端单进程双端口：REST :8080 + WebSocket :8081；消息分发为内存 Hub
+（`Dispatcher` 接口，多实例时换 Redis Pub/Sub 实现）。
 
 ## 博客
 

@@ -1,6 +1,13 @@
 # 01 — 详细架构设计
 
 > **前置阅读**：[00_MASTER_PLAN.md](./00_MASTER_PLAN.md)
+>
+> **实现状态（2026-07-16）**：本文档描述的是**目标微服务架构**。当前实现为
+> **单体 Go 服务**（`server/`，单进程双端口：REST :8080 + WebSocket :8081），
+> 分层为 handler → service → repository，尚未拆分 gRPC 微服务。
+> 消息分发为进程内内存 Hub（`ws.Dispatcher` 接口），多实例部署时以
+> Redis Pub/Sub 实现同一接口替换。已实现的聊天协议见
+> [02_CHAT_API.md](./02_CHAT_API.md)。
 
 ---
 
