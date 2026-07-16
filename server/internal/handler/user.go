@@ -88,6 +88,32 @@ func (h *UserHandler) Login(c *gin.Context) {
 	})
 }
 
+// Refresh exchanges a refresh token for a new token pair (sliding session).
+func (h *UserHandler) Refresh(c *gin.Context) {
+	var req RefreshRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	pair, err := h.svc.Refresh(c.Request.Context(), req.RefreshToken)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidRefresh) {
+			Unauthorized(c, "invalid or expired refresh token")
+			return
+		}
+		h.logger.Error("refresh failed", zap.Error(err))
+		InternalError(c, "refresh failed")
+		return
+	}
+
+	Success(c, gin.H{
+		"access_token":  pair.AccessToken,
+		"refresh_token": pair.RefreshToken,
+		"expires_in":    pair.ExpiresIn,
+	})
+}
+
 // GetProfile returns the current user's profile.
 func (h *UserHandler) GetProfile(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
@@ -156,6 +182,10 @@ type RegisterRequest struct {
 type LoginRequest struct {
 	Account  string `json:"account" binding:"required"`
 	Password string `json:"password" binding:"required"`
+}
+
+type RefreshRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
 }
 
 type UpdateProfileRequest struct {

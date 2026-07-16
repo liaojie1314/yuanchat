@@ -9,6 +9,29 @@
 - **WebSocket**：浏览器 WS API 无法携带 Header，改用 query 参数：
   `ws://<host>:8081/ws?token=<access_token>`。token 无效返回 HTTP 401，不升级连接。
 
+### POST /api/v1/auth/refresh（无需 Authorization）
+
+滑动会话（轮换）：用有效的 refresh token 换**全新的 token 对**，
+access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不掉线。
+旧 refresh 在剩余有效期内仍可用（无服务端存储；Claims 含 `jti`，后续可加黑名单失效）。
+
+```json
+// 请求
+{ "refresh_token": "eyJ..." }
+
+// 响应（与登录一致，无 user 字段）
+{
+  "code": 0,
+  "message": "ok",
+  "data": { "access_token": "eyJ...", "refresh_token": "eyJ...", "expires_in": 900 }
+}
+```
+
+- refresh 无效/过期/用 access 冒充 → HTTP 401，前端清登录态回登录页。
+- 前端策略（`packages/shared/src/api/tokenManager.ts`）：
+  - **主动**：REST 请求发出前与 WS 拨号前，access 距过期 < 60s 即先刷新（单飞行去重并发）；
+  - **被动**：REST 收到 401 时兜底刷新并重试原请求一次。
+
 ## 二、REST 端点
 
 ### GET /api/v1/conversations

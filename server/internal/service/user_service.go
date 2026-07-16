@@ -21,6 +21,7 @@ var (
 	ErrDuplicateUser   = errors.New("phone or email already registered")
 	ErrInvalidPassword = errors.New("invalid password")
 	ErrUserNotFound    = errors.New("user not found")
+	ErrInvalidRefresh  = errors.New("invalid or expired refresh token")
 )
 
 // UserService handles user registration, login, and profile operations.
@@ -137,6 +138,32 @@ func (s *UserService) Profile(ctx context.Context, userID uuid.UUID) (*model.Use
 		return nil, fmt.Errorf("find user: %w", err)
 	}
 	return user, nil
+}
+
+// Refresh exchanges a valid refresh token for a brand-new token pair.
+//
+// 滑动会话（轮换）策略：access 与 refresh 都重新签发、各自重置 TTL，
+// 持续活跃的用户永不掉线。旧 refresh 在剩余有效期内仍可用（无服务端存储）。
+func (s *UserService) Refresh(ctx context.Context, refreshToken string) (*jwt.TokenPair, error) {
+	claims, err := s.jwtGen.Validate(refreshToken)
+	if err != nil || claims.TokenUse != "refresh" {
+		return nil, ErrInvalidRefresh
+	}
+
+	// 用户被注销/封禁后 refresh 立即失效
+	user, err := s.repo.FindByID(ctx, claims.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("find user: %w", err)
+	}
+	if user == nil {
+		return nil, ErrInvalidRefresh
+	}
+
+	pair, err := s.jwtGen.GeneratePair(claims.UserID, claims.DeviceID)
+	if err != nil {
+		return nil, fmt.Errorf("generate tokens: %w", err)
+	}
+	return pair, nil
 }
 
 func (s *UserService) buildAuthResult(user model.User, deviceID string) (*AuthResult, error) {

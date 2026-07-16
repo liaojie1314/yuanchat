@@ -5,6 +5,10 @@
  * 管理用户登录/注册流程，存储 Access Token（15min）和 Refresh Token（7天）。
  * 使用 Zustand persist 中间件持久化 token 到 localStorage，刷新后自动恢复登录态。
  *
+ * 静默刷新（滑动会话）：expiresAt 记录 access 过期时刻，
+ * api/tokenManager 在临近过期或 401 时调用此处注册的 refresh handler
+ * 置换全新 token 对；refresh 也失效时自动清登录态回登录页。
+ *
  * API 调用流程：
  * 1. loginWithPassword() → POST /api/v1/users/login → 存储 token
  * 2. registerWithPassword() → POST /api/v1/users/register → 存储 token
@@ -20,6 +24,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { apiPost } from "../api/client";
+import { setRefreshHandler } from "../api/tokenManager";
 
 // ========================================
 // Types
@@ -53,6 +58,18 @@ interface LoginResponse {
   expires_in: number;
 }
 
+/** POST /api/v1/auth/refresh 响应（无 user） */
+interface RefreshResponse {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+}
+
+/** expires_in（秒）→ 本地过期时刻（Unix ms） */
+function expiryOf(expiresInSec: number): number {
+  return Date.now() + expiresInSec * 1000;
+}
+
 function mapUser(dto: UserDTO): User {
   return {
     id: dto.id,
@@ -68,6 +85,8 @@ interface AuthState {
   user: User | null;
   accessToken: string | null;
   refreshToken: string | null;
+  /** access token 过期时刻（Unix ms），静默刷新判据 */
+  expiresAt: number | null;
   isAuthenticated: boolean;
 
   /** 账号（手机号/邮箱/元聊号）+ 密码登录 */
@@ -94,6 +113,7 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       accessToken: null,
       refreshToken: null,
+      expiresAt: null,
       isAuthenticated: false,
 
       /**
@@ -109,6 +129,7 @@ export const useAuthStore = create<AuthState>()(
           user: mapUser(data.user),
           accessToken: data.access_token,
           refreshToken: data.refresh_token,
+          expiresAt: expiryOf(data.expires_in),
           isAuthenticated: true,
         });
       },
@@ -135,6 +156,7 @@ export const useAuthStore = create<AuthState>()(
           user: mapUser(data.user),
           accessToken: data.access_token,
           refreshToken: data.refresh_token,
+          expiresAt: expiryOf(data.expires_in),
           isAuthenticated: true,
         });
       },
@@ -155,6 +177,7 @@ export const useAuthStore = create<AuthState>()(
           user: null,
           accessToken: null,
           refreshToken: null,
+          expiresAt: null,
           isAuthenticated: false,
         });
       },
@@ -162,3 +185,42 @@ export const useAuthStore = create<AuthState>()(
     { name: "yuanchat-auth" },
   ),
 );
+
+// ========================================
+// 静默刷新接线（模块加载即注册，无需组件参与）
+// ========================================
+
+setRefreshHandler({
+  getExpiresAt: () => {
+    const s = useAuthStore.getState();
+    // 未登录或没有 refresh token 时不触发刷新
+    if (!s.isAuthenticated || !s.refreshToken) return null;
+    return s.expiresAt ?? null;
+  },
+
+  refresh: async () => {
+    const { refreshToken } = useAuthStore.getState();
+    if (!refreshToken) return null;
+    try {
+      const data = await apiPost<RefreshResponse>("/api/v1/auth/refresh", {
+        refresh_token: refreshToken,
+      });
+      useAuthStore.setState({
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+        expiresAt: expiryOf(data.expires_in),
+      });
+      return data.access_token;
+    } catch {
+      // refresh 也失效：清登录态，路由守卫自动回登录页
+      useAuthStore.setState({
+        user: null,
+        accessToken: null,
+        refreshToken: null,
+        expiresAt: null,
+        isAuthenticated: false,
+      });
+      return null;
+    }
+  },
+});
