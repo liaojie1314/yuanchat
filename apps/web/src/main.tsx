@@ -16,10 +16,10 @@ import App from "./App";
 useThemeStore.getState().applyTheme();
 
 async function bootstrap() {
-  // 开发阶段启动 MSW Mock Service Worker，拦截 API 返回模拟数据
-  // 后端就绪后设置 VITE_ENABLE_MOCK=false 即可关闭
+  // 开发阶段且 VITE_ENABLE_MOCK=true 时启动 MSW Mock Service Worker
+  // 联调真实后端：VITE_ENABLE_MOCK=false pnpm --filter @yuanchat/web dev
   // 动态 import 确保 MSW 在 production build 中被 tree-shake
-  if (import.meta.env.DEV) {
+  if (import.meta.env.DEV && import.meta.env.VITE_ENABLE_MOCK === "true") {
     const { startMockWorker } = await import("@yuanchat/shared/mocks/browser");
     await startMockWorker();
   }

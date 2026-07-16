@@ -2,20 +2,22 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/yuanchat/server/internal/config"
 	"github.com/redis/go-redis/v9"
+	"github.com/yuanchat/server/internal/config"
 	"github.com/yuanchat/server/internal/handler"
 	"github.com/yuanchat/server/internal/middleware"
 	"github.com/yuanchat/server/internal/pkg/jwt"
 	"github.com/yuanchat/server/internal/pkg/shortid"
 	"github.com/yuanchat/server/internal/repository"
 	"github.com/yuanchat/server/internal/service"
+	"github.com/yuanchat/server/internal/ws"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
-// Setup wires all dependencies and returns the Gin engine.
-func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logger) *gin.Engine {
+// Setup wires all dependencies and returns the Gin engine plus the
+// WebSocket handler (served by a dedicated listener in main).
+func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logger) (*gin.Engine, *ws.Handler) {
 	if cfg.Server.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -29,12 +31,22 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logge
 	// --- Dependency wiring ---
 	jwtGen := jwt.NewGenerator(cfg.JWT.Secret, cfg.JWT.AccessTokenTTL, cfg.JWT.RefreshTokenTTL)
 	userRepo := repository.NewUserRepository(db)
+	convRepo := repository.NewConversationRepository(db)
+	msgRepo := repository.NewMessageRepository(db)
 	sidGen := shortid.NewGenerator(db)
+
 	userSvc := service.NewUserService(userRepo, jwtGen, sidGen, logger)
+	msgSvc := service.NewMessageService(msgRepo, convRepo, userRepo, logger)
+	convSvc := service.NewConversationService(convRepo, msgRepo, logger)
 
 	healthH := handler.NewHealthHandler()
 	captchaH := handler.NewCaptchaHandler(rdb)
 	userH := handler.NewUserHandler(userSvc, captchaH, logger)
+	convH := handler.NewConversationHandler(convSvc, logger)
+	msgH := handler.NewMessageHandler(msgSvc, logger)
+
+	hub := ws.NewHub(cfg.WebSocket.MaxConnectionsPerUser, logger)
+	wsH := ws.NewHandler(hub, msgSvc, jwtGen, cfg.WebSocket, cfg.Server.IsProduction(), logger)
 
 	// --- Routes ---
 	api := r.Group("/api/v1")
@@ -53,9 +65,11 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logge
 		}
 	}
 
-	api.GET("/ws", middleware.AuthRequired(cfg.JWT), func(c *gin.Context) {
-		c.JSON(200, gin.H{"message": "WebSocket endpoint - to be implemented"})
-	})
+	chat := api.Group("", middleware.AuthRequired(cfg.JWT))
+	{
+		chat.GET("/conversations", convH.List)
+		chat.GET("/conversations/:id/messages", msgH.History)
+	}
 
-	return r
+	return r, wsH
 }

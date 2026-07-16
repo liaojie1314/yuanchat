@@ -14,8 +14,8 @@
  * @param onShowDetail - 打开详情面板/抽屉回调，非空时显示详情按钮
  * @param compactComposer - 移动端使用紧凑输入区
  */
-import { useEffect, useRef } from "react";
-import { ArrowLeft, MoreHorizontal, Phone, Pin, Search, Video } from "lucide-react";
+import { useCallback, useEffect, useRef } from "react";
+import { ArrowLeft, Loader2, MoreHorizontal, Phone, Pin, Search, Video } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useConversationStore, useMessageStore } from "@yuanchat/shared";
 import { Avatar } from "./Avatar";
@@ -39,18 +39,56 @@ export function ChatWindow({
 
   const messages = useMessageStore((s) => (activeId ? s.messagesByConv[activeId] : undefined));
   const typingName = useMessageStore((s) => (activeId ? s.typingByConv[activeId] : undefined));
+  const hasMore = useMessageStore((s) => (activeId ? s.hasMoreByConv[activeId] : false));
   const sendText = useMessageStore((s) => s.sendText);
-  const setStatus = useMessageStore((s) => s.setStatus);
+  const retrySend = useMessageStore((s) => s.retrySend);
+  const loadHistory = useMessageStore((s) => s.loadHistory);
+  const loadMore = useMessageStore((s) => s.loadMore);
   const setReplyingTo = useMessageStore((s) => s.setReplyingTo);
   const replyingTo = useMessageStore((s) => s.replyingTo);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const loadingMoreRef = useRef(false);
 
-  // 消息变化 / 切换会话时滚动到底部
+  // 进入会话时按需加载历史（真实模式；mock 模式内部直接跳过）
   useEffect(() => {
+    if (activeId) void loadHistory(activeId);
+  }, [activeId, loadHistory]);
+
+  // 消息变化 / 切换会话时滚动到底部（翻页加载不触发，避免跳动）
+  useEffect(() => {
+    if (loadingMoreRef.current) {
+      loadingMoreRef.current = false;
+      return;
+    }
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages?.length, activeId]);
+
+  // 滚动到顶部时向上翻页
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || !activeId || !hasMore || loadingMoreRef.current) return;
+    if (el.scrollTop > 40) return;
+
+    loadingMoreRef.current = true;
+    const prevHeight = el.scrollHeight;
+    const prevCount = useMessageStore.getState().messagesByConv[activeId]?.length ?? 0;
+    void loadMore(activeId).then(() => {
+      const nextCount = useMessageStore.getState().messagesByConv[activeId]?.length ?? 0;
+      if (nextCount === prevCount) {
+        // 没有新数据（到头/失败）：解除锁，否则滚动加载永久失效
+        loadingMoreRef.current = false;
+        return;
+      }
+      // 维持视口位置：滚动差 = 新增内容高度
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight - prevHeight;
+        }
+      });
+    });
+  }, [activeId, hasMore, loadMore]);
 
   // 防御：如果没找到会话（activeId 无效或为 null），不渲染
   if (!conv) return null;
@@ -142,9 +180,16 @@ export function ChatWindow({
       )}
 
       {/* 消息流 */}
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto">
         <div className="flex flex-col px-4 py-4">
-          {/* 日期分隔线（demo 阶段固定"今天"，接入后按消息时间分组） */}
+          {/* 向上翻页加载指示 */}
+          {hasMore && (
+            <div className="text-on-surface-variant my-1 flex justify-center">
+              <Loader2 size={16} className="animate-spin" />
+            </div>
+          )}
+
+          {/* 日期分隔线（当前统一"今天"，后续按消息日期分组） */}
           <div className="text-label-md text-on-surface-variant my-2 flex items-center gap-3">
             <span className="bg-outline-variant h-px flex-1" />
             {t("chat.today")}
@@ -156,12 +201,7 @@ export function ChatWindow({
               key={msg.id}
               msg={msg}
               onRetry={
-                msg.status === "failed" && activeId
-                  ? () => {
-                      setStatus(activeId, msg.id, "sending");
-                      setTimeout(() => setStatus(activeId, msg.id, "sent"), 700);
-                    }
-                  : undefined
+                msg.status === "failed" && activeId ? () => retrySend(activeId, msg.id) : undefined
               }
               onReply={() => setReplyingTo(msg)}
             />

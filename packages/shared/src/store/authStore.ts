@@ -9,18 +9,17 @@
  * 1. loginWithPassword() → POST /api/v1/users/login → 存储 token
  * 2. registerWithPassword() → POST /api/v1/users/register → 存储 token
  * 3. logout() → POST /api/v1/auth/logout → 清空所有状态
- * 4. refreshAccessToken() → POST /api/v1/auth/refresh → 换新 access token
  *
  * @example
  * ```tsx
  * const { loginWithPassword, isAuthenticated, user } = useAuthStore();
- * await loginWithPassword("yuanchat_001", "password123");
+ * await loginWithPassword("13800000001", "password123");
  * if (isAuthenticated) navigate("/chat");
  * ```
  */
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { ApiResponse } from "../types";
+import { apiPost } from "../api/client";
 
 // ========================================
 // Types
@@ -32,14 +31,37 @@ interface User {
   avatarUrl?: string | null;
   phone?: string;
   email?: string;
+  /** QQ 号风格短号（元聊号） */
+  shortId?: number;
+}
+
+/** 后端 user JSON（snake_case） */
+interface UserDTO {
+  id: string;
+  nickname: string;
+  avatar_url?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  short_id?: number;
 }
 
 /** POST /api/v1/users/login 响应 */
 interface LoginResponse {
-  user: User;
+  user: UserDTO;
   access_token: string;
   refresh_token: string;
   expires_in: number;
+}
+
+function mapUser(dto: UserDTO): User {
+  return {
+    id: dto.id,
+    nickname: dto.nickname,
+    avatarUrl: dto.avatar_url,
+    phone: dto.phone ?? undefined,
+    email: dto.email ?? undefined,
+    shortId: dto.short_id,
+  };
 }
 
 interface AuthState {
@@ -48,8 +70,8 @@ interface AuthState {
   refreshToken: string | null;
   isAuthenticated: boolean;
 
-  /** 元聊号 + 密码登录 */
-  loginWithPassword: (yuanchatId: string, password: string) => Promise<void>;
+  /** 账号（手机号/邮箱/元聊号）+ 密码登录 */
+  loginWithPassword: (account: string, password: string) => Promise<void>;
   /** 密码注册 */
   registerWithPassword: (
     phone: string,
@@ -60,32 +82,6 @@ interface AuthState {
   ) => Promise<void>;
   /** 登出（异步：先调 API 再清本地状态） */
   logout: () => Promise<void>;
-}
-
-// ========================================
-// API helpers
-// ========================================
-
-/** 后端 API 地址，由各 app 的 .env 文件配置 */
-interface ImportMetaEnv {
-  VITE_API_BASE_URL?: string;
-}
-const API_BASE: string =
-  typeof import.meta !== "undefined"
-    ? (import.meta as { env?: ImportMetaEnv }).env?.VITE_API_BASE_URL || "http://localhost:8080"
-    : "http://localhost:8080";
-
-async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const json: ApiResponse<T> = await res.json();
-  if (json.code !== 0) {
-    throw new Error(json.message || "Request failed");
-  }
-  return json.data;
 }
 
 // ========================================
@@ -101,16 +97,16 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
 
       /**
-       * 元聊号 + 密码登录
-       * yuanchatId 为注册时分配的元聊号
+       * 账号 + 密码登录
+       * account 支持手机号 / 邮箱（后端 LoginRequest.Account）
        */
-      loginWithPassword: async (yuanchatId: string, password: string) => {
+      loginWithPassword: async (account: string, password: string) => {
         const data = await apiPost<LoginResponse>("/api/v1/users/login", {
-          yuanchat_id: yuanchatId,
+          account,
           password,
         });
         set({
-          user: data.user,
+          user: mapUser(data.user),
           accessToken: data.access_token,
           refreshToken: data.refresh_token,
           isAuthenticated: true,
@@ -136,7 +132,7 @@ export const useAuthStore = create<AuthState>()(
           nickname,
         });
         set({
-          user: data.user,
+          user: mapUser(data.user),
           accessToken: data.access_token,
           refreshToken: data.refresh_token,
           isAuthenticated: true,

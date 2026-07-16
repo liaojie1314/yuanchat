@@ -1,0 +1,150 @@
+# 元聊 YuanChat — 聊天 API 与 WebSocket 协议
+
+> 对应实现：`server/internal/ws/`（协议与网关）、`server/internal/handler/conversation.go` / `message.go`（REST）。
+> 前端消费方：`packages/shared/src/api/chat.ts`（REST 映射）、`packages/shared/src/ws/chatSocket.ts`（WS 客户端）。
+
+## 一、认证方式
+
+- **REST**：`Authorization: Bearer <access_token>`（15 分钟有效期）。
+- **WebSocket**：浏览器 WS API 无法携带 Header，改用 query 参数：
+  `ws://<host>:8081/ws?token=<access_token>`。token 无效返回 HTTP 401，不升级连接。
+
+## 二、REST 端点
+
+### GET /api/v1/conversations
+
+返回当前用户参与的所有会话，按 `updated_at` 降序。
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "conversations": [
+      {
+        "id": "uuid",
+        "type": 2,
+        "name": "产品研发群",
+        "avatar_url": null,
+        "member_count": 3,
+        "unread_count": 2,
+        "is_muted": false,
+        "last_seq": 10,
+        "my_last_read_seq": 8,
+        "last_message": {
+          "preview": "发布评审改到明早 9 点",
+          "sender_nickname": "陈曦",
+          "created_at": "2026-07-16T09:00:00+08:00"
+        },
+        "peer": { "id": "uuid", "nickname": "Bob", "avatar_url": null },
+        "updated_at": "2026-07-16T09:00:00+08:00"
+      }
+    ]
+  }
+}
+```
+
+- `type`：1=单聊 2=群聊 3=系统。
+- `unread_count` = `last_seq - my_last_read_seq`（服务端计算）。
+- `peer` 仅单聊返回；单聊 `name`/`avatar_url` 为空时前端用 `peer` 填充。
+
+### GET /api/v1/conversations/:id/messages
+
+历史消息分页（seq 降序返回，前端反转为升序展示）。
+
+| Query 参数   | 说明                                                    |
+| ------------ | ------------------------------------------------------- |
+| `before_seq` | 取 `seq < before_seq` 的消息；`0`（默认）表示从最新开始 |
+| `limit`      | 页大小，默认 30，最大 100                               |
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "messages": [
+      {
+        "id": "uuid",
+        "conversation_id": "uuid",
+        "sender_id": "uuid",
+        "seq": 42,
+        "message_type": 1,
+        "content": "{\"text\":\"你好\"}",
+        "status": 1,
+        "reply_to_id": null,
+        "client_msg_id": "c-xxx",
+        "created_at": "2026-07-16T09:00:00+08:00",
+        "sender_nickname": "Alice",
+        "sender_avatar_url": null
+      }
+    ],
+    "has_more": true
+  }
+}
+```
+
+- 非会话成员访问返回 `403`。
+- `content` 是 JSONB 字符串；`message_type`：1=文本 2=图片 3=文件 4=语音 5=视频 6=系统。
+
+## 三、WebSocket 协议
+
+- 地址：`ws://<host>:8081/ws?token=<access_token>`（生产 `wss://`）。
+- 信封：所有帧统一 `{"type": string, "payload": object}`。
+- 心跳：WebSocket 协议层 ping/pong。服务端每 `ping_interval`（30s）发 ping，`pong_timeout`（90s）内无 pong 则断开。客户端无需实现业务心跳。
+- 每用户最多 `max_connections_per_user`（5）条并发连接，超限拒绝（close code 1008）。
+
+### 客户端 → 服务端
+
+| type           | payload                                                                        | 说明                                                                |
+| -------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| `message.send` | `{conversation_id, content: {type:"text", text}, client_msg_id, reply_to_id?}` | 发送文本（≤4000 字符）。`client_msg_id` 客户端生成，幂等/回执匹配用 |
+| `message.read` | `{conversation_id, seq}`                                                       | 上报已读进度（已读到的最大 seq，只前进不后退）                      |
+| `typing`       | `{conversation_id}`                                                            | 正在输入（客户端节流 ~3s/次）                                       |
+
+### 服务端 → 客户端
+
+| type              | payload                                                                                                            | 推送对象                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| `message.ack`     | `{client_msg_id, message_id, conversation_id, seq, timestamp}`                                                     | 发送者的所有设备。乐观 UI 收到后：sending → sent，补服务端 seq                                            |
+| `message.receive` | `{message_id, conversation_id, sender_id, sender_nickname, content, seq, timestamp, reply_to_id?, client_msg_id?}` | 会话全部成员（含发送者其他设备；本设备按 `client_msg_id` 去重）                                           |
+| `message.read`    | `{conversation_id, user_id, seq}`                                                                                  | 会话全部成员。`user_id`=自己 → 多端未读同步清零；`user_id`=他人 → 把自己 `seq ≤` 该值的已送达消息翻为已读 |
+| `typing`          | `{conversation_id, user_id, nickname}`                                                                             | 会话中除输入者外的成员（前端显示 4s 后自动消失）                                                          |
+| `error`           | `{code, message, client_msg_id?}`                                                                                  | 当前连接。`client_msg_id` 非空表示对应那次发送失败                                                        |
+
+## 四、seq 与已读机制
+
+- 每个会话独立维护单调递增 `last_seq`（`conversations.last_seq`），消息落库时通过
+  `UPDATE ... SET last_seq = last_seq + 1 ... RETURNING last_seq` 原子分配，保证会话内消息严格有序、无重复。
+- 每个成员维护 `last_read_seq`（`conversation_members.last_read_seq`）。
+  **未读数 = last_seq − last_read_seq**，不需要逐条已读表。
+- 已读上报只前进不后退（`WHERE last_read_seq < ?`）。
+- 断线重连后客户端应重新拉取会话列表 + 活跃会话历史（`chatSocket.onReconnect` 已实现），
+  以 seq 对比补齐掉线期间的消息。
+
+## 五、消息发送时序
+
+```
+发送端                    服务端                       接收端
+  │ message.send            │                            │
+  │ ────────────────────────►                            │
+  │        （事务：分配 seq + 落库 + 更新 last_message）  │
+  │ ◄── message.ack ────────│                            │
+  │  (sending → sent)       │ ── message.receive ───────►│
+  │                         │    (追加气泡 + 未读+1)      │
+  │                         │ ◄── message.read ──────────│（接收端打开会话）
+  │ ◄── message.read ───────│                            │
+  │  (sent → read 双勾)     │                            │
+```
+
+失败路径：发送端 5s 内未收到 `message.ack` → 本地标记 `failed`，用户点击重试按钮以**相同 `client_msg_id`** 重发。
+
+## 六、部署形态
+
+单 Go 进程双监听（`server/cmd/server/main.go`）：
+
+| 端口    | 用途                                                                                                   |
+| ------- | ------------------------------------------------------------------------------------------------------ |
+| `:8080` | Gin REST API                                                                                           |
+| `:8081` | WebSocket 网关（仅 `/ws` 路径，独立 `http.Server`，无 Read/WriteTimeout——长连接超时由 ping/pong 管理） |
+
+消息分发当前为进程内内存 Hub（`ws.Hub`，实现 `ws.Dispatcher` 接口）。未来多实例部署时，以 Redis Pub/Sub 实现同一接口替换，业务代码不变。
