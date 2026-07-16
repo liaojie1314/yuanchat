@@ -17,6 +17,9 @@
  */
 import { create } from "zustand";
 
+/** 用户/会话在线状态（比布尔 isOnline 更细，isOnline 保留兼容旧组件与测试） */
+export type Presence = "online" | "away" | "busy" | "offline";
+
 /**
  * 会话数据结构
  *
@@ -42,6 +45,20 @@ export interface Conversation {
   isOnline?: boolean;
   /** 是否开启免打扰模式 */
   isMuted: boolean;
+  /** 是否置顶（置顶会话在列表中单独分组靠前显示） */
+  isPinned?: boolean;
+  /** 单聊对方的在线状态（不设置时回退 isOnline 布尔值） */
+  presence?: Presence;
+  /** 未发送的草稿内容，非空时列表预览显示 [草稿] 前缀 */
+  draft?: string;
+  /** 最后一条消息中是否 @ 了我（列表预览高亮 [@你]） */
+  mentionedMe?: boolean;
+  /** 群聊成员总数 */
+  memberCount?: number;
+  /** 群聊当前在线人数 */
+  onlineCount?: number;
+  /** 群公告/置顶消息（聊天窗口顶部 pin-bar 显示） */
+  pinnedMessage?: string;
 }
 
 interface ConversationState {
@@ -65,31 +82,70 @@ interface ConversationState {
 const DEMO_CONVERSATIONS: Conversation[] = [
   {
     id: "1",
-    type: "private",
-    name: "张三",
-    lastMessage: "好的，明天开会讨论一下",
+    type: "group",
+    name: "产品研发群",
+    lastMessage: "陈曦：发布评审改到明早 9 点",
     lastTime: "14:32",
     unreadCount: 3,
-    isOnline: true,
     isMuted: false,
+    isPinned: true,
+    mentionedMe: true,
+    memberCount: 28,
+    onlineCount: 5,
+    pinnedMessage: "周五 15:00 发布评审，请提前更新进度看板",
   },
   {
     id: "2",
-    type: "group",
-    name: "产品研发群",
-    lastMessage: "李四: 新版本已经发布了",
-    lastTime: "13:15",
+    type: "private",
+    name: "李四",
+    lastMessage: "[图片] 这是设计稿的第二版",
+    lastTime: "13:05",
     unreadCount: 0,
+    isOnline: true,
+    presence: "away",
     isMuted: true,
+    isPinned: true,
   },
   {
     id: "3",
     type: "private",
-    name: "王五",
-    lastMessage: "文件收到了吗？",
-    lastTime: "昨天",
+    name: "张伟",
+    lastMessage: "好的，那就这么定了，辛苦！",
+    lastTime: "12:48",
     unreadCount: 1,
+    isOnline: true,
+    presence: "online",
+    isMuted: false,
+  },
+  {
+    id: "4",
+    type: "group",
+    name: "设计组",
+    lastMessage: "图标规范我下午整理一份",
+    lastTime: "昨天",
+    unreadCount: 0,
+    isMuted: false,
+    draft: "图标规范我下午整理一份",
+    memberCount: 9,
+  },
+  {
+    id: "5",
+    type: "private",
+    name: "王芳",
+    lastMessage: "[语音] 0'15\"",
+    lastTime: "周三",
+    unreadCount: 0,
     isOnline: false,
+    presence: "offline",
+    isMuted: false,
+  },
+  {
+    id: "6",
+    type: "private",
+    name: "元聊助手",
+    lastMessage: "🤖 已为你总结 3 条未读消息",
+    lastTime: "06-30",
+    unreadCount: 0,
     isMuted: false,
   },
 ];

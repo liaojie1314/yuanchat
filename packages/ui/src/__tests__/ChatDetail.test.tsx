@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { ChatDetail } from "../ChatDetail";
 import { useConversationStore } from "@yuanchat/shared";
 
+// jsdom 默认 locale 为 en-US，所有 t() 文案断言使用英文
 describe("ChatDetail", () => {
   beforeEach(() => {
     useConversationStore.setState({
@@ -26,6 +27,7 @@ describe("ChatDetail", () => {
           lastTime: "13:00",
           unreadCount: 1,
           isMuted: true,
+          memberCount: 28,
         },
       ],
     });
@@ -37,42 +39,60 @@ describe("ChatDetail", () => {
     expect(screen.getAllByText("张三").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("shows '联系人' for private chat type", () => {
+  it("shows contact label for private chat type", () => {
     render(<ChatDetail />);
-    expect(screen.getByText("联系人")).toBeInTheDocument();
+    expect(screen.getByText("Contact")).toBeInTheDocument();
   });
 
-  it("shows '群聊' for group chat type", () => {
+  it("shows group label for group chat type", () => {
     useConversationStore.setState({ activeId: "2" });
     render(<ChatDetail />);
-    expect(screen.getByText("群聊")).toBeInTheDocument();
+    expect(screen.getByText(/Group · 28 members/)).toBeInTheDocument();
   });
 
-  it("renders mute toggle button", () => {
+  it("renders mute toggle row", () => {
     render(<ChatDetail />);
-    expect(screen.getByText("消息免打扰")).toBeInTheDocument();
+    expect(screen.getByText("Mute notifications")).toBeInTheDocument();
   });
 
-  it("toggles mute status on button click", () => {
+  it("toggles mute status on row click", () => {
     render(<ChatDetail />);
-    fireEvent.click(screen.getByText("消息免打扰"));
+    fireEvent.click(screen.getByText("Mute notifications"));
     const conv = useConversationStore.getState().conversations.find((c) => c.id === "1");
     expect(conv?.isMuted).toBe(true);
   });
 
-  it("renders search button", () => {
+  it("toggles pinned status on row click", () => {
     render(<ChatDetail />);
-    expect(screen.getByText("搜索聊天记录")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Pin conversation"));
+    const conv = useConversationStore.getState().conversations.find((c) => c.id === "1");
+    expect(conv?.isPinned).toBe(true);
   });
 
   it("shows invite button for group chats", () => {
     useConversationStore.setState({ activeId: "2" });
     render(<ChatDetail />);
-    expect(screen.getByText("邀请成员")).toBeInTheDocument();
+    expect(screen.getByText("Invite")).toBeInTheDocument();
   });
 
   it("does not show invite button for private chats", () => {
     render(<ChatDetail />);
-    expect(screen.queryByText("邀请成员")).toBeNull();
+    expect(screen.queryByText("Invite")).toBeNull();
+  });
+
+  it("shows leave-group action only for groups", () => {
+    const { unmount } = render(<ChatDetail />);
+    expect(screen.queryByText("Leave group")).toBeNull();
+    unmount();
+    useConversationStore.setState({ activeId: "2" });
+    render(<ChatDetail />);
+    expect(screen.getByText("Leave group")).toBeInTheDocument();
+  });
+
+  it("renders close button and fires onClose", () => {
+    let closed = false;
+    render(<ChatDetail onClose={() => (closed = true)} />);
+    fireEvent.click(screen.getByLabelText("Close details"));
+    expect(closed).toBe(true);
   });
 });

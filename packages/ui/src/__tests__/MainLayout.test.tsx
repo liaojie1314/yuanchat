@@ -30,9 +30,10 @@ describe("MainLayout", () => {
         <MainLayout />
       </MemoryRouter>,
     );
-    expect(screen.getByText("消息")).toBeInTheDocument();
-    expect(screen.getByText("通讯录")).toBeInTheDocument();
-    expect(screen.getByText("设置")).toBeInTheDocument();
+    // jsdom locale 为 en-US，导航标签走 i18n
+    expect(screen.getByText("Messages")).toBeInTheDocument();
+    expect(screen.getByText("Contacts")).toBeInTheDocument();
+    expect(screen.getByText("Settings")).toBeInTheDocument();
   });
 
   it("renders theme toggle button", () => {
@@ -96,7 +97,7 @@ describe("MainLayout", () => {
         <MainLayout />
       </MemoryRouter>,
     );
-    const contactsLink = screen.getByText("通讯录").closest("a");
+    const contactsLink = screen.getByText("Contacts").closest("a");
     expect(contactsLink?.className).toContain("bg-white/25");
   });
 

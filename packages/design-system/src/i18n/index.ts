@@ -56,6 +56,9 @@ i18n.use(initReactI18next).init({
   fallbackLng: "zh-CN",
   interpolation: {
     escapeValue: false, // React 自带 XSS 防护
+    // locale 文件采用 %{variable} 占位符（Rails 风格），与 i18next 默认 {{}} 不同
+    prefix: "%{",
+    suffix: "}",
   },
   // 企业级配置
   returnNull: false, // 缺失翻译返回 key 本身而非 null

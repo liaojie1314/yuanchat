@@ -2,63 +2,183 @@
  * ConversationList 组件 — 会话列表
  *
  * @description
- * IM 应用的核心导航组件，位于三栏布局的最左侧。
- * 显示当前用户的所有会话（单聊和群聊混合排列），每条会话展示：
- * - 头像（含在线状态指示）
- * - 会话名称（单聊是对方昵称，群聊是群名）
- * - 最后一条消息的预览文本
- * - 时间标签
- * - 未读消息计数角标（红色圆形，超过99显示 "99+"）
+ * IM 应用的核心导航组件，位于三栏布局的左列。功能：
+ * - 顶部标题栏（消息 + 新建按钮）
+ * - 搜索框：按会话名 / 最后消息实时过滤
+ * - 过滤 chips：全部 / 未读 / 群聊 / 单聊 / @我
+ * - 置顶分组：置顶会话带左侧主题色竖条，单独分组靠前
+ * - 会话条目：头像（presence 状态点）、名称、时间（tabular-nums）、
+ *   预览（[草稿]/[@你] 前缀高亮）、未读角标 / 免打扰铃铛
  *
- * 包含顶部搜索栏（搜索功能待实现）和创建新会话按钮。
- * 点击会话条目后，通过 Zustand Store 的 `setActive` 切换到该会话。
+ * 点击会话条目后，通过 Zustand Store 的 `setActive` 切换会话并清零未读。
+ *
+ * @param hideHeader - 隐藏标题栏（移动端由外层 app bar 承担标题时使用）
  *
  * @example
  * <ConversationList />
  */
-import { Search, Plus } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Search, Plus, BellOff, Pin } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useConversationStore } from "@yuanchat/shared";
 import type { Conversation } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
 
-export function ConversationList() {
+/** 过滤器类别，对应顶部 chips */
+type Filter = "all" | "unread" | "group" | "private" | "mentions";
+
+const FILTERS: { key: Filter; labelKey: string }[] = [
+  { key: "all", labelKey: "chat.filter.all" },
+  { key: "unread", labelKey: "chat.filter.unread" },
+  { key: "group", labelKey: "chat.filter.group" },
+  { key: "private", labelKey: "chat.filter.private" },
+  { key: "mentions", labelKey: "chat.filter.mentions" },
+];
+
+function matchFilter(conv: Conversation, filter: Filter): boolean {
+  switch (filter) {
+    case "unread":
+      return conv.unreadCount > 0;
+    case "group":
+      return conv.type === "group";
+    case "private":
+      return conv.type === "private";
+    case "mentions":
+      return !!conv.mentionedMe;
+    default:
+      return true;
+  }
+}
+
+export function ConversationList({ hideHeader = false }: { hideHeader?: boolean }) {
+  const { t } = useTranslation();
   const conversations = useConversationStore((s) => s.conversations);
   const activeId = useConversationStore((s) => s.activeId);
   const setActive = useConversationStore((s) => s.setActive);
+  const clearUnread = useConversationStore((s) => s.clearUnread);
+
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<Filter>("all");
+
+  const hasUnread = conversations.some((c) => c.unreadCount > 0);
+
+  // 搜索 + 过滤 + 置顶分组，一次 memo 完成
+  const { pinned, rest } = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const visible = conversations.filter(
+      (c) =>
+        matchFilter(c, filter) &&
+        (!q || c.name.toLowerCase().includes(q) || c.lastMessage?.toLowerCase().includes(q)),
+    );
+    return {
+      pinned: visible.filter((c) => c.isPinned),
+      rest: visible.filter((c) => !c.isPinned),
+    };
+  }, [conversations, query, filter]);
+
+  const handleSelect = (id: string) => {
+    setActive(id);
+    clearUnread(id);
+  };
 
   return (
     <div className="flex h-full flex-col">
-      {/* 搜索栏 */}
-      <div className="border-b border-gray-200 p-3 dark:border-gray-700">
-        <div className="flex items-center gap-2">
-          <div className="relative flex-1">
-            <Search
-              size={16}
-              className="text-on-surface-variant absolute top-1/2 left-3 -translate-y-1/2"
-            />
-            <input
-              placeholder="搜索会话..."
-              className="bg-surface-container-high text-body-md placeholder:text-on-surface-variant w-full rounded-xl py-2.5 pr-3 pl-9 focus:outline-none"
-            />
-          </div>
-          <button className="md3-icon-btn text-on-surface-variant">
-            <Plus size={18} />
+      {!hideHeader && (
+        <header className="flex h-14 shrink-0 items-center justify-between pr-2 pl-4">
+          <h1 className="text-title-lg text-on-surface font-semibold">{t("chat.title")}</h1>
+          <button className="md3-icon-btn text-on-surface-variant" aria-label={t("chat.newChat")}>
+            <Plus size={20} />
           </button>
+        </header>
+      )}
+
+      {/* 搜索框 */}
+      <div className="shrink-0 px-3 pb-1">
+        <div className="relative">
+          <Search
+            size={16}
+            className="text-on-surface-variant absolute top-1/2 left-3 -translate-y-1/2"
+          />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("chat.searchConversation")}
+            aria-label={t("common.search")}
+            className="bg-surface-container-high text-body-md text-on-surface placeholder:text-on-surface-variant/70 focus:ring-primary/40 w-full rounded-md py-2 pr-3 pl-9 transition-shadow focus:ring-2 focus:outline-none"
+          />
         </div>
       </div>
 
-      {/* 会话列表 */}
-      <div className="flex-1 overflow-y-auto">
-        {conversations.map((conv) => (
-          <ConversationItem
-            key={conv.id}
-            conv={conv}
-            isActive={conv.id === activeId}
-            onClick={() => setActive(conv.id)}
-          />
+      {/* 过滤 chips */}
+      <div
+        className="scrollbar-none flex shrink-0 gap-2 overflow-x-auto px-3 py-2"
+        role="tablist"
+        aria-label={t("chat.title")}
+      >
+        {FILTERS.map(({ key, labelKey }) => (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={filter === key}
+            onClick={() => setFilter(key)}
+            className={cn(
+              "text-label-md inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-3 whitespace-nowrap transition-colors",
+              filter === key
+                ? "bg-primary-container text-primary-on-container font-medium"
+                : "bg-surface-container-high text-on-surface hover:bg-surface-container",
+            )}
+          >
+            {t(labelKey)}
+            {key === "unread" && hasUnread && (
+              <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+            )}
+          </button>
         ))}
       </div>
+
+      {/* 会话列表（置顶分组 + 全部） */}
+      <div className="flex-1 overflow-y-auto px-2 pb-3">
+        {pinned.length > 0 && (
+          <>
+            <SectionLabel>{t("chat.section.pinned")}</SectionLabel>
+            {pinned.map((conv) => (
+              <ConversationItem
+                key={conv.id}
+                conv={conv}
+                isActive={conv.id === activeId}
+                onClick={() => handleSelect(conv.id)}
+              />
+            ))}
+          </>
+        )}
+        {rest.length > 0 && (
+          <>
+            {pinned.length > 0 && <SectionLabel>{t("chat.section.all")}</SectionLabel>}
+            {rest.map((conv) => (
+              <ConversationItem
+                key={conv.id}
+                conv={conv}
+                isActive={conv.id === activeId}
+                onClick={() => handleSelect(conv.id)}
+              />
+            ))}
+          </>
+        )}
+        {pinned.length === 0 && rest.length === 0 && (
+          <p className="text-body-md text-on-surface-variant px-4 py-8 text-center">
+            {t("chat.searchEmpty")}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-label-md text-on-surface-variant px-2 pt-3 pb-1.5 font-medium">
+      {children}
     </div>
   );
 }
@@ -66,8 +186,9 @@ export function ConversationList() {
 /**
  * ConversationItem — 单条会话条目
  *
- * @description 内部私有组件，不对外导出。接收会话数据和交互回调。
- * 当前选中项有蓝色高亮背景。
+ * @description 内部私有组件，不对外导出。
+ * 置顶会话左侧显示 3px 主题色竖条；当前选中项 primary-container 高亮；
+ * 未读会话名称加粗，角标 99+ 截断；免打扰会话未读角标降级为灰色。
  */
 function ConversationItem({
   conv,
@@ -78,31 +199,78 @@ function ConversationItem({
   isActive: boolean;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
+  const hasDraft = !!conv.draft;
+
   return (
     <button
       onClick={onClick}
+      aria-current={isActive || undefined}
       className={cn(
-        "flex w-full items-center gap-3 px-3 py-3 text-left transition-colors",
-        isActive ? "bg-gray-300 dark:bg-gray-600" : "hover:bg-gray-200 dark:hover:bg-gray-700",
+        "relative flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors",
+        isActive
+          ? "bg-primary-container"
+          : "hover:bg-surface-container-high active:bg-surface-container",
       )}
     >
-      <Avatar name={conv.name} src={conv.avatarUrl} online={conv.isOnline} />
+      {/* 置顶标记：左侧主题色短竖条 */}
+      {conv.isPinned && (
+        <span className="bg-primary absolute top-1/2 left-0.5 h-5 w-[3px] -translate-y-1/2 rounded-full" />
+      )}
+
+      <Avatar
+        name={conv.name}
+        src={conv.avatarUrl}
+        presence={conv.presence}
+        online={conv.presence ? undefined : conv.isOnline}
+      />
+
       <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between">
-          <span className="text-body-lg text-on-surface truncate font-medium">{conv.name}</span>
-          <span className="text-label-sm text-on-surface-variant ml-2 shrink-0">
+        <div className="flex items-baseline justify-between gap-2">
+          <span
+            className={cn(
+              "text-body-lg text-on-surface truncate",
+              conv.unreadCount > 0 ? "font-bold" : "font-medium",
+            )}
+          >
+            {conv.name}
+          </span>
+          <span className="text-label-sm text-on-surface-variant shrink-0 tabular-nums">
             {conv.lastTime}
           </span>
         </div>
-        <div className="mt-0.5 flex items-center justify-between">
+        <div className="mt-0.5 flex items-center justify-between gap-2">
           <span className="text-body-sm text-on-surface-variant truncate">
-            {conv.lastMessage || "暂无消息"}
+            {hasDraft ? (
+              <>
+                <span className="text-error font-medium">{t("chat.preview.draft")} </span>
+                {conv.draft}
+              </>
+            ) : (
+              <>
+                {conv.mentionedMe && (
+                  <span className="font-semibold text-amber-600 dark:text-amber-400">
+                    {t("chat.preview.mentionYou")}{" "}
+                  </span>
+                )}
+                {conv.lastMessage || t("chat.preview.empty")}
+              </>
+            )}
           </span>
-          {conv.unreadCount > 0 && (
-            <span className="bg-primary text-primary-on ml-2 inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full px-1 text-[11px] font-medium">
+          {conv.unreadCount > 0 ? (
+            <span
+              className={cn(
+                "text-label-sm inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full px-1.5 font-bold text-white",
+                conv.isMuted ? "bg-outline" : "bg-red-500",
+              )}
+            >
               {conv.unreadCount > 99 ? "99+" : conv.unreadCount}
             </span>
-          )}
+          ) : conv.isMuted ? (
+            <BellOff size={14} className="text-on-surface-variant/60 shrink-0" />
+          ) : conv.isPinned ? (
+            <Pin size={12} className="text-on-surface-variant/40 shrink-0" />
+          ) : null}
         </div>
       </div>
     </button>
