@@ -4,6 +4,13 @@ export * from "./store/messageStore";
 export * from "./store/authStore";
 export * from "./api/client";
 export * from "./api/chat";
+export {
+  setRefreshHandler,
+  ensureFreshToken,
+  forceRefresh,
+  needsRefresh,
+} from "./api/tokenManager";
+export type { RefreshHandler } from "./api/tokenManager";
 export { chatSocket } from "./ws/chatSocket";
 export type { FrameHandler, ServerFrames } from "./ws/chatSocket";
 export { useIsDesktop } from "./hooks/useIsDesktop";

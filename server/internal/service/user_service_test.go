@@ -1,9 +1,15 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
+	"github.com/yuanchat/server/internal/pkg/jwt"
 	"github.com/yuanchat/server/internal/pkg/password"
+	"go.uber.org/zap"
 )
 
 // ========================================
@@ -94,6 +100,72 @@ func TestErrorConstants(t *testing.T) {
 	}
 	if ErrUserNotFound.Error() == "" {
 		t.Error("ErrUserNotFound should have message")
+	}
+}
+
+// ========================================
+// Refresh — Token Rotation Tests
+// ========================================
+
+// refreshSvc 构造仅含 JWT 生成器的 UserService。
+// 以下用例全部在 token 校验阶段失败返回，不会触达 nil repo
+//（合法 refresh 的完整链路由 E2E 覆盖）。
+func refreshSvc(accessTTL, refreshTTL time.Duration) (*UserService, *jwt.Generator) {
+	gen := jwt.NewGenerator("test-secret", accessTTL, refreshTTL)
+	return NewUserService(nil, gen, nil, zap.NewNop()), gen
+}
+
+func TestRefreshRejectsGarbageToken(t *testing.T) {
+	svc, _ := refreshSvc(time.Minute, time.Hour)
+
+	_, err := svc.Refresh(context.Background(), "not-a-jwt")
+	if !errors.Is(err, ErrInvalidRefresh) {
+		t.Fatalf("expected ErrInvalidRefresh, got %v", err)
+	}
+}
+
+func TestRefreshRejectsAccessTokenAsRefresh(t *testing.T) {
+	svc, gen := refreshSvc(time.Minute, time.Hour)
+
+	pair, err := gen.GeneratePair(uuid.New(), "web")
+	if err != nil {
+		t.Fatalf("generate pair: %v", err)
+	}
+
+	// access token 冒充 refresh：签名合法但 use != "refresh"
+	_, err = svc.Refresh(context.Background(), pair.AccessToken)
+	if !errors.Is(err, ErrInvalidRefresh) {
+		t.Fatalf("expected ErrInvalidRefresh for access token, got %v", err)
+	}
+}
+
+func TestRefreshRejectsExpiredRefreshToken(t *testing.T) {
+	svc, gen := refreshSvc(time.Minute, -time.Minute) // refresh 签发即过期
+
+	pair, err := gen.GeneratePair(uuid.New(), "web")
+	if err != nil {
+		t.Fatalf("generate pair: %v", err)
+	}
+
+	_, err = svc.Refresh(context.Background(), pair.RefreshToken)
+	if !errors.Is(err, ErrInvalidRefresh) {
+		t.Fatalf("expected ErrInvalidRefresh for expired token, got %v", err)
+	}
+}
+
+func TestRefreshRejectsTamperedSignature(t *testing.T) {
+	svc, _ := refreshSvc(time.Minute, time.Hour)
+
+	// 用另一个 secret 签发的 refresh token
+	otherGen := jwt.NewGenerator("other-secret", time.Minute, time.Hour)
+	pair, err := otherGen.GeneratePair(uuid.New(), "web")
+	if err != nil {
+		t.Fatalf("generate pair: %v", err)
+	}
+
+	_, err = svc.Refresh(context.Background(), pair.RefreshToken)
+	if !errors.Is(err, ErrInvalidRefresh) {
+		t.Fatalf("expected ErrInvalidRefresh for tampered token, got %v", err)
 	}
 }
 

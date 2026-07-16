@@ -11,6 +11,7 @@
  *
  * 兼容性：产物经 es2019 转译；WebSocket / JSON 在 Chrome 74 WebView 均可用。
  */
+import { ensureFreshToken, needsRefresh } from "../api/tokenManager";
 
 export interface ServerFrames {
   "message.ack": {
@@ -80,6 +81,27 @@ class ChatSocket {
   }
 
   connect() {
+    if (this.state === "connecting" || this.state === "open") return;
+
+    // token 临近过期：先静默刷新再拨号，避免注定 401 的握手
+    //（服务端只在握手时校验 token，已建立的连接不受过期影响）
+    if (needsRefresh()) {
+      this.state = "connecting";
+      void ensureFreshToken().then(() => {
+        if (this.state !== "connecting") return; // 刷新期间被主动断开
+        this.state = "idle";
+        // 刷新失败时仍尝试拨号：登出场景 token 已清、dial 自然跳过；
+        // 网络抖动场景则靠 401 握手失败 → 退避重连兜底
+        this.dial();
+      });
+      return;
+    }
+
+    this.dial();
+  }
+
+  /** 实际建立 WebSocket 连接（token 已确保新鲜或由重连兜底） */
+  private dial() {
     if (this.state === "connecting" || this.state === "open") return;
     const token = this.tokenProvider();
     if (!token) return;

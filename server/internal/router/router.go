@@ -52,6 +52,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logge
 	api := r.Group("/api/v1")
 	api.GET("/health", healthH.Check)
 	api.GET("/captcha", captchaH.Generate)
+	api.POST("/auth/refresh", middleware.LimitByIP(20, 40), userH.Refresh)
 
 	users := api.Group("/users")
 	{
