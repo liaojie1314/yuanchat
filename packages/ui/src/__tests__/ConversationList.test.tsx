@@ -114,18 +114,35 @@ describe("ConversationList", () => {
         <ConversationList />
       </MemoryRouter>,
     );
-    expect(screen.getByPlaceholderText("搜索会话...")).toBeInTheDocument();
+    // jsdom locale 为 en-US
+    expect(screen.getByPlaceholderText("Search chats, contacts, messages…")).toBeInTheDocument();
   });
 
-  it("search input accepts text input", () => {
-    // 搜索过滤功能待实现，此处仅测试输入框可正常输入
+  it("filters conversations by search input", () => {
     render(
       <MemoryRouter>
         <ConversationList />
       </MemoryRouter>,
     );
-    const input = screen.getByPlaceholderText("搜索会话...") as HTMLInputElement;
+    const input = screen.getByPlaceholderText(
+      "Search chats, contacts, messages…",
+    ) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "产品" } });
     expect(input.value).toBe("产品");
+    // 只剩产品研发群，张三/王五被过滤掉
+    expect(screen.getAllByText("产品研发群").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("明天开会")).toBeNull();
+  });
+
+  it("filters unread conversations via chip", () => {
+    render(
+      <MemoryRouter>
+        <ConversationList />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /Unread/ }));
+    // 只有张三有未读
+    expect(screen.getAllByText("张三").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("李四: 新版本上线了")).toBeNull();
   });
 });

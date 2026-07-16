@@ -2,136 +2,177 @@
  * ChatWindow 组件 — 聊天消息窗口
  *
  * @description
- * IM 应用最主要的交互界面，位于三栏布局的中间。
- * 由三个区域组成：
- * 1. **顶部标题栏**：显示对方/群聊名称和在线状态
- * 2. **消息列表**：滚动显示历史消息，
- *    - 自己发送的消息靠右（蓝色气泡，msg-bubble-sent）
- *    - 对方的消息靠左（白色/深色气泡，msg-bubble-received）
- * 3. **底部输入区**：工具栏按钮（图片/文件/表情）+ 文本输入框 + 发送按钮
+ * IM 应用最主要的交互界面，位于三栏布局的中间。组成：
+ * 1. **顶部标题栏**：头像 + 名称 + 成员/在线信息 + 通话/搜索/详情按钮，
+ *    移动端显示返回按钮
+ * 2. **置顶消息条**：会话存在 pinnedMessage 时显示
+ * 3. **消息流**：日期分隔线、全形态气泡（MessageBubble）、正在输入指示，
+ *    新消息自动滚动到底部
+ * 4. **输入区**：Composer（引用回复 / 工具条 / 自适应输入）
  *
- * 气泡样式由 `@yuanchat/design-system` 的 `.msg-bubble-sent` 和
- * `.msg-bubble-received` CSS 类定义。
- *
- * @example
- * <ChatWindow />
+ * @param onBack - 移动端返回会话列表回调，非空时显示返回按钮
+ * @param onShowDetail - 打开详情面板/抽屉回调，非空时显示详情按钮
+ * @param compactComposer - 移动端使用紧凑输入区
  */
-import { Send, Paperclip, Image, Smile } from "lucide-react";
-import { useConversationStore, useAuthStore } from "@yuanchat/shared";
-import { cn } from "@yuanchat/shared/utils";
+import { useEffect, useRef } from "react";
+import { ArrowLeft, MoreHorizontal, Phone, Pin, Search, Video } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { useConversationStore, useMessageStore } from "@yuanchat/shared";
 import { Avatar } from "./Avatar";
+import { Composer } from "./Composer";
+import { MessageBubble, TypingIndicator } from "./MessageBubble";
 
-/** 开发阶段使用的模拟消息数据，后续替换为 API 获取 */
-const DEMO_MESSAGES = [
-  {
-    id: "1",
-    senderId: "user1",
-    text: "你好，明天的会议准备得怎么样了？",
-    time: "14:15",
-    isSelf: false,
-  },
-  { id: "2", senderId: "me", text: "已经准备差不多了，PPT 还在完善", time: "14:18", isSelf: true },
-  { id: "3", senderId: "user1", text: "好的，下班前发给我看一下", time: "14:20", isSelf: false },
-  { id: "4", senderId: "me", text: "没问题 👍", time: "14:22", isSelf: true },
-  {
-    id: "5",
-    senderId: "user1",
-    text: "对了，新版本的设计稿你看了吗？我觉得侧边栏的颜色可以再调整一下",
-    time: "14:32",
-    isSelf: false,
-  },
-];
-
-export function ChatWindow() {
-  // 从 Zustand Store 中读取当前活跃会话 ID 和会话列表
+export function ChatWindow({
+  onBack,
+  onShowDetail,
+  compactComposer = false,
+}: {
+  onBack?: () => void;
+  onShowDetail?: () => void;
+  compactComposer?: boolean;
+}) {
+  const { t } = useTranslation();
+  // 从 Zustand Store 中读取当前活跃会话与消息流
   const activeId = useConversationStore((s) => s.activeId);
   const conversations = useConversationStore((s) => s.conversations);
-  const currentUser = useAuthStore((s) => s.user);
-  // 根据 activeId 找到对应的会话对象
   const conv = conversations.find((c) => c.id === activeId);
 
-  /** 点击消息列表空白区域时清除文本选中 */
-  const handleMessageListMouseDown = (e: React.MouseEvent) => {
-    const target = e.target as HTMLElement;
-    // 如果点击的是气泡内部，保留选中（让用户可以用键盘复制等）
-    if (target.closest(".msg-bubble")) return;
-    window.getSelection()?.removeAllRanges();
-  };
+  const messages = useMessageStore((s) => (activeId ? s.messagesByConv[activeId] : undefined));
+  const typingName = useMessageStore((s) => (activeId ? s.typingByConv[activeId] : undefined));
+  const sendText = useMessageStore((s) => s.sendText);
+  const setStatus = useMessageStore((s) => s.setStatus);
+  const setReplyingTo = useMessageStore((s) => s.setReplyingTo);
+  const replyingTo = useMessageStore((s) => s.replyingTo);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // 消息变化 / 切换会话时滚动到底部
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages?.length, activeId]);
 
   // 防御：如果没找到会话（activeId 无效或为 null），不渲染
   if (!conv) return null;
 
+  const subtitle =
+    conv.type === "group"
+      ? [
+          conv.memberCount ? t("chat.members", { count: conv.memberCount }) : null,
+          conv.onlineCount ? t("chat.onlineCount", { count: conv.onlineCount }) : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : conv.isOnline || conv.presence === "online"
+        ? t("common.online")
+        : t("common.offline");
+
+  const handleSend = (text: string) => {
+    if (!activeId) return;
+    sendText(
+      activeId,
+      text,
+      replyingTo
+        ? {
+            senderName: replyingTo.senderName ?? "我",
+            excerpt: (replyingTo.text ?? replyingTo.file?.name ?? "").slice(0, 40),
+          }
+        : undefined,
+    );
+  };
+
   return (
-    <div className="flex h-full flex-col">
-      {/* 顶部标题栏 — 品牌渐变 */}
-      <header className="brand-gradient-soft flex items-center gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
-        <Avatar name={conv.name} src={conv.avatarUrl} online={conv.isOnline} />
-        <div>
-          <h2 className="text-title-md text-on-surface font-semibold">{conv.name}</h2>
-          <p className="text-label-sm text-on-surface-variant">
-            {conv.type === "group" ? "群聊" : conv.isOnline ? "在线" : "离线"}
-          </p>
+    <div className="flex h-full min-w-0 flex-col">
+      {/* 顶部标题栏 */}
+      <header className="border-outline-variant bg-surface-container-low flex h-[60px] shrink-0 items-center gap-3 border-b pr-2 pl-3">
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="md3-icon-btn text-on-surface -ml-1"
+            aria-label={t("chat.back")}
+          >
+            <ArrowLeft size={22} />
+          </button>
+        )}
+        <Avatar name={conv.name} src={conv.avatarUrl} presence={conv.presence} />
+        <div className="min-w-0 flex-1">
+          <h2 className="text-title-md text-on-surface truncate font-semibold">{conv.name}</h2>
+          <p className="text-label-sm text-on-surface-variant truncate">{subtitle}</p>
         </div>
+        <button
+          className="md3-icon-btn text-on-surface-variant"
+          title={t("chat.voiceCall")}
+          aria-label={t("chat.voiceCall")}
+        >
+          <Phone size={19} />
+        </button>
+        <button
+          className="md3-icon-btn text-on-surface-variant"
+          title={t("chat.videoCall")}
+          aria-label={t("chat.videoCall")}
+        >
+          <Video size={19} />
+        </button>
+        <button
+          className="md3-icon-btn text-on-surface-variant hidden sm:grid"
+          title={t("chat.searchHistory")}
+          aria-label={t("chat.searchHistory")}
+        >
+          <Search size={19} />
+        </button>
+        {onShowDetail && (
+          <button
+            onClick={onShowDetail}
+            className="md3-icon-btn text-on-surface-variant"
+            title={t("chat.details")}
+            aria-label={t("chat.details")}
+          >
+            <MoreHorizontal size={19} />
+          </button>
+        )}
       </header>
 
-      {/* 消息列表 — 灰底衬托白色 received 气泡 */}
-      <div
-        className="flex-1 space-y-4 overflow-y-auto bg-slate-100 px-4 py-4 dark:bg-gray-950"
-        onMouseDown={handleMessageListMouseDown}
-      >
-        {DEMO_MESSAGES.map((msg, i) => {
-          // TODO: 根据与上一条消息的时间差判断是否显示时间分隔
-          // 当前简化处理：仅第一条消息显示时间
-          const showTime = i === 0;
-
-          return (
-            <div key={msg.id}>
-              {showTime && (
-                <div className="mb-4 text-center">
-                  <span className="bg-surface-container-high text-label-sm text-on-surface-variant inline-block rounded-full px-3 py-1">
-                    {msg.time}
-                  </span>
-                </div>
-              )}
-              <div className={cn("flex gap-3", msg.isSelf ? "flex-row-reverse" : "flex-row")}>
-                <Avatar
-                  name={msg.isSelf ? currentUser?.nickname || "我" : conv.name}
-                  src={msg.isSelf ? (currentUser?.avatarUrl ?? undefined) : conv.avatarUrl}
-                  size="md"
-                />
-                <div className={cn(msg.isSelf ? "msg-bubble-sent" : "msg-bubble-received")}>
-                  {msg.text}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* 底部输入区 */}
-      <div className="border-t border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900">
-        <div className="mb-2 flex items-center gap-1">
-          <button className="md3-icon-btn text-on-surface-variant">
-            <Image size={18} />
-          </button>
-          <button className="md3-icon-btn text-on-surface-variant">
-            <Paperclip size={18} />
-          </button>
-          <button className="md3-icon-btn text-on-surface-variant">
-            <Smile size={18} />
-          </button>
+      {/* 置顶消息条 */}
+      {conv.pinnedMessage && (
+        <div className="bg-primary-container text-primary-on-container flex h-9 shrink-0 items-center gap-2 px-4">
+          <Pin size={13} className="shrink-0" />
+          <span className="text-label-md font-semibold">{t("chat.pinnedLabel")}</span>
+          <span className="text-body-sm min-w-0 flex-1 truncate">{conv.pinnedMessage}</span>
         </div>
-        <div className="flex items-end gap-2">
-          <textarea
-            rows={3}
-            placeholder="输入消息..."
-            className="text-body-md text-on-surface placeholder:text-on-surface-variant flex-1 resize-none bg-transparent px-4 py-2.5 focus:outline-none"
-          />
-          <button className="bg-primary text-primary-on shadow-elevation-2 shrink-0 rounded-xl p-2.5 transition-opacity hover:opacity-90">
-            <Send size={18} />
-          </button>
+      )}
+
+      {/* 消息流 */}
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+        <div className="flex flex-col px-4 py-4">
+          {/* 日期分隔线（demo 阶段固定"今天"，接入后按消息时间分组） */}
+          <div className="text-label-md text-on-surface-variant my-2 flex items-center gap-3">
+            <span className="bg-outline-variant h-px flex-1" />
+            {t("chat.today")}
+            <span className="bg-outline-variant h-px flex-1" />
+          </div>
+
+          {(messages ?? []).map((msg) => (
+            <MessageBubble
+              key={msg.id}
+              msg={msg}
+              onRetry={
+                msg.status === "failed" && activeId
+                  ? () => {
+                      setStatus(activeId, msg.id, "sending");
+                      setTimeout(() => setStatus(activeId, msg.id, "sent"), 700);
+                    }
+                  : undefined
+              }
+              onReply={() => setReplyingTo(msg)}
+            />
+          ))}
+
+          {typingName && <TypingIndicator name={typingName} />}
         </div>
       </div>
+
+      {/* 输入区 */}
+      <Composer onSend={handleSend} compact={compactComposer} />
     </div>
   );
 }

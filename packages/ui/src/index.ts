@@ -9,7 +9,7 @@
  *
  * 组件分为三类：
  * - 基础 UI：Button、Input、Avatar（可复用的原子组件）
- * - 聊天组件：ConversationList、ChatWindow、ChatDetail（IM 专用业务组件）
+ * - 聊天组件：ConversationList、ChatWindow、MessageBubble、Composer、ChatDetail
  * - 布局组件：MainLayout（页面框架）
  */
 
@@ -23,7 +23,10 @@ export { ResizeHandle } from "./ResizeHandle";
 // 聊天组件
 export { ConversationList } from "./ConversationList";
 export { ChatWindow } from "./ChatWindow";
+export { MessageBubble, TypingIndicator } from "./MessageBubble";
+export { Composer } from "./Composer";
 export { ChatDetail } from "./ChatDetail";
+export { ChatScreen } from "./ChatScreen";
 
 // 布局组件
 export { MainLayout } from "./MainLayout";

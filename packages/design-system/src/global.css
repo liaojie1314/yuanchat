@@ -133,6 +133,56 @@
     border-color: #334155;
   }
 
+  /* 新版消息气泡 — 自己发送（品牌渐变，含结构化内容时由组件控制布局） */
+  .msg-bubble-self {
+    background: linear-gradient(135deg, #5b9bd5 0%, #7ec8e3 100%);
+    color: #fff;
+    box-shadow: 0 2px 12px rgb(91 155 213 / 30%);
+  }
+
+  .dark .msg-bubble-self {
+    background: linear-gradient(135deg, #3d7ab8 0%, #5b9bd5 100%);
+    color: #eaf3ff;
+    box-shadow: 0 2px 12px rgb(61 122 184 / 35%);
+  }
+
+  /* 新版消息气泡 — 接收方（表面色 + 细边框） */
+  .msg-bubble-peer {
+    background: #fff;
+    color: #171c24;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 6%);
+  }
+
+  .dark .msg-bubble-peer {
+    background: #1e293b;
+    color: #dee5ee;
+    border-color: #334155;
+  }
+
+  /* 正在输入指示 — 三个跳动圆点 */
+  .typing-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 9999px;
+    background: rgb(var(--md-sys-color-primary-rgb));
+    animation: typing-pulse 1.2s infinite;
+  }
+
+  @keyframes typing-pulse {
+    0%,
+    60%,
+    100% {
+      opacity: 0.3;
+      transform: translateY(0);
+    }
+
+    30% {
+      opacity: 1;
+      transform: translateY(-3px);
+    }
+  }
+
   /* 输入框 */
   .input-base {
     @apply border-outline-variant w-full rounded-xl border px-4 py-3;
@@ -338,6 +388,15 @@
 @layer utilities {
   .no-select {
     user-select: none;
+  }
+
+  /* 隐藏水平滚动条（chips 横向滚动条视觉噪音大） */
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
   }
 
   /* 键盘感知的全屏高度容器 —— 替代 h-screen(100vh)。
