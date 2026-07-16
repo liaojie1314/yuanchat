@@ -28,5 +28,12 @@ export { Composer } from "./Composer";
 export { ChatDetail } from "./ChatDetail";
 export { ChatScreen } from "./ChatScreen";
 
+// 通讯录组件
+export { ContactsScreen } from "./ContactsScreen";
+export { ContactsPanel } from "./ContactsPanel";
+export { ContactDetail } from "./ContactDetail";
+export { NewFriendsView } from "./NewFriendsView";
+export { AddContactModal } from "./AddContactModal";
+
 // 布局组件
 export { MainLayout } from "./MainLayout";

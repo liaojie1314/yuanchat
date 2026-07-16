@@ -5,6 +5,7 @@ import { useAuthStore, useKeyboardAwareViewport } from "@yuanchat/shared";
 import { TitleBar } from "./components/TitleBar";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { ChatPage } from "./pages/ChatPage";
+import { ContactsPage } from "./pages/ContactsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
@@ -53,7 +54,7 @@ function App() {
       <Route element={<MainLayout titleBar={isMobile ? undefined : <TitleBar />} />}>
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/chat/:conversationId" element={<ChatPage />} />
-        <Route path="/contacts" element={<ChatPage />} />
+        <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/settings" element={<ChatPage />} />
         <Route path="*" element={<Navigate to="/chat" replace />} />
       </Route>

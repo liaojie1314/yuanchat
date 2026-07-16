@@ -33,11 +33,13 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logge
 	userRepo := repository.NewUserRepository(db)
 	convRepo := repository.NewConversationRepository(db)
 	msgRepo := repository.NewMessageRepository(db)
+	contactRepo := repository.NewContactRepository(db)
 	sidGen := shortid.NewGenerator(db)
 
 	userSvc := service.NewUserService(userRepo, jwtGen, sidGen, logger)
 	msgSvc := service.NewMessageService(msgRepo, convRepo, userRepo, logger)
 	convSvc := service.NewConversationService(convRepo, msgRepo, logger)
+	contactSvc := service.NewContactService(contactRepo, userRepo, logger)
 
 	healthH := handler.NewHealthHandler()
 	captchaH := handler.NewCaptchaHandler(rdb)
@@ -47,6 +49,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logge
 
 	hub := ws.NewHub(cfg.WebSocket.MaxConnectionsPerUser, logger)
 	wsH := ws.NewHandler(hub, msgSvc, jwtGen, cfg.WebSocket, cfg.Server.IsProduction(), logger)
+	contactH := handler.NewContactHandler(contactSvc, hub, logger)
 
 	// --- Routes ---
 	api := r.Group("/api/v1")
@@ -63,6 +66,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logge
 		{
 			authUsers.GET("/me", userH.GetProfile)
 			authUsers.PUT("/me", userH.UpdateProfile)
+			authUsers.GET("/search", contactH.Search)
 		}
 	}
 
@@ -70,6 +74,12 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logge
 	{
 		chat.GET("/conversations", convH.List)
 		chat.GET("/conversations/:id/messages", msgH.History)
+
+		chat.GET("/contacts", contactH.ListFriends)
+		chat.POST("/contacts/requests", contactH.SendRequest)
+		chat.GET("/contacts/requests", contactH.ListRequests)
+		chat.POST("/contacts/requests/:id/accept", contactH.Accept)
+		chat.POST("/contacts/requests/:id/reject", contactH.Reject)
 	}
 
 	return r, wsH

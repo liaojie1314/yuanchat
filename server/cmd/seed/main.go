@@ -2,9 +2,11 @@
 //
 //	3 个用户（alice / bob / carol，密码均为 Test@1234）
 //	1 个单聊（alice ↔ bob）+ 1 个群聊（产品研发群，三人）
+//	好友关系：alice↔bob、bob↔carol（bob↔carol 补建单聊维持"好友必有会话"）
+//	好友申请：carol → alice 一条 pending（演示"新的朋友"角标）
 //	每个会话若干条历史消息（正确维护 seq / last_seq / last_read_seq）
 //
-// 幂等：按手机号查重，已存在的用户/会话不会重复创建。
+// 幂等：按手机号查重，已存在的用户/会话/关系不会重复创建。
 //
 // 运行：go run ./cmd/seed
 package main
@@ -55,6 +57,11 @@ func main() {
 	}
 	defer database.Close(db)
 
+	// 定向迁移新表（seed 可能先于 server 首次运行）
+	if err := db.AutoMigrate(&model.FriendRequest{}); err != nil {
+		log.Fatalf("migrate friend_requests: %v", err)
+	}
+
 	ctx := context.Background()
 
 	users, err := ensureUsers(ctx, db)
@@ -75,6 +82,26 @@ func main() {
 		[]memberSpec{{alice.ID, model.MemberRoleOwner}, {bob.ID, model.MemberRoleNormal}, {carol.ID, model.MemberRoleNormal}})
 	if err != nil {
 		log.Fatalf("seed group conversation: %v", err)
+	}
+
+	// bob↔carol 好友对应的单聊（维持"好友必有会话"不变式；alice↔bob 已有）
+	bcConv, err := ensureConversation(ctx, db, model.ConversationTypePrivate, nil,
+		[]memberSpec{{bob.ID, model.MemberRoleNormal}, {carol.ID, model.MemberRoleNormal}})
+	if err != nil {
+		log.Fatalf("seed bob-carol conversation: %v", err)
+	}
+
+	// 好友关系（双向行）：alice↔bob、bob↔carol
+	if err := ensureFriendship(ctx, db, alice.ID, bob.ID); err != nil {
+		log.Fatalf("seed friendship alice-bob: %v", err)
+	}
+	if err := ensureFriendship(ctx, db, bob.ID, carol.ID); err != nil {
+		log.Fatalf("seed friendship bob-carol: %v", err)
+	}
+
+	// carol → alice pending 申请（演示"新的朋友"角标；已是好友/已有申请则跳过）
+	if err := ensurePendingRequest(ctx, db, carol.ID, alice.ID, "我是 Carol，产品研发群里加个好友～"); err != nil {
+		log.Fatalf("seed friend request: %v", err)
 	}
 
 	if err := ensureMessages(ctx, db, privateConv, []seedMsg{
@@ -104,12 +131,20 @@ func main() {
 		log.Fatalf("seed group messages: %v", err)
 	}
 
+	if err := ensureMessages(ctx, db, bcConv, []seedMsg{
+		{carol.ID, "Bob，设计稿第二版的反馈你看了吗？"},
+		{bob.ID, "看了，交互那两处我今天改"},
+	}); err != nil {
+		log.Fatalf("seed bob-carol messages: %v", err)
+	}
+
 	fmt.Println("Seed 完成 ✔")
 	fmt.Println("测试账号（密码均为 Test@1234）：")
 	for i, u := range users {
 		fmt.Printf("  %-6s phone=%s short_id=%d id=%s\n", seedUsers[i].nickname, seedUsers[i].phone, u.ShortID, u.ID)
 	}
-	fmt.Printf("单聊会话: %s\n群聊会话: %s\n", privateConv.ID, groupConv.ID)
+	fmt.Printf("单聊会话: %s\n群聊会话: %s\nBob-Carol 单聊: %s\n", privateConv.ID, groupConv.ID, bcConv.ID)
+	fmt.Println("好友：Alice↔Bob、Bob↔Carol；待处理申请：Carol → Alice")
 }
 
 // ensureUsers 幂等创建测试用户。
@@ -209,6 +244,59 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convType int16, name *
 type seedMsg struct {
 	senderID uuid.UUID
 	text     string
+}
+
+// ensureFriendship 幂等写入双向好友行（已存在则置为 accepted）。
+func ensureFriendship(ctx context.Context, db *gorm.DB, a, b uuid.UUID) error {
+	src := "seed"
+	for _, pair := range [][2]uuid.UUID{{a, b}, {b, a}} {
+		var existing model.Contact
+		err := db.WithContext(ctx).
+			First(&existing, "user_id = ? AND contact_user_id = ?", pair[0], pair[1]).Error
+		if err == nil {
+			if existing.Status != model.ContactStatusAccepted {
+				if err := db.WithContext(ctx).Model(&existing).
+					Update("status", model.ContactStatusAccepted).Error; err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		contact := &model.Contact{
+			UserID:        pair[0],
+			ContactUserID: pair[1],
+			Status:        model.ContactStatusAccepted,
+			Source:        &src,
+		}
+		if err := db.WithContext(ctx).Create(contact).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ensurePendingRequest 幂等创建 pending 好友申请（已有任意状态申请则不动，
+// 避免覆盖联调中手动 accept/reject 的结果）。
+func ensurePendingRequest(ctx context.Context, db *gorm.DB, requester, target uuid.UUID, message string) error {
+	var existing model.FriendRequest
+	err := db.WithContext(ctx).
+		First(&existing, "requester_id = ? AND target_id = ?", requester, target).Error
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	req := &model.FriendRequest{
+		RequesterID: requester,
+		TargetID:    target,
+		Message:     &message,
+		Status:      model.FriendRequestStatusPending,
+	}
+	return db.WithContext(ctx).Create(req).Error
 }
 
 // ensureMessages 仅在会话还没有消息时插入历史消息。

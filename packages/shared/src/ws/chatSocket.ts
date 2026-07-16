@@ -34,6 +34,17 @@ export interface ServerFrames {
   };
   "message.read": { conversation_id: string; user_id: string; seq: number };
   typing: { conversation_id: string; user_id: string; nickname: string };
+  "contact.request": {
+    request_id: string;
+    requester: { id: string; nickname: string; avatar_url?: string | null; short_id: number };
+    message?: string;
+    created_at: number;
+  };
+  "contact.accepted": {
+    request_id: string;
+    friend: { id: string; nickname: string; avatar_url?: string | null; short_id: number };
+    conversation_id: string;
+  };
   error: { code: number; message: string; client_msg_id?: string };
 }
 

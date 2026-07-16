@@ -53,6 +53,16 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*model.
 	return &user, err
 }
 
+// FindByShortID looks up a user by their short id (元聊号).
+func (r *UserRepository) FindByShortID(ctx context.Context, shortID int64) (*model.User, error) {
+	var user model.User
+	err := r.db.WithContext(ctx).First(&user, "short_id = ?", shortID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &user, err
+}
+
 // ExistsByPhoneOrEmail checks whether a phone or email is already registered.
 func (r *UserRepository) ExistsByPhoneOrEmail(ctx context.Context, phone, email string) (bool, error) {
 	var count int64

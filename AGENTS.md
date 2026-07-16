@@ -42,11 +42,14 @@
   token 静默刷新（滑动会话轮换 + 401 兜底重试，`api/tokenManager.ts`）
 - ✅ 聊天核心闭环：会话列表、文本消息 WebSocket 实时收发、已读回执、
   正在输入、历史游标分页、断线重连、失败重试（协议见 `docs/02_CHAT_API.md`）
+- ✅ 好友核心闭环：精确搜索（手机号/元聊号/邮箱）→ 发申请（WS 实时推送）→
+  同意/拒绝 → 同意即原子建单聊 + 打招呼消息 → 字母分组好友列表
+  （`ContactsScreen.tsx` 三端编排，端点见 `docs/02_CHAT_API.md`）
 - ✅ 三端响应式聊天主界面（`packages/ui/src/ChatScreen.tsx` 编排）
 - ✅ 一键启动：`pnpm dev:web` / `dev:web:mock` / `dev:desktop` / `dev:android` /
   `dev:server` / `dev:stop`（`scripts/dev.mjs`，见 `docs/DEVELOPMENT.md` 第零章）
-- ⏳ 未做：联系人/好友（进行中）、建群流程、图片/文件/语音消息（需 MinIO）、
-  撤回、presence
+- ⏳ 未做：建群流程、图片/文件/语音消息（需 MinIO）、撤回、presence、
+  删好友/黑名单
 
 后端单进程双端口：REST :8080 + WebSocket :8081；消息分发为内存 Hub
 （`Dispatcher` 接口，多实例时换 Redis Pub/Sub 实现）。

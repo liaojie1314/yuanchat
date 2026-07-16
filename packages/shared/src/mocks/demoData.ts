@@ -5,6 +5,7 @@
  * 无后端时（VITE_ENABLE_MOCK=true）由 useChatBootstrap 注入 store，
  * 保证三端 UI 演示不退化。数据形态覆盖原型的全部气泡与列表状态。
  */
+import type { Friend, FriendRequestItem } from "../api/contacts";
 import type { Conversation } from "../store/conversationStore";
 import type { ChatMessage } from "../store/messageStore";
 
@@ -203,3 +204,32 @@ export const DEMO_MESSAGES: Record<string, ChatMessage[]> = {
 
 /** Mock 模式下"陈曦正在输入"演示 */
 export const DEMO_TYPING: Record<string, string> = { "1": "陈曦" };
+
+/** Mock 模式下的好友列表（覆盖中英文昵称的字母分组） */
+export const DEMO_FRIENDS: Friend[] = [
+  { id: "u_chenxi", nickname: "陈曦", avatarUrl: null, shortId: 10011, conversationId: "1" },
+  { id: "u_zhangwei", nickname: "张伟", avatarUrl: null, shortId: 10012, conversationId: "3" },
+  { id: "u_bob", nickname: "Bob", avatarUrl: null, shortId: 10002, conversationId: null },
+  { id: "u_amy", nickname: "Amy", avatarUrl: null, shortId: 10021, conversationId: null },
+  { id: "u_lina", nickname: "李娜", avatarUrl: null, shortId: 10022, conversationId: null },
+];
+
+/** Mock 模式下的好友申请（1 条待处理 + 1 条我发出的） */
+export const DEMO_REQUESTS: FriendRequestItem[] = [
+  {
+    id: "fr_demo_1",
+    direction: "in",
+    status: 0,
+    message: "我是 Carol，产品研发群里加个好友～",
+    peer: { id: "u_carol", nickname: "Carol", avatarUrl: null, shortId: 10003 },
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: "fr_demo_2",
+    direction: "out",
+    status: 0,
+    message: "你好，我是元聊用户",
+    peer: { id: "u_david", nickname: "David", avatarUrl: null, shortId: 10031 },
+    updatedAt: new Date(Date.now() - 3600_000).toISOString(),
+  },
+];

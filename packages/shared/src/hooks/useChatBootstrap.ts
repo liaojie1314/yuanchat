@@ -13,8 +13,15 @@
 import { useEffect } from "react";
 import { formatListTime, formatMessageTime } from "../api/chat";
 import { setTokenProvider } from "../api/client";
-import { DEMO_CONVERSATIONS, DEMO_MESSAGES, DEMO_TYPING } from "../mocks/demoData";
+import {
+  DEMO_CONVERSATIONS,
+  DEMO_FRIENDS,
+  DEMO_MESSAGES,
+  DEMO_REQUESTS,
+  DEMO_TYPING,
+} from "../mocks/demoData";
 import { useAuthStore } from "../store/authStore";
+import { useContactStore } from "../store/contactStore";
 import { useConversationStore } from "../store/conversationStore";
 import { setMessageMockMode, useMessageStore } from "../store/messageStore";
 import type { ChatMessage } from "../store/messageStore";
@@ -110,6 +117,35 @@ function wireSocket() {
     typing: (p) => {
       useMessageStore.getState().setTyping(p.conversation_id, p.nickname);
     },
+
+    "contact.request": (p) => {
+      useContactStore.getState().applyIncomingRequest({
+        id: p.request_id,
+        direction: "in",
+        status: 0,
+        message: p.message || "",
+        peer: {
+          id: p.requester.id,
+          nickname: p.requester.nickname,
+          avatarUrl: p.requester.avatar_url,
+          shortId: p.requester.short_id,
+        },
+        updatedAt: new Date(p.created_at).toISOString(),
+      });
+    },
+
+    "contact.accepted": (p) => {
+      useContactStore.getState().applyAccepted(
+        p.request_id,
+        {
+          id: p.friend.id,
+          nickname: p.friend.nickname,
+          avatarUrl: p.friend.avatar_url,
+          shortId: p.friend.short_id,
+        },
+        p.conversation_id,
+      );
+    },
   });
 
   chatSocket.onReconnect = () => {
@@ -118,6 +154,8 @@ function wireSocket() {
     useMessageStore.setState({ messagesByConv: {}, hasMoreByConv: {} });
     const activeId = useConversationStore.getState().activeId;
     if (activeId) useMessageStore.getState().loadHistory(activeId);
+    // 掉线期间可能漏好友申请/同意推送
+    void useContactStore.getState().loadRequests();
   };
 }
 
@@ -131,6 +169,9 @@ function injectDemoData() {
   if (Object.keys(msgState.messagesByConv).length === 0) {
     useMessageStore.setState({ messagesByConv: DEMO_MESSAGES, typingByConv: DEMO_TYPING });
   }
+  if (useContactStore.getState().friends.length === 0) {
+    useContactStore.setState({ friends: DEMO_FRIENDS, requests: DEMO_REQUESTS });
+  }
 }
 
 export function useChatBootstrap() {
@@ -142,6 +183,8 @@ export function useChatBootstrap() {
 
     wireSocket();
     void useConversationStore.getState().loadConversations();
+    // 申请列表随登录拉取（"新的朋友"角标；好友列表进通讯录页再拉）
+    void useContactStore.getState().loadRequests();
     chatSocket.connect();
 
     return () => {
