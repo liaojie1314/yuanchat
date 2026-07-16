@@ -48,6 +48,32 @@ pnpm install                # 安装所有 workspace 依赖
 
 ---
 
+## 零、一键启动（推荐入口）
+
+`scripts/dev.mjs` 按「目标端 × 数据模式」组合拉起完整开发环境：
+
+| 命令                    | 数据模式 | 自动完成的步骤                                                                                             |
+| ----------------------- | -------- | ---------------------------------------------------------------------------------------------------------- |
+| `pnpm dev:web`          | 真实后端 | docker(pg/redis, `--wait` 健康检查) → seed（幂等）→ Go 服务（REST :8080 + WS :8081，健康检查）→ Vite :5173 |
+| `pnpm dev:web:mock`     | Mock     | 仅 Vite :5173（MSW + demo 数据，无需后端/数据库）                                                          |
+| `pnpm dev:desktop`      | 真实后端 | 同 dev:web 的后端链 → `tauri dev`（桌面窗口，Vite :1420）                                                  |
+| `pnpm dev:desktop:mock` | Mock     | 仅 `tauri dev`                                                                                             |
+| `pnpm dev:android`      | 真实后端 | 后端链 → `adb reverse tcp:8080/8081`（设备直连宿主机后端）→ `tauri android dev`                            |
+| `pnpm dev:android:mock` | Mock     | 仅 `tauri android dev`（需 ANDROID_HOME，见第三章）                                                        |
+| `pnpm dev:server`       | —        | 仅后端链（docker → seed → Go 服务），前端另起                                                              |
+| `pnpm dev:stop`         | —        | 停止 5173/1420/8080/8081 上的进程 + `docker compose stop`                                                  |
+
+行为约定：
+
+- **Ctrl+C**：终止本次拉起的应用进程与 Go 服务（按进程组 kill，`go run` 的子二进制不会残留）；docker 容器保留以加速下次启动
+- **彻底清理**：`pnpm dev:stop`
+- Go 工具链不在 PATH 时自动兜底 `/home/liaojie1314/env/go/go/bin`
+- 真实模式测试账号见第四章
+
+以下章节为**分步启动**方式（调试单个环节时使用）。
+
+---
+
 ## 一、Web 端
 
 | 命令                                     | 说明                                                           |
@@ -250,6 +276,8 @@ pnpm --filter @yuanchat/desktop tauri android build
 
 ### 聊天功能联调（前端 + 后端全链路）
 
+> 一键完成下面全部步骤：`pnpm dev:web`（详见第零章）。以下为手动分步方式。
+
 ```bash
 # 1. 启动基础设施（PostgreSQL :5433 + Redis :6379）
 docker compose -f deploy/docker-compose.yml up -d
@@ -401,6 +429,8 @@ npx tauri android build --aab --split-per-abi --target aarch64
 | 命令             | 说明                                   |
 | ---------------- | -------------------------------------- |
 | `pnpm install`   | 安装所有 workspace 依赖                |
+| `pnpm dev:*`     | **一键启动**（见第零章）               |
+| `pnpm dev:stop`  | 停止一键启动拉起的全部进程与容器       |
 | `pnpm typecheck` | 所有包 TypeScript 类型检查             |
 | `pnpm lint`      | ESLint 全量检查                        |
 | `pnpm build`     | 构建所有应用（**仅前端 JS/CSS**）      |
