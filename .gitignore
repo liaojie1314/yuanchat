@@ -95,4 +95,4 @@ server/server
 test-results/
 playwright-report/
 
-.design/
+.design/.playwright-mcp/

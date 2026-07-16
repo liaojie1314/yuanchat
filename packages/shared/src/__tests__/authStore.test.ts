@@ -6,10 +6,10 @@ import { useAuthStore } from "../store/authStore";
 // MSW Server — 在 Node 环境下拦截 fetch 请求
 const server = setupServer(
   http.post("http://localhost:8080/api/v1/users/login", async ({ request }) => {
-    const body = (await request.json()) as { yuanchat_id?: string; password?: string };
+    const body = (await request.json()) as { account?: string; password?: string };
     if (body.password === "wrong") {
       return HttpResponse.json(
-        { code: 40101, message: "元聊号或密码错误", data: null },
+        { code: 40101, message: "账号或密码错误", data: null },
         { status: 401 },
       );
     }
@@ -17,7 +17,7 @@ const server = setupServer(
       code: 0,
       message: "ok",
       data: {
-        user: { id: "test_user", nickname: body.yuanchat_id || "test" },
+        user: { id: "test_user", nickname: body.account || "test" },
         access_token: "token_access",
         refresh_token: "token_refresh",
         expires_in: 900,
@@ -104,7 +104,7 @@ describe("authStore", () => {
 
     it("throws on wrong password", async () => {
       await expect(useAuthStore.getState().loginWithPassword("testuser", "wrong")).rejects.toThrow(
-        "元聊号或密码错误",
+        "账号或密码错误",
       );
 
       // 状态不应改变

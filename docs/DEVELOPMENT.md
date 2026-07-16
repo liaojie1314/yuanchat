@@ -1,6 +1,6 @@
 # 元聊 YuanChat — 开发与打包指南
 
-> **最后更新**：2026-06-18
+> **最后更新**：2026-07-16
 >
 > ⚠️ **文档维护规则**：任何 `package.json` scripts、Tauri 配置、环境变量的变更，**必须同步更新本文档**。此规则对所有会话生效。
 
@@ -78,10 +78,14 @@ pnpm install                # 安装所有 workspace 依赖
 
 **Mock 覆盖的接口**：
 
-- `POST /api/v1/users/login` — 元聊号 + 密码登录（密码 `wrong` 测试错误）
+- `POST /api/v1/users/login` — 账号（手机号/邮箱）+ 密码登录（密码 `wrong` 测试错误）
 - `POST /api/v1/users/register` — 手机号 + 密码 + 验证码 + 昵称注册
 - `POST /api/v1/auth/logout` — 登出（始终返回成功，300ms 延迟）
 - `GET /api/v1/captcha` — SVG 验证码
+
+**聊天数据的 Mock**：会话列表与消息不走 MSW，而是由 `useChatBootstrap` 在
+Mock 模式下直接注入 demo 数据（`packages/shared/src/mocks/demoData.ts`），
+发送消息用 setTimeout 模拟「送达→已读」回执，无需任何后端。
 
 > **桌面端同理**：`pnpm --filter @yuanchat/desktop dev:mock` / `dev:real`，或 `pnpm tauri:dev` 前设置 `VITE_ENABLE_MOCK`。
 
@@ -234,11 +238,43 @@ pnpm --filter @yuanchat/desktop tauri android build
 
 ## 四、Go 后端
 
-| 命令                                                             | 说明                                |
-| ---------------------------------------------------------------- | ----------------------------------- |
-| `cd server && make dev`                                          | 启动 Gin HTTP 服务（:8080）         |
-| `cd server && make build`                                        | 编译为 `server/bin/yuanchat-server` |
-| `cd server && go test -v -race -coverprofile=coverage.out ./...` | 运行测试                            |
+> Go 工具链位置：`/home/liaojie1314/env/go/go/bin`（若 `go` 不在 PATH：`export PATH=/home/liaojie1314/env/go/go/bin:$PATH`）
+
+| 命令                                                             | 说明                                               |
+| ---------------------------------------------------------------- | -------------------------------------------------- |
+| `cd server && make dev`                                          | 启动服务（REST :8080 + WebSocket :8081，同一进程） |
+| `cd server && go run ./cmd/server`                               | 等价于 make dev                                    |
+| `cd server && go run ./cmd/seed`                                 | 灌入联调测试数据（幂等，可重复执行）               |
+| `cd server && make build`                                        | 编译为 `server/bin/yuanchat-server`                |
+| `cd server && go test -v -race -coverprofile=coverage.out ./...` | 运行测试                                           |
+
+### 聊天功能联调（前端 + 后端全链路）
+
+```bash
+# 1. 启动基础设施（PostgreSQL :5433 + Redis :6379）
+docker compose -f deploy/docker-compose.yml up -d
+
+# 2. 灌入测试数据（3 个用户 + 单聊 + 群聊 + 历史消息）
+cd server && go run ./cmd/seed
+
+# 3. 启动后端（REST :8080 + WS :8081）
+go run ./cmd/server
+
+# 4. 另开终端，启动前端（真实模式，关闭 MSW）
+pnpm --filter @yuanchat/web dev:real
+```
+
+**测试账号**（密码均为 `Test@1234`）：
+
+| 昵称  | 手机号（登录账号） | 说明                |
+| ----- | ------------------ | ------------------- |
+| Alice | `13800000001`      | 单聊 + 群聊（群主） |
+| Bob   | `13800000002`      | 单聊 + 群聊         |
+| Carol | `13800000003`      | 仅群聊              |
+
+两个浏览器（或普通+隐身窗口）分别登录 Alice / Bob 即可互发消息，验证实时收发、已读回执（双勾变蓝）、正在输入、未读角标。
+
+> 聊天 REST 端点与 WebSocket 协议详见 [`docs/02_CHAT_API.md`](./02_CHAT_API.md)。
 
 ---
 
@@ -476,11 +512,13 @@ packages/shared/coverage/
 
 #### 已有测试覆盖
 
-| 包                      | 测试文件               | 内容                       |
-| ----------------------- | ---------------------- | -------------------------- |
-| `internal/pkg/jwt`      | `jwt_test.go`          | Token 生成/验证/过期/无效  |
-| `internal/pkg/password` | `password_test.go`     | bcrypt 哈希/验证/盐值      |
-| `internal/service`      | `user_service_test.go` | 密码哈希、strPtr、错误常量 |
+| 包                      | 测试文件               | 内容                                          |
+| ----------------------- | ---------------------- | --------------------------------------------- |
+| `internal/pkg/jwt`      | `jwt_test.go`          | Token 生成/验证/过期/无效                     |
+| `internal/pkg/password` | `password_test.go`     | bcrypt 哈希/验证/盐值                         |
+| `internal/service`      | `user_service_test.go` | 密码哈希、strPtr、错误常量                    |
+| `internal/ws`           | `hub_test.go`          | Hub 注册/注销、多设备投递、连接上限、并发安全 |
+| `internal/ws`           | `protocol_test.go`     | WS 信封编解码                                 |
 
 > **注意**：`UserService` 依赖具体的 `*repository.UserRepository` 而非接口，完整的 Register/Login/Profile 集成测试需要连接测试数据库或重构为接口注入。
 

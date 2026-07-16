@@ -5,26 +5,20 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
+	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/config"
+	"github.com/yuanchat/server/internal/pkg/jwt"
 )
-
-// Claims JWT 声明
-//
-// 嵌入 jwt.RegisteredClaims 提供标准的 exp/iat/nbf 等字段。
-// UserID 和 DeviceID 是元聊扩展的自定义声明。
-type Claims struct {
-	UserID   uuid.UUID `json:"user_id"`
-	DeviceID string    `json:"device_id"`
-	jwt.RegisteredClaims
-}
 
 // AuthRequired JWT 认证中间件
 //
 // 从 Authorization Header 提取 Bearer Token，解析 JWT 后将 user_id 和 device_id
 // 注入到 Gin Context 中（通过 c.Set），后续 handler 可通过 GetUserID 获取。
-// Token 无效或缺失时返回 401。
+// Token 无效、缺失或非 access 用途时返回 401。
+//
+// Claims 结构复用 pkg/jwt.Claims（uid/did/use JSON tag），
+// 必须与 jwt.Generator 生成端一致，否则解析出的 UserID 恒为零值。
 func AuthRequired(cfg config.JWTConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString := extractToken(c)
@@ -36,15 +30,15 @@ func AuthRequired(cfg config.JWTConfig) gin.HandlerFunc {
 			return
 		}
 
-		claims := &Claims{}
-		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, jwt.ErrSignatureInvalid
+		claims := &jwt.Claims{}
+		token, err := gojwt.ParseWithClaims(tokenString, claims, func(token *gojwt.Token) (any, error) {
+			if _, ok := token.Method.(*gojwt.SigningMethodHMAC); !ok {
+				return nil, gojwt.ErrSignatureInvalid
 			}
 			return []byte(cfg.Secret), nil
 		})
 
-		if err != nil || !token.Valid {
+		if err != nil || !token.Valid || claims.TokenUse != "access" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"code":    401,
 				"message": "invalid or expired token",

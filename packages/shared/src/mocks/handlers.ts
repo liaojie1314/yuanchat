@@ -18,17 +18,19 @@ import { http, HttpResponse, passthrough, delay } from "msw";
 interface MockUser {
   id: string;
   nickname: string;
-  avatarUrl: string | null;
+  avatar_url: string | null;
   phone: string;
   email: string;
+  short_id: number;
 }
 
 const MOCK_USER: MockUser = {
   id: "user_001",
   nickname: "元聊用户",
-  avatarUrl: null,
+  avatar_url: null,
   phone: "13800138000",
   email: "user@yuanchat.com",
+  short_id: 10001,
 };
 
 // ========================================
@@ -139,15 +141,15 @@ export const handlers = [
   // --------------------------------------------------
   // 认证 — 登录
   // POST /api/v1/users/login
-  // Body: { yuanchat_id: string; password: string }
+  // Body: { account: string; password: string }
   // --------------------------------------------------
   http.post("http://localhost:8080/api/v1/users/login", async ({ request }) => {
     await delay(600); // 模拟网络延迟
-    const body = (await request.json()) as { yuanchat_id?: string; password?: string };
+    const body = (await request.json()) as { account?: string; password?: string };
 
     // 参数校验
-    if (!body.yuanchat_id || body.yuanchat_id.trim().length < 3) {
-      return apiError(40001, "元聊号长度至少 3 位");
+    if (!body.account || body.account.trim().length < 3) {
+      return apiError(40001, "账号长度至少 3 位");
     }
     if (!body.password || body.password.length < 6) {
       return apiError(40002, "密码长度至少 6 位");
@@ -157,13 +159,13 @@ export const handlers = [
     // "wrong" — 短密码，走客户端校验
     // "Wrong@1234" — 满足客户端校验但服务端返回认证失败
     if (body.password === "wrong" || body.password === "Wrong@1234") {
-      return apiError(40101, "元聊号或密码错误");
+      return apiError(40101, "账号或密码错误");
     }
 
     return apiOk({
       user: {
         ...MOCK_USER,
-        nickname: body.yuanchat_id, // 用元聊号作为昵称
+        nickname: body.account, // 用账号作为昵称
       },
       access_token: "mock_access_token_" + Date.now(),
       refresh_token: "mock_refresh_token_" + Date.now(),

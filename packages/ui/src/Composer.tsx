@@ -16,8 +16,11 @@
 import { useRef, useState } from "react";
 import { Image as ImageIcon, Mic, Paperclip, Plus, Send, Smile, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useMessageStore } from "@yuanchat/shared";
+import { chatSocket, useConversationStore, useMessageStore } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
+
+/** typing 帧节流间隔：输入期间最多每 3s 上报一次 */
+const TYPING_THROTTLE_MS = 3000;
 
 export function Composer({
   onSend,
@@ -29,10 +32,20 @@ export function Composer({
   const { t } = useTranslation();
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const lastTypingSentRef = useRef(0);
   const replyingTo = useMessageStore((s) => s.replyingTo);
   const setReplyingTo = useMessageStore((s) => s.setReplyingTo);
+  const activeId = useConversationStore((s) => s.activeId);
 
   const canSend = value.trim().length > 0;
+
+  const notifyTyping = () => {
+    if (!activeId || !chatSocket.isOpen()) return;
+    const nowMs = Date.now();
+    if (nowMs - lastTypingSentRef.current < TYPING_THROTTLE_MS) return;
+    lastTypingSentRef.current = nowMs;
+    chatSocket.send("typing", { conversation_id: activeId });
+  };
 
   const send = () => {
     const text = value.trim();
@@ -92,6 +105,7 @@ export function Composer({
             onChange={(e) => {
               setValue(e.target.value);
               autoGrow(e.target);
+              notifyTyping();
             }}
             onKeyDown={handleKeyDown}
             placeholder={t("chat.input.placeholder")}
@@ -137,6 +151,7 @@ export function Composer({
           onChange={(e) => {
             setValue(e.target.value);
             autoGrow(e.target);
+            notifyTyping();
           }}
           onKeyDown={handleKeyDown}
           placeholder={t("chat.input.placeholder")}

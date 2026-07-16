@@ -18,7 +18,12 @@
 import { useEffect, useState } from "react";
 import { MessageSquare } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useBreakpoint, useConversationStore, useResizable } from "@yuanchat/shared";
+import {
+  useBreakpoint,
+  useChatBootstrap,
+  useConversationStore,
+  useResizable,
+} from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { ChatDetail } from "./ChatDetail";
 import { ChatWindow } from "./ChatWindow";
@@ -30,6 +35,9 @@ export function ChatScreen() {
   const bp = useBreakpoint();
   const activeId = useConversationStore((s) => s.activeId);
   const setActive = useConversationStore((s) => s.setActive);
+
+  // 数据源接线：mock 注入 demo 数据 / 真实模式拉列表 + 建 WS 连接
+  useChatBootstrap();
 
   const [showDetail, setShowDetail] = useState(false);
   const leftPanel = useResizable(300, 240, 380);
