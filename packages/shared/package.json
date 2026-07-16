@@ -28,6 +28,7 @@
   "dependencies": {
     "@yuanchat/design-system": "workspace:*",
     "clsx": "^2.1.1",
+    "pinyin-pro": "^3.28.1",
     "react": "^19.0.0",
     "tailwind-merge": "^2.6.0",
     "zustand": "^5.0.0"

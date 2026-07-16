@@ -12,6 +12,7 @@ import (
 	"github.com/yuanchat/server/internal/config"
 	"github.com/yuanchat/server/internal/database"
 	"github.com/yuanchat/server/internal/logger"
+	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/redis"
 	"github.com/yuanchat/server/internal/router"
 	"go.uber.org/zap"
@@ -54,6 +55,11 @@ func main() {
 	}
 	defer database.Close(db)
 	zapLogger.Info("PostgreSQL connected")
+
+	// 3.1 定向迁移：仅新表（已有表由 init-scripts SQL 管理，不做全量 AutoMigrate）
+	if err := db.AutoMigrate(&model.FriendRequest{}); err != nil {
+		zapLogger.Fatal("Failed to migrate friend_requests", zap.Error(err))
+	}
 
 	// 4. 连接 Redis
 	zapLogger.Info("Connecting to Redis...")

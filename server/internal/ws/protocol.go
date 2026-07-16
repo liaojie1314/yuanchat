@@ -26,10 +26,35 @@ const (
 
 // 服务端 → 客户端 帧类型
 const (
-	TypeMessageAck     = "message.ack"
-	TypeMessageReceive = "message.receive"
-	TypeError          = "error"
+	TypeMessageAck      = "message.ack"
+	TypeMessageReceive  = "message.receive"
+	TypeError           = "error"
+	TypeContactRequest  = "contact.request"
+	TypeContactAccepted = "contact.accepted"
 )
+
+// UserBrief 联系人相关帧中携带的用户摘要。
+type UserBrief struct {
+	ID        uuid.UUID `json:"id"`
+	Nickname  string    `json:"nickname"`
+	AvatarURL *string   `json:"avatar_url,omitempty"`
+	ShortID   int64     `json:"short_id"`
+}
+
+// ContactRequestPayload 新好友申请推送，推给目标用户的所有设备。
+type ContactRequestPayload struct {
+	RequestID uuid.UUID `json:"request_id"`
+	Requester UserBrief `json:"requester"`
+	Message   string    `json:"message,omitempty"`
+	CreatedAt int64     `json:"created_at"` // Unix 毫秒
+}
+
+// ContactAcceptedPayload 申请被同意推送，推给申请方的所有设备。
+type ContactAcceptedPayload struct {
+	RequestID      uuid.UUID `json:"request_id"`
+	Friend         UserBrief `json:"friend"`
+	ConversationID uuid.UUID `json:"conversation_id"`
+}
 
 // ContentPayload 是消息体的传输结构（当前仅支持 text）。
 type ContentPayload struct {

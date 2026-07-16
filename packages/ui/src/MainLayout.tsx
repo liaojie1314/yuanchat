@@ -25,7 +25,13 @@
  */
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { MessageCircle, Users, Settings, Sun, Moon, LogOut } from "lucide-react";
-import { useThemeStore, useAuthStore, useConversationStore, useBreakpoint } from "@yuanchat/shared";
+import {
+  useThemeStore,
+  useAuthStore,
+  useContactStore,
+  useConversationStore,
+  useBreakpoint,
+} from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { useTranslation } from "react-i18next";
 import type { ReactNode } from "react";
@@ -49,7 +55,14 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
   const totalUnread = useConversationStore((s) =>
     s.conversations.reduce((sum, c) => sum + (c.isMuted ? 0 : c.unreadCount), 0),
   );
+  const pendingRequests = useContactStore(
+    (s) => s.requests.filter((r) => r.direction === "in" && r.status === 0).length,
+  );
   const activeConvId = useConversationStore((s) => s.activeId);
+
+  /** 导航项角标数：消息未读 / 通讯录待处理申请 */
+  const badgeOf = (to: string) =>
+    to === "/chat" ? totalUnread : to === "/contacts" ? pendingRequests : 0;
 
   const isActive = (to: string) =>
     to === "/chat" ? location.pathname.startsWith("/chat") : location.pathname.startsWith(to);
@@ -73,6 +86,7 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
           >
             {NAV_ITEMS.map(({ to, icon: Icon, labelKey }) => {
               const active = isActive(to);
+              const badge = badgeOf(to);
               return (
                 <Link
                   key={to}
@@ -89,9 +103,9 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
                     )}
                   >
                     <Icon size={22} strokeWidth={active ? 2.4 : 1.75} />
-                    {to === "/chat" && totalUnread > 0 && (
+                    {badge > 0 && (
                       <span className="text-label-sm absolute -top-1 right-1.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 font-bold text-white">
-                        {totalUnread > 99 ? "99+" : totalUnread}
+                        {badge > 99 ? "99+" : badge}
                       </span>
                     )}
                   </span>
@@ -117,6 +131,7 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
 
         {NAV_ITEMS.map(({ to, icon: Icon, labelKey }) => {
           const active = isActive(to);
+          const badge = badgeOf(to);
           return (
             <Link
               key={to}
@@ -131,7 +146,7 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
             >
               <Icon size={24} strokeWidth={active ? 2.5 : 1.5} />
               <span className="leading-none">{t(labelKey)}</span>
-              {to === "/chat" && totalUnread > 0 && (
+              {badge > 0 && (
                 <span className="absolute top-1.5 right-3 h-2 w-2 rounded-full bg-red-500" />
               )}
             </Link>

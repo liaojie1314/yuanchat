@@ -23,7 +23,7 @@
  */
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { apiPost } from "../api/client";
+import { apiPost, setTokenProvider } from "../api/client";
 import { setRefreshHandler } from "../api/tokenManager";
 
 // ========================================
@@ -187,8 +187,11 @@ export const useAuthStore = create<AuthState>()(
 );
 
 // ========================================
-// 静默刷新接线（模块加载即注册，无需组件参与）
+// API 层接线（模块加载即注册，不依赖任何页面组件挂载——
+// 直接刷新进 /contacts 等非聊天页时 REST 也能带上 Authorization）
 // ========================================
+
+setTokenProvider(() => useAuthStore.getState().accessToken);
 
 setRefreshHandler({
   getExpiresAt: () => {
