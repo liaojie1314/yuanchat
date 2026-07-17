@@ -132,3 +132,15 @@ func previewOf(m *repository.MessageWithSender) string {
 		return ""
 	}
 }
+
+// Members 校验成员身份后返回会话成员列表（owner 在前）。
+func (s *ConversationService) Members(ctx context.Context, userID, convID uuid.UUID) ([]repository.MemberWithUser, error) {
+	ok, err := s.convRepo.IsMember(ctx, convID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("check membership: %w", err)
+	}
+	if !ok {
+		return nil, ErrNotMember
+	}
+	return s.convRepo.ListMembers(ctx, convID)
+}

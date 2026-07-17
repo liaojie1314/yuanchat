@@ -14,10 +14,20 @@
  * @param onShowDetail - 打开详情面板/抽屉回调，非空时显示详情按钮
  * @param compactComposer - 移动端使用紧凑输入区
  */
-import { useCallback, useEffect, useRef } from "react";
-import { ArrowLeft, Loader2, MoreHorizontal, Phone, Pin, Search, Video } from "lucide-react";
+import { useCallback, useEffect, useRef, Fragment } from "react";
+import {
+  ArrowLeft,
+  Loader2,
+  MessageSquare,
+  MoreHorizontal,
+  Phone,
+  Pin,
+  Search,
+  Video,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useConversationStore, useMessageStore } from "@yuanchat/shared";
+import { formatDateDivider, useConversationStore, useMessageStore } from "@yuanchat/shared";
+import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
 import { Composer } from "./Composer";
 import { MessageBubble, TypingIndicator } from "./MessageBubble";
@@ -181,38 +191,114 @@ export function ChatWindow({
 
       {/* 消息流 */}
       <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="flex flex-col px-4 py-4">
-          {/* 向上翻页加载指示 */}
-          {hasMore && (
-            <div className="text-on-surface-variant my-1 flex justify-center">
-              <Loader2 size={16} className="animate-spin" />
-            </div>
-          )}
+        {messages === undefined ? (
+          <MessageSkeleton />
+        ) : messages.length === 0 ? (
+          <EmptyMessages />
+        ) : (
+          <div className="flex flex-col px-4 py-4">
+            {/* 向上翻页加载指示 */}
+            {hasMore && (
+              <div className="text-on-surface-variant my-1 flex justify-center">
+                <Loader2 size={16} className="animate-spin" />
+              </div>
+            )}
 
-          {/* 日期分隔线（当前统一"今天"，后续按消息日期分组） */}
-          <div className="text-label-md text-on-surface-variant my-2 flex items-center gap-3">
-            <span className="bg-outline-variant h-px flex-1" />
-            {t("chat.today")}
-            <span className="bg-outline-variant h-px flex-1" />
+            {messages.map((msg, i) => {
+              const prev = i > 0 ? messages[i - 1] : undefined;
+              const showDivider = !!msg.dateKey && msg.dateKey !== prev?.dateKey;
+              const compact =
+                !showDivider &&
+                !!prev &&
+                prev.kind !== "system" &&
+                msg.kind !== "system" &&
+                prev.isSelf === msg.isSelf &&
+                prev.senderName === msg.senderName &&
+                minutesBetween(prev.time, msg.time) < 1;
+              return (
+                <Fragment key={msg.id}>
+                  {showDivider && <DateDivider label={formatDateDivider(msg.dateKey!)} />}
+                  <MessageBubble
+                    msg={msg}
+                    compact={compact}
+                    onRetry={
+                      msg.status === "failed" && activeId
+                        ? () => retrySend(activeId, msg.id)
+                        : undefined
+                    }
+                    onReply={() => setReplyingTo(msg)}
+                  />
+                </Fragment>
+              );
+            })}
+
+            {typingName && <TypingIndicator name={typingName} />}
           </div>
-
-          {(messages ?? []).map((msg) => (
-            <MessageBubble
-              key={msg.id}
-              msg={msg}
-              onRetry={
-                msg.status === "failed" && activeId ? () => retrySend(activeId, msg.id) : undefined
-              }
-              onReply={() => setReplyingTo(msg)}
-            />
-          ))}
-
-          {typingName && <TypingIndicator name={typingName} />}
-        </div>
+        )}
       </div>
 
       {/* 输入区 */}
       <Composer onSend={handleSend} compact={compactComposer} />
+    </div>
+  );
+}
+
+/** 解析两条消息 "HH:mm" 标签的分钟差；跨天由 showDivider 拦住，此处只需同日比较 */
+function minutesBetween(a: string, b: string): number {
+  const pa = a.split(":");
+  const pb = b.split(":");
+  if (pa.length !== 2 || pb.length !== 2) return Infinity;
+  const ma = Number(pa[0]) * 60 + Number(pa[1]);
+  const mb = Number(pb[0]) * 60 + Number(pb[1]);
+  if (isNaN(ma) || isNaN(mb)) return Infinity;
+  return Math.abs(mb - ma);
+}
+
+/** 日期分隔线：居中胶囊 + 两侧分隔线 */
+function DateDivider({ label }: { label: string }) {
+  return (
+    <div className="text-label-md text-on-surface-variant my-2 flex items-center gap-3">
+      <span className="bg-outline-variant h-px flex-1" />
+      {label}
+      <span className="bg-outline-variant h-px flex-1" />
+    </div>
+  );
+}
+
+/** 空消息态：图标 + 文案，居中（复用 ChatScreen EmptyState 风格） */
+function EmptyMessages() {
+  const { t } = useTranslation();
+  return (
+    <div className="flex h-full items-center justify-center px-6">
+      <div className="text-center">
+        <div className="bg-surface-container-high text-on-surface-variant mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full">
+          <MessageSquare size={40} strokeWidth={1.5} />
+        </div>
+        <p className="text-body-md text-on-surface-variant">{t("chat.emptyMessages")}</p>
+      </div>
+    </div>
+  );
+}
+
+/** 消息加载骨架：4 条左右交替的气泡占位（pulse，固定高度防 CLS） */
+function MessageSkeleton() {
+  const rows = [false, true, false, true];
+  return (
+    <div className="flex flex-col gap-4 px-4 py-4" aria-hidden>
+      {rows.map((isSelf, i) => (
+        <div
+          key={i}
+          className={cn("flex animate-pulse items-end gap-2", isSelf && "flex-row-reverse")}
+        >
+          <span className="bg-surface-container-high h-10 w-10 shrink-0 rounded-full" />
+          <span
+            className={cn(
+              "bg-surface-container-high h-10 rounded-2xl",
+              i % 2 === 0 ? "w-48" : "w-32",
+            )}
+          />
+        </div>
+      ))}
     </div>
   );
 }

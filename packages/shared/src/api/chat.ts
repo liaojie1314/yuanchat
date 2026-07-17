@@ -6,6 +6,7 @@
  * 此处统一转换为 UI 直接消费的 `Conversation` / `ChatMessage` 结构。
  */
 import { apiGet } from "./client";
+import i18n from "@yuanchat/design-system/i18n";
 import type { Conversation } from "../store/conversationStore";
 import type { ChatMessage } from "../store/messageStore";
 
@@ -86,6 +87,36 @@ function two(n: number): string {
   return n < 10 ? "0" + n : String(n);
 }
 
+/** Date → 本地日期键（YYYY-MM-DD），用于消息按日分组与日期分隔线 */
+export function dateKeyOf(d: Date): string {
+  if (isNaN(d.getTime())) return "";
+  return d.getFullYear() + "-" + two(d.getMonth() + 1) + "-" + two(d.getDate());
+}
+
+/**
+ * 日期分隔线文案：今天 / 昨天 / `M月D日`（今年）/ `YYYY/M/D`（跨年）
+ *
+ * @param dateKey - `YYYY-MM-DD` 本地日期键（由 dateKeyOf 产出）
+ * @remarks 今天/昨天经 i18n（shared 层直接 `i18n.t`，不依赖 react 组件层）；
+ *   月日格式沿用 formatListTime 的中文风格，跨年与其一致。
+ */
+export function formatDateDivider(dateKey: string): string {
+  const parts = dateKey.split("-");
+  if (parts.length !== 3) return dateKey;
+  const year = Number(parts[0]);
+  const month = Number(parts[1]);
+  const day = Number(parts[2]);
+  const d = new Date(year, month - 1, day);
+  if (isNaN(d.getTime())) return dateKey;
+
+  const today = new Date();
+  if (dateKey === dateKeyOf(today)) return i18n.t("chat.today");
+  const yesterday = new Date(today.getTime() - 86400000);
+  if (dateKey === dateKeyOf(yesterday)) return i18n.t("chat.yesterday");
+  if (year === today.getFullYear()) return month + "月" + day + "日";
+  return year + "/" + month + "/" + day;
+}
+
 // ========================================
 // DTO → 前端模型映射
 // ========================================
@@ -143,6 +174,7 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
       dto.message_type === 1 || dto.message_type === 6 ? parseTextContent(dto.content) : undefined,
     seq: dto.seq,
     time: formatMessageTime(dto.created_at),
+    dateKey: dateKeyOf(new Date(dto.created_at)),
     // 历史消息不区分 sent/read（read 回执只对新消息实时生效），统一视为已读
     status: isSelf ? "read" : undefined,
   };
@@ -174,4 +206,31 @@ export async function fetchMessages(
   // 后端返回 seq 降序，前端消息流按时间升序展示
   const messages = (data.messages || []).map((m) => mapMessage(m, selfUserId)).reverse();
   return { messages, hasMore: !!data.has_more };
+}
+
+export interface ConversationMember {
+  userId: string;
+  nickname: string;
+  avatarUrl?: string | null;
+  role: 0 | 1 | 2;
+}
+
+interface MemberDTO {
+  user_id: string;
+  nickname: string;
+  avatar_url?: string | null;
+  role: number;
+}
+
+/** 群成员列表（ChatDetail 头像墙 / 成员全列表用） */
+export async function fetchMembers(conversationId: string): Promise<ConversationMember[]> {
+  const data = await apiGet<{ members: MemberDTO[] }>(
+    "/api/v1/conversations/" + conversationId + "/members",
+  );
+  return (data.members || []).map((m) => ({
+    userId: m.user_id,
+    nickname: m.nickname,
+    avatarUrl: m.avatar_url,
+    role: (m.role === 1 || m.role === 2 ? m.role : 0) as 0 | 1 | 2,
+  }));
 }

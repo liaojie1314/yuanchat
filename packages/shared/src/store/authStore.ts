@@ -25,6 +25,8 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { apiPost, setTokenProvider } from "../api/client";
 import { setRefreshHandler } from "../api/tokenManager";
+import { updateMyProfile } from "../api/users";
+import type { ProfilePatch } from "../api/users";
 
 // ========================================
 // Types
@@ -38,6 +40,10 @@ interface User {
   email?: string;
   /** QQ 号风格短号（元聊号） */
   shortId?: number;
+  /** 个性签名 */
+  bio?: string | null;
+  /** 0=未知 1=男 2=女 */
+  gender?: 0 | 1 | 2;
 }
 
 /** 后端 user JSON（snake_case） */
@@ -48,6 +54,8 @@ interface UserDTO {
   phone?: string | null;
   email?: string | null;
   short_id?: number;
+  bio?: string | null;
+  gender?: number;
 }
 
 /** POST /api/v1/users/login 响应 */
@@ -78,6 +86,8 @@ function mapUser(dto: UserDTO): User {
     phone: dto.phone ?? undefined,
     email: dto.email ?? undefined,
     shortId: dto.short_id,
+    bio: dto.bio ?? undefined,
+    gender: (dto.gender === 1 || dto.gender === 2 ? dto.gender : 0) as 0 | 1 | 2,
   };
 }
 
@@ -101,6 +111,8 @@ interface AuthState {
   ) => Promise<void>;
   /** 登出（异步：先调 API 再清本地状态） */
   logout: () => Promise<void>;
+  /** 更新我的资料并同步本地 user（设置页保存用） */
+  updateProfile: (patch: ProfilePatch) => Promise<void>;
 }
 
 // ========================================
@@ -180,6 +192,22 @@ export const useAuthStore = create<AuthState>()(
           expiresAt: null,
           isAuthenticated: false,
         });
+      },
+
+      /** 更新我的资料并同步本地 user（设置页保存用） */
+      updateProfile: async (patch) => {
+        const updated = await updateMyProfile(patch);
+        set((s) => ({
+          user: s.user
+            ? {
+                ...s.user,
+                nickname: updated.nickname,
+                avatarUrl: updated.avatarUrl,
+                bio: updated.bio,
+                gender: updated.gender,
+              }
+            : s.user,
+        }));
       },
     }),
     { name: "yuanchat-auth" },

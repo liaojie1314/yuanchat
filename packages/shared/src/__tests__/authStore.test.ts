@@ -48,6 +48,24 @@ const server = setupServer(
   http.post("http://localhost:8080/api/v1/auth/logout", () => {
     return HttpResponse.json({ code: 0, message: "ok", data: { message: "logged out" } });
   }),
+
+  http.put("http://localhost:8080/api/v1/users/me", async ({ request }) => {
+    const patch = (await request.json()) as { nickname?: string };
+    return HttpResponse.json({
+      code: 0,
+      message: "ok",
+      data: {
+        id: "test_user",
+        nickname: patch.nickname || "老名",
+        avatar_url: null,
+        short_id: 10001,
+        bio: "更新后的签名",
+        gender: 2,
+        phone: "13800000001",
+        email: null,
+      },
+    });
+  }),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -131,6 +149,35 @@ describe("authStore", () => {
       ).rejects.toThrow("手机号不能为空");
 
       expect(useAuthStore.getState().isAuthenticated).toBe(false);
+    });
+  });
+
+  describe("updateProfile", () => {
+    it("merges returned profile fields into local user", async () => {
+      useAuthStore.setState({
+        user: { id: "test_user", nickname: "老名", phone: "13800000001", shortId: 10001 },
+        accessToken: "token-123",
+        refreshToken: "refresh-123",
+        isAuthenticated: true,
+      });
+
+      await useAuthStore.getState().updateProfile({ nickname: "新名" });
+
+      const user = useAuthStore.getState().user;
+      expect(user?.nickname).toBe("新名");
+      expect(user?.bio).toBe("更新后的签名");
+      expect(user?.gender).toBe(2);
+      // 未被更新接口覆盖的字段保持不变
+      expect(user?.phone).toBe("13800000001");
+      expect(user?.shortId).toBe(10001);
+    });
+
+    it("no-ops when there is no logged-in user", async () => {
+      useAuthStore.setState({ user: null, isAuthenticated: false });
+
+      await useAuthStore.getState().updateProfile({ nickname: "新名" });
+
+      expect(useAuthStore.getState().user).toBeNull();
     });
   });
 });

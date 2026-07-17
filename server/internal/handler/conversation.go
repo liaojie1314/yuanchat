@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/middleware"
 	"github.com/yuanchat/server/internal/service"
 	"go.uber.org/zap"
@@ -41,4 +43,30 @@ func (h *ConversationHandler) List(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, Response{Code: 0, Message: "ok", Data: gin.H{"conversations": dtos}})
+}
+
+// Members 群成员列表（仅会话成员可查）。
+func (h *ConversationHandler) Members(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		Unauthorized(c, "unauthorized")
+		return
+	}
+	convID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid conversation id")
+		return
+	}
+
+	members, err := h.svc.Members(c.Request.Context(), userID, convID)
+	if err != nil {
+		if errors.Is(err, service.ErrNotMember) {
+			Error(c, http.StatusForbidden, 403, "not a conversation member")
+			return
+		}
+		h.logger.Error("list members failed", zap.Error(err))
+		InternalError(c, "failed to list members")
+		return
+	}
+	Success(c, gin.H{"members": members})
 }

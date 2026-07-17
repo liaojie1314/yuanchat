@@ -11,7 +11,7 @@
  * 卸载时断开连接（登出/离开聊天页）。
  */
 import { useEffect } from "react";
-import { formatListTime, formatMessageTime } from "../api/chat";
+import { dateKeyOf, formatListTime, formatMessageTime } from "../api/chat";
 import { setTokenProvider } from "../api/client";
 import {
   DEMO_CONVERSATIONS,
@@ -69,6 +69,7 @@ function wireSocket() {
         text: p.content.text,
         seq: p.seq,
         time: formatMessageTime(iso),
+        dateKey: dateKeyOf(new Date(p.timestamp)),
         status: isSelf ? "sent" : undefined,
         clientMsgId: p.client_msg_id,
       };
@@ -167,7 +168,13 @@ function injectDemoData() {
   }
   const msgState = useMessageStore.getState();
   if (Object.keys(msgState.messagesByConv).length === 0) {
-    useMessageStore.setState({ messagesByConv: DEMO_MESSAGES, typingByConv: DEMO_TYPING });
+    // demo 消息无 created_at，统一按"今天"补 dateKey，保证分隔线正常渲染
+    const todayKey = dateKeyOf(new Date());
+    const withDateKey: Record<string, ChatMessage[]> = {};
+    for (const [convId, list] of Object.entries(DEMO_MESSAGES)) {
+      withDateKey[convId] = list.map((m) => ({ ...m, dateKey: todayKey }));
+    }
+    useMessageStore.setState({ messagesByConv: withDateKey, typingByConv: DEMO_TYPING });
   }
   if (useContactStore.getState().friends.length === 0) {
     useContactStore.setState({ friends: DEMO_FRIENDS, requests: DEMO_REQUESTS });

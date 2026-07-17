@@ -67,6 +67,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logge
 			authUsers.GET("/me", userH.GetProfile)
 			authUsers.PUT("/me", userH.UpdateProfile)
 			authUsers.GET("/search", contactH.Search)
+			authUsers.GET("/:id", userH.GetPublicProfile)
 		}
 	}
 
@@ -74,6 +75,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logge
 	{
 		chat.GET("/conversations", convH.List)
 		chat.GET("/conversations/:id/messages", msgH.History)
+		chat.GET("/conversations/:id/members", convH.Members)
 
 		chat.GET("/contacts", contactH.ListFriends)
 		chat.POST("/contacts/requests", contactH.SendRequest)

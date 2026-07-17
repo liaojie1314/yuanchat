@@ -3,6 +3,7 @@ import { MainLayout } from "@yuanchat/ui";
 import { useAuthStore, useKeyboardAwareViewport } from "@yuanchat/shared";
 import { ChatPage } from "./pages/ChatPage";
 import { ContactsPage } from "./pages/ContactsPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
@@ -32,7 +33,7 @@ function App() {
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/chat/:conversationId" element={<ChatPage />} />
         <Route path="/contacts" element={<ContactsPage />} />
-        <Route path="/settings" element={<ChatPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/chat" replace />} />
       </Route>
     </Routes>

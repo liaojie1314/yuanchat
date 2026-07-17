@@ -1,13 +1,15 @@
 /**
  * api/chat DTO 映射与时间格式化单元测试
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  formatDateDivider,
   formatListTime,
   formatMessageTime,
   mapConversation,
   mapMessage,
   parseTextContent,
+  fetchMembers,
 } from "../api/chat";
 import type { ConversationDTO, MessageDTO } from "../api/chat";
 
@@ -48,6 +50,23 @@ describe("formatMessageTime / formatListTime", () => {
   it("returns empty string for invalid date", () => {
     expect(formatListTime("garbage")).toBe("");
     expect(formatMessageTime("garbage")).toBe("");
+  });
+});
+
+describe("formatDateDivider", () => {
+  const key = (d: Date) =>
+    d.getFullYear() +
+    "-" +
+    String(d.getMonth() + 1).padStart(2, "0") +
+    "-" +
+    String(d.getDate()).padStart(2, "0");
+
+  it("今天/昨天/日期", () => {
+    const today = new Date();
+    expect(formatDateDivider(key(today))).toBe("今天");
+    const y = new Date(today.getTime() - 86400000);
+    expect(formatDateDivider(key(y))).toBe("昨天");
+    expect(formatDateDivider("2020-03-05")).toBe("2020/3/5");
   });
 });
 
@@ -118,5 +137,39 @@ describe("mapMessage", () => {
     const msg = mapMessage({ ...dto, sender_id: "u1" }, "u1");
     expect(msg.isSelf).toBe(true);
     expect(msg.status).toBe("read");
+  });
+});
+
+describe("fetchMembers", () => {
+  beforeEach(() => vi.unstubAllGlobals());
+
+  function mockFetchOnce(data: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ json: () => Promise.resolve({ code: 0, message: "ok", data }) }),
+    );
+  }
+
+  it("maps snake_case members and clamps unknown role to 0", async () => {
+    mockFetchOnce({
+      members: [
+        { user_id: "u1", nickname: "群主", avatar_url: null, role: 2 },
+        { user_id: "u2", nickname: "管理", avatar_url: "a.png", role: 1 },
+        { user_id: "u3", nickname: "路人", avatar_url: null, role: 9 },
+      ],
+    });
+    const members = await fetchMembers("conv-1");
+    expect(members).toEqual([
+      { userId: "u1", nickname: "群主", avatarUrl: null, role: 2 },
+      { userId: "u2", nickname: "管理", avatarUrl: "a.png", role: 1 },
+      { userId: "u3", nickname: "路人", avatarUrl: null, role: 0 },
+    ]);
+    const call = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toContain("/api/v1/conversations/conv-1/members");
+  });
+
+  it("returns empty array when members missing", async () => {
+    mockFetchOnce({});
+    expect(await fetchMembers("conv-1")).toEqual([]);
   });
 });

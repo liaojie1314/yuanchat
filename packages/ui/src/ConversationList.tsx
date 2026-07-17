@@ -57,6 +57,7 @@ export function ConversationList({ hideHeader = false }: { hideHeader?: boolean 
   const activeId = useConversationStore((s) => s.activeId);
   const setActive = useConversationStore((s) => s.setActive);
   const clearUnread = useConversationStore((s) => s.clearUnread);
+  const loading = useConversationStore((s) => s.loading);
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -139,36 +140,42 @@ export function ConversationList({ hideHeader = false }: { hideHeader?: boolean 
 
       {/* 会话列表（置顶分组 + 全部） */}
       <div className="flex-1 overflow-y-auto px-2 pb-3">
-        {pinned.length > 0 && (
+        {loading && conversations.length === 0 ? (
+          <ConversationSkeleton />
+        ) : (
           <>
-            <SectionLabel>{t("chat.section.pinned")}</SectionLabel>
-            {pinned.map((conv) => (
-              <ConversationItem
-                key={conv.id}
-                conv={conv}
-                isActive={conv.id === activeId}
-                onClick={() => handleSelect(conv.id)}
-              />
-            ))}
+            {pinned.length > 0 && (
+              <>
+                <SectionLabel>{t("chat.section.pinned")}</SectionLabel>
+                {pinned.map((conv) => (
+                  <ConversationItem
+                    key={conv.id}
+                    conv={conv}
+                    isActive={conv.id === activeId}
+                    onClick={() => handleSelect(conv.id)}
+                  />
+                ))}
+              </>
+            )}
+            {rest.length > 0 && (
+              <>
+                {pinned.length > 0 && <SectionLabel>{t("chat.section.all")}</SectionLabel>}
+                {rest.map((conv) => (
+                  <ConversationItem
+                    key={conv.id}
+                    conv={conv}
+                    isActive={conv.id === activeId}
+                    onClick={() => handleSelect(conv.id)}
+                  />
+                ))}
+              </>
+            )}
+            {pinned.length === 0 && rest.length === 0 && (
+              <p className="text-body-md text-on-surface-variant px-4 py-8 text-center">
+                {t("chat.searchEmpty")}
+              </p>
+            )}
           </>
-        )}
-        {rest.length > 0 && (
-          <>
-            {pinned.length > 0 && <SectionLabel>{t("chat.section.all")}</SectionLabel>}
-            {rest.map((conv) => (
-              <ConversationItem
-                key={conv.id}
-                conv={conv}
-                isActive={conv.id === activeId}
-                onClick={() => handleSelect(conv.id)}
-              />
-            ))}
-          </>
-        )}
-        {pinned.length === 0 && rest.length === 0 && (
-          <p className="text-body-md text-on-surface-variant px-4 py-8 text-center">
-            {t("chat.searchEmpty")}
-          </p>
         )}
       </div>
     </div>
@@ -179,6 +186,23 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div className="text-label-md text-on-surface-variant px-2 pt-3 pb-1.5 font-medium">
       {children}
+    </div>
+  );
+}
+
+/** 会话列表加载骨架：6 行 pulse 占位，行高与真实条目一致（防 CLS） */
+function ConversationSkeleton() {
+  return (
+    <div aria-hidden>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="flex animate-pulse items-center gap-3 px-3 py-2.5">
+          <span className="bg-surface-container-high h-10 w-10 shrink-0 rounded-full" />
+          <div className="min-w-0 flex-1">
+            <span className="bg-surface-container-high block h-3.5 w-28 rounded-full" />
+            <span className="bg-surface-container-high mt-2 block h-3 w-40 rounded-full" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

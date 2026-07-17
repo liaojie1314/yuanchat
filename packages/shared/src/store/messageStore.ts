@@ -15,7 +15,7 @@
  *   demo 数据由 mocks/demoData.ts 注入
  */
 import { create } from "zustand";
-import { fetchMessages, formatMessageTime } from "../api/chat";
+import { fetchMessages, dateKeyOf, formatMessageTime } from "../api/chat";
 import { chatSocket } from "../ws/chatSocket";
 import { useAuthStore } from "./authStore";
 
@@ -77,6 +77,8 @@ export interface ChatMessage {
   mentions?: string[];
   /** HH:mm 时间标签 */
   time: string;
+  /** 本地日期键（YYYY-MM-DD），用于消息按日分组与日期分隔线 */
+  dateKey?: string;
   status?: ChatMessageStatus;
   edited?: boolean;
   /** 服务端分配的会话内序列号（已读进度比对用） */
@@ -209,6 +211,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       text,
       quote,
       time: now(),
+      dateKey: dateKeyOf(new Date()),
       status: "sending",
       clientMsgId,
     };
@@ -281,6 +284,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
                 status: "sent" as const,
                 seq,
                 time: formatMessageTime(new Date(timestamp).toISOString()),
+                dateKey: dateKeyOf(new Date(timestamp)),
               }
             : m,
         ),

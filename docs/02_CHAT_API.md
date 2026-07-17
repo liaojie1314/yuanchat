@@ -109,6 +109,84 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 - 非会话成员访问返回 `403`。
 - `content` 是 JSONB 字符串；`message_type`：1=文本 2=图片 3=文件 4=语音 5=视频 6=系统。
 
+### GET /api/v1/users/:id
+
+按用户 ID 查看**公开资料**（好友资料卡、群成员点击等入口）。仅返回对外可见字段，
+不含手机号、账号状态等隐私信息。
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "id": "uuid",
+    "nickname": "Bob",
+    "avatar_url": null,
+    "short_id": 10002,
+    "bio": null,
+    "gender": 0
+  }
+}
+```
+
+- `gender`：0=未设置 1=男 2=女；`bio`（个性签名）可为 `null`。
+- 用户不存在返回 `404`。
+
+### GET /api/v1/conversations/:id/members
+
+返回指定会话的成员列表，**群主排在首位**（服务端按 `role` 降序、加入时间升序排序）。
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "members": [
+      {
+        "user_id": "uuid",
+        "nickname": "Alice",
+        "avatar_url": null,
+        "role": 2
+      }
+    ]
+  }
+}
+```
+
+- `role`：0=普通成员 1=管理员 2=群主。
+- 非会话成员访问返回 `403`。
+
+### PUT /api/v1/users/me
+
+修改当前登录用户的资料（昵称 / 头像 / 个性签名 / 性别），落库持久化。
+成功后返回**完整的用户对象**（含更新后的字段），前端据此刷新本地登录态。
+
+```json
+// 请求（字段均选填，仅更新传入项）
+// nickname 1~50 字，bio ≤500 字，avatar_url 须为合法 URL，gender ∈ {0,1,2}
+{ "nickname": "Alice", "avatar_url": null, "bio": "介绍一下自己…", "gender": 1 }
+
+// 响应
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "id": "uuid",
+    "phone": "13800000001",
+    "short_id": 10001,
+    "nickname": "Alice",
+    "bio": "介绍一下自己…",
+    "gender": 1,
+    "status": 1,
+    "created_at": "2026-07-16T14:35:21+08:00",
+    "updated_at": "2026-07-17T20:31:26+08:00"
+  }
+}
+```
+
+- `gender`：0=未设置 1=男 2=女。
+- 参数校验失败（如昵称超长）返回 `400`。
+
 ### GET /api/v1/users/search?q=…
 
 精确搜索用户（好友添加入口，不做模糊匹配防扫号）。`q` 按格式路由：

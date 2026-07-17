@@ -13,11 +13,12 @@
  * @param onSend - 发送回调，参数为去除首尾空白后的文本
  * @param compact - 移动端紧凑模式
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Image as ImageIcon, Mic, Paperclip, Plus, Send, Smile, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { chatSocket, useConversationStore, useMessageStore } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
+import { EmojiPicker } from "./EmojiPicker";
 
 /** typing 帧节流间隔：输入期间最多每 3s 上报一次 */
 const TYPING_THROTTLE_MS = 3000;
@@ -31,6 +32,7 @@ export function Composer({
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
+  const [showEmoji, setShowEmoji] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastTypingSentRef = useRef(0);
   const replyingTo = useMessageStore((s) => s.replyingTo);
@@ -38,6 +40,33 @@ export function Composer({
   const activeId = useConversationStore((s) => s.activeId);
 
   const canSend = value.trim().length > 0;
+
+  // 表情面板打开时，监听 document mousedown：点击面板外部即关闭
+  // （面板根元素 onMouseDown 已 stopPropagation，故点内部不会触发）
+  useEffect(() => {
+    if (!showEmoji) return;
+    const onDocMouseDown = () => setShowEmoji(false);
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [showEmoji]);
+
+  /** 在光标处插入 emoji，并在下一帧恢复焦点与光标位置 */
+  const insertEmoji = (emoji: string) => {
+    const el = textareaRef.current;
+    if (!el) {
+      setValue((v) => v + emoji);
+      return;
+    }
+    const start = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? value.length;
+    const next = value.slice(0, start) + emoji + value.slice(end);
+    setValue(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + emoji.length;
+      el.setSelectionRange(pos, pos);
+    });
+  };
 
   const notifyTyping = () => {
     if (!activeId || !chatSocket.isOpen()) return;
@@ -115,6 +144,8 @@ export function Composer({
           <button
             className="md3-icon-btn text-on-surface-variant"
             aria-label={t("chat.input.emoji")}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => setShowEmoji((s) => !s)}
           >
             <Smile size={20} />
           </button>
@@ -135,13 +166,25 @@ export function Composer({
             </button>
           )}
         </div>
+        {/* 移动端：面板行内渲染在输入行下方，推高布局（不悬浮，规避安卓键盘 fixed 定位坑） */}
+        {showEmoji && (
+          <div className="animate-slide-up mt-2 h-56">
+            <EmojiPicker compact onPick={insertEmoji} onClose={() => setShowEmoji(false)} />
+          </div>
+        )}
       </div>
     );
   }
 
   // 桌面 / 平板：一体化输入卡片
   return (
-    <div className="border-outline-variant bg-surface-container-low shrink-0 border-t px-3 pt-2.5 pb-3">
+    <div className="border-outline-variant bg-surface-container-low relative shrink-0 border-t px-3 pt-2.5 pb-3">
+      {/* 桌面：面板浮层定位于输入卡片上方 */}
+      {showEmoji && (
+        <div className="animate-slide-up absolute bottom-full left-3 z-10 mb-1 max-h-72 w-80">
+          <EmojiPicker onPick={insertEmoji} onClose={() => setShowEmoji(false)} />
+        </div>
+      )}
       {replyBar}
       <div className="border-outline-variant focus-within:border-primary focus-within:ring-primary/15 bg-surface-bright dark:bg-surface-container group rounded-2xl border transition-shadow focus-within:ring-[3px]">
         <textarea
@@ -165,7 +208,11 @@ export function Composer({
           <ToolButton label={t("chat.input.file")}>
             <Paperclip size={19} />
           </ToolButton>
-          <ToolButton label={t("chat.input.emoji")}>
+          <ToolButton
+            label={t("chat.input.emoji")}
+            onClick={() => setShowEmoji((s) => !s)}
+            active={showEmoji}
+          >
             <Smile size={19} />
           </ToolButton>
           <ToolButton label={t("chat.input.voice")}>
@@ -197,12 +244,24 @@ export function Composer({
   );
 }
 
-function ToolButton({ label, children }: { label: string; children: React.ReactNode }) {
+function ToolButton({
+  label,
+  onClick,
+  active = false,
+  children,
+}: {
+  label: string;
+  onClick?: () => void;
+  active?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <button
-      className="md3-icon-btn text-on-surface-variant !h-9 !w-9"
+      className={cn("md3-icon-btn !h-9 !w-9", active ? "text-primary" : "text-on-surface-variant")}
       aria-label={label}
       title={label}
+      onMouseDown={onClick ? (e) => e.stopPropagation() : undefined}
+      onClick={onClick}
     >
       {children}
     </button>

@@ -16,6 +16,7 @@
  * - 已编辑标记
  *
  * @param msg - 消息数据
+ * @param compact - 与上一条同一发送者且 1 分钟内：省略头像与群聊昵称行，缩小行距
  * @param onRetry - 发送失败点击重试回调
  * @param onReply - 引用回复回调（悬浮操作，暂通过双击触发）
  */
@@ -56,10 +57,12 @@ function renderTextWithMentions(text: string, mentions?: string[]) {
 
 export function MessageBubble({
   msg,
+  compact = false,
   onRetry,
   onReply,
 }: {
   msg: ChatMessage;
+  compact?: boolean;
   onRetry?: () => void;
   onReply?: () => void;
 }) {
@@ -78,14 +81,22 @@ export function MessageBubble({
 
   return (
     <div
-      className={cn("mt-2 flex items-end gap-2", isSelf && "flex-row-reverse")}
+      className={cn(
+        "flex items-end gap-2",
+        compact ? "mt-0.5" : "mt-2",
+        isSelf && "flex-row-reverse",
+      )}
       onDoubleClick={onReply}
     >
-      <Avatar name={isSelf ? "我" : (msg.senderName ?? "?")} size="md" />
+      {compact ? (
+        <div className="w-10 shrink-0" aria-hidden />
+      ) : (
+        <Avatar name={isSelf ? "我" : (msg.senderName ?? "?")} size="md" />
+      )}
 
       <div className={cn("flex max-w-[70%] flex-col", isSelf && "items-end")}>
-        {/* 群聊接收方显示发送者昵称 */}
-        {!isSelf && msg.senderName && (
+        {/* 群聊接收方显示发送者昵称（合并态省略） */}
+        {!compact && !isSelf && msg.senderName && (
           <span className="text-label-sm text-primary mx-1 mb-1 font-medium">{msg.senderName}</span>
         )}
 
