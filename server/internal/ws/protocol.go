@@ -26,12 +26,29 @@ const (
 
 // 服务端 → 客户端 帧类型
 const (
-	TypeMessageAck      = "message.ack"
-	TypeMessageReceive  = "message.receive"
-	TypeError           = "error"
-	TypeContactRequest  = "contact.request"
-	TypeContactAccepted = "contact.accepted"
+	TypeMessageAck          = "message.ack"
+	TypeMessageReceive      = "message.receive"
+	TypeError               = "error"
+	TypeContactRequest      = "contact.request"
+	TypeContactAccepted     = "contact.accepted"
+	TypeConversationCreated = "conversation.created"
+	TypeMessageRecalled     = "message.recalled"
 )
+
+// ConversationCreatedPayload 新会话创建推送（建群），推给全部成员。
+// Conversation 字段为 service.ConversationDTO 的 JSON（避免 ws→service 循环导入，用 any）。
+type ConversationCreatedPayload struct {
+	Conversation any `json:"conversation"`
+}
+
+// MessageRecalledPayload 消息撤回推送，推给会话全部成员。
+type MessageRecalledPayload struct {
+	MessageID        uuid.UUID `json:"message_id"`
+	ConversationID   uuid.UUID `json:"conversation_id"`
+	Seq              int64     `json:"seq"`
+	OperatorID       uuid.UUID `json:"operator_id"`
+	OperatorNickname string    `json:"operator_nickname"`
+}
 
 // UserBrief 联系人相关帧中携带的用户摘要。
 type UserBrief struct {
@@ -56,10 +73,16 @@ type ContactAcceptedPayload struct {
 	ConversationID uuid.UUID `json:"conversation_id"`
 }
 
-// ContentPayload 是消息体的传输结构（当前仅支持 text）。
+// ContentPayload 是消息体的传输结构（text / image）。
+//
+// 向后兼容：text 帧只用 Type/Text，image 字段带 omitempty，不会污染文本消息。
 type ContentPayload struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type   string `json:"type"`
+	Text   string `json:"text,omitempty"`
+	Key    string `json:"key,omitempty"`    // image: MinIO object key
+	Width  int    `json:"width,omitempty"`  // image: 像素宽
+	Height int    `json:"height,omitempty"` // image: 像素高
+	Size   int64  `json:"size,omitempty"`   // image: 字节大小
 }
 
 // SendPayload 客户端发送消息请求。

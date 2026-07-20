@@ -12,6 +12,7 @@
  * 兼容性：产物经 es2019 转译；WebSocket / JSON 在 Chrome 74 WebView 均可用。
  */
 import { ensureFreshToken, needsRefresh } from "../api/tokenManager";
+import type { ConversationDTO } from "../api/chat";
 
 export interface ServerFrames {
   "message.ack": {
@@ -26,13 +27,28 @@ export interface ServerFrames {
     conversation_id: string;
     sender_id: string;
     sender_nickname: string;
-    content: { type: string; text: string };
+    // text 帧只用 type/text；image 帧带 key/width/height/size（后端 omitempty，不污染文本）
+    content: {
+      type: string;
+      text?: string;
+      key?: string;
+      width?: number;
+      height?: number;
+      size?: number;
+    };
     seq: number;
     timestamp: number;
     reply_to_id?: string;
     client_msg_id?: string;
   };
   "message.read": { conversation_id: string; user_id: string; seq: number };
+  "message.recalled": {
+    message_id: string;
+    conversation_id: string;
+    seq: number;
+    operator_id: string;
+    operator_nickname: string;
+  };
   typing: { conversation_id: string; user_id: string; nickname: string };
   "contact.request": {
     request_id: string;
@@ -45,6 +61,7 @@ export interface ServerFrames {
     friend: { id: string; nickname: string; avatar_url?: string | null; short_id: number };
     conversation_id: string;
   };
+  "conversation.created": { conversation: ConversationDTO };
   error: { code: number; message: string; client_msg_id?: string };
 }
 

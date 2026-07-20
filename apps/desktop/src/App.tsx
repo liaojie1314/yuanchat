@@ -6,6 +6,7 @@ import { TitleBar } from "./components/TitleBar";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { ChatPage } from "./pages/ChatPage";
 import { ContactsPage } from "./pages/ContactsPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
@@ -18,23 +19,32 @@ function App() {
   // 移动端软键盘弹出时把内容顶起（桌面端 / 旧 WebView 自动降级为无操作）
   useKeyboardAwareViewport();
 
-  // 已认证时（含从持久化恢复的登录态）将窗口切换为首页尺寸
+  // 登录态驱动窗口形态：已认证 → 首页大窗可缩放；登出/未登录 → 恢复登录小窗不可缩放
   useEffect(() => {
-    if (!isAuthenticated) return;
-
     const resize = async () => {
       try {
         const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
         const win = getCurrentWindow();
-        await win.setSize(new LogicalSize(1200, 800));
-        await win.setResizable(true);
-        await win.setMinSize(new LogicalSize(900, 600));
+        // 注册/忘记密码等子窗口跑的是同一个 SPA，此逻辑只归主窗口管，
+        // 否则未登录分支会把子窗口压回 540×600（覆盖 openAuthWindow 指定的尺寸）
+        if (win.label !== "main") return;
+        if (isAuthenticated) {
+          await win.setSize(new LogicalSize(1200, 800));
+          await win.setResizable(true);
+          await win.setMinSize(new LogicalSize(900, 600));
+        } else {
+          // 先清最小尺寸并退出最大化，否则 900×600 的 minSize 会卡住缩不回登录窗
+          await win.unmaximize();
+          await win.setMinSize(undefined);
+          await win.setSize(new LogicalSize(540, 640));
+          await win.setResizable(false);
+        }
         await win.center();
       } catch {
         /* 非 Tauri 环境忽略 */
       }
     };
-    resize();
+    void resize();
   }, [isAuthenticated]);
 
   if (!isAuthenticated) {
@@ -55,7 +65,7 @@ function App() {
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/chat/:conversationId" element={<ChatPage />} />
         <Route path="/contacts" element={<ContactsPage />} />
-        <Route path="/settings" element={<ChatPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/chat" replace />} />
       </Route>
     </Routes>

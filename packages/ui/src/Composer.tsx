@@ -13,11 +13,12 @@
  * @param onSend - 发送回调，参数为去除首尾空白后的文本
  * @param compact - 移动端紧凑模式
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Image as ImageIcon, Mic, Paperclip, Plus, Send, Smile, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { chatSocket, useConversationStore, useMessageStore } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
+import { EmojiPicker } from "./EmojiPicker";
 
 /** typing 帧节流间隔：输入期间最多每 3s 上报一次 */
 const TYPING_THROTTLE_MS = 3000;
@@ -31,13 +32,42 @@ export function Composer({
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
+  const [showEmoji, setShowEmoji] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const lastTypingSentRef = useRef(0);
   const replyingTo = useMessageStore((s) => s.replyingTo);
   const setReplyingTo = useMessageStore((s) => s.setReplyingTo);
   const activeId = useConversationStore((s) => s.activeId);
 
   const canSend = value.trim().length > 0;
+
+  // 表情面板打开时，监听 document mousedown：点击面板外部即关闭
+  // （面板根元素 onMouseDown 已 stopPropagation，故点内部不会触发）
+  useEffect(() => {
+    if (!showEmoji) return;
+    const onDocMouseDown = () => setShowEmoji(false);
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [showEmoji]);
+
+  /** 在光标处插入 emoji，并在下一帧恢复焦点与光标位置 */
+  const insertEmoji = (emoji: string) => {
+    const el = textareaRef.current;
+    if (!el) {
+      setValue((v) => v + emoji);
+      return;
+    }
+    const start = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? value.length;
+    const next = value.slice(0, start) + emoji + value.slice(end);
+    setValue(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + emoji.length;
+      el.setSelectionRange(pos, pos);
+    });
+  };
 
   const notifyTyping = () => {
     if (!activeId || !chatSocket.isOpen()) return;
@@ -54,6 +84,42 @@ export function Composer({
     setValue("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
+
+  /** 发送一张图片：交给 store 的 sendImage（乐观预览 → 压缩 → 上传 → WS 帧） */
+  const sendImageFile = (file: File) => {
+    if (!activeId) return;
+    void useMessageStore.getState().sendImage(activeId, file);
+  };
+
+  /** 图片按钮选中文件：仅取图片类型，发送后清空 input 以便再次选同一文件 */
+  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type.indexOf("image/") === 0) sendImageFile(file);
+    e.target.value = "";
+  };
+
+  /** 粘贴：剪贴板首个图片文件走图片发送路径（截图直接粘贴发图），阻止图片当文本插入 */
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const file = e.clipboardData?.files?.[0];
+    if (file && file.type.indexOf("image/") === 0) {
+      e.preventDefault();
+      sendImageFile(file);
+    }
+  };
+
+  /** 打开系统文件选择器（图片按钮 / 移动端回形针触发） */
+  const openFilePicker = () => fileInputRef.current?.click();
+
+  /** 隐藏的图片文件选择器（两种布局共用） */
+  const fileInput = (
+    <input
+      ref={fileInputRef}
+      type="file"
+      accept="image/*"
+      className="hidden"
+      onChange={handleFilePick}
+    />
+  );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -93,6 +159,13 @@ export function Composer({
         {replyBar}
         <div className="flex items-end gap-1.5">
           <button
+            onClick={openFilePicker}
+            className="md3-icon-btn text-on-surface-variant"
+            aria-label={t("chat.input.image")}
+          >
+            <ImageIcon size={20} />
+          </button>
+          <button
             className="md3-icon-btn text-on-surface-variant"
             aria-label={t("chat.input.file")}
           >
@@ -108,6 +181,7 @@ export function Composer({
               notifyTyping();
             }}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={t("chat.input.placeholder")}
             aria-label={t("chat.input.placeholder")}
             className="bg-surface-container-high text-body-lg text-on-surface placeholder:text-on-surface-variant/70 max-h-28 min-w-0 flex-1 resize-none rounded-3xl px-4 py-2.5 focus:outline-none"
@@ -115,6 +189,8 @@ export function Composer({
           <button
             className="md3-icon-btn text-on-surface-variant"
             aria-label={t("chat.input.emoji")}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => setShowEmoji((s) => !s)}
           >
             <Smile size={20} />
           </button>
@@ -135,13 +211,26 @@ export function Composer({
             </button>
           )}
         </div>
+        {/* 移动端：面板行内渲染在输入行下方，推高布局（不悬浮，规避安卓键盘 fixed 定位坑） */}
+        {showEmoji && (
+          <div className="animate-slide-up mt-2 h-56">
+            <EmojiPicker compact onPick={insertEmoji} onClose={() => setShowEmoji(false)} />
+          </div>
+        )}
+        {fileInput}
       </div>
     );
   }
 
   // 桌面 / 平板：一体化输入卡片
   return (
-    <div className="border-outline-variant bg-surface-container-low shrink-0 border-t px-3 pt-2.5 pb-3">
+    <div className="border-outline-variant bg-surface-container-low relative shrink-0 border-t px-3 pt-2.5 pb-3">
+      {/* 桌面：面板浮层定位于输入卡片上方 */}
+      {showEmoji && (
+        <div className="animate-slide-up absolute bottom-full left-3 z-10 mb-1 max-h-72 w-80">
+          <EmojiPicker onPick={insertEmoji} onClose={() => setShowEmoji(false)} />
+        </div>
+      )}
       {replyBar}
       <div className="border-outline-variant focus-within:border-primary focus-within:ring-primary/15 bg-surface-bright dark:bg-surface-container group rounded-2xl border transition-shadow focus-within:ring-[3px]">
         <textarea
@@ -154,18 +243,23 @@ export function Composer({
             notifyTyping();
           }}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={t("chat.input.placeholder")}
           aria-label={t("chat.input.placeholder")}
           className="text-body-lg text-on-surface placeholder:text-on-surface-variant/70 block max-h-40 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 leading-relaxed focus:outline-none"
         />
         <div className="flex items-center gap-0.5 px-2 pb-1.5">
-          <ToolButton label={t("chat.input.image")}>
+          <ToolButton label={t("chat.input.image")} onClick={openFilePicker}>
             <ImageIcon size={19} />
           </ToolButton>
           <ToolButton label={t("chat.input.file")}>
             <Paperclip size={19} />
           </ToolButton>
-          <ToolButton label={t("chat.input.emoji")}>
+          <ToolButton
+            label={t("chat.input.emoji")}
+            onClick={() => setShowEmoji((s) => !s)}
+            active={showEmoji}
+          >
             <Smile size={19} />
           </ToolButton>
           <ToolButton label={t("chat.input.voice")}>
@@ -193,16 +287,29 @@ export function Composer({
           </button>
         </div>
       </div>
+      {fileInput}
     </div>
   );
 }
 
-function ToolButton({ label, children }: { label: string; children: React.ReactNode }) {
+function ToolButton({
+  label,
+  onClick,
+  active = false,
+  children,
+}: {
+  label: string;
+  onClick?: () => void;
+  active?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <button
-      className="md3-icon-btn text-on-surface-variant !h-9 !w-9"
+      className={cn("md3-icon-btn !h-9 !w-9", active ? "text-primary" : "text-on-surface-variant")}
       aria-label={label}
       title={label}
+      onMouseDown={onClick ? (e) => e.stopPropagation() : undefined}
+      onClick={onClick}
     >
       {children}
     </button>

@@ -12,28 +12,74 @@
  * 菜单项点击后直接操作 Zustand Store 更新状态。
  *
  * @param onClose - 关闭面板回调，非空时右上角显示关闭按钮
+ * @param onShowAllMembers - 「查看全部」成员回调，非空时群聊头像墙显示该按钮
  */
+import { useEffect, useState } from "react";
 import { Hash, LogOut, Paperclip, Phone, Trash2, UserPlus, X, MessageCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useConversationStore } from "@yuanchat/shared";
+import { fetchMembers, isMockEnabled, useConversationStore } from "@yuanchat/shared";
+import type { ConversationMember } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
 
-/** 群成员头像墙演示数据，接入后端后由成员接口驱动 */
-const DEMO_MEMBERS = ["张伟", "李四", "王芳", "陈曦", "我"];
+/** 群成员头像墙 mock 数据，mock 模式下回退使用 */
+const MOCK_MEMBERS: ConversationMember[] = [
+  { userId: "m1", nickname: "张伟", avatarUrl: null, role: 2 },
+  { userId: "m2", nickname: "李四", avatarUrl: null, role: 0 },
+  { userId: "m3", nickname: "王芳", avatarUrl: null, role: 0 },
+  { userId: "m4", nickname: "陈曦", avatarUrl: null, role: 0 },
+  { userId: "m5", nickname: "我", avatarUrl: null, role: 0 },
+];
 
-export function ChatDetail({ onClose }: { onClose?: () => void }) {
+/** 头像墙最多展示的成员数，超出部分折叠为 +N */
+const WALL_LIMIT = 8;
+
+export function ChatDetail({
+  onClose,
+  onShowAllMembers,
+}: {
+  onClose?: () => void;
+  onShowAllMembers?: () => void;
+}) {
   const { t } = useTranslation();
   const activeId = useConversationStore((s) => s.activeId);
   const conversations = useConversationStore((s) => s.conversations);
   const updateConversation = useConversationStore((s) => s.updateConversation);
   const conv = conversations.find((c) => c.id === activeId);
 
+  const [members, setMembers] = useState<ConversationMember[]>([]);
+
+  const convId = conv?.id;
+  const isGroup = conv?.type === "group";
+
+  // 群聊拉取真实成员；mock 模式回退静态数组
+  useEffect(() => {
+    if (!isGroup || !convId) {
+      setMembers([]);
+      return;
+    }
+    if (isMockEnabled()) {
+      setMembers(MOCK_MEMBERS);
+      return;
+    }
+    let alive = true;
+    void fetchMembers(convId)
+      .then((list) => {
+        if (alive) setMembers(list);
+      })
+      .catch(() => {
+        if (alive) setMembers([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [isGroup, convId]);
+
   // 防御：如果找不到对应会话（数据不一致），不渲染任何内容
   if (!conv) return null;
 
-  const isGroup = conv.type === "group";
-  const extraMembers = (conv.memberCount ?? DEMO_MEMBERS.length) - DEMO_MEMBERS.length;
+  const shownMembers = members.slice(0, WALL_LIMIT);
+  const extraMembers = (conv.memberCount ?? members.length) - Math.min(members.length, WALL_LIMIT);
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
@@ -86,12 +132,16 @@ export function ChatDetail({ onClose }: { onClose?: () => void }) {
       {isGroup && (
         <div className="px-4 pt-3 pb-2">
           <div className="text-label-md text-on-surface-variant mb-2 flex items-center justify-between font-medium">
-            <span>{t("detail.members", { count: conv.memberCount ?? DEMO_MEMBERS.length })}</span>
-            <button className="text-primary text-label-md font-medium">{t("detail.seeAll")}</button>
+            <span>{t("detail.members", { count: conv.memberCount ?? members.length })}</span>
+            {onShowAllMembers && (
+              <button onClick={onShowAllMembers} className="text-primary text-label-md font-medium">
+                {t("detail.seeAll")}
+              </button>
+            )}
           </div>
           <div className="flex flex-wrap gap-2.5">
-            {DEMO_MEMBERS.map((name) => (
-              <Avatar key={name} name={name} size="sm" />
+            {shownMembers.map((m) => (
+              <Avatar key={m.userId} name={m.nickname} src={m.avatarUrl} size="sm" />
             ))}
             {extraMembers > 0 && (
               <span className="bg-surface-container-high text-on-surface-variant text-label-sm grid h-8 w-8 place-items-center rounded-full font-medium">

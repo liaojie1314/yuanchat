@@ -9,6 +9,10 @@
  * - **mobile（<768px）**：栈式单屏，列表 ↔ 聊天二选一（返回键切换），
  *   详情全屏覆盖
  *
+ * 详情面板内部有 info / members 两态：ChatDetail 头像墙「全部」切到 members
+ * （MembersView 全成员列表），返回切回 info。建群与添加好友由顶部「+」下拉触发，
+ * 分别挂载 CreateGroupModal / AddContactModal。
+ *
  * 未选中会话时聊天区显示空状态引导。
  *
  * @example
@@ -19,16 +23,31 @@ import { useEffect, useState } from "react";
 import { MessageSquare } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
+  fetchMembers,
+  isMockEnabled,
   useBreakpoint,
   useChatBootstrap,
   useConversationStore,
   useResizable,
 } from "@yuanchat/shared";
+import type { ConversationMember } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
+import { AddContactModal } from "./AddContactModal";
 import { ChatDetail } from "./ChatDetail";
 import { ChatWindow } from "./ChatWindow";
 import { ConversationList } from "./ConversationList";
+import { CreateGroupModal } from "./CreateGroupModal";
+import { MembersView } from "./MembersView";
 import { ResizeHandle } from "./ResizeHandle";
+
+/** mock 模式成员全列表回退数据（与 ChatDetail 头像墙一致，覆盖 owner/admin/member 三态） */
+const MOCK_MEMBERS: ConversationMember[] = [
+  { userId: "m1", nickname: "张伟", avatarUrl: null, role: 2 },
+  { userId: "m2", nickname: "李四", avatarUrl: null, role: 1 },
+  { userId: "m3", nickname: "王芳", avatarUrl: null, role: 0 },
+  { userId: "m4", nickname: "陈曦", avatarUrl: null, role: 0 },
+  { userId: "m5", nickname: "我", avatarUrl: null, role: 0 },
+];
 
 export function ChatScreen() {
   const { t } = useTranslation();
@@ -40,19 +59,64 @@ export function ChatScreen() {
   useChatBootstrap();
 
   const [showDetail, setShowDetail] = useState(false);
+  const [detailView, setDetailView] = useState<"info" | "members">("info");
+  const [members, setMembers] = useState<ConversationMember[]>([]);
+  const [groupOpen, setGroupOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const leftPanel = useResizable(300, 240, 380);
 
   // 切换会话时收起详情，避免面板残留上一个会话的信息
   useEffect(() => {
     setShowDetail(false);
+    setDetailView("info");
   }, [activeId]);
+
+  // 切到成员全列表时拉取成员（mock 模式回退静态数组）
+  useEffect(() => {
+    if (detailView !== "members" || !activeId) return;
+    if (isMockEnabled()) {
+      setMembers(MOCK_MEMBERS);
+      return;
+    }
+    let alive = true;
+    void fetchMembers(activeId)
+      .then((list) => {
+        if (alive) setMembers(list);
+      })
+      .catch(() => {
+        if (alive) setMembers([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [detailView, activeId]);
+
+  const modals = (
+    <>
+      <CreateGroupModal open={groupOpen} onClose={() => setGroupOpen(false)} />
+      <AddContactModal open={addOpen} onClose={() => setAddOpen(false)} />
+    </>
+  );
+
+  /** 详情面板内容：info（ChatDetail）↔ members（MembersView） */
+  const detailPanel = (onClose: () => void) =>
+    detailView === "members" ? (
+      <MembersView members={members} onBack={() => setDetailView("info")} />
+    ) : (
+      <ChatDetail onClose={onClose} onShowAllMembers={() => setDetailView("members")} />
+    );
+
+  const list = (
+    <ConversationList onNewGroup={() => setGroupOpen(true)} onAddContact={() => setAddOpen(true)} />
+  );
 
   // ── 手机端：栈式单屏 ──
   if (bp === "mobile") {
     if (activeId && showDetail) {
       return (
         <div className="bg-surface flex min-h-0 flex-1 flex-col">
-          <ChatDetail onClose={() => setShowDetail(false)} />
+          {detailPanel(() => setShowDetail(false))}
+          {modals}
         </div>
       );
     }
@@ -64,12 +128,14 @@ export function ChatScreen() {
             onShowDetail={() => setShowDetail(true)}
             compactComposer
           />
+          {modals}
         </div>
       );
     }
     return (
       <div className="bg-surface flex min-h-0 flex-1 flex-col">
-        <ConversationList />
+        {list}
+        {modals}
       </div>
     );
   }
@@ -86,7 +152,7 @@ export function ChatScreen() {
           !isDesktop && "w-[300px]",
         )}
       >
-        <ConversationList />
+        {list}
       </div>
       {isDesktop && <ResizeHandle {...leftPanel.handleProps} isDragging={leftPanel.isDragging} />}
 
@@ -105,7 +171,7 @@ export function ChatScreen() {
       {/* 详情：桌面第四栏 / 平板右侧抽屉 */}
       {activeId && showDetail && isDesktop && (
         <aside className="border-outline-variant bg-surface-container-low animate-slide-left w-[280px] shrink-0 overflow-hidden border-l">
-          <ChatDetail onClose={() => setShowDetail(false)} />
+          {detailPanel(() => setShowDetail(false))}
         </aside>
       )}
       {activeId && showDetail && !isDesktop && (
@@ -116,10 +182,12 @@ export function ChatScreen() {
             aria-hidden
           />
           <aside className="bg-surface-container-low shadow-elevation-4 animate-slide-left absolute top-0 right-0 bottom-0 z-40 w-[320px] overflow-hidden">
-            <ChatDetail onClose={() => setShowDetail(false)} />
+            {detailPanel(() => setShowDetail(false))}
           </aside>
         </>
       )}
+
+      {modals}
     </div>
   );
 }

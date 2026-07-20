@@ -13,7 +13,6 @@ import (
 	"github.com/yuanchat/server/internal/pkg/shortid"
 	"github.com/yuanchat/server/internal/repository"
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 )
 
 // Common errors returned by UserService.
@@ -132,10 +131,45 @@ func (s *UserService) Login(ctx context.Context, req LoginRequest) (*AuthResult,
 func (s *UserService) Profile(ctx context.Context, userID uuid.UUID) (*model.User, error) {
 	user, err := s.repo.FindByID(ctx, userID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrUserNotFound
-		}
 		return nil, fmt.Errorf("find user: %w", err)
+	}
+	// FindByID 对未命中返回 (nil, nil)，须转成领域错误，防止调用方解引用 nil
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+	return user, nil
+}
+
+// UpdateProfile 更新用户资料字段（nil 表示不改），持久化后返回最新 user。
+func (s *UserService) UpdateProfile(
+	ctx context.Context,
+	userID uuid.UUID,
+	nickname, avatarURL, bio *string,
+	gender *int16,
+) (*model.User, error) {
+	user, err := s.repo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("find user: %w", err)
+	}
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+
+	if nickname != nil {
+		user.Nickname = *nickname
+	}
+	if avatarURL != nil {
+		user.AvatarURL = avatarURL
+	}
+	if bio != nil {
+		user.Bio = bio
+	}
+	if gender != nil {
+		user.Gender = *gender
+	}
+
+	if err := s.repo.Update(ctx, user); err != nil {
+		return nil, fmt.Errorf("update user: %w", err)
 	}
 	return user, nil
 }

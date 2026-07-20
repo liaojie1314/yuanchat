@@ -24,9 +24,16 @@ export { ResizeHandle } from "./ResizeHandle";
 export { ConversationList } from "./ConversationList";
 export { ChatWindow } from "./ChatWindow";
 export { MessageBubble, TypingIndicator } from "./MessageBubble";
+export { MessageImage } from "./MessageImage";
+export { ImageLightbox } from "./ImageLightbox";
 export { Composer } from "./Composer";
+export { EmojiPicker } from "./EmojiPicker";
+export { EMOJI_CATEGORIES } from "./emojiData";
+export type { EmojiCategory } from "./emojiData";
 export { ChatDetail } from "./ChatDetail";
 export { ChatScreen } from "./ChatScreen";
+export { MembersView } from "./MembersView";
+export { CreateGroupModal } from "./CreateGroupModal";
 
 // 通讯录组件
 export { ContactsScreen } from "./ContactsScreen";
@@ -34,6 +41,10 @@ export { ContactsPanel } from "./ContactsPanel";
 export { ContactDetail } from "./ContactDetail";
 export { NewFriendsView } from "./NewFriendsView";
 export { AddContactModal } from "./AddContactModal";
+
+// 设置组件
+export { SettingsScreen } from "./SettingsScreen";
+export { ProfileEditView } from "./ProfileEditView";
 
 // 布局组件
 export { MainLayout } from "./MainLayout";

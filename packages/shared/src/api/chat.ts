@@ -5,7 +5,8 @@
  * 后端返回的是数据库风格的 snake_case DTO（seq、message_type、content JSON 字符串），
  * 此处统一转换为 UI 直接消费的 `Conversation` / `ChatMessage` 结构。
  */
-import { apiGet } from "./client";
+import { apiGet, apiPost } from "./client";
+import i18n from "@yuanchat/design-system/i18n";
 import type { Conversation } from "../store/conversationStore";
 import type { ChatMessage } from "../store/messageStore";
 
@@ -86,6 +87,36 @@ function two(n: number): string {
   return n < 10 ? "0" + n : String(n);
 }
 
+/** Date → 本地日期键（YYYY-MM-DD），用于消息按日分组与日期分隔线 */
+export function dateKeyOf(d: Date): string {
+  if (isNaN(d.getTime())) return "";
+  return d.getFullYear() + "-" + two(d.getMonth() + 1) + "-" + two(d.getDate());
+}
+
+/**
+ * 日期分隔线文案：今天 / 昨天 / `M月D日`（今年）/ `YYYY/M/D`（跨年）
+ *
+ * @param dateKey - `YYYY-MM-DD` 本地日期键（由 dateKeyOf 产出）
+ * @remarks 今天/昨天经 i18n（shared 层直接 `i18n.t`，不依赖 react 组件层）；
+ *   月日格式沿用 formatListTime 的中文风格，跨年与其一致。
+ */
+export function formatDateDivider(dateKey: string): string {
+  const parts = dateKey.split("-");
+  if (parts.length !== 3) return dateKey;
+  const year = Number(parts[0]);
+  const month = Number(parts[1]);
+  const day = Number(parts[2]);
+  const d = new Date(year, month - 1, day);
+  if (isNaN(d.getTime())) return dateKey;
+
+  const today = new Date();
+  if (dateKey === dateKeyOf(today)) return i18n.t("chat.today");
+  const yesterday = new Date(today.getTime() - 86400000);
+  if (dateKey === dateKeyOf(yesterday)) return i18n.t("chat.yesterday");
+  if (year === today.getFullYear()) return month + "月" + day + "日";
+  return year + "/" + month + "/" + day;
+}
+
 // ========================================
 // DTO → 前端模型映射
 // ========================================
@@ -123,6 +154,24 @@ export function parseTextContent(content: string): string {
   }
 }
 
+/** content JSON 字符串 → 图片载荷（key + 宽高）；非法 JSON 时返回 0 尺寸占位 */
+export function parseImageContent(content: string): {
+  key?: string;
+  width: number;
+  height: number;
+} {
+  try {
+    const parsed = JSON.parse(content) as { key?: string; width?: number; height?: number };
+    return {
+      key: typeof parsed.key === "string" ? parsed.key : undefined,
+      width: typeof parsed.width === "number" ? parsed.width : 0,
+      height: typeof parsed.height === "number" ? parsed.height : 0,
+    };
+  } catch {
+    return { width: 0, height: 0 };
+  }
+}
+
 export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
   const isSelf = dto.sender_id === selfUserId;
   const kindMap: Record<number, ChatMessage["kind"]> = {
@@ -132,6 +181,9 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     4: "voice",
     6: "system",
   };
+  // status=2 表示已撤回：气泡走灰字系统占位，忽略 kind/text
+  const recalled = dto.status === 2;
+  const isImage = dto.message_type === 2;
 
   return {
     id: dto.id,
@@ -141,8 +193,13 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     senderName: dto.sender_nickname,
     text:
       dto.message_type === 1 || dto.message_type === 6 ? parseTextContent(dto.content) : undefined,
+    // 历史图片：解析 key + 宽高，渲染时按 key 签下载 URL（无 localUrl）
+    image: isImage ? parseImageContent(dto.content) : undefined,
     seq: dto.seq,
     time: formatMessageTime(dto.created_at),
+    dateKey: dateKeyOf(new Date(dto.created_at)),
+    createdAtMs: new Date(dto.created_at).getTime(),
+    recalled: recalled ? true : undefined,
     // 历史消息不区分 sent/read（read 回执只对新消息实时生效），统一视为已读
     status: isSelf ? "read" : undefined,
   };
@@ -155,6 +212,25 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
 export async function fetchConversations(): Promise<Conversation[]> {
   const data = await apiGet<{ conversations: ConversationDTO[] }>("/api/v1/conversations");
   return (data.conversations || []).map(mapConversation);
+}
+
+/**
+ * 创建群聊：选定好友作为初始成员，可选群名。
+ *
+ * @param name - 群名，留空时后端按成员昵称拼接默认名
+ * @param memberIds - 初始成员 ID（须全部为发起者好友，1-100 人）
+ * @returns 新群会话（发起者视角 DTO 过 mapConversation）
+ * @throws ApiError code=400 成员非好友 / 无有效成员
+ */
+export async function createGroup(
+  name: string | undefined,
+  memberIds: string[],
+): Promise<Conversation> {
+  const dto = await apiPost<ConversationDTO>("/api/v1/conversations", {
+    name,
+    member_ids: memberIds,
+  });
+  return mapConversation(dto);
 }
 
 export async function fetchMessages(
@@ -174,4 +250,42 @@ export async function fetchMessages(
   // 后端返回 seq 降序，前端消息流按时间升序展示
   const messages = (data.messages || []).map((m) => mapMessage(m, selfUserId)).reverse();
   return { messages, hasMore: !!data.has_more };
+}
+
+export interface ConversationMember {
+  userId: string;
+  nickname: string;
+  avatarUrl?: string | null;
+  role: 0 | 1 | 2;
+}
+
+interface MemberDTO {
+  user_id: string;
+  nickname: string;
+  avatar_url?: string | null;
+  role: number;
+}
+
+/** 群成员列表（ChatDetail 头像墙 / 成员全列表用） */
+export async function fetchMembers(conversationId: string): Promise<ConversationMember[]> {
+  const data = await apiGet<{ members: MemberDTO[] }>(
+    "/api/v1/conversations/" + conversationId + "/members",
+  );
+  return (data.members || []).map((m) => ({
+    userId: m.user_id,
+    nickname: m.nickname,
+    avatarUrl: m.avatar_url,
+    role: (m.role === 1 || m.role === 2 ? m.role : 0) as 0 | 1 | 2,
+  }));
+}
+
+/**
+ * 撤回一条消息（仅发送者、2 分钟内有效，窗口判定由后端兜底）。
+ *
+ * @remarks 成功 / 幂等均返回 200；撤回后由后端广播 `message.recalled` 帧，
+ *   前端不做乐观翻转，统一在收到帧时 applyRecall，保证双端一致。
+ * @throws ApiError code=4031 超过撤回窗口；403 非发送者；404 消息不存在。
+ */
+export async function recallMessage(messageId: string): Promise<void> {
+  await apiPost<Record<string, never>>("/api/v1/messages/" + messageId + "/recall", {});
 }

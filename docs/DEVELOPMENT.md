@@ -316,6 +316,28 @@ docker compose -f deploy/docker-compose.yml ps        # 状态
 docker compose -f deploy/docker-compose.yml down      # 停止
 ```
 
+Compose 含三个服务：**PostgreSQL**（`:5433`→5432）、**Redis**（`:6379`）、**MinIO**（对象存储，图片/文件/头像）。
+
+### MinIO（对象存储）
+
+图片消息、文件、头像的对象存储，随 compose 一并启动，无需单独安装。
+
+| 端口    | 用途                                                            |
+| ------- | --------------------------------------------------------------- |
+| `:9000` | S3 API 端点（后端签发预签名 URL、前端直传/下载都走它）          |
+| `:9001` | Web 控制台（浏览器打开 `http://localhost:9001` 可视化管理对象） |
+
+- **控制台账号**（开发默认，见 `deploy/docker-compose.yml` 与 `server/config/config.yaml`）：
+  用户名 `yuanchat_minio` / 密码 `yuanchat_minio_dev`，默认桶 `yuanchat`。
+- **健康检查**：`curl http://localhost:9000/minio/health/live` 返回 200 即就绪。
+- 后端首次连接时幂等创建 `yuanchat` 桶，并对 `avatars/` 前缀开放匿名公共读（头像用永久 public URL，
+  免签名）；图片消息落 `images/` 前缀，走一次性预签名 GET（详见 `docs/02_CHAT_API.md` 的 files 端点）。
+
+> **真机联调注意**：MinIO 预签名 URL 里的 host 来自 `minio.endpoint`（默认 `localhost:9000`）。
+> 手机/平板真机访问宿主机的 `localhost` 会指向设备自身而非开发机，导致图片上传/下载失败。
+> 真机联调时须把 `server/config/config.yaml` 的 `minio.endpoint` 改为开发机的**局域网 IP**
+> （如 `192.168.1.100:9000`），并确保防火墙放行 9000 端口；后端据此签名，真机才能直连对象存储。
+
 ---
 
 ## 六、打包构建（Desktop + Android）
@@ -444,17 +466,19 @@ npx tauri android build --aab --split-per-abi --target aarch64
 
 ### 后端
 
-| 变量             | 默认值           | 说明            |
-| ---------------- | ---------------- | --------------- |
-| `SERVER_ENV`     | `development`    | 运行环境        |
-| `DB_HOST`        | `localhost`      | PostgreSQL 主机 |
-| `DB_PORT`        | `5432`           | PostgreSQL 端口 |
-| `DB_USER`        | `yuanchat`       | 数据库用户      |
-| `DB_PASSWORD`    | —                | 数据库密码      |
-| `DB_NAME`        | `yuanchat`       | 数据库名        |
-| `REDIS_ADDR`     | `localhost:6379` | Redis 地址      |
-| `JWT_SECRET`     | —                | JWT 签名密钥    |
-| `MINIO_ENDPOINT` | `localhost:9000` | MinIO S3 端点   |
+| 变量               | 默认值               | 说明                                           |
+| ------------------ | -------------------- | ---------------------------------------------- |
+| `SERVER_ENV`       | `development`        | 运行环境                                       |
+| `DB_HOST`          | `localhost`          | PostgreSQL 主机                                |
+| `DB_PORT`          | `5432`               | PostgreSQL 端口                                |
+| `DB_USER`          | `yuanchat`           | 数据库用户                                     |
+| `DB_PASSWORD`      | —                    | 数据库密码                                     |
+| `DB_NAME`          | `yuanchat`           | 数据库名                                       |
+| `REDIS_ADDR`       | `localhost:6379`     | Redis 地址                                     |
+| `JWT_SECRET`       | —                    | JWT 签名密钥                                   |
+| `MINIO_ENDPOINT`   | `localhost:9000`     | MinIO S3 端点（真机联调改局域网 IP，见第五章） |
+| `MINIO_ACCESS_KEY` | `yuanchat_minio`     | MinIO 访问密钥（对应控制台用户名）             |
+| `MINIO_SECRET_KEY` | `yuanchat_minio_dev` | MinIO 私有密钥（对应控制台密码）               |
 
 ### 前端
 

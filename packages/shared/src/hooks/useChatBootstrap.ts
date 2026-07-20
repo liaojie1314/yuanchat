@@ -11,7 +11,8 @@
  * 卸载时断开连接（登出/离开聊天页）。
  */
 import { useEffect } from "react";
-import { formatListTime, formatMessageTime } from "../api/chat";
+import i18n from "@yuanchat/design-system/i18n";
+import { dateKeyOf, formatListTime, formatMessageTime, mapConversation } from "../api/chat";
 import { setTokenProvider } from "../api/client";
 import {
   DEMO_CONVERSATIONS,
@@ -49,7 +50,9 @@ function wireSocket() {
 
   chatSocket.setHandlers({
     "message.ack": (p) => {
-      useMessageStore.getState().applyAck(p.client_msg_id, p.conversation_id, p.seq, p.timestamp);
+      useMessageStore
+        .getState()
+        .applyAck(p.client_msg_id, p.message_id, p.conversation_id, p.seq, p.timestamp);
       useConversationStore
         .getState()
         .updateConversation(p.conversation_id, { lastSeq: p.seq, myLastReadSeq: p.seq });
@@ -59,16 +62,21 @@ function wireSocket() {
       const selfId = useAuthStore.getState().user?.id ?? "";
       const isSelf = p.sender_id === selfId;
       const iso = new Date(p.timestamp).toISOString();
+      const isImage = p.content.type === "image";
 
       const msg: ChatMessage = {
         id: p.message_id,
         conversationId: p.conversation_id,
-        kind: "text",
+        kind: isImage ? "image" : "text",
         isSelf,
         senderName: p.sender_nickname,
-        text: p.content.text,
+        text: isImage ? undefined : p.content.text,
+        image: isImage
+          ? { key: p.content.key, width: p.content.width ?? 0, height: p.content.height ?? 0 }
+          : undefined,
         seq: p.seq,
         time: formatMessageTime(iso),
+        dateKey: dateKeyOf(new Date(p.timestamp)),
         status: isSelf ? "sent" : undefined,
         clientMsgId: p.client_msg_id,
       };
@@ -76,10 +84,10 @@ function wireSocket() {
 
       const convStore = useConversationStore.getState();
       const conv = convStore.conversations.find((c) => c.id === p.conversation_id);
+      // 图片消息列表预览走「[图片]」占位；文本用正文
+      const body = isImage ? i18n.t("chat.message.image") : (p.content.text ?? "");
       const preview =
-        conv && conv.type === "group" && !isSelf
-          ? p.sender_nickname + ": " + p.content.text
-          : p.content.text;
+        conv && conv.type === "group" && !isSelf ? p.sender_nickname + ": " + body : body;
 
       if (isSelf) {
         // 自己发的消息（本设备或其他设备）：只刷新预览，不加未读
@@ -114,6 +122,22 @@ function wireSocket() {
       useMessageStore.getState().applyRead(p.conversation_id, p.seq);
     },
 
+    "message.recalled": (p) => {
+      const selfId = useAuthStore.getState().user?.id ?? "";
+      useMessageStore.getState().applyRecall(p.conversation_id, p.message_id, p.operator_nickname);
+      const convStore = useConversationStore.getState();
+      const conv = convStore.conversations.find((c) => c.id === p.conversation_id);
+      // 撤回的是最后一条时刷新列表预览
+      if (conv && conv.lastSeq === p.seq) {
+        convStore.updateConversation(p.conversation_id, {
+          lastMessage: i18n.t(
+            p.operator_id === selfId ? "chat.message.revokedBySelf" : "chat.message.revokedBy",
+            { name: p.operator_nickname },
+          ),
+        });
+      }
+    },
+
     typing: (p) => {
       useMessageStore.getState().setTyping(p.conversation_id, p.nickname);
     },
@@ -146,6 +170,14 @@ function wireSocket() {
         p.conversation_id,
       );
     },
+
+    "conversation.created": (p) => {
+      const conv = mapConversation(p.conversation);
+      const convStore = useConversationStore.getState();
+      // 发起者已由 POST 响应把会话插入本地：按 id 去重，避免帧重复冒出
+      if (convStore.conversations.some((c) => c.id === conv.id)) return;
+      convStore.addConversation(conv);
+    },
   });
 
   chatSocket.onReconnect = () => {
@@ -167,7 +199,13 @@ function injectDemoData() {
   }
   const msgState = useMessageStore.getState();
   if (Object.keys(msgState.messagesByConv).length === 0) {
-    useMessageStore.setState({ messagesByConv: DEMO_MESSAGES, typingByConv: DEMO_TYPING });
+    // demo 消息无 created_at，统一按"今天"补 dateKey，保证分隔线正常渲染
+    const todayKey = dateKeyOf(new Date());
+    const withDateKey: Record<string, ChatMessage[]> = {};
+    for (const [convId, list] of Object.entries(DEMO_MESSAGES)) {
+      withDateKey[convId] = list.map((m) => ({ ...m, dateKey: todayKey }));
+    }
+    useMessageStore.setState({ messagesByConv: withDateKey, typingByConv: DEMO_TYPING });
   }
   if (useContactStore.getState().friends.length === 0) {
     useContactStore.setState({ friends: DEMO_FRIENDS, requests: DEMO_REQUESTS });

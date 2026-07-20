@@ -84,12 +84,19 @@ export interface TranslationKeys {
   "chat.message.revoke": string;
   "chat.message.revokeConfirm": string;
   "chat.message.revoked": string;
+  "chat.message.revokedBySelf": string;
+  "chat.message.revokedBy": string;
+  "chat.message.recallExpired": string;
   "chat.message.copy": string;
   "chat.message.reply": string;
   "chat.message.forward": string;
   "chat.message.image": string;
   "chat.message.file": string;
   "chat.message.voice": string;
+  "chat.image.alt": string;
+  "chat.image.open": string;
+  "chat.image.loadError": string;
+  "chat.lightbox.close": string;
   "chat.groupChat": string;
   "chat.privateChat": string;
 

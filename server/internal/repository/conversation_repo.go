@@ -27,6 +27,11 @@ func NewConversationRepository(db *gorm.DB) *ConversationRepository {
 	return &ConversationRepository{db: db}
 }
 
+// DB 暴露底层连接供 service 层组织跨仓储事务。
+func (r *ConversationRepository) DB() *gorm.DB {
+	return r.db
+}
+
 // ListByUserID 查询用户参与的所有会话，按最近更新排序。
 func (r *ConversationRepository) ListByUserID(ctx context.Context, userID uuid.UUID) ([]ConversationListItem, error) {
 	var items []ConversationListItem
@@ -81,4 +86,25 @@ func (r *ConversationRepository) GetPeerUser(ctx context.Context, convID, userID
 		return nil, nil
 	}
 	return &user, err
+}
+
+// MemberWithUser 群成员投影：成员行 + 用户资料。
+type MemberWithUser struct {
+	UserID    uuid.UUID `json:"user_id"`
+	Nickname  string    `json:"nickname"`
+	AvatarURL *string   `json:"avatar_url"`
+	Role      int16     `json:"role"`
+}
+
+// ListMembers 查会话全部成员（owner 在前，其余按昵称升序）。
+func (r *ConversationRepository) ListMembers(ctx context.Context, convID uuid.UUID) ([]MemberWithUser, error) {
+	var items []MemberWithUser
+	err := r.db.WithContext(ctx).
+		Table("conversation_members cm").
+		Select("cm.user_id, u.nickname, u.avatar_url, cm.role").
+		Joins("JOIN users u ON u.id = cm.user_id").
+		Where("cm.conversation_id = ?", convID).
+		Order("cm.role DESC, u.nickname ASC").
+		Scan(&items).Error
+	return items, err
 }

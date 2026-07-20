@@ -145,7 +145,9 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
               title={t(labelKey)}
             >
               <Icon size={24} strokeWidth={active ? 2.5 : 1.5} />
-              <span className="leading-none">{t(labelKey)}</span>
+              <span className="w-full truncate px-0.5 text-center text-[10px] leading-none">
+                {t(labelKey)}
+              </span>
               {badge > 0 && (
                 <span className="absolute top-1.5 right-3 h-2 w-2 rounded-full bg-red-500" />
               )}

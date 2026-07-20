@@ -144,7 +144,7 @@ export function LoginPage() {
           <div className="mt-4 flex items-center text-sm">
             <button
               type="button"
-              onClick={() => openAuthWindow("/forgot-password", "忘记密码", 540, 680)}
+              onClick={() => openAuthWindow("/forgot-password", "忘记密码", 540, 640)}
               className={`text-on-surface-variant hover:text-primary${isMobile ? "ml-auto" : ""}`}
             >
               忘记密码
@@ -165,7 +165,7 @@ export function LoginPage() {
             还没有账号？{" "}
             <button
               type="button"
-              onClick={() => openAuthWindow("/register", "注册元聊")}
+              onClick={() => openAuthWindow("/register", "注册元聊", 540, 750)}
               className="cursor-pointer font-medium text-primary"
             >
               立即注册

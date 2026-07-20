@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/middleware"
 	"github.com/yuanchat/server/internal/service"
 	"go.uber.org/zap"
@@ -146,26 +147,43 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		return
 	}
 
-	user, err := h.svc.Profile(c.Request.Context(), userID)
+	user, err := h.svc.UpdateProfile(c.Request.Context(), userID, req.Nickname, req.AvatarURL, req.Bio, req.Gender)
 	if err != nil {
+		h.logger.Error("update profile failed", zap.Error(err))
+		InternalError(c, "failed to update profile")
+		return
+	}
+
+	Success(c, user)
+}
+
+// GetPublicProfile 查任意用户的公开资料（好友资料页用，不含手机号/邮箱）。
+func (h *UserHandler) GetPublicProfile(c *gin.Context) {
+	targetID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid user id")
+		return
+	}
+
+	user, err := h.svc.Profile(c.Request.Context(), targetID)
+	if err != nil {
+		if errors.Is(err, service.ErrUserNotFound) {
+			NotFound(c, "user not found")
+			return
+		}
+		h.logger.Error("get public profile failed", zap.Error(err))
 		InternalError(c, "failed to get profile")
 		return
 	}
 
-	if req.Nickname != nil {
-		user.Nickname = *req.Nickname
-	}
-	if req.AvatarURL != nil {
-		user.AvatarURL = req.AvatarURL
-	}
-	if req.Bio != nil {
-		user.Bio = req.Bio
-	}
-	if req.Gender != nil {
-		user.Gender = *req.Gender
-	}
-
-	Success(c, gin.H{"message": "profile updated"})
+	Success(c, gin.H{
+		"id":         user.ID,
+		"nickname":   user.Nickname,
+		"avatar_url": user.AvatarURL,
+		"short_id":   user.ShortID,
+		"bio":        user.Bio,
+		"gender":     user.Gender,
+	})
 }
 
 // --- Request/Response types ---

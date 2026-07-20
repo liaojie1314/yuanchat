@@ -71,6 +71,45 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 - `unread_count` = `last_seq - my_last_read_seq`（服务端计算）。
 - `peer` 仅单聊返回；单聊 `name`/`avatar_url` 为空时前端用 `peer` 填充。
 
+### POST /api/v1/conversations
+
+创建群聊。校验发起者与全部成员均为好友后建群：写 `conversations`（type=2）、
+`conversation_members`（发起者 role=2 群主、其余 role=0），插入系统消息「X 创建了群聊」（seq=1），
+并向全部成员（含发起者）推送 `conversation.created` 帧。
+
+```json
+// 请求（name 选填，为空时服务端用「发起者、成员1、成员2」拼接默认群名，rune 数超 100 截断）
+{ "name": "产品研发群", "member_ids": ["uuid", "uuid"] }
+
+// 响应（201 Created；发起者视角：unread=0、已读到系统消息）
+{
+  "code": 0,
+  "message": "created",
+  "data": {
+    "id": "uuid",
+    "type": 2,
+    "name": "产品研发群",
+    "avatar_url": null,
+    "member_count": 3,
+    "unread_count": 0,
+    "is_muted": false,
+    "last_seq": 1,
+    "my_last_read_seq": 1,
+    "last_message": {
+      "preview": "Alice 创建了群聊",
+      "sender_nickname": "Alice",
+      "created_at": "2026-07-16T09:00:00+08:00"
+    },
+    "updated_at": "2026-07-16T09:00:00+08:00"
+  }
+}
+```
+
+- `member_ids`：1~100 个；去重并剔除发起者本人后须非空，否则 `400`。
+- 存在非好友成员返回 `400`（`all members must be your friends`）。
+- 响应 `data` 结构同 `GET /conversations` 列表条目；`type` 固定为 2（群聊）。
+- 发起者由本响应把会话插入本地列表并激活，随后到达的 `conversation.created` 帧按会话 id 去重吞掉。
+
 ### GET /api/v1/conversations/:id/messages
 
 历史消息分页（seq 降序返回，前端反转为升序展示）。
@@ -108,6 +147,100 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 
 - 非会话成员访问返回 `403`。
 - `content` 是 JSONB 字符串；`message_type`：1=文本 2=图片 3=文件 4=语音 5=视频 6=系统。
+
+### POST /api/v1/messages/:id/recall
+
+撤回消息：仅**发送者本人**、且在**发送后 2 分钟**（`RecallWindow`）内可撤回。
+成功后消息 `status` 翻为已撤回、`content` 清空为 `{}`，并向会话全部成员推送 `message.recalled` 帧。
+
+```json
+// 请求：无 body，:id 为消息的服务端 UUID
+// 响应
+{ "code": 0, "message": "ok", "data": { "message": "recalled" } }
+```
+
+- 已撤回的消息重复调用视为**幂等成功**（返回 200，不重复推送 `message.recalled`）。
+- `:id` 非合法 UUID 返回 `400`（`invalid message id`）。
+- 消息不存在返回 `404`；非发送者本人返回 `403`（`only the sender can recall`）。
+- 超出 2 分钟窗口返回 **`403`，body `code=4031`**（`recall window expired`）——前端据此行内提示「超过可撤回时间」。
+
+### GET /api/v1/users/:id
+
+按用户 ID 查看**公开资料**（好友资料卡、群成员点击等入口）。仅返回对外可见字段，
+不含手机号、账号状态等隐私信息。
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "id": "uuid",
+    "nickname": "Bob",
+    "avatar_url": null,
+    "short_id": 10002,
+    "bio": null,
+    "gender": 0
+  }
+}
+```
+
+- `gender`：0=未设置 1=男 2=女；`bio`（个性签名）可为 `null`。
+- 用户不存在返回 `404`。
+
+### GET /api/v1/conversations/:id/members
+
+返回指定会话的成员列表，**群主排在首位**（服务端按 `role` 降序、加入时间升序排序）。
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "members": [
+      {
+        "user_id": "uuid",
+        "nickname": "Alice",
+        "avatar_url": null,
+        "role": 2
+      }
+    ]
+  }
+}
+```
+
+- `role`：0=普通成员 1=管理员 2=群主。
+- 非会话成员访问返回 `403`。
+
+### PUT /api/v1/users/me
+
+修改当前登录用户的资料（昵称 / 头像 / 个性签名 / 性别），落库持久化。
+成功后返回**完整的用户对象**（含更新后的字段），前端据此刷新本地登录态。
+
+```json
+// 请求（字段均选填，仅更新传入项）
+// nickname 1~50 字，bio ≤500 字，avatar_url 须为合法 URL，gender ∈ {0,1,2}
+{ "nickname": "Alice", "avatar_url": null, "bio": "介绍一下自己…", "gender": 1 }
+
+// 响应
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "id": "uuid",
+    "phone": "13800000001",
+    "short_id": 10001,
+    "nickname": "Alice",
+    "bio": "介绍一下自己…",
+    "gender": 1,
+    "status": 1,
+    "created_at": "2026-07-16T14:35:21+08:00",
+    "updated_at": "2026-07-17T20:31:26+08:00"
+  }
+}
+```
+
+- `gender`：0=未设置 1=男 2=女。
+- 参数校验失败（如昵称超长）返回 `400`。
 
 ### GET /api/v1/users/search?q=…
 
@@ -204,6 +337,64 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 
 - `conversation_id` 为双方共同所在、恰好 2 人的 private 会话（accept 事务保证"好友必有会话"，`null` 仅容忍脏数据）。
 
+### POST /api/v1/files/upload-url
+
+签发**预签名上传 URL**，客户端凭此 PUT 直传对象存储（MinIO / S3 兼容），服务端不中转文件字节。
+校验通过后返回 `upload_url`（15 分钟有效）与 `object_key`（后续 `message.send` / 下载凭此）。
+
+```json
+// 请求
+// content_type 须在白名单内（image/jpeg|png|gif|webp、application/pdf|msword|docx、text/plain）；
+// size 为字节数，超上限（默认 100MB）回 4002
+{ "filename": "photo.png", "content_type": "image/png", "size": 20480 }
+
+// 响应
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "upload_url": "http://localhost:9000/yuanchat/images/2026/07/<uuid>.png?X-Amz-...",
+    "object_key": "images/2026/07/<uuid>.png",
+    "expires_in": 900
+  }
+}
+```
+
+- Query `category`：显式 `images` / `avatars` / `files`；缺省按 `content_type` 推断（`image/*` → images，其余 → files）。
+- **头像专用**：`?category=avatars` 时对象落在 `avatars/` 前缀（匿名公共读），响应额外返回
+  `public_url`（形如 `http://<endpoint>/<bucket>/avatars/…`），前端直接存库，**无需再签下载**。
+- `object_key` 形如 `{category}/{yyyy}/{mm}/{uuid}.{ext}`：uuid 防碰撞、隐藏原始文件名，扩展名统一小写。
+- 错误码：类型非白名单（含空串）→ **`400 code=4001`**（`unsupported file type`）；
+  超大 → **`400 code=4002`**（`file too large`）；文件名扩展名脏（含空格/缺失/非小写字母数字，
+  会生成下载正则拒收的键）→ **`400 code=4001`**（`invalid file extension`，提前拦截避免对象永久取不回）；
+  MinIO 不可达 → **`503`**（`object storage unavailable`）。
+
+### GET /api/v1/files/download-url
+
+换取对象的**预签名下载 GET URL**（24 小时有效），用于私有对象（图片消息等）的受控读取。
+
+```json
+// GET /api/v1/files/download-url?key=images/2026/07/<uuid>.png
+// 响应
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "url": "http://localhost:9000/yuanchat/images/2026/07/<uuid>.png?X-Amz-...",
+    "expires_in": 86400
+  }
+}
+```
+
+- `key` 必须匹配正则 `^(images|avatars|files)/[0-9]{4}/[0-9]{2}/[0-9a-f-]+\.[a-z0-9]+$`，
+  拦截任意 key 探测（越权拉取未授权对象）；不匹配 → `400`（`invalid object key`）。
+- MinIO 不可达 → `503`。前端对同一 key 的下载 URL 做进程内缓存（提前 5 分钟过期重取），
+  避免同图在消息流反复渲染时重复签名。
+
+> **预签名读权限取舍**：图片消息为**私有**对象，每次浏览都要 `download-url` 换一次性预签名 GET
+> （带 `X-Amz-*` 签名参数、有 TTL），杜绝越权直取；头像落在 `avatars/` **公共读**前缀（桶策略开放匿名
+> `s3:GetObject`），用永久 `public_url` 直接展示、免签名——头像本就随处曝光，换取零签名开销与可长期缓存。
+
 ## 三、WebSocket 协议
 
 - 地址：`ws://<host>:8081/ws?token=<access_token>`（生产 `wss://`）。
@@ -213,23 +404,31 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 
 ### 客户端 → 服务端
 
-| type           | payload                                                                        | 说明                                                                |
-| -------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| `message.send` | `{conversation_id, content: {type:"text", text}, client_msg_id, reply_to_id?}` | 发送文本（≤4000 字符）。`client_msg_id` 客户端生成，幂等/回执匹配用 |
-| `message.read` | `{conversation_id, seq}`                                                       | 上报已读进度（已读到的最大 seq，只前进不后退）                      |
-| `typing`       | `{conversation_id}`                                                            | 正在输入（客户端节流 ~3s/次）                                       |
+| type           | payload                                                                                             | 说明                                                                                                                                                                                                         |
+| -------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `message.send` | `{conversation_id, content: {type:"text", text}, client_msg_id, reply_to_id?}`                      | 发送文本（≤4000 字符）。`client_msg_id` 客户端生成，幂等/回执匹配用                                                                                                                                          |
+| `message.send` | `{conversation_id, content: {type:"image", key, width, height, size}, client_msg_id, reply_to_id?}` | 发送图片。`content` 走图片分支：`key`=`upload-url` 返回的 object_key，`width`/`height`=像素宽高（气泡等比占位防 CLS），`size`=字节；四者缺一或非正 → `400`（`image content requires key/width/height/size`） |
+| `message.read` | `{conversation_id, seq}`                                                                            | 上报已读进度（已读到的最大 seq，只前进不后退）                                                                                                                                                               |
+| `typing`       | `{conversation_id}`                                                                                 | 正在输入（客户端节流 ~3s/次）                                                                                                                                                                                |
+
+> **ContentPayload（消息体传输结构）**：`{type, text?, key?, width?, height?, size?}`。text 帧只用 `type`/`text`；
+> image 帧用 `type:"image"` + `key`/`width`/`height`/`size`（均 `omitempty`，不污染文本消息）。
+> 服务端落库时按 `content.type` 分流 `message_type`（text=1、image=2），`message.receive` 原样回传
+> `content`，接收端据 `type` 渲染文本气泡或图片气泡（图片气泡用 `key` 换 `download-url` 拉预签名 GET）。
 
 ### 服务端 → 客户端
 
-| type               | payload                                                                                                            | 推送对象                                                                                                  |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| `message.ack`      | `{client_msg_id, message_id, conversation_id, seq, timestamp}`                                                     | 发送者的所有设备。乐观 UI 收到后：sending → sent，补服务端 seq                                            |
-| `message.receive`  | `{message_id, conversation_id, sender_id, sender_nickname, content, seq, timestamp, reply_to_id?, client_msg_id?}` | 会话全部成员（含发送者其他设备；本设备按 `client_msg_id` 去重）                                           |
-| `message.read`     | `{conversation_id, user_id, seq}`                                                                                  | 会话全部成员。`user_id`=自己 → 多端未读同步清零；`user_id`=他人 → 把自己 `seq ≤` 该值的已送达消息翻为已读 |
-| `typing`           | `{conversation_id, user_id, nickname}`                                                                             | 会话中除输入者外的成员（前端显示 4s 后自动消失）                                                          |
-| `contact.request`  | `{request_id, requester: {id, nickname, avatar_url, short_id}, message, created_at}`                               | 被申请方全部设备。前端置顶插入"新的朋友"列表 + 角标 +1                                                    |
-| `contact.accepted` | `{request_id, friend: {id, nickname, avatar_url, short_id}, conversation_id}`                                      | 申请方全部设备。前端翻转申请状态 + 加好友 + 拉会话列表（随后收到打招呼 `message.receive`）                |
-| `error`            | `{code, message, client_msg_id?}`                                                                                  | 当前连接。`client_msg_id` 非空表示对应那次发送失败                                                        |
+| type                   | payload                                                                                                            | 推送对象                                                                                                                   |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `message.ack`          | `{client_msg_id, message_id, conversation_id, seq, timestamp}`                                                     | 发送者的所有设备。乐观 UI 收到后：sending → sent，补服务端 seq                                                             |
+| `message.receive`      | `{message_id, conversation_id, sender_id, sender_nickname, content, seq, timestamp, reply_to_id?, client_msg_id?}` | 会话全部成员（含发送者其他设备；本设备按 `client_msg_id` 去重）                                                            |
+| `message.read`         | `{conversation_id, user_id, seq}`                                                                                  | 会话全部成员。`user_id`=自己 → 多端未读同步清零；`user_id`=他人 → 把自己 `seq ≤` 该值的已送达消息翻为已读                  |
+| `typing`               | `{conversation_id, user_id, nickname}`                                                                             | 会话中除输入者外的成员（前端显示 4s 后自动消失）                                                                           |
+| `contact.request`      | `{request_id, requester: {id, nickname, avatar_url, short_id}, message, created_at}`                               | 被申请方全部设备。前端置顶插入"新的朋友"列表 + 角标 +1                                                                     |
+| `contact.accepted`     | `{request_id, friend: {id, nickname, avatar_url, short_id}, conversation_id}`                                      | 申请方全部设备。前端翻转申请状态 + 加好友 + 拉会话列表（随后收到打招呼 `message.receive`）                                 |
+| `conversation.created` | `{conversation: ConversationDTO}`                                                                                  | 新建群会话的全部成员（含发起者，前端按会话 id 去重）。帧内 DTO 取成员视角（`unread_count`=1、`my_last_read_seq`=0）        |
+| `message.recalled`     | `{message_id, conversation_id, seq, operator_id, operator_nickname}`                                               | 会话全部成员。前端把对应气泡翻成撤回占位（本人「你撤回了一条消息」/ 他人「X 撤回了一条消息」）；撤回最后一条时刷新列表预览 |
+| `error`                | `{code, message, client_msg_id?}`                                                                                  | 当前连接。`client_msg_id` 非空表示对应那次发送失败                                                                         |
 
 ## 四、seq 与已读机制
 
