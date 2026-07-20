@@ -75,7 +75,7 @@ export function EmojiPicker({
       role="dialog"
       aria-label={t("chat.input.emoji")}
       onMouseDown={(e) => e.stopPropagation()}
-      className="bg-surface-container-high border-outline-variant flex flex-col overflow-hidden rounded-xl border shadow-lg"
+      className="bg-surface-container-high border-outline-variant flex flex-col overflow-hidden rounded-lg border shadow-lg"
     >
       {/* 分类 tab 栏 */}
       <div

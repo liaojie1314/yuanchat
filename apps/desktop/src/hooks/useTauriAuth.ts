@@ -13,9 +13,11 @@ export function useOpenAuthWindow() {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
       const label = route.replace(/\//g, "");
 
-      // 检查窗口是否已存在，存在则置顶居中
+      // 检查窗口是否已存在，存在则同步尺寸后置顶居中（尺寸参数可能已更新）
       const existing = await WebviewWindow.getByLabel(label);
       if (existing) {
+        const { LogicalSize } = await import("@tauri-apps/api/window");
+        await existing.setSize(new LogicalSize(width, height));
         await existing.setFocus();
         await existing.center();
         return;
