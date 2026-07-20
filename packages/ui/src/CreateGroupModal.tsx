@@ -105,7 +105,7 @@ export function CreateGroupModal({ open, onClose }: CreateGroupModalProps) {
       onClick={handleClose}
     >
       <div
-        className="bg-surface-container-low flex max-h-[80vh] w-full max-w-sm flex-col rounded-2xl shadow-xl"
+        className="bg-surface-container-low flex max-h-[80vh] w-full max-w-sm flex-col rounded-xl shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 头部 */}
@@ -142,7 +142,7 @@ export function CreateGroupModal({ open, onClose }: CreateGroupModalProps) {
                   aria-label={t("chat.group.removeMember")}
                 >
                   <Avatar name={f.nickname} src={f.avatarUrl} size="md" />
-                  <span className="bg-on-surface-variant absolute -top-0.5 -right-0.5 grid h-4 w-4 place-items-center rounded-full text-white">
+                  <span className="bg-error absolute -top-0.5 -right-0.5 grid h-4 w-4 place-items-center rounded-full text-white">
                     <X size={11} />
                   </span>
                 </button>

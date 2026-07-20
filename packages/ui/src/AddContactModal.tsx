@@ -101,7 +101,7 @@ export function AddContactModal({ open, onClose }: AddContactModalProps) {
       onClick={handleClose}
     >
       <div
-        className="bg-surface-container-low w-full max-w-sm rounded-2xl shadow-xl"
+        className="bg-surface-container-low w-full max-w-sm rounded-xl shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 头部 */}

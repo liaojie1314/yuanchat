@@ -89,7 +89,8 @@ function ThemeSwitch({ checked }: { checked: boolean }) {
       role="switch"
       aria-checked={checked}
       className={cn(
-        "relative h-6 w-11 shrink-0 rounded-full transition-colors",
+        // block 必须显式声明：父按钮非 flex 时 inline span 的宽高不生效，轨道塌缩致滑块溢出
+        "relative block h-6 w-11 shrink-0 rounded-full transition-colors",
         checked ? "bg-primary" : "bg-outline",
       )}
     >

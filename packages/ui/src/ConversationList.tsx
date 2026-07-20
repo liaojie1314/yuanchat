@@ -119,7 +119,7 @@ export function ConversationList({
                 />
                 <div
                   role="menu"
-                  className="bg-surface-container-high shadow-elevation-2 animate-fade-in absolute top-full right-0 z-20 mt-1 w-40 overflow-hidden rounded-xl py-1"
+                  className="bg-surface-container-high shadow-elevation-2 animate-fade-in absolute top-full right-0 z-20 mt-1 w-40 overflow-hidden rounded-lg py-1"
                 >
                   <MenuItem
                     icon={<Users size={17} />}

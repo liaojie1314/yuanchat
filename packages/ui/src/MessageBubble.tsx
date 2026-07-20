@@ -18,7 +18,7 @@
  * @param msg - 消息数据
  * @param compact - 与上一条同一发送者且 1 分钟内：省略头像与群聊昵称行，缩小行距
  * @param onRetry - 发送失败点击重试回调
- * @param onReply - 引用回复回调（悬浮操作，暂通过双击触发）
+ * @param onReply - 引用回复回调（右键 / 长按菜单触发，双击气泡为快捷方式）
  * @param onRecall - 撤回回调（右键 / 长按菜单触发，仅自己 2 分钟内的消息可用）
  */
 import {
@@ -30,6 +30,7 @@ import {
   Image as ImageIcon,
   Loader2,
   Play,
+  Reply,
   Sparkles,
   Undo2,
 } from "lucide-react";
@@ -114,20 +115,22 @@ export function MessageBubble({
   const recallEligible = !!onRecall && isSelf && !!msg.createdAtMs;
   // 文本消息才提供复制项
   const canCopy = msg.kind === "text" && !!msg.text;
+  // 引用回复：父层给了回调即可（文本/图片/文件/语音均可引用）
+  const canReply = !!onReply;
   // 菜单当前展示的撤回项（资格 + 窗口内）
   const showRecall = recallEligible && recallInWindow;
 
   const openMenu = (e: { preventDefault: () => void }) => {
     // 窗口判定放事件里（Date.now 不纯，不能在 render 调用）
     const withinWindow = recallEligible && Date.now() - (msg.createdAtMs ?? 0) < 120_000;
-    if (!withinWindow && !canCopy) return;
+    if (!withinWindow && !canCopy && !canReply) return;
     e.preventDefault();
     setRecallInWindow(withinWindow);
     setMenuOpen(true);
   };
 
   const startLongPress = (e: { preventDefault: () => void }) => {
-    if (!recallEligible && !canCopy) return;
+    if (!recallEligible && !canCopy && !canReply) return;
     longPressTimer.current = setTimeout(() => openMenu(e), 500);
   };
 
@@ -143,6 +146,11 @@ export function MessageBubble({
     setMenuOpen(false);
   };
 
+  const handleReply = () => {
+    setMenuOpen(false);
+    onReply?.();
+  };
+
   const handleRecall = () => {
     setMenuOpen(false);
     onRecall?.();
@@ -151,7 +159,7 @@ export function MessageBubble({
   return (
     <div
       className={cn(
-        "flex items-end gap-2",
+        "flex items-start gap-2",
         compact ? "mt-0.5" : "mt-2",
         isSelf && "flex-row-reverse",
       )}
@@ -290,13 +298,13 @@ export function MessageBubble({
               </div>
             )}
 
-            {/* 内联操作菜单：右键 / 长按弹出，复制 + 撤回（撤回仅自己 2 分钟内） */}
+            {/* 内联操作菜单：右键 / 长按弹出，复制 + 引用 + 撤回（撤回仅自己 2 分钟内） */}
             {menuOpen && (
               <div
                 role="menu"
                 onMouseDown={(e) => e.stopPropagation()}
                 className={cn(
-                  "bg-surface-container-high border-outline-variant absolute bottom-full z-10 mb-1 min-w-[7rem] overflow-hidden rounded-xl border py-1 shadow-lg",
+                  "bg-surface-container-high border-outline-variant absolute bottom-full z-10 mb-1 min-w-[7rem] overflow-hidden rounded-lg border py-1 shadow-lg",
                   isSelf ? "right-0" : "left-0",
                 )}
               >
@@ -307,6 +315,15 @@ export function MessageBubble({
                     className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
                   >
                     <Copy size={15} /> {t("chat.message.copy")}
+                  </button>
+                )}
+                {canReply && (
+                  <button
+                    role="menuitem"
+                    onClick={handleReply}
+                    className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
+                  >
+                    <Reply size={15} /> {t("chat.message.reply")}
                   </button>
                 )}
                 {showRecall && (

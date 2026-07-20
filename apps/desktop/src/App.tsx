@@ -19,23 +19,29 @@ function App() {
   // 移动端软键盘弹出时把内容顶起（桌面端 / 旧 WebView 自动降级为无操作）
   useKeyboardAwareViewport();
 
-  // 已认证时（含从持久化恢复的登录态）将窗口切换为首页尺寸
+  // 登录态驱动窗口形态：已认证 → 首页大窗可缩放；登出/未登录 → 恢复登录小窗不可缩放
   useEffect(() => {
-    if (!isAuthenticated) return;
-
     const resize = async () => {
       try {
         const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
         const win = getCurrentWindow();
-        await win.setSize(new LogicalSize(1200, 800));
-        await win.setResizable(true);
-        await win.setMinSize(new LogicalSize(900, 600));
+        if (isAuthenticated) {
+          await win.setSize(new LogicalSize(1200, 800));
+          await win.setResizable(true);
+          await win.setMinSize(new LogicalSize(900, 600));
+        } else {
+          // 先清最小尺寸并退出最大化，否则 900×600 的 minSize 会卡住缩不回登录窗
+          await win.unmaximize();
+          await win.setMinSize(undefined);
+          await win.setSize(new LogicalSize(540, 600));
+          await win.setResizable(false);
+        }
         await win.center();
       } catch {
         /* 非 Tauri 环境忽略 */
       }
     };
-    resize();
+    void resize();
   }, [isAuthenticated]);
 
   if (!isAuthenticated) {
