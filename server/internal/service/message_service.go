@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/model"
@@ -15,6 +16,19 @@ import (
 // ErrNotMember 用户不是会话成员。
 var ErrNotMember = errors.New("not a conversation member")
 
+// 撤回相关错误。
+var (
+	// ErrMessageNotFound 目标消息不存在（或已软删）。
+	ErrMessageNotFound = errors.New("message not found")
+	// ErrNotSender 撤回者非消息发送者本人。
+	ErrNotSender = errors.New("only the sender can recall the message")
+	// ErrRecallWindowExpired 已超出可撤回时间窗口。
+	ErrRecallWindowExpired = errors.New("recall window expired")
+)
+
+// RecallWindow 消息可撤回的时间窗口（自发送起 2 分钟）。
+const RecallWindow = 2 * time.Minute
+
 // SendResult 消息落库后的结果，供 WS 层构造 ack / receive 推送。
 type SendResult struct {
 	Message        *model.Message
@@ -22,7 +36,16 @@ type SendResult struct {
 	MemberIDs      []uuid.UUID
 }
 
-// MessageService 消息核心服务：发送、历史、已读。
+// RecallResult 撤回结果，供 handler 构造 message.recalled 推送。
+// Idempotent 为 true 时表示消息已处于撤回态，MemberIDs 为空，handler 跳过推送。
+type RecallResult struct {
+	Message          *model.Message
+	OperatorNickname string
+	MemberIDs        []uuid.UUID
+	Idempotent       bool
+}
+
+// MessageService 消息核心服务：发送、历史、已读、撤回。
 type MessageService struct {
 	msgRepo  *repository.MessageRepository
 	convRepo *repository.ConversationRepository
@@ -143,4 +166,56 @@ func (s *MessageService) TypingTargets(ctx context.Context, userID, convID uuid.
 		return "", nil, err
 	}
 	return user.Nickname, memberIDs, nil
+}
+
+// Recall 撤回消息：仅发送者本人、且在 RecallWindow 内可撤回。
+//
+// 已撤回的消息重复调用视为幂等成功（Idempotent=true，不再推送）。
+func (s *MessageService) Recall(ctx context.Context, userID, messageID uuid.UUID) (*RecallResult, error) {
+	msg, err := s.msgRepo.FindByID(ctx, messageID)
+	if err != nil {
+		return nil, fmt.Errorf("find message: %w", err)
+	}
+	if msg == nil {
+		return nil, ErrMessageNotFound
+	}
+	if msg.SenderID != userID {
+		return nil, ErrNotSender
+	}
+
+	// 已撤回：幂等返回，不重复推送。
+	if msg.Status == model.MessageStatusRevoked {
+		return &RecallResult{Message: msg, Idempotent: true}, nil
+	}
+
+	if time.Since(msg.CreatedAt) > RecallWindow {
+		return nil, ErrRecallWindowExpired
+	}
+
+	flipped, err := s.msgRepo.Recall(ctx, messageID)
+	if err != nil {
+		return nil, fmt.Errorf("recall message: %w", err)
+	}
+	// 并发下已被撤回（flipped=false）同样按幂等处理，不推送。
+	if !flipped {
+		return &RecallResult{Message: msg, Idempotent: true}, nil
+	}
+	msg.Status = model.MessageStatusRevoked
+	msg.Content = "{}"
+
+	operator, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil || operator == nil {
+		return nil, fmt.Errorf("load operator: %w", err)
+	}
+
+	memberIDs, err := s.convRepo.GetMemberIDs(ctx, msg.ConversationID)
+	if err != nil {
+		return nil, fmt.Errorf("load members: %w", err)
+	}
+
+	return &RecallResult{
+		Message:          msg,
+		OperatorNickname: operator.Nickname,
+		MemberIDs:        memberIDs,
+	}, nil
 }

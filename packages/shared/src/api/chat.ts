@@ -5,7 +5,7 @@
  * 后端返回的是数据库风格的 snake_case DTO（seq、message_type、content JSON 字符串），
  * 此处统一转换为 UI 直接消费的 `Conversation` / `ChatMessage` 结构。
  */
-import { apiGet } from "./client";
+import { apiGet, apiPost } from "./client";
 import i18n from "@yuanchat/design-system/i18n";
 import type { Conversation } from "../store/conversationStore";
 import type { ChatMessage } from "../store/messageStore";
@@ -163,6 +163,8 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     4: "voice",
     6: "system",
   };
+  // status=2 表示已撤回：气泡走灰字系统占位，忽略 kind/text
+  const recalled = dto.status === 2;
 
   return {
     id: dto.id,
@@ -175,6 +177,8 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     seq: dto.seq,
     time: formatMessageTime(dto.created_at),
     dateKey: dateKeyOf(new Date(dto.created_at)),
+    createdAtMs: new Date(dto.created_at).getTime(),
+    recalled: recalled ? true : undefined,
     // 历史消息不区分 sent/read（read 回执只对新消息实时生效），统一视为已读
     status: isSelf ? "read" : undefined,
   };
@@ -187,6 +191,25 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
 export async function fetchConversations(): Promise<Conversation[]> {
   const data = await apiGet<{ conversations: ConversationDTO[] }>("/api/v1/conversations");
   return (data.conversations || []).map(mapConversation);
+}
+
+/**
+ * 创建群聊：选定好友作为初始成员，可选群名。
+ *
+ * @param name - 群名，留空时后端按成员昵称拼接默认名
+ * @param memberIds - 初始成员 ID（须全部为发起者好友，1-100 人）
+ * @returns 新群会话（发起者视角 DTO 过 mapConversation）
+ * @throws ApiError code=400 成员非好友 / 无有效成员
+ */
+export async function createGroup(
+  name: string | undefined,
+  memberIds: string[],
+): Promise<Conversation> {
+  const dto = await apiPost<ConversationDTO>("/api/v1/conversations", {
+    name,
+    member_ids: memberIds,
+  });
+  return mapConversation(dto);
 }
 
 export async function fetchMessages(
@@ -233,4 +256,15 @@ export async function fetchMembers(conversationId: string): Promise<Conversation
     avatarUrl: m.avatar_url,
     role: (m.role === 1 || m.role === 2 ? m.role : 0) as 0 | 1 | 2,
   }));
+}
+
+/**
+ * 撤回一条消息（仅发送者、2 分钟内有效，窗口判定由后端兜底）。
+ *
+ * @remarks 成功 / 幂等均返回 200；撤回后由后端广播 `message.recalled` 帧，
+ *   前端不做乐观翻转，统一在收到帧时 applyRecall，保证双端一致。
+ * @throws ApiError code=4031 超过撤回窗口；403 非发送者；404 消息不存在。
+ */
+export async function recallMessage(messageId: string): Promise<void> {
+  await apiPost<Record<string, never>>("/api/v1/messages/" + messageId + "/recall", {});
 }

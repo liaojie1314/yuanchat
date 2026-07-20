@@ -19,21 +19,26 @@
  * @param compact - 与上一条同一发送者且 1 分钟内：省略头像与群聊昵称行，缩小行距
  * @param onRetry - 发送失败点击重试回调
  * @param onReply - 引用回复回调（悬浮操作，暂通过双击触发）
+ * @param onRecall - 撤回回调（右键 / 长按菜单触发，仅自己 2 分钟内的消息可用）
  */
 import {
   AlertCircle,
   Check,
   CheckCheck,
+  Copy,
   Download,
   Image as ImageIcon,
   Loader2,
   Play,
   Sparkles,
+  Undo2,
 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ChatMessage } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
+import { copyText } from "./copyText";
 
 /** 把文本中的 @xxx 提及切分为高亮 token（简单前缀匹配，接入真实数据后按实体渲染） */
 function renderTextWithMentions(text: string, mentions?: string[]) {
@@ -60,13 +65,29 @@ export function MessageBubble({
   compact = false,
   onRetry,
   onReply,
+  onRecall,
 }: {
   msg: ChatMessage;
   compact?: boolean;
   onRetry?: () => void;
   onReply?: () => void;
+  onRecall?: () => void;
 }) {
   const { t } = useTranslation();
+  // 气泡内联操作菜单（右键 / 长按弹出，点外部关闭）
+  const [menuOpen, setMenuOpen] = useState(false);
+  // 撤回项是否在 2 分钟窗口内——在打开菜单的事件里用 Date.now() 求值并存下，
+  // 避免在 render 里调用 Date.now()（不纯，react-hooks/purity 禁止）
+  const [recallInWindow, setRecallInWindow] = useState(false);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = () => setMenuOpen(false);
+    // 捕获阶段监听，任何 document 点击都关闭（菜单根 onMouseDown 阻止冒泡自保）
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [menuOpen]);
 
   // 系统消息：居中胶囊，无头像无气泡
   if (msg.kind === "system") {
@@ -77,7 +98,55 @@ export function MessageBubble({
     );
   }
 
+  // 已撤回：整条走系统消息样式，忽略原 kind/text
+  if (msg.recalled) {
+    return (
+      <div className="bg-surface-container text-label-md text-on-surface-variant mx-auto my-2.5 w-fit rounded-full px-3 py-1">
+        {msg.isSelf
+          ? t("chat.message.revokedBySelf")
+          : t("chat.message.revokedBy", { name: msg.senderName ?? "" })}
+      </div>
+    );
+  }
+
   const isSelf = msg.isSelf;
+  // 撤回资格（render 纯判定）：仅自己且父层给了回调；实际的 2 分钟窗口在开菜单时判
+  const recallEligible = !!onRecall && isSelf && !!msg.createdAtMs;
+  // 文本消息才提供复制项
+  const canCopy = msg.kind === "text" && !!msg.text;
+  // 菜单当前展示的撤回项（资格 + 窗口内）
+  const showRecall = recallEligible && recallInWindow;
+
+  const openMenu = (e: { preventDefault: () => void }) => {
+    // 窗口判定放事件里（Date.now 不纯，不能在 render 调用）
+    const withinWindow = recallEligible && Date.now() - (msg.createdAtMs ?? 0) < 120_000;
+    if (!withinWindow && !canCopy) return;
+    e.preventDefault();
+    setRecallInWindow(withinWindow);
+    setMenuOpen(true);
+  };
+
+  const startLongPress = (e: { preventDefault: () => void }) => {
+    if (!recallEligible && !canCopy) return;
+    longPressTimer.current = setTimeout(() => openMenu(e), 500);
+  };
+
+  const cancelLongPress = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  const handleCopy = () => {
+    void copyText(msg.text ?? "");
+    setMenuOpen(false);
+  };
+
+  const handleRecall = () => {
+    setMenuOpen(false);
+    onRecall?.();
+  };
 
   return (
     <div
@@ -114,10 +183,14 @@ export function MessageBubble({
 
           <div
             className={cn(
-              "w-fit max-w-full rounded-2xl break-words select-text",
+              "relative w-fit max-w-full rounded-2xl break-words select-text",
               msg.kind === "image" ? "p-1.5" : "px-3.5 py-2.5",
               isSelf ? "msg-bubble-self rounded-br-md" : "msg-bubble-peer rounded-bl-md",
             )}
+            onContextMenu={openMenu}
+            onTouchStart={startLongPress}
+            onTouchEnd={cancelLongPress}
+            onTouchMove={cancelLongPress}
           >
             {/* 引用块 */}
             {msg.quote && (
@@ -214,6 +287,37 @@ export function MessageBubble({
                 >
                   <Sparkles size={12} /> {t("chat.voice.toText")}
                 </button>
+              </div>
+            )}
+
+            {/* 内联操作菜单：右键 / 长按弹出，复制 + 撤回（撤回仅自己 2 分钟内） */}
+            {menuOpen && (
+              <div
+                role="menu"
+                onMouseDown={(e) => e.stopPropagation()}
+                className={cn(
+                  "bg-surface-container-high border-outline-variant absolute bottom-full z-10 mb-1 min-w-[7rem] overflow-hidden rounded-xl border py-1 shadow-lg",
+                  isSelf ? "right-0" : "left-0",
+                )}
+              >
+                {canCopy && (
+                  <button
+                    role="menuitem"
+                    onClick={handleCopy}
+                    className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
+                  >
+                    <Copy size={15} /> {t("chat.message.copy")}
+                  </button>
+                )}
+                {showRecall && (
+                  <button
+                    role="menuitem"
+                    onClick={handleRecall}
+                    className="text-body-md text-error hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
+                  >
+                    <Undo2 size={15} /> {t("chat.message.revoke")}
+                  </button>
+                )}
               </div>
             )}
           </div>

@@ -26,12 +26,29 @@ const (
 
 // 服务端 → 客户端 帧类型
 const (
-	TypeMessageAck      = "message.ack"
-	TypeMessageReceive  = "message.receive"
-	TypeError           = "error"
-	TypeContactRequest  = "contact.request"
-	TypeContactAccepted = "contact.accepted"
+	TypeMessageAck          = "message.ack"
+	TypeMessageReceive      = "message.receive"
+	TypeError               = "error"
+	TypeContactRequest      = "contact.request"
+	TypeContactAccepted     = "contact.accepted"
+	TypeConversationCreated = "conversation.created"
+	TypeMessageRecalled     = "message.recalled"
 )
+
+// ConversationCreatedPayload 新会话创建推送（建群），推给全部成员。
+// Conversation 字段为 service.ConversationDTO 的 JSON（避免 ws→service 循环导入，用 any）。
+type ConversationCreatedPayload struct {
+	Conversation any `json:"conversation"`
+}
+
+// MessageRecalledPayload 消息撤回推送，推给会话全部成员。
+type MessageRecalledPayload struct {
+	MessageID        uuid.UUID `json:"message_id"`
+	ConversationID   uuid.UUID `json:"conversation_id"`
+	Seq              int64     `json:"seq"`
+	OperatorID       uuid.UUID `json:"operator_id"`
+	OperatorNickname string    `json:"operator_nickname"`
+}
 
 // UserBrief 联系人相关帧中携带的用户摘要。
 type UserBrief struct {

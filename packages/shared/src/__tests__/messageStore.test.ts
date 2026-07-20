@@ -56,11 +56,31 @@ describe("messageStore (real mode)", () => {
 
   it("applyAck marks message sent with server seq", () => {
     const id = useMessageStore.getState().sendText(CONV, "hi");
-    useMessageStore.getState().applyAck(id, CONV, 42, Date.now());
+    useMessageStore.getState().applyAck(id, "srv-42", CONV, 42, Date.now());
 
     const msg = useMessageStore.getState().messagesByConv[CONV][0];
     expect(msg.status).toBe("sent");
     expect(msg.seq).toBe(42);
+  });
+
+  it("applyAck promotes optimistic id to server message id so recall-by-server-id works", () => {
+    const clientId = useMessageStore.getState().sendText(CONV, "recall me");
+    const serverId = "srv-msg-777";
+    useMessageStore.getState().applyAck(clientId, serverId, CONV, 5, Date.now());
+
+    const msg = useMessageStore.getState().messagesByConv[CONV][0];
+    // id 从本地 client id 提升为服务端 message id（撤回、去重都以服务端 id 为准）
+    expect(msg.id).toBe(serverId);
+    expect(msg.status).toBe("sent");
+    expect(msg.seq).toBe(5);
+    // clientMsgId 保留：message.receive 自回显仍按 clientMsgId 去重
+    expect(msg.clientMsgId).toBe(clientId);
+
+    // 撤回帧携带服务端 message_id → applyRecall(按 id) 现在能命中并翻转
+    useMessageStore.getState().applyRecall(CONV, serverId, "我");
+    const recalled = useMessageStore.getState().messagesByConv[CONV][0];
+    expect(recalled.recalled).toBe(true);
+    expect(recalled.text).toBeUndefined();
   });
 
   it("marks message failed when ack does not arrive in time", () => {
@@ -75,7 +95,7 @@ describe("messageStore (real mode)", () => {
   it("ack before timeout prevents failed state", () => {
     const id = useMessageStore.getState().sendText(CONV, "ok");
     vi.advanceTimersByTime(2000);
-    useMessageStore.getState().applyAck(id, CONV, 7, Date.now());
+    useMessageStore.getState().applyAck(id, "srv-7", CONV, 7, Date.now());
     vi.advanceTimersByTime(10_000);
 
     expect(useMessageStore.getState().messagesByConv[CONV][0].status).toBe("sent");
@@ -97,8 +117,8 @@ describe("messageStore (real mode)", () => {
   it("applyRead flips own sent messages up to seq", () => {
     const id1 = useMessageStore.getState().sendText(CONV, "a");
     const id2 = useMessageStore.getState().sendText(CONV, "b");
-    useMessageStore.getState().applyAck(id1, CONV, 1, Date.now());
-    useMessageStore.getState().applyAck(id2, CONV, 2, Date.now());
+    useMessageStore.getState().applyAck(id1, "srv-a", CONV, 1, Date.now());
+    useMessageStore.getState().applyAck(id2, "srv-b", CONV, 2, Date.now());
 
     useMessageStore.getState().applyRead(CONV, 1);
 
@@ -169,6 +189,60 @@ describe("messageStore (real mode)", () => {
     expect(useMessageStore.getState().typingByConv[CONV]).toBe("Bob");
     vi.advanceTimersByTime(1000);
     expect(useMessageStore.getState().typingByConv[CONV]).toBeUndefined();
+  });
+
+  it("applyRecall flags the target message and clears its text, leaving others intact", () => {
+    useMessageStore.setState({
+      messagesByConv: {
+        [CONV]: [
+          {
+            id: "m-1",
+            conversationId: CONV,
+            kind: "text",
+            isSelf: true,
+            text: "撤回我",
+            time: "10:00",
+            seq: 1,
+          },
+          {
+            id: "m-2",
+            conversationId: CONV,
+            kind: "text",
+            isSelf: false,
+            senderName: "Bob",
+            text: "保留我",
+            time: "10:01",
+            seq: 2,
+          },
+        ],
+      },
+    });
+
+    useMessageStore.getState().applyRecall(CONV, "m-1", "我");
+
+    const list = useMessageStore.getState().messagesByConv[CONV];
+    expect(list[0].recalled).toBe(true);
+    expect(list[0].text).toBeUndefined();
+    // 其余消息不受影响
+    expect(list[1].recalled).toBeUndefined();
+    expect(list[1].text).toBe("保留我");
+  });
+
+  it("applyRecall is a no-op for unknown conversation / message id", () => {
+    useMessageStore.setState({
+      messagesByConv: {
+        [CONV]: [
+          { id: "m-1", conversationId: CONV, kind: "text", isSelf: true, text: "x", time: "10:00" },
+        ],
+      },
+    });
+
+    useMessageStore.getState().applyRecall("missing-conv", "m-1", "我");
+    useMessageStore.getState().applyRecall(CONV, "missing-msg", "我");
+
+    const list = useMessageStore.getState().messagesByConv[CONV];
+    expect(list[0].recalled).toBeUndefined();
+    expect(list[0].text).toBe("x");
   });
 });
 

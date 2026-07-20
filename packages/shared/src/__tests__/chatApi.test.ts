@@ -10,6 +10,7 @@ import {
   mapMessage,
   parseTextContent,
   fetchMembers,
+  recallMessage,
 } from "../api/chat";
 import type { ConversationDTO, MessageDTO } from "../api/chat";
 
@@ -137,6 +138,34 @@ describe("mapMessage", () => {
     const msg = mapMessage({ ...dto, sender_id: "u1" }, "u1");
     expect(msg.isSelf).toBe(true);
     expect(msg.status).toBe("read");
+  });
+
+  it("marks recalled message (status=2) and drops its text", () => {
+    const msg = mapMessage({ ...dto, status: 2 }, "u1");
+    expect(msg.recalled).toBe(true);
+  });
+
+  it("fills createdAtMs from created_at", () => {
+    const iso = "2026-07-17T09:05:00.000Z";
+    const msg = mapMessage({ ...dto, created_at: iso }, "u1");
+    expect(msg.createdAtMs).toBe(new Date(iso).getTime());
+  });
+});
+
+describe("recallMessage", () => {
+  beforeEach(() => vi.unstubAllGlobals());
+
+  it("POSTs to the recall endpoint with an empty body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue({ json: () => Promise.resolve({ code: 0, message: "ok", data: {} }) }),
+    );
+    await recallMessage("m-1");
+    const call = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toContain("/api/v1/messages/m-1/recall");
+    expect(call[1].method).toBe("POST");
   });
 });
 

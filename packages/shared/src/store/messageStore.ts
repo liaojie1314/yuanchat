@@ -81,8 +81,12 @@ export interface ChatMessage {
   dateKey?: string;
   status?: ChatMessageStatus;
   edited?: boolean;
+  /** 已撤回：气泡渲染灰字系统占位，忽略 kind/text */
+  recalled?: boolean;
   /** 服务端分配的会话内序列号（已读进度比对用） */
   seq?: number;
+  /** 消息创建时间（epoch ms），用于撤回 2 分钟窗口的客户端判定 */
+  createdAtMs?: number;
   /** 客户端幂等 ID（ack 匹配 / 重试复用） */
   clientMsgId?: string;
 }
@@ -107,10 +111,22 @@ interface MessageState {
   retrySend: (conversationId: string, messageId: string) => void;
   /** WebSocket message.receive：追加新消息（自动按 clientMsgId 去重自己的回显） */
   receiveMessage: (msg: ChatMessage) => void;
-  /** WebSocket message.ack：本地乐观消息 → sent（补 seq / 服务端时间） */
-  applyAck: (clientMsgId: string, convId: string, seq: number, timestamp: number) => void;
+  /** WebSocket message.ack：本地乐观消息 → sent（补 seq / 服务端时间 / 服务端 id） */
+  applyAck: (
+    clientMsgId: string,
+    messageId: string,
+    convId: string,
+    seq: number,
+    timestamp: number,
+  ) => void;
   /** WebSocket message.read：把自己 seq ≤ 给定值的消息标记为已读 */
   applyRead: (convId: string, seq: number) => void;
+  /**
+   * WebSocket message.recalled：把目标消息翻成撤回占位（清空 text）。
+   * 非乐观更新——本端与他端都只在收到帧后调用，保证双端一致。
+   * @param operatorName 撤回操作者昵称（预留给调用方拼列表预览，store 内不用）
+   */
+  applyRecall: (convId: string, messageId: string, operatorName: string) => void;
   /** typing 帧：显示"正在输入"，4 秒无后续自动清除 */
   setTyping: (convId: string, name: string) => void;
   /** 更新消息状态（重试 / 回执） */
@@ -212,6 +228,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       quote,
       time: now(),
       dateKey: dateKeyOf(new Date()),
+      createdAtMs: Date.now(),
       status: "sending",
       clientMsgId,
     };
@@ -268,7 +285,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     });
   },
 
-  applyAck: (clientMsgId, convId, seq, timestamp) => {
+  applyAck: (clientMsgId, messageId, convId, seq, timestamp) => {
     const timer = ackTimers.get(clientMsgId);
     if (timer) {
       clearTimeout(timer);
@@ -281,10 +298,14 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
           m.clientMsgId === clientMsgId
             ? {
                 ...m,
+                // 本地 client id 提升为服务端 message id：撤回/去重以服务端 id 为准，
+                // clientMsgId 原样保留供 message.receive 自回显去重
+                id: messageId,
                 status: "sent" as const,
                 seq,
                 time: formatMessageTime(new Date(timestamp).toISOString()),
                 dateKey: dateKeyOf(new Date(timestamp)),
+                createdAtMs: timestamp,
               }
             : m,
         ),
@@ -303,6 +324,20 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
         ),
       },
     })),
+
+  applyRecall: (convId, messageId, _operatorName) =>
+    set((s) => {
+      const list = s.messagesByConv[convId];
+      if (!list || !list.some((m) => m.id === messageId)) return s;
+      return {
+        messagesByConv: {
+          ...s.messagesByConv,
+          [convId]: list.map((m) =>
+            m.id === messageId ? { ...m, recalled: true, text: undefined } : m,
+          ),
+        },
+      };
+    }),
 
   setTyping: (convId, name) => {
     const prev = typingTimers.get(convId);

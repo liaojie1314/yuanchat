@@ -33,7 +33,8 @@ func TestConversationMembers(t *testing.T) {
 	}
 	t.Cleanup(func() { db.Where("conversation_id = ?", conv.ID).Delete(&model.ConversationMember{}) })
 
-	svc := NewConversationService(repository.NewConversationRepository(db), repository.NewMessageRepository(db), zap.NewNop())
+	svc := NewConversationService(repository.NewConversationRepository(db), repository.NewMessageRepository(db),
+		repository.NewContactRepository(db), repository.NewUserRepository(db), zap.NewNop())
 
 	got, err := svc.Members(context.Background(), b.ID, conv.ID)
 	if err != nil || len(got) != 2 {

@@ -27,6 +27,11 @@ func NewConversationRepository(db *gorm.DB) *ConversationRepository {
 	return &ConversationRepository{db: db}
 }
 
+// DB 暴露底层连接供 service 层组织跨仓储事务。
+func (r *ConversationRepository) DB() *gorm.DB {
+	return r.db
+}
+
 // ListByUserID 查询用户参与的所有会话，按最近更新排序。
 func (r *ConversationRepository) ListByUserID(ctx context.Context, userID uuid.UUID) ([]ConversationListItem, error) {
 	var items []ConversationListItem

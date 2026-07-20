@@ -13,12 +13,14 @@
  * 点击会话条目后，通过 Zustand Store 的 `setActive` 切换会话并清零未读。
  *
  * @param hideHeader - 隐藏标题栏（移动端由外层 app bar 承担标题时使用）
+ * @param onNewGroup - 顶部「+」下拉「发起群聊」回调（由 ChatScreen 挂 CreateGroupModal）
+ * @param onAddContact - 顶部「+」下拉「添加好友」回调（由 ChatScreen 挂 AddContactModal）
  *
  * @example
  * <ConversationList />
  */
 import { useMemo, useState } from "react";
-import { Search, Plus, BellOff, Pin } from "lucide-react";
+import { Search, Plus, BellOff, Pin, Users, UserPlus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useConversationStore } from "@yuanchat/shared";
 import type { Conversation } from "@yuanchat/shared";
@@ -51,7 +53,15 @@ function matchFilter(conv: Conversation, filter: Filter): boolean {
   }
 }
 
-export function ConversationList({ hideHeader = false }: { hideHeader?: boolean }) {
+export function ConversationList({
+  hideHeader = false,
+  onNewGroup,
+  onAddContact,
+}: {
+  hideHeader?: boolean;
+  onNewGroup?: () => void;
+  onAddContact?: () => void;
+}) {
   const { t } = useTranslation();
   const conversations = useConversationStore((s) => s.conversations);
   const activeId = useConversationStore((s) => s.activeId);
@@ -61,6 +71,7 @@ export function ConversationList({ hideHeader = false }: { hideHeader?: boolean 
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [showMenu, setShowMenu] = useState(false);
 
   const hasUnread = conversations.some((c) => c.unreadCount > 0);
 
@@ -88,9 +99,48 @@ export function ConversationList({ hideHeader = false }: { hideHeader?: boolean 
       {!hideHeader && (
         <header className="flex h-14 shrink-0 items-center justify-between pr-2 pl-4">
           <h1 className="text-title-lg text-on-surface font-semibold">{t("chat.title")}</h1>
-          <button className="md3-icon-btn text-on-surface-variant" aria-label={t("chat.newChat")}>
-            <Plus size={20} />
-          </button>
+          <div className="relative">
+            <button
+              className="md3-icon-btn text-on-surface-variant"
+              aria-label={t("chat.newChat")}
+              aria-haspopup="menu"
+              aria-expanded={showMenu}
+              onClick={() => setShowMenu((v) => !v)}
+            >
+              <Plus size={20} />
+            </button>
+            {showMenu && (
+              <>
+                {/* 点击外部关闭：透明全屏遮罩兜底 */}
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setShowMenu(false)}
+                  aria-hidden
+                />
+                <div
+                  role="menu"
+                  className="bg-surface-container-high shadow-elevation-2 animate-fade-in absolute top-full right-0 z-20 mt-1 w-40 overflow-hidden rounded-xl py-1"
+                >
+                  <MenuItem
+                    icon={<Users size={17} />}
+                    label={t("chat.menu.newGroup")}
+                    onClick={() => {
+                      setShowMenu(false);
+                      onNewGroup?.();
+                    }}
+                  />
+                  <MenuItem
+                    icon={<UserPlus size={17} />}
+                    label={t("chat.menu.addContact")}
+                    onClick={() => {
+                      setShowMenu(false);
+                      onAddContact?.();
+                    }}
+                  />
+                </div>
+              </>
+            )}
+          </div>
         </header>
       )}
 
@@ -187,6 +237,28 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
     <div className="text-label-md text-on-surface-variant px-2 pt-3 pb-1.5 font-medium">
       {children}
     </div>
+  );
+}
+
+/** 新建下拉菜单项 */
+function MenuItem({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      role="menuitem"
+      onClick={onClick}
+      className="text-body-md text-on-surface hover:bg-surface-container flex w-full items-center gap-3 px-3 py-2 text-left transition-colors"
+    >
+      <span className="text-on-surface-variant shrink-0">{icon}</span>
+      {label}
+    </button>
   );
 }
 

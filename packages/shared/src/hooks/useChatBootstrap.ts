@@ -11,7 +11,8 @@
  * 卸载时断开连接（登出/离开聊天页）。
  */
 import { useEffect } from "react";
-import { dateKeyOf, formatListTime, formatMessageTime } from "../api/chat";
+import i18n from "@yuanchat/design-system/i18n";
+import { dateKeyOf, formatListTime, formatMessageTime, mapConversation } from "../api/chat";
 import { setTokenProvider } from "../api/client";
 import {
   DEMO_CONVERSATIONS,
@@ -49,7 +50,9 @@ function wireSocket() {
 
   chatSocket.setHandlers({
     "message.ack": (p) => {
-      useMessageStore.getState().applyAck(p.client_msg_id, p.conversation_id, p.seq, p.timestamp);
+      useMessageStore
+        .getState()
+        .applyAck(p.client_msg_id, p.message_id, p.conversation_id, p.seq, p.timestamp);
       useConversationStore
         .getState()
         .updateConversation(p.conversation_id, { lastSeq: p.seq, myLastReadSeq: p.seq });
@@ -115,6 +118,22 @@ function wireSocket() {
       useMessageStore.getState().applyRead(p.conversation_id, p.seq);
     },
 
+    "message.recalled": (p) => {
+      const selfId = useAuthStore.getState().user?.id ?? "";
+      useMessageStore.getState().applyRecall(p.conversation_id, p.message_id, p.operator_nickname);
+      const convStore = useConversationStore.getState();
+      const conv = convStore.conversations.find((c) => c.id === p.conversation_id);
+      // 撤回的是最后一条时刷新列表预览
+      if (conv && conv.lastSeq === p.seq) {
+        convStore.updateConversation(p.conversation_id, {
+          lastMessage: i18n.t(
+            p.operator_id === selfId ? "chat.message.revokedBySelf" : "chat.message.revokedBy",
+            { name: p.operator_nickname },
+          ),
+        });
+      }
+    },
+
     typing: (p) => {
       useMessageStore.getState().setTyping(p.conversation_id, p.nickname);
     },
@@ -146,6 +165,14 @@ function wireSocket() {
         },
         p.conversation_id,
       );
+    },
+
+    "conversation.created": (p) => {
+      const conv = mapConversation(p.conversation);
+      const convStore = useConversationStore.getState();
+      // 发起者已由 POST 响应把会话插入本地：按 id 去重，避免帧重复冒出
+      if (convStore.conversations.some((c) => c.id === conv.id)) return;
+      convStore.addConversation(conv);
     },
   });
 

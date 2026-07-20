@@ -26,7 +26,13 @@ import {
   Video,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { formatDateDivider, useConversationStore, useMessageStore } from "@yuanchat/shared";
+import {
+  ApiError,
+  formatDateDivider,
+  recallMessage,
+  useConversationStore,
+  useMessageStore,
+} from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
 import { Composer } from "./Composer";
@@ -129,6 +135,16 @@ export function ChatWindow({
     );
   };
 
+  // 撤回：调服务端（用服务端 id）→ 成功靠 message.recalled 帧统一 applyRecall，不乐观翻转。
+  // 4031（超窗口）行内提示；其余错误静默（消息保持原样）。
+  const handleRecall = (messageId: string) => {
+    recallMessage(messageId).catch((err) => {
+      if (err instanceof ApiError && err.code === 4031) {
+        window.alert(t("chat.message.recallExpired"));
+      }
+    });
+  };
+
   return (
     <div className="flex h-full min-w-0 flex-col">
       {/* 顶部标题栏 */}
@@ -227,6 +243,13 @@ export function ChatWindow({
                         : undefined
                     }
                     onReply={() => setReplyingTo(msg)}
+                    onRecall={
+                      // 仅自己且已送达（sent/read）的消息可撤回：sending/failed 只有本地
+                      // client id、无服务端 id，撤回需用服务端 id，故不提供
+                      msg.isSelf && (msg.status === "sent" || msg.status === "read")
+                        ? () => handleRecall(msg.id)
+                        : undefined
+                    }
                   />
                 </Fragment>
               );

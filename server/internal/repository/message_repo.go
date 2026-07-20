@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/model"
@@ -68,6 +69,24 @@ func (r *MessageRepository) ListBefore(ctx context.Context, convID uuid.UUID, be
 	var rows []MessageWithSender
 	err := q.Order("m.seq DESC").Limit(limit).Scan(&rows).Error
 	return rows, err
+}
+
+// FindByID 按 ID 查消息（含软删过滤），不存在返回 nil。
+func (r *MessageRepository) FindByID(ctx context.Context, id uuid.UUID) (*model.Message, error) {
+	var msg model.Message
+	err := r.db.WithContext(ctx).First(&msg, "id = ?", id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &msg, err
+}
+
+// Recall 将消息置为已撤回并清空内容（仅 normal 状态可翻转，返回是否翻转成功）。
+func (r *MessageRepository) Recall(ctx context.Context, id uuid.UUID) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.Message{}).
+		Where("id = ? AND status = ?", id, model.MessageStatusNormal).
+		Updates(map[string]any{"status": model.MessageStatusRevoked, "content": "{}"})
+	return res.RowsAffected > 0, res.Error
 }
 
 // GetLastMessage 取会话最后一条消息（会话列表预览用）。

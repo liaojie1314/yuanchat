@@ -38,18 +38,18 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logge
 
 	userSvc := service.NewUserService(userRepo, jwtGen, sidGen, logger)
 	msgSvc := service.NewMessageService(msgRepo, convRepo, userRepo, logger)
-	convSvc := service.NewConversationService(convRepo, msgRepo, logger)
+	convSvc := service.NewConversationService(convRepo, msgRepo, contactRepo, userRepo, logger)
 	contactSvc := service.NewContactService(contactRepo, userRepo, logger)
 
 	healthH := handler.NewHealthHandler()
 	captchaH := handler.NewCaptchaHandler(rdb)
 	userH := handler.NewUserHandler(userSvc, captchaH, logger)
-	convH := handler.NewConversationHandler(convSvc, logger)
-	msgH := handler.NewMessageHandler(msgSvc, logger)
 
 	hub := ws.NewHub(cfg.WebSocket.MaxConnectionsPerUser, logger)
 	wsH := ws.NewHandler(hub, msgSvc, jwtGen, cfg.WebSocket, cfg.Server.IsProduction(), logger)
+	msgH := handler.NewMessageHandler(msgSvc, hub, logger)
 	contactH := handler.NewContactHandler(contactSvc, hub, logger)
+	convH := handler.NewConversationHandler(convSvc, hub, logger)
 
 	// --- Routes ---
 	api := r.Group("/api/v1")
@@ -74,8 +74,10 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logge
 	chat := api.Group("", middleware.AuthRequired(cfg.JWT))
 	{
 		chat.GET("/conversations", convH.List)
+		chat.POST("/conversations", convH.Create)
 		chat.GET("/conversations/:id/messages", msgH.History)
 		chat.GET("/conversations/:id/members", convH.Members)
+		chat.POST("/messages/:id/recall", msgH.Recall)
 
 		chat.GET("/contacts", contactH.ListFriends)
 		chat.POST("/contacts/requests", contactH.SendRequest)
