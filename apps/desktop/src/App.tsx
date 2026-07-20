@@ -36,7 +36,7 @@ function App() {
           // 先清最小尺寸并退出最大化，否则 900×600 的 minSize 会卡住缩不回登录窗
           await win.unmaximize();
           await win.setMinSize(undefined);
-          await win.setSize(new LogicalSize(540, 600));
+          await win.setSize(new LogicalSize(540, 640));
           await win.setResizable(false);
         }
         await win.center();
