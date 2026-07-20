@@ -9,6 +9,7 @@ import {
   mapConversation,
   mapMessage,
   parseTextContent,
+  parseImageContent,
   fetchMembers,
   recallMessage,
 } from "../api/chat";
@@ -25,6 +26,22 @@ describe("parseTextContent", () => {
 
   it("returns empty string when text field missing", () => {
     expect(parseTextContent('{"foo":1}')).toBe("");
+  });
+});
+
+describe("parseImageContent", () => {
+  it("extracts key + dimensions from JSON content", () => {
+    expect(
+      parseImageContent('{"key":"images/2026/07/a.png","width":100,"height":200,"size":9}'),
+    ).toEqual({
+      key: "images/2026/07/a.png",
+      width: 100,
+      height: 200,
+    });
+  });
+
+  it("falls back to zero dimensions on invalid JSON", () => {
+    expect(parseImageContent("garbage")).toEqual({ key: undefined, width: 0, height: 0 });
   });
 });
 
@@ -143,6 +160,20 @@ describe("mapMessage", () => {
   it("marks recalled message (status=2) and drops its text", () => {
     const msg = mapMessage({ ...dto, status: 2 }, "u1");
     expect(msg.recalled).toBe(true);
+  });
+
+  it("maps image message (type=2) parsing key + dimensions, no text", () => {
+    const msg = mapMessage(
+      {
+        ...dto,
+        message_type: 2,
+        content: '{"key":"images/2026/07/x.png","width":640,"height":480,"size":1234}',
+      },
+      "u1",
+    );
+    expect(msg.kind).toBe("image");
+    expect(msg.text).toBeUndefined();
+    expect(msg.image).toEqual({ key: "images/2026/07/x.png", width: 640, height: 480 });
   });
 
   it("fills createdAtMs from created_at", () => {

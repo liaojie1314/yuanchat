@@ -10,6 +10,7 @@ import (
 	"github.com/yuanchat/server/internal/pkg/shortid"
 	"github.com/yuanchat/server/internal/repository"
 	"github.com/yuanchat/server/internal/service"
+	"github.com/yuanchat/server/internal/storage"
 	"github.com/yuanchat/server/internal/ws"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -17,7 +18,8 @@ import (
 
 // Setup wires all dependencies and returns the Gin engine plus the
 // WebSocket handler (served by a dedicated listener in main).
-func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logger) (*gin.Engine, *ws.Handler) {
+// st 为对象存储句柄，可能为 nil（MinIO 不可达时），文件相关端点据此降级为 503。
+func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Config, logger *zap.Logger) (*gin.Engine, *ws.Handler) {
 	if cfg.Server.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -50,6 +52,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logge
 	msgH := handler.NewMessageHandler(msgSvc, hub, logger)
 	contactH := handler.NewContactHandler(contactSvc, hub, logger)
 	convH := handler.NewConversationHandler(convSvc, hub, logger)
+	fileH := handler.NewFileHandler(st, cfg.Upload, logger)
 
 	// --- Routes ---
 	api := r.Group("/api/v1")
@@ -78,6 +81,9 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config, logger *zap.Logge
 		chat.GET("/conversations/:id/messages", msgH.History)
 		chat.GET("/conversations/:id/members", convH.Members)
 		chat.POST("/messages/:id/recall", msgH.Recall)
+
+		chat.POST("/files/upload-url", fileH.UploadURL)
+		chat.GET("/files/download-url", fileH.DownloadURL)
 
 		chat.GET("/contacts", contactH.ListFriends)
 		chat.POST("/contacts/requests", contactH.SendRequest)

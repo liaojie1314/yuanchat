@@ -73,10 +73,16 @@ type ContactAcceptedPayload struct {
 	ConversationID uuid.UUID `json:"conversation_id"`
 }
 
-// ContentPayload 是消息体的传输结构（当前仅支持 text）。
+// ContentPayload 是消息体的传输结构（text / image）。
+//
+// 向后兼容：text 帧只用 Type/Text，image 字段带 omitempty，不会污染文本消息。
 type ContentPayload struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type   string `json:"type"`
+	Text   string `json:"text,omitempty"`
+	Key    string `json:"key,omitempty"`    // image: MinIO object key
+	Width  int    `json:"width,omitempty"`  // image: 像素宽
+	Height int    `json:"height,omitempty"` // image: 像素高
+	Size   int64  `json:"size,omitempty"`   // image: 字节大小
 }
 
 // SendPayload 客户端发送消息请求。

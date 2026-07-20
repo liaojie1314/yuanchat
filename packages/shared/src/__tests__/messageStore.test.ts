@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setMessageMockMode, useMessageStore } from "../store/messageStore";
 import type { ChatMessage } from "../store/messageStore";
 import { chatSocket } from "../ws/chatSocket";
+import * as filesApi from "../api/files";
 
 const CONV = "conv-1";
 
@@ -243,6 +244,116 @@ describe("messageStore (real mode)", () => {
     const list = useMessageStore.getState().messagesByConv[CONV];
     expect(list[0].recalled).toBeUndefined();
     expect(list[0].text).toBe("x");
+  });
+});
+
+describe("messageStore.sendImage (real mode)", () => {
+  let revokeSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    setMessageMockMode(false);
+    reset();
+    vi.spyOn(chatSocket, "send").mockImplementation(() => {});
+    // node 环境无 URL.createObjectURL / canvas：桩掉本地预览与压缩
+    // revokeObjectURL 用 vi.fn 以便断言 ack 后释放 blob（防长会话内存泄漏）
+    revokeSpy = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL: () => "blob:local-1", revokeObjectURL: revokeSpy });
+    vi.spyOn(filesApi, "compressImage").mockResolvedValue({
+      blob: new Blob(["x"], { type: "image/jpeg" }),
+      width: 800,
+      height: 600,
+    });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("optimistically inserts an image message with localUrl and sending status, then uploads + emits image frame", async () => {
+    vi.spyOn(filesApi, "getUploadUrl").mockResolvedValue({
+      uploadUrl: "https://put",
+      objectKey: "images/2026/07/k.jpg",
+    });
+    vi.spyOn(filesApi, "uploadToTicket").mockResolvedValue(undefined);
+
+    await useMessageStore.getState().sendImage(CONV, new Blob(["src"], { type: "image/jpeg" }));
+
+    const list = useMessageStore.getState().messagesByConv[CONV];
+    expect(list).toHaveLength(1);
+    expect(list[0].kind).toBe("image");
+    expect(list[0].status).toBe("sending");
+    expect(list[0].image?.localUrl).toBe("blob:local-1");
+    expect(list[0].image?.width).toBe(800);
+    // key 回填到乐观消息
+    expect(list[0].image?.key).toBe("images/2026/07/k.jpg");
+
+    // WS 帧带 image content + 对象 key + 尺寸
+    const call = vi.mocked(chatSocket.send).mock.calls.find(([tp]) => tp === "message.send");
+    expect(call?.[1]).toEqual(
+      expect.objectContaining({
+        conversation_id: CONV,
+        content: expect.objectContaining({
+          type: "image",
+          key: "images/2026/07/k.jpg",
+          width: 800,
+          height: 600,
+        }),
+        client_msg_id: list[0].clientMsgId,
+      }),
+    );
+  });
+
+  it("marks the message failed when upload throws (no WS frame sent)", async () => {
+    vi.spyOn(filesApi, "getUploadUrl").mockRejectedValue(new Error("network"));
+
+    await useMessageStore.getState().sendImage(CONV, new Blob(["src"], { type: "image/jpeg" }));
+
+    const list = useMessageStore.getState().messagesByConv[CONV];
+    expect(list[0].status).toBe("failed");
+    const sendCall = vi.mocked(chatSocket.send).mock.calls.find(([tp]) => tp === "message.send");
+    expect(sendCall).toBeUndefined();
+  });
+
+  it("applyAck reconciles the optimistic image message to sent, preserving image payload", async () => {
+    vi.spyOn(filesApi, "getUploadUrl").mockResolvedValue({
+      uploadUrl: "https://put",
+      objectKey: "images/2026/07/k.jpg",
+    });
+    vi.spyOn(filesApi, "uploadToTicket").mockResolvedValue(undefined);
+
+    await useMessageStore.getState().sendImage(CONV, new Blob(["src"], { type: "image/jpeg" }));
+    const clientId = useMessageStore.getState().messagesByConv[CONV][0].clientMsgId!;
+    useMessageStore.getState().applyAck(clientId, "srv-img-1", CONV, 9, Date.now());
+
+    const msg = useMessageStore.getState().messagesByConv[CONV][0];
+    expect(msg.status).toBe("sent");
+    expect(msg.id).toBe("srv-img-1");
+    expect(msg.seq).toBe(9);
+    // 对象 key 在 ack 后保留（新挂载据此签下载渲染）
+    expect(msg.image?.key).toBe("images/2026/07/k.jpg");
+  });
+
+  it("applyAck revokes the local blob preview and clears localUrl to free memory", async () => {
+    vi.spyOn(filesApi, "getUploadUrl").mockResolvedValue({
+      uploadUrl: "https://put",
+      objectKey: "images/2026/07/k.jpg",
+    });
+    vi.spyOn(filesApi, "uploadToTicket").mockResolvedValue(undefined);
+
+    await useMessageStore.getState().sendImage(CONV, new Blob(["src"], { type: "image/jpeg" }));
+    const before = useMessageStore.getState().messagesByConv[CONV][0];
+    expect(before.image?.localUrl).toBe("blob:local-1");
+
+    const clientId = before.clientMsgId!;
+    useMessageStore.getState().applyAck(clientId, "srv-img-1", CONV, 9, Date.now());
+
+    const after = useMessageStore.getState().messagesByConv[CONV][0];
+    // ack 后 localUrl 被清除，且旧 blob URL 已撤销（长会话内存不再堆积压缩图）
+    expect(after.image?.localUrl).toBeUndefined();
+    expect(after.image?.key).toBe("images/2026/07/k.jpg");
+    expect(revokeSpy).toHaveBeenCalledWith("blob:local-1");
   });
 });
 

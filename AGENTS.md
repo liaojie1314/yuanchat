@@ -34,7 +34,7 @@
 
 ## 当前状态
 
-> 更新于 2026-07-16
+> 更新于 2026-07-20
 
 **MVP 核心链路已打通**（阶段一进行中）：
 
@@ -46,13 +46,20 @@
   同意/拒绝 → 同意即原子建单聊 + 打招呼消息 → 字母分组好友列表
   （`ContactsScreen.tsx` 三端编排，端点见 `docs/02_CHAT_API.md`）
 - ✅ 三端响应式聊天主界面（`packages/ui/src/ChatScreen.tsx` 编排）
+- ✅ 设置页 / 个人资料：昵称/签名/性别编辑 + 头像上传（512px 中心裁方 → MinIO
+  `avatars/` 公开 URL，落库持久化，`PUT /users/me`）
+- ✅ 建群流程：好友多选建群（校验全员互为好友）→ 系统消息 + `conversation.created`
+  实时推送（`CreateGroupModal.tsx`，端点见 `docs/02_CHAT_API.md`）
+- ✅ 消息撤回：发送后 2 分钟内本人可撤回 → `message.recalled` 全员推送 + 气泡占位
+- ✅ 图片消息：MinIO 对象存储 + 预签名直传（canvas 压缩、乐观缩略图、失败重试）、
+  Lightbox 全屏查看、粘贴/选图发送、列表 `[图片]` 预览（files 端点见 `docs/02_CHAT_API.md`）
 - ✅ 一键启动：`pnpm dev:web` / `dev:web:mock` / `dev:desktop` / `dev:android` /
   `dev:server` / `dev:stop`（`scripts/dev.mjs`，见 `docs/DEVELOPMENT.md` 第零章）
-- ⏳ 未做：建群流程、图片/文件/语音消息（需 MinIO）、撤回、presence、
-  删好友/黑名单
+- ⏳ 未做：语音/文件消息、presence（在线状态）、删好友/黑名单
 
 后端单进程双端口：REST :8080 + WebSocket :8081；消息分发为内存 Hub
-（`Dispatcher` 接口，多实例时换 Redis Pub/Sub 实现）。
+（`Dispatcher` 接口，多实例时换 Redis Pub/Sub 实现）。对象存储为 MinIO（`:9000` S3 端点、
+`:9001` 控制台），随 `deploy/docker-compose.yml` 启动。
 
 ## 博客
 

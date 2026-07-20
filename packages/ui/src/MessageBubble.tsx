@@ -4,7 +4,7 @@
  * @description
  * 渲染消息流中的一条消息，覆盖 IM 的全部气泡形态：
  * - 文本（含 @提及 高亮 token、引用块）
- * - 图片（占位灰块，接入后端后换真实 URL）
+ * - 图片（真实渲染：乐观本地预览 / 按 key 签下载 URL，点击开大图）
  * - 文件卡片（扩展名徽标 + 名称 + 大小 + 下载按钮）
  * - 语音（播放按钮 + 波形 + 时长 + "查看文字" AI 转写入口）
  * - 系统消息（居中胶囊，如 "会话加密已开启"）
@@ -20,6 +20,7 @@
  * @param onRetry - 发送失败点击重试回调
  * @param onReply - 引用回复回调（右键 / 长按菜单触发，双击气泡为快捷方式）
  * @param onRecall - 撤回回调（右键 / 长按菜单触发，仅自己 2 分钟内的消息可用）
+ * @param onImageClick - 点击图片气泡打开全屏查看器的回调，参数为当前展示 URL
  */
 import {
   AlertCircle,
@@ -27,7 +28,6 @@ import {
   CheckCheck,
   Copy,
   Download,
-  Image as ImageIcon,
   Loader2,
   Play,
   Reply,
@@ -39,6 +39,7 @@ import { useTranslation } from "react-i18next";
 import type { ChatMessage } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
+import { MessageImage } from "./MessageImage";
 import { copyText } from "./copyText";
 
 /** 把文本中的 @xxx 提及切分为高亮 token（简单前缀匹配，接入真实数据后按实体渲染） */
@@ -67,12 +68,14 @@ export function MessageBubble({
   onRetry,
   onReply,
   onRecall,
+  onImageClick,
 }: {
   msg: ChatMessage;
   compact?: boolean;
   onRetry?: () => void;
   onReply?: () => void;
   onRecall?: () => void;
+  onImageClick?: (url: string) => void;
 }) {
   const { t } = useTranslation();
   // 气泡内联操作菜单（右键 / 长按弹出，点外部关闭）
@@ -229,13 +232,7 @@ export function MessageBubble({
             )}
 
             {msg.kind === "image" && msg.image && (
-              <div
-                className="bg-surface-container-high text-on-surface-variant flex items-center justify-center rounded-xl"
-                style={{ width: msg.image.width, height: msg.image.height }}
-                aria-label={t("chat.message.image")}
-              >
-                <ImageIcon size={36} strokeWidth={1.25} />
-              </div>
+              <MessageImage image={msg.image} onOpen={onImageClick} />
             )}
 
             {msg.kind === "file" && msg.file && (

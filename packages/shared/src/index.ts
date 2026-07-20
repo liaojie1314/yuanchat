@@ -7,6 +7,7 @@ export * from "./api/client";
 export * from "./api/chat";
 export * from "./api/contacts";
 export * from "./api/users";
+export * from "./api/files";
 export {
   setRefreshHandler,
   ensureFreshToken,

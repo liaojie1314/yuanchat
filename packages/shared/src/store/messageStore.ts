@@ -16,6 +16,7 @@
  */
 import { create } from "zustand";
 import { fetchMessages, dateKeyOf, formatMessageTime } from "../api/chat";
+import { compressImage, getUploadUrl, uploadToTicket } from "../api/files";
 import { chatSocket } from "../ws/chatSocket";
 import { useAuthStore } from "./authStore";
 
@@ -67,8 +68,12 @@ export interface ChatMessage {
   senderName?: string;
   /** 文本内容（text / system 消息） */
   text?: string;
-  /** 图片尺寸占位（image 消息，接入后换成 URL + 宽高） */
-  image?: { width: number; height: number };
+  /**
+   * 图片消息载荷：width/height 为像素尺寸（气泡等比占位，防加载抖动）。
+   * - key：对象存储 key，收到/确认后据此签下载 URL 渲染
+   * - localUrl：本地 blob URL，上传期间直接预览（确认后可继续沿用，避免闪烁）
+   */
+  image?: { width: number; height: number; key?: string; localUrl?: string };
   file?: FilePayload;
   voice?: VoicePayload;
   quote?: QuoteRef;
@@ -107,7 +112,12 @@ interface MessageState {
   loadMore: (conversationId: string) => Promise<void>;
   /** 发送一条文本消息，返回消息 ID */
   sendText: (conversationId: string, text: string, quote?: QuoteRef) => string;
-  /** 重试发送失败的消息（复用原 client_msg_id） */
+  /**
+   * 发送一张图片：本地压缩 → 乐观插入（本地预览）→ 申请上传 URL → 直传 → WS image 帧。
+   * 任一步失败置该消息为 failed（可点击重试，走 retrySend 重跑整个流程）。
+   */
+  sendImage: (conversationId: string, file: Blob) => Promise<void>;
+  /** 重试发送失败的消息（复用原 client_msg_id；图片则从 localUrl 重传） */
   retrySend: (conversationId: string, messageId: string) => void;
   /** WebSocket message.receive：追加新消息（自动按 clientMsgId 去重自己的回显） */
   receiveMessage: (msg: ChatMessage) => void;
@@ -251,9 +261,73 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     return clientMsgId;
   },
 
+  sendImage: async (conversationId, file) => {
+    // 1. 压缩（gif 原样透传）；失败则不插入乐观消息（无法渲染无图气泡）
+    let compressed: { blob: Blob; width: number; height: number };
+    try {
+      compressed = await compressImage(file);
+    } catch {
+      return;
+    }
+    const { blob, width, height } = compressed;
+
+    // 2. 乐观插入：本地 blob URL 立即预览，状态 sending
+    const clientMsgId = newClientMsgId();
+    const localUrl = URL.createObjectURL(blob);
+    const msg: ChatMessage = {
+      id: clientMsgId,
+      conversationId,
+      kind: "image",
+      isSelf: true,
+      image: { width, height, localUrl },
+      time: now(),
+      dateKey: dateKeyOf(new Date()),
+      createdAtMs: Date.now(),
+      status: "sending",
+      clientMsgId,
+    };
+    set((s) => ({
+      messagesByConv: {
+        ...s.messagesByConv,
+        [conversationId]: [...(s.messagesByConv[conversationId] ?? []), msg],
+      },
+      replyingTo: null,
+    }));
+
+    if (mockMode) {
+      setTimeout(() => get().setStatus(conversationId, clientMsgId, "sent"), 700);
+      setTimeout(() => get().setStatus(conversationId, clientMsgId, "read"), 1600);
+      return;
+    }
+
+    // 3. 申请上传 URL → 直传 → WS image 帧（含对象 key），失败置 failed
+    await dispatchImageSend(conversationId, blob, width, height, clientMsgId, get);
+  },
+
   retrySend: (conversationId, messageId) => {
     const msg = (get().messagesByConv[conversationId] ?? []).find((m) => m.id === messageId);
-    if (!msg || !msg.text) return;
+    if (!msg) return;
+
+    // 图片：从本地 blob URL 重新取回压缩后的字节，整条流程（上传+发送）重跑
+    if (msg.kind === "image") {
+      const localUrl = msg.image?.localUrl;
+      if (!localUrl) return; // 无本地副本（如重进会话后的历史消息）无法重传
+      get().setStatus(conversationId, messageId, "sending");
+      if (mockMode) {
+        setTimeout(() => get().setStatus(conversationId, messageId, "sent"), 700);
+        return;
+      }
+      const clientMsgId = msg.clientMsgId ?? messageId;
+      const w = msg.image?.width ?? 0;
+      const h = msg.image?.height ?? 0;
+      void fetch(localUrl)
+        .then((r) => r.blob())
+        .then((blob) => dispatchImageSend(conversationId, blob, w, h, clientMsgId, get))
+        .catch(() => get().setStatus(conversationId, messageId, "failed"));
+      return;
+    }
+
+    if (!msg.text) return;
     get().setStatus(conversationId, messageId, "sending");
 
     if (mockMode) {
@@ -294,21 +368,24 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     set((s) => ({
       messagesByConv: {
         ...s.messagesByConv,
-        [convId]: (s.messagesByConv[convId] ?? []).map((m) =>
-          m.clientMsgId === clientMsgId
-            ? {
-                ...m,
-                // 本地 client id 提升为服务端 message id：撤回/去重以服务端 id 为准，
-                // clientMsgId 原样保留供 message.receive 自回显去重
-                id: messageId,
-                status: "sent" as const,
-                seq,
-                time: formatMessageTime(new Date(timestamp).toISOString()),
-                dateKey: dateKeyOf(new Date(timestamp)),
-                createdAtMs: timestamp,
-              }
-            : m,
-        ),
+        [convId]: (s.messagesByConv[convId] ?? []).map((m) => {
+          if (m.clientMsgId !== clientMsgId) return m;
+          // 图片已确认：本地 blob 预览到此为止（新挂载据 key 签下载渲染），
+          // 撤销 object URL 释放内存并清除 localUrl，防长会话内 blob 无限堆积。
+          const image = revokeLocalPreview(m.image);
+          return {
+            ...m,
+            // 本地 client id 提升为服务端 message id：撤回/去重以服务端 id 为准，
+            // clientMsgId 原样保留供 message.receive 自回显去重
+            id: messageId,
+            status: "sent" as const,
+            seq,
+            time: formatMessageTime(new Date(timestamp).toISOString()),
+            dateKey: dateKeyOf(new Date(timestamp)),
+            createdAtMs: timestamp,
+            ...(image ? { image } : {}),
+          };
+        }),
       },
     }));
   },
@@ -375,7 +452,76 @@ function dispatchSend(
     content: { type: "text", text },
     client_msg_id: clientMsgId,
   });
+  armAckTimeout(conversationId, clientMsgId, get);
+}
 
+/**
+ * 图片发送：申请上传 URL → 直传对象存储 → 发 WS image 帧（含对象 key）→ 挂 ack 超时。
+ * 上传阶段任一失败置该消息为 failed（可重试）；ack 走既有 applyAck 复用文本回执路径。
+ */
+async function dispatchImageSend(
+  conversationId: string,
+  blob: Blob,
+  width: number,
+  height: number,
+  clientMsgId: string,
+  get: () => MessageState,
+) {
+  let key: string;
+  try {
+    const ticket = await getUploadUrl(filenameForBlob(blob), blob.type, blob.size);
+    await uploadToTicket(ticket, blob, blob.type);
+    key = ticket.objectKey;
+  } catch {
+    // 消息可能在上传期间被重试重置为 sending：仅当仍是该乐观条目时翻 failed
+    const pending = (get().messagesByConv[conversationId] ?? []).find(
+      (m) => m.clientMsgId === clientMsgId,
+    );
+    if (pending) get().setStatus(conversationId, pending.id, "failed");
+    return;
+  }
+
+  // 回填对象 key（乐观 → 确认的一部分）：ack 后本地副本失效时可据 key 签下载渲染
+  writeBackImageKey(conversationId, clientMsgId, key);
+
+  chatSocket.send("message.send", {
+    conversation_id: conversationId,
+    content: { type: "image", key, width, height, size: blob.size },
+    client_msg_id: clientMsgId,
+  });
+  armAckTimeout(conversationId, clientMsgId, get);
+}
+
+/**
+ * 撤销图片消息的本地 blob 预览并清除 localUrl。
+ *
+ * 确认（ack）后本地 object URL 不再需要——新挂载会据 key 签下载渲染，
+ * 已挂载的 <img> 早已解码持有位图，撤销 URL 不影响其继续显示（见 MessageImage 的锁存）。
+ * 返回去掉 localUrl 的新 image（引用不变的对象不复制），无 localUrl 时原样返回。
+ */
+function revokeLocalPreview(image: ChatMessage["image"]): ChatMessage["image"] {
+  if (!image || !image.localUrl) return image;
+  if (typeof URL !== "undefined" && URL.revokeObjectURL) {
+    URL.revokeObjectURL(image.localUrl);
+  }
+  const { localUrl: _dropped, ...rest } = image;
+  return rest;
+}
+
+/** 把对象 key 写回乐观图片消息（保留已有 localUrl，二者并存） */
+function writeBackImageKey(conversationId: string, clientMsgId: string, key: string) {
+  useMessageStore.setState((s) => ({
+    messagesByConv: {
+      ...s.messagesByConv,
+      [conversationId]: (s.messagesByConv[conversationId] ?? []).map((m) =>
+        m.clientMsgId === clientMsgId && m.image ? { ...m, image: { ...m.image, key } } : m,
+      ),
+    },
+  }));
+}
+
+/** 挂 ack 超时定时器：ACK_TIMEOUT_MS 内未收到回执则置 failed */
+function armAckTimeout(conversationId: string, clientMsgId: string, get: () => MessageState) {
   ackTimers.set(
     clientMsgId,
     setTimeout(() => {
@@ -385,4 +531,18 @@ function dispatchSend(
       if (pending) get().setStatus(conversationId, pending.id, "failed");
     }, ACK_TIMEOUT_MS),
   );
+}
+
+/** 由 blob MIME 推断上传文件名（扩展名须小写字母数字，与后端 download 正则自洽） */
+function filenameForBlob(blob: Blob): string {
+  switch (blob.type) {
+    case "image/png":
+      return "img.png";
+    case "image/gif":
+      return "img.gif";
+    case "image/webp":
+      return "img.webp";
+    default:
+      return "img.jpg";
+  }
 }

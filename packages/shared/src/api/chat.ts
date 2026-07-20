@@ -154,6 +154,24 @@ export function parseTextContent(content: string): string {
   }
 }
 
+/** content JSON 字符串 → 图片载荷（key + 宽高）；非法 JSON 时返回 0 尺寸占位 */
+export function parseImageContent(content: string): {
+  key?: string;
+  width: number;
+  height: number;
+} {
+  try {
+    const parsed = JSON.parse(content) as { key?: string; width?: number; height?: number };
+    return {
+      key: typeof parsed.key === "string" ? parsed.key : undefined,
+      width: typeof parsed.width === "number" ? parsed.width : 0,
+      height: typeof parsed.height === "number" ? parsed.height : 0,
+    };
+  } catch {
+    return { width: 0, height: 0 };
+  }
+}
+
 export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
   const isSelf = dto.sender_id === selfUserId;
   const kindMap: Record<number, ChatMessage["kind"]> = {
@@ -165,6 +183,7 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
   };
   // status=2 表示已撤回：气泡走灰字系统占位，忽略 kind/text
   const recalled = dto.status === 2;
+  const isImage = dto.message_type === 2;
 
   return {
     id: dto.id,
@@ -174,6 +193,8 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     senderName: dto.sender_nickname,
     text:
       dto.message_type === 1 || dto.message_type === 6 ? parseTextContent(dto.content) : undefined,
+    // 历史图片：解析 key + 宽高，渲染时按 key 签下载 URL（无 localUrl）
+    image: isImage ? parseImageContent(dto.content) : undefined,
     seq: dto.seq,
     time: formatMessageTime(dto.created_at),
     dateKey: dateKeyOf(new Date(dto.created_at)),

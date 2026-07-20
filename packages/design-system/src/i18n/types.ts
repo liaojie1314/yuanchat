@@ -93,6 +93,10 @@ export interface TranslationKeys {
   "chat.message.image": string;
   "chat.message.file": string;
   "chat.message.voice": string;
+  "chat.image.alt": string;
+  "chat.image.open": string;
+  "chat.image.loadError": string;
+  "chat.lightbox.close": string;
   "chat.groupChat": string;
   "chat.privateChat": string;
 

@@ -15,6 +15,7 @@ import (
 	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/redis"
 	"github.com/yuanchat/server/internal/router"
+	"github.com/yuanchat/server/internal/storage"
 	"go.uber.org/zap"
 )
 
@@ -70,8 +71,19 @@ func main() {
 	defer redis.Close(rdb)
 	_ = rdb // 后续传递给 repository/service 层
 
+	// 4.1 初始化对象存储（MinIO）。失败仅 Warn 不 Fatal：本地无 MinIO 时服务仍可跑，
+	// 文件相关端点届时返回 503（见 files handler），不阻断其余功能。
+	zapLogger.Info("Connecting to MinIO...")
+	st, err := storage.New(cfg.MinIO)
+	if err != nil {
+		zapLogger.Warn("MinIO unavailable, file endpoints will be degraded", zap.Error(err))
+		st = nil
+	} else {
+		zapLogger.Info("MinIO connected", zap.String("endpoint", cfg.MinIO.Endpoint), zap.String("bucket", cfg.MinIO.Bucket))
+	}
+
 	// 5. 设置路由 + WebSocket 网关
-	r, wsHandler := router.Setup(db, rdb, cfg, zapLogger)
+	r, wsHandler := router.Setup(db, rdb, st, cfg, zapLogger)
 
 	// 6. 启动 HTTP 服务器
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)

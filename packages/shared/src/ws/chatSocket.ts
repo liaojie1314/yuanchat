@@ -27,7 +27,15 @@ export interface ServerFrames {
     conversation_id: string;
     sender_id: string;
     sender_nickname: string;
-    content: { type: string; text: string };
+    // text 帧只用 type/text；image 帧带 key/width/height/size（后端 omitempty，不污染文本）
+    content: {
+      type: string;
+      text?: string;
+      key?: string;
+      width?: number;
+      height?: number;
+      size?: number;
+    };
     seq: number;
     timestamp: number;
     reply_to_id?: string;

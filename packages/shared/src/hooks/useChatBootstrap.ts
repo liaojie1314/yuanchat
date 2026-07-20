@@ -62,14 +62,18 @@ function wireSocket() {
       const selfId = useAuthStore.getState().user?.id ?? "";
       const isSelf = p.sender_id === selfId;
       const iso = new Date(p.timestamp).toISOString();
+      const isImage = p.content.type === "image";
 
       const msg: ChatMessage = {
         id: p.message_id,
         conversationId: p.conversation_id,
-        kind: "text",
+        kind: isImage ? "image" : "text",
         isSelf,
         senderName: p.sender_nickname,
-        text: p.content.text,
+        text: isImage ? undefined : p.content.text,
+        image: isImage
+          ? { key: p.content.key, width: p.content.width ?? 0, height: p.content.height ?? 0 }
+          : undefined,
         seq: p.seq,
         time: formatMessageTime(iso),
         dateKey: dateKeyOf(new Date(p.timestamp)),
@@ -80,10 +84,10 @@ function wireSocket() {
 
       const convStore = useConversationStore.getState();
       const conv = convStore.conversations.find((c) => c.id === p.conversation_id);
+      // 图片消息列表预览走「[图片]」占位；文本用正文
+      const body = isImage ? i18n.t("chat.message.image") : (p.content.text ?? "");
       const preview =
-        conv && conv.type === "group" && !isSelf
-          ? p.sender_nickname + ": " + p.content.text
-          : p.content.text;
+        conv && conv.type === "group" && !isSelf ? p.sender_nickname + ": " + body : body;
 
       if (isSelf) {
         // 自己发的消息（本设备或其他设备）：只刷新预览，不加未读

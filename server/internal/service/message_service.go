@@ -63,10 +63,30 @@ func NewMessageService(
 }
 
 // SendText 校验成员身份后持久化文本消息（seq 事务内原子分配）。
+//
+// 文本内容序列化为 model.MessageContentText 后委托 SendContent，与图片等类型共用落库/推送骨架。
 func (s *MessageService) SendText(
 	ctx context.Context,
 	senderID, convID uuid.UUID,
 	text, clientMsgID string,
+	replyTo *uuid.UUID,
+) (*SendResult, error) {
+	content, err := json.Marshal(model.MessageContentText{Text: text})
+	if err != nil {
+		return nil, fmt.Errorf("marshal content: %w", err)
+	}
+	return s.SendContent(ctx, senderID, convID, model.MessageTypeText, string(content), clientMsgID, replyTo)
+}
+
+// SendContent 校验成员身份后持久化任意类型消息（content 为已序列化的 JSON 串，seq 事务内原子分配）。
+//
+// 调用方负责按 messageType 组装并序列化 content（文本、图片等），本方法只保证落库与成员/发送者信息装配一致。
+func (s *MessageService) SendContent(
+	ctx context.Context,
+	senderID, convID uuid.UUID,
+	messageType int16,
+	contentJSON string,
+	clientMsgID string,
 	replyTo *uuid.UUID,
 ) (*SendResult, error) {
 	ok, err := s.convRepo.IsMember(ctx, convID, senderID)
@@ -77,16 +97,11 @@ func (s *MessageService) SendText(
 		return nil, ErrNotMember
 	}
 
-	content, err := json.Marshal(model.MessageContentText{Text: text})
-	if err != nil {
-		return nil, fmt.Errorf("marshal content: %w", err)
-	}
-
 	msg := &model.Message{
 		ConversationID: convID,
 		SenderID:       senderID,
-		MessageType:    model.MessageTypeText,
-		Content:        string(content),
+		MessageType:    messageType,
+		Content:        contentJSON,
 		Status:         model.MessageStatusNormal,
 		ReplyToID:      replyTo,
 	}

@@ -24,6 +24,8 @@ export { ResizeHandle } from "./ResizeHandle";
 export { ConversationList } from "./ConversationList";
 export { ChatWindow } from "./ChatWindow";
 export { MessageBubble, TypingIndicator } from "./MessageBubble";
+export { MessageImage } from "./MessageImage";
+export { ImageLightbox } from "./ImageLightbox";
 export { Composer } from "./Composer";
 export { EmojiPicker } from "./EmojiPicker";
 export { EMOJI_CATEGORIES } from "./emojiData";

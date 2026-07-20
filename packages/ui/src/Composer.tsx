@@ -34,6 +34,7 @@ export function Composer({
   const [value, setValue] = useState("");
   const [showEmoji, setShowEmoji] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const lastTypingSentRef = useRef(0);
   const replyingTo = useMessageStore((s) => s.replyingTo);
   const setReplyingTo = useMessageStore((s) => s.setReplyingTo);
@@ -84,6 +85,42 @@ export function Composer({
     if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
 
+  /** 发送一张图片：交给 store 的 sendImage（乐观预览 → 压缩 → 上传 → WS 帧） */
+  const sendImageFile = (file: File) => {
+    if (!activeId) return;
+    void useMessageStore.getState().sendImage(activeId, file);
+  };
+
+  /** 图片按钮选中文件：仅取图片类型，发送后清空 input 以便再次选同一文件 */
+  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type.indexOf("image/") === 0) sendImageFile(file);
+    e.target.value = "";
+  };
+
+  /** 粘贴：剪贴板首个图片文件走图片发送路径（截图直接粘贴发图），阻止图片当文本插入 */
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const file = e.clipboardData?.files?.[0];
+    if (file && file.type.indexOf("image/") === 0) {
+      e.preventDefault();
+      sendImageFile(file);
+    }
+  };
+
+  /** 打开系统文件选择器（图片按钮 / 移动端回形针触发） */
+  const openFilePicker = () => fileInputRef.current?.click();
+
+  /** 隐藏的图片文件选择器（两种布局共用） */
+  const fileInput = (
+    <input
+      ref={fileInputRef}
+      type="file"
+      accept="image/*"
+      className="hidden"
+      onChange={handleFilePick}
+    />
+  );
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -122,6 +159,13 @@ export function Composer({
         {replyBar}
         <div className="flex items-end gap-1.5">
           <button
+            onClick={openFilePicker}
+            className="md3-icon-btn text-on-surface-variant"
+            aria-label={t("chat.input.image")}
+          >
+            <ImageIcon size={20} />
+          </button>
+          <button
             className="md3-icon-btn text-on-surface-variant"
             aria-label={t("chat.input.file")}
           >
@@ -137,6 +181,7 @@ export function Composer({
               notifyTyping();
             }}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={t("chat.input.placeholder")}
             aria-label={t("chat.input.placeholder")}
             className="bg-surface-container-high text-body-lg text-on-surface placeholder:text-on-surface-variant/70 max-h-28 min-w-0 flex-1 resize-none rounded-3xl px-4 py-2.5 focus:outline-none"
@@ -172,6 +217,7 @@ export function Composer({
             <EmojiPicker compact onPick={insertEmoji} onClose={() => setShowEmoji(false)} />
           </div>
         )}
+        {fileInput}
       </div>
     );
   }
@@ -197,12 +243,13 @@ export function Composer({
             notifyTyping();
           }}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={t("chat.input.placeholder")}
           aria-label={t("chat.input.placeholder")}
           className="text-body-lg text-on-surface placeholder:text-on-surface-variant/70 block max-h-40 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 leading-relaxed focus:outline-none"
         />
         <div className="flex items-center gap-0.5 px-2 pb-1.5">
-          <ToolButton label={t("chat.input.image")}>
+          <ToolButton label={t("chat.input.image")} onClick={openFilePicker}>
             <ImageIcon size={19} />
           </ToolButton>
           <ToolButton label={t("chat.input.file")}>
@@ -240,6 +287,7 @@ export function Composer({
           </button>
         </div>
       </div>
+      {fileInput}
     </div>
   );
 }

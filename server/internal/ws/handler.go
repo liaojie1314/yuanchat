@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/yuanchat/server/internal/config"
+	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/pkg/jwt"
 	"github.com/yuanchat/server/internal/service"
 	"go.uber.org/zap"
@@ -134,15 +135,15 @@ func (h *Handler) handleSend(c *Client, env *Envelope) {
 		c.sendError(400, "invalid message.send payload", "")
 		return
 	}
-	if p.Content.Type != "text" || p.Content.Text == "" || len([]rune(p.Content.Text)) > maxTextLen {
-		c.sendError(400, "text content required (1-4000 chars)", p.ClientMsgID)
+	messageType, contentJSON, ok := h.buildContent(c, &p)
+	if !ok {
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
 	defer cancel()
 
-	result, err := h.msgSvc.SendText(ctx, c.userID, p.ConversationID, p.Content.Text, p.ClientMsgID, p.ReplyToID)
+	result, err := h.msgSvc.SendContent(ctx, c.userID, p.ConversationID, messageType, contentJSON, p.ClientMsgID, p.ReplyToID)
 	if err != nil {
 		h.logger.Error("send message failed", zap.Error(err), zap.String("user_id", c.userID.String()))
 		c.sendError(500, "send failed", p.ClientMsgID)
@@ -175,6 +176,45 @@ func (h *Handler) handleSend(c *Client, env *Envelope) {
 	})
 	if err == nil {
 		h.hub.SendToUsers(result.MemberIDs, receive)
+	}
+}
+
+// buildContent 按 content.type 校验并序列化落库内容，返回 (messageType, contentJSON, ok)。
+//
+// 校验失败时已就地回错误帧并返回 ok=false，调用方直接 return 即可。
+// text 与 image 共用 message.send 通道，故在此分流；ReceivePayload 仍原样回传 p.Content。
+func (h *Handler) buildContent(c *Client, p *SendPayload) (int16, string, bool) {
+	switch p.Content.Type {
+	case "text":
+		if p.Content.Text == "" || len([]rune(p.Content.Text)) > maxTextLen {
+			c.sendError(400, "text content required (1-4000 chars)", p.ClientMsgID)
+			return 0, "", false
+		}
+		raw, err := json.Marshal(model.MessageContentText{Text: p.Content.Text})
+		if err != nil {
+			c.sendError(400, "invalid text content", p.ClientMsgID)
+			return 0, "", false
+		}
+		return model.MessageTypeText, string(raw), true
+	case "image":
+		if p.Content.Key == "" || p.Content.Width <= 0 || p.Content.Height <= 0 || p.Content.Size <= 0 {
+			c.sendError(400, "image content requires key/width/height/size", p.ClientMsgID)
+			return 0, "", false
+		}
+		raw, err := json.Marshal(struct {
+			Key    string `json:"key"`
+			Width  int    `json:"width"`
+			Height int    `json:"height"`
+			Size   int64  `json:"size"`
+		}{p.Content.Key, p.Content.Width, p.Content.Height, p.Content.Size})
+		if err != nil {
+			c.sendError(400, "invalid image content", p.ClientMsgID)
+			return 0, "", false
+		}
+		return model.MessageTypeImage, string(raw), true
+	default:
+		c.sendError(400, "unsupported content type", p.ClientMsgID)
+		return 0, "", false
 	}
 }
 

@@ -14,7 +14,7 @@
  * @param onShowDetail - 打开详情面板/抽屉回调，非空时显示详情按钮
  * @param compactComposer - 移动端使用紧凑输入区
  */
-import { useCallback, useEffect, useRef, Fragment } from "react";
+import { useCallback, useEffect, useRef, useState, Fragment } from "react";
 import {
   ArrowLeft,
   Loader2,
@@ -36,6 +36,7 @@ import {
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
 import { Composer } from "./Composer";
+import { ImageLightbox } from "./ImageLightbox";
 import { MessageBubble, TypingIndicator } from "./MessageBubble";
 
 export function ChatWindow({
@@ -65,6 +66,8 @@ export function ChatWindow({
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadingMoreRef = useRef(false);
+  // 全屏查看的图片 URL（null 表示未打开）
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   // 进入会话时按需加载历史（真实模式；mock 模式内部直接跳过）
   useEffect(() => {
@@ -243,6 +246,7 @@ export function ChatWindow({
                         : undefined
                     }
                     onReply={() => setReplyingTo(msg)}
+                    onImageClick={setLightboxUrl}
                     onRecall={
                       // 仅自己且已送达（sent/read）的消息可撤回：sending/failed 只有本地
                       // client id、无服务端 id，撤回需用服务端 id，故不提供
@@ -262,6 +266,9 @@ export function ChatWindow({
 
       {/* 输入区 */}
       <Composer onSend={handleSend} compact={compactComposer} />
+
+      {/* 图片全屏查看器（点击气泡内图片打开） */}
+      {lightboxUrl && <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
     </div>
   );
 }
