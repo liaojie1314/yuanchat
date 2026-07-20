@@ -25,6 +25,9 @@ function App() {
       try {
         const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
         const win = getCurrentWindow();
+        // 注册/忘记密码等子窗口跑的是同一个 SPA，此逻辑只归主窗口管，
+        // 否则未登录分支会把子窗口压回 540×600（覆盖 openAuthWindow 指定的尺寸）
+        if (win.label !== "main") return;
         if (isAuthenticated) {
           await win.setSize(new LogicalSize(1200, 800));
           await win.setResizable(true);

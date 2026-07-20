@@ -165,7 +165,7 @@ export function LoginPage() {
             还没有账号？{" "}
             <button
               type="button"
-              onClick={() => openAuthWindow("/register", "注册元聊", 540, 950)}
+              onClick={() => openAuthWindow("/register", "注册元聊", 540, 750)}
               className="cursor-pointer font-medium text-primary"
             >
               立即注册
