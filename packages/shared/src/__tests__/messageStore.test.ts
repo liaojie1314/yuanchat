@@ -245,6 +245,55 @@ describe("messageStore (real mode)", () => {
     expect(list[0].recalled).toBeUndefined();
     expect(list[0].text).toBe("x");
   });
+
+  it("applyRecall 保留自己文本消息原文供重新编辑", () => {
+    useMessageStore.setState({
+      messagesByConv: {
+        c1: [
+          {
+            id: "m1",
+            conversationId: "c1",
+            kind: "text",
+            isSelf: true,
+            text: "hello",
+            time: "10:00",
+          },
+        ],
+      },
+    });
+    useMessageStore.getState().applyRecall("c1", "m1", "我");
+    const m = useMessageStore.getState().messagesByConv.c1[0];
+    expect(m.recalled).toBe(true);
+    expect(m.text).toBeUndefined();
+    expect(m.recalledText).toBe("hello");
+    expect(typeof m.recalledAtMs).toBe("number");
+  });
+
+  it("applyRecall 对他人消息不保留原文", () => {
+    useMessageStore.setState({
+      messagesByConv: {
+        c1: [
+          {
+            id: "m2",
+            conversationId: "c1",
+            kind: "text",
+            isSelf: false,
+            text: "hi",
+            time: "10:00",
+          },
+        ],
+      },
+    });
+    useMessageStore.getState().applyRecall("c1", "m2", "对方");
+    expect(useMessageStore.getState().messagesByConv.c1[0].recalledText).toBeUndefined();
+  });
+
+  it("setComposerInsert 写入与清空", () => {
+    useMessageStore.getState().setComposerInsert("draft");
+    expect(useMessageStore.getState().composerInsert).toBe("draft");
+    useMessageStore.getState().setComposerInsert(null);
+    expect(useMessageStore.getState().composerInsert).toBeNull();
+  });
 });
 
 describe("messageStore.sendImage (real mode)", () => {

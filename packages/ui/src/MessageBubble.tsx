@@ -68,6 +68,7 @@ export function MessageBubble({
   onRetry,
   onReply,
   onRecall,
+  onReEdit,
   onImageClick,
 }: {
   msg: ChatMessage;
@@ -75,6 +76,7 @@ export function MessageBubble({
   onRetry?: () => void;
   onReply?: () => void;
   onRecall?: () => void;
+  onReEdit?: () => void;
   onImageClick?: (url: string) => void;
 }) {
   const { t } = useTranslation();
@@ -105,10 +107,15 @@ export function MessageBubble({
   // 已撤回：整条走系统消息样式，忽略原 kind/text
   if (msg.recalled) {
     return (
-      <div className="bg-surface-container text-label-md text-on-surface-variant mx-auto my-2.5 w-fit rounded-full px-3 py-1">
+      <div className="bg-surface-container text-label-md text-on-surface-variant mx-auto my-2.5 flex w-fit items-center gap-1.5 rounded-full px-3 py-1">
         {msg.isSelf
           ? t("chat.message.revokedBySelf")
           : t("chat.message.revokedBy", { name: msg.senderName ?? "" })}
+        {msg.isSelf && msg.recalledText && onReEdit && (
+          <button onClick={onReEdit} className="text-primary font-medium">
+            {t("chat.message.reEdit")}
+          </button>
+        )}
       </div>
     );
   }

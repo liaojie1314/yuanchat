@@ -19,6 +19,8 @@ export type { ButtonVariant } from "./Button";
 export { Input } from "./Input";
 export { Avatar } from "./Avatar";
 export { ResizeHandle } from "./ResizeHandle";
+export { ToastHost } from "./Toast";
+export { ConfirmDialog } from "./ConfirmDialog";
 
 // 聊天组件
 export { ConversationList } from "./ConversationList";

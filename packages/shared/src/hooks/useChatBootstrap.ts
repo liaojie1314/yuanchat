@@ -25,6 +25,7 @@ import { useAuthStore } from "../store/authStore";
 import { useContactStore } from "../store/contactStore";
 import { useConversationStore } from "../store/conversationStore";
 import { setMessageMockMode, useMessageStore } from "../store/messageStore";
+import { resetChatStores, revokeAllLocalPreviews } from "../store/resetStores";
 import type { ChatMessage } from "../store/messageStore";
 import { chatSocket } from "../ws/chatSocket";
 
@@ -77,6 +78,7 @@ function wireSocket() {
         seq: p.seq,
         time: formatMessageTime(iso),
         dateKey: dateKeyOf(new Date(p.timestamp)),
+        createdAtMs: p.timestamp,
         status: isSelf ? "sent" : undefined,
         clientMsgId: p.client_msg_id,
       };
@@ -183,12 +185,18 @@ function wireSocket() {
   chatSocket.onReconnect = () => {
     // 掉线期间可能漏消息：重拉会话列表，清空消息缓存让会话重新按需加载
     useConversationStore.getState().loadConversations();
+    revokeAllLocalPreviews();
     useMessageStore.setState({ messagesByConv: {}, hasMoreByConv: {} });
     const activeId = useConversationStore.getState().activeId;
     if (activeId) useMessageStore.getState().loadHistory(activeId);
     // 掉线期间可能漏好友申请/同意推送
     void useContactStore.getState().loadRequests();
   };
+
+  // 登出（isAuthenticated true→false）时回收 blob 并清空聊天 store，防跨账号残留
+  useAuthStore.subscribe((s, prev) => {
+    if (prev.isAuthenticated && !s.isAuthenticated) resetChatStores();
+  });
 }
 
 /** 演示数据注入（幂等：列表已有数据时跳过） */

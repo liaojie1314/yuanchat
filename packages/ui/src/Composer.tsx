@@ -38,9 +38,18 @@ export function Composer({
   const lastTypingSentRef = useRef(0);
   const replyingTo = useMessageStore((s) => s.replyingTo);
   const setReplyingTo = useMessageStore((s) => s.setReplyingTo);
+  const composerInsert = useMessageStore((s) => s.composerInsert);
   const activeId = useConversationStore((s) => s.activeId);
 
   const canSend = value.trim().length > 0;
+
+  // 撤回重新编辑：composerInsert 非空 → 覆盖输入框值 + 聚焦，随即清空该字段
+  useEffect(() => {
+    if (composerInsert === null) return;
+    setValue(composerInsert);
+    useMessageStore.getState().setComposerInsert(null);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [composerInsert]);
 
   // 表情面板打开时，监听 document mousedown：点击面板外部即关闭
   // （面板根元素 onMouseDown 已 stopPropagation，故点内部不会触发）

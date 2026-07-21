@@ -125,6 +125,10 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 
 	user, err := h.svc.Profile(c.Request.Context(), userID)
 	if err != nil {
+		if errors.Is(err, service.ErrUserNotFound) {
+			NotFound(c, "user not found")
+			return
+		}
 		h.logger.Error("get profile failed", zap.Error(err))
 		InternalError(c, "failed to get profile")
 		return
@@ -149,6 +153,10 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 
 	user, err := h.svc.UpdateProfile(c.Request.Context(), userID, req.Nickname, req.AvatarURL, req.Bio, req.Gender)
 	if err != nil {
+		if errors.Is(err, service.ErrUserNotFound) {
+			NotFound(c, "user not found")
+			return
+		}
 		h.logger.Error("update profile failed", zap.Error(err))
 		InternalError(c, "failed to update profile")
 		return

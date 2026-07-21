@@ -88,6 +88,10 @@ export interface ChatMessage {
   edited?: boolean;
   /** 已撤回：气泡渲染灰字系统占位，忽略 kind/text */
   recalled?: boolean;
+  /** 撤回前的原文本（仅本端自己的 text 消息保留，供「重新编辑」回填） */
+  recalledText?: string;
+  /** 撤回发生时刻（epoch ms），重新编辑 5 分钟窗口判定用 */
+  recalledAtMs?: number;
   /** 服务端分配的会话内序列号（已读进度比对用） */
   seq?: number;
   /** 消息创建时间（epoch ms），用于撤回 2 分钟窗口的客户端判定 */
@@ -106,6 +110,9 @@ interface MessageState {
   /** 正在引用回复的消息（composer 上方的引用条） */
   replyingTo: ChatMessage | null;
   setReplyingTo: (msg: ChatMessage | null) => void;
+  /** 待回填输入框的文本（撤回重新编辑）；Composer 消费后置回 null */
+  composerInsert: string | null;
+  setComposerInsert: (text: string | null) => void;
   /** 首次加载会话历史（已有消息时跳过） */
   loadHistory: (conversationId: string) => Promise<void>;
   /** 向上翻页加载更早的历史 */
@@ -171,6 +178,9 @@ const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const ACK_TIMEOUT_MS = 5000;
 const TYPING_CLEAR_MS = 4000;
 
+/** 撤回后可重新编辑的时间窗口（5 分钟） */
+export const RE_EDIT_WINDOW_MS = 5 * 60_000;
+
 const now = () =>
   new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
 
@@ -186,8 +196,11 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
   hasMoreByConv: {},
   typingByConv: {},
   replyingTo: null,
+  composerInsert: null,
 
   setReplyingTo: (msg) => set({ replyingTo: msg }),
+
+  setComposerInsert: (text) => set({ composerInsert: text }),
 
   loadHistory: async (conversationId) => {
     if (mockMode) return;
@@ -409,9 +422,16 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       return {
         messagesByConv: {
           ...s.messagesByConv,
-          [convId]: list.map((m) =>
-            m.id === messageId ? { ...m, recalled: true, text: undefined } : m,
-          ),
+          [convId]: list.map((m) => {
+            if (m.id !== messageId) return m;
+            const keepText = m.isSelf && m.kind === "text" && m.text ? m.text : undefined;
+            return {
+              ...m,
+              recalled: true,
+              text: undefined,
+              ...(keepText ? { recalledText: keepText, recalledAtMs: Date.now() } : {}),
+            };
+          }),
         },
       };
     }),
