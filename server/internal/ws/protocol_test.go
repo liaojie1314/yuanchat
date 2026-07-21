@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 
@@ -151,5 +152,43 @@ func TestErrorPayloadOmitsEmptyClientMsgID(t *testing.T) {
 	_ = json.Unmarshal(env.Payload, &m)
 	if _, exists := m["client_msg_id"]; exists {
 		t.Fatal("empty client_msg_id should be omitted")
+	}
+}
+
+func TestEncodeFileContent(t *testing.T) {
+	data, err := Encode(TypeMessageReceive, ReceivePayload{
+		Content: ContentPayload{Type: "file", Key: "files/2026/07/x.pdf", Name: "报告.pdf", Size: 1024},
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	var env Envelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+	}
+	var p ReceivePayload
+	if err := json.Unmarshal(env.Payload, &p); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if p.Content.Name != "报告.pdf" || p.Content.Size != 1024 {
+		t.Fatalf("file fields lost: %+v", p.Content)
+	}
+}
+
+func TestEncodeVoiceContentOmitsImageFields(t *testing.T) {
+	data, _ := Encode(TypeMessageReceive, ReceivePayload{
+		Content: ContentPayload{Type: "voice", Key: "files/2026/07/v.webm", Duration: 12, Size: 2048},
+	})
+	if bytes.Contains(data, []byte(`"width"`)) || bytes.Contains(data, []byte(`"name"`)) {
+		t.Fatalf("omitempty broken: %s", data)
+	}
+	var env Envelope
+	_ = json.Unmarshal(data, &env)
+	var p ReceivePayload
+	if err := json.Unmarshal(env.Payload, &p); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if p.Content.Duration != 12 {
+		t.Fatalf("duration lost: %+v", p.Content)
 	}
 }

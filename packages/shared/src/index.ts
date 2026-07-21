@@ -26,3 +26,5 @@ export { useKeyboardAwareViewport } from "./hooks/useKeyboardAwareViewport";
 export { useBreakpoint, BREAKPOINTS } from "./hooks/useBreakpoint";
 export type { Breakpoint } from "./hooks/useBreakpoint";
 export { useChatBootstrap, isMockEnabled } from "./hooks/useChatBootstrap";
+export { useVoiceRecorder } from "./hooks/useVoiceRecorder";
+export type { VoiceRecorderState } from "./hooks/useVoiceRecorder";

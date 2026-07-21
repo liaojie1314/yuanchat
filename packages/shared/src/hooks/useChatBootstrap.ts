@@ -12,7 +12,14 @@
  */
 import { useEffect } from "react";
 import i18n from "@yuanchat/design-system/i18n";
-import { dateKeyOf, formatListTime, formatMessageTime, mapConversation } from "../api/chat";
+import {
+  dateKeyOf,
+  formatFileMeta,
+  formatListTime,
+  formatMessageTime,
+  mapConversation,
+  pseudoWave,
+} from "../api/chat";
 import { setTokenProvider } from "../api/client";
 import {
   DEMO_CONVERSATIONS,
@@ -67,16 +74,41 @@ function wireSocket() {
       const iso = new Date(p.timestamp).toISOString();
       const isImage = p.content.type === "image";
       const isSystem = p.content.type === "system";
+      const isFile = p.content.type === "file";
+      const isVoice = p.content.type === "voice";
 
+      const kind: ChatMessage["kind"] = isSystem
+        ? "system"
+        : isImage
+          ? "image"
+          : isFile
+            ? "file"
+            : isVoice
+              ? "voice"
+              : "text";
       const msg: ChatMessage = {
         id: p.message_id,
         conversationId: p.conversation_id,
-        kind: isSystem ? "system" : isImage ? "image" : "text",
+        kind,
         isSelf,
         senderName: p.sender_nickname,
-        text: isImage ? undefined : p.content.text,
+        text: kind === "text" || kind === "system" ? p.content.text : undefined,
         image: isImage
           ? { key: p.content.key, width: p.content.width ?? 0, height: p.content.height ?? 0 }
+          : undefined,
+        file: isFile
+          ? {
+              name: p.content.name ?? "",
+              ...formatFileMeta(p.content.name ?? "", p.content.size ?? 0),
+              key: p.content.key,
+            }
+          : undefined,
+        voice: isVoice
+          ? {
+              seconds: p.content.duration ?? 0,
+              wave: pseudoWave(p.content.duration ?? 0),
+              key: p.content.key,
+            }
           : undefined,
         seq: p.seq,
         time: formatMessageTime(iso),
@@ -89,8 +121,14 @@ function wireSocket() {
 
       const convStore = useConversationStore.getState();
       const conv = convStore.conversations.find((c) => c.id === p.conversation_id);
-      // 图片消息列表预览走「[图片]」占位；文本/系统消息用正文
-      const body = isImage ? i18n.t("chat.message.image") : (p.content.text ?? "");
+      // 图片/文件/语音消息列表预览走占位文案；文本/系统消息用正文
+      const body = isImage
+        ? i18n.t("chat.message.image")
+        : isFile
+          ? i18n.t("chat.message.file")
+          : isVoice
+            ? i18n.t("chat.message.voice")
+            : (p.content.text ?? "");
       // system 消息不加昵称前缀
       const preview =
         conv && conv.type === "group" && !isSelf && !isSystem

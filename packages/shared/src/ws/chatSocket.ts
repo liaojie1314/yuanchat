@@ -27,7 +27,8 @@ export interface ServerFrames {
     conversation_id: string;
     sender_id: string;
     sender_nickname: string;
-    // text 帧只用 type/text；image 帧带 key/width/height/size（后端 omitempty，不污染文本）
+    // text 帧只用 type/text；image 帧带 key/width/height/size；file 帧带 key/name/size；
+    // voice 帧带 key/duration/size（后端 omitempty，不污染文本）
     content: {
       type: string;
       text?: string;
@@ -35,6 +36,8 @@ export interface ServerFrames {
       width?: number;
       height?: number;
       size?: number;
+      name?: string;
+      duration?: number;
     };
     seq: number;
     timestamp: number;

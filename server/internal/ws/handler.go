@@ -212,6 +212,40 @@ func (h *Handler) buildContent(c *Client, p *SendPayload) (int16, string, bool) 
 			return 0, "", false
 		}
 		return model.MessageTypeImage, string(raw), true
+	case "file":
+		if p.Content.Key == "" || p.Content.Name == "" || p.Content.Size <= 0 {
+			c.sendError(400, "file content requires key/name/size", p.ClientMsgID)
+			return 0, "", false
+		}
+		if len([]rune(p.Content.Name)) > 255 {
+			c.sendError(400, "file name too long", p.ClientMsgID)
+			return 0, "", false
+		}
+		raw, err := json.Marshal(struct {
+			Key  string `json:"key"`
+			Name string `json:"name"`
+			Size int64  `json:"size"`
+		}{p.Content.Key, p.Content.Name, p.Content.Size})
+		if err != nil {
+			c.sendError(400, "invalid file content", p.ClientMsgID)
+			return 0, "", false
+		}
+		return model.MessageTypeFile, string(raw), true
+	case "voice":
+		if p.Content.Key == "" || p.Content.Duration <= 0 || p.Content.Duration > 60 || p.Content.Size <= 0 {
+			c.sendError(400, "voice content requires key/duration(1-60s)/size", p.ClientMsgID)
+			return 0, "", false
+		}
+		raw, err := json.Marshal(struct {
+			Key      string `json:"key"`
+			Duration int    `json:"duration"`
+			Size     int64  `json:"size"`
+		}{p.Content.Key, p.Content.Duration, p.Content.Size})
+		if err != nil {
+			c.sendError(400, "invalid voice content", p.ClientMsgID)
+			return 0, "", false
+		}
+		return model.MessageTypeVoice, string(raw), true
 	default:
 		c.sendError(400, "unsupported content type", p.ClientMsgID)
 		return 0, "", false

@@ -432,13 +432,17 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 | -------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `message.send` | `{conversation_id, content: {type:"text", text}, client_msg_id, reply_to_id?}`                      | 发送文本（≤4000 字符）。`client_msg_id` 客户端生成，幂等/回执匹配用                                                                                                                                          |
 | `message.send` | `{conversation_id, content: {type:"image", key, width, height, size}, client_msg_id, reply_to_id?}` | 发送图片。`content` 走图片分支：`key`=`upload-url` 返回的 object_key，`width`/`height`=像素宽高（气泡等比占位防 CLS），`size`=字节；四者缺一或非正 → `400`（`image content requires key/width/height/size`） |
+| `message.send` | `{conversation_id, content: {type:"file", key, name, size}, client_msg_id, reply_to_id?}`           | 发送文件。`name`=原始文件名（展示用，≤255 rune），三者缺一 → `400`；MIME 须在 `upload.allowed_types` 白名单内（upload-url 阶段拦截 `4001`）                                                                  |
+| `message.send` | `{conversation_id, content: {type:"voice", key, duration, size}, client_msg_id, reply_to_id?}`      | 发送语音（webm/opus）。`duration`=秒数，**1-60s** 之外 → `400`（`voice content requires key/duration(1-60s)/size`）                                                                                          |
 | `message.read` | `{conversation_id, seq}`                                                                            | 上报已读进度（已读到的最大 seq，只前进不后退）                                                                                                                                                               |
 | `typing`       | `{conversation_id}`                                                                                 | 正在输入（客户端节流 ~3s/次）                                                                                                                                                                                |
 
-> **ContentPayload（消息体传输结构）**：`{type, text?, key?, width?, height?, size?}`。text 帧只用 `type`/`text`；
-> image 帧用 `type:"image"` + `key`/`width`/`height`/`size`（均 `omitempty`，不污染文本消息）。
-> 服务端落库时按 `content.type` 分流 `message_type`（text=1、image=2），`message.receive` 原样回传
-> `content`，接收端据 `type` 渲染文本气泡或图片气泡（图片气泡用 `key` 换 `download-url` 拉预签名 GET）。
+> **ContentPayload（消息体传输结构）**：`{type, text?, key?, width?, height?, size?, name?, duration?}`。
+> text 帧只用 `type`/`text`；image 帧用 `key`/`width`/`height`/`size`；file 帧用 `key`/`name`/`size`；
+> voice 帧用 `key`/`duration`/`size`（均 `omitempty`，不污染文本消息）。
+> 服务端落库时按 `content.type` 分流 `message_type`（text=1、image=2、file=3、voice=4、system=6），
+> `message.receive` 原样回传 `content`，接收端据 `type` 渲染对应气泡
+> （image/file/voice 均用 `key` 换 `download-url` 拉预签名 GET；voice 播放走单例 Audio）。
 
 ### 服务端 → 客户端
 

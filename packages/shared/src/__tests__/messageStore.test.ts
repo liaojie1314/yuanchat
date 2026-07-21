@@ -406,6 +406,87 @@ describe("messageStore.sendImage (real mode)", () => {
   });
 });
 
+describe("messageStore.sendFile (real mode)", () => {
+  let revokeSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    setMessageMockMode(false);
+    reset();
+    vi.spyOn(chatSocket, "send").mockImplementation(() => {});
+    revokeSpy = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL: () => "blob:file-1", revokeObjectURL: revokeSpy });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("sendFile 乐观插入 file 气泡（sending + 本地元数据）并发 file 帧", async () => {
+    vi.spyOn(filesApi, "getUploadUrl").mockResolvedValue({
+      uploadUrl: "https://put",
+      objectKey: "files/2026/07/k.pdf",
+    });
+    vi.spyOn(filesApi, "uploadToTicket").mockResolvedValue(undefined);
+
+    const file = new File([new Uint8Array(1024)], "合同.pdf", { type: "application/pdf" });
+    await useMessageStore.getState().sendFile(CONV, file);
+
+    const m = useMessageStore.getState().messagesByConv[CONV][0];
+    expect(m.kind).toBe("file");
+    expect(m.file?.name).toBe("合同.pdf");
+    expect(m.file?.ext).toBe("PDF");
+    expect(m.file?.size).toBe("1.0 KB");
+    expect(m.status).toBe("sending");
+    expect(m.file?.key).toBe("files/2026/07/k.pdf");
+
+    const call = vi.mocked(chatSocket.send).mock.calls.find(([tp]) => tp === "message.send");
+    expect(call?.[1]).toEqual(
+      expect.objectContaining({
+        conversation_id: CONV,
+        content: expect.objectContaining({
+          type: "file",
+          key: "files/2026/07/k.pdf",
+          name: "合同.pdf",
+          size: 1024,
+        }),
+        client_msg_id: m.clientMsgId,
+      }),
+    );
+  });
+
+  it("上传失败置 failed 且不发帧", async () => {
+    vi.spyOn(filesApi, "getUploadUrl").mockRejectedValue(new Error("network"));
+
+    const file = new File(["x"], "a.zip", { type: "application/zip" });
+    await useMessageStore.getState().sendFile(CONV, file);
+
+    expect(useMessageStore.getState().messagesByConv[CONV][0].status).toBe("failed");
+    const sendCall = vi.mocked(chatSocket.send).mock.calls.find(([tp]) => tp === "message.send");
+    expect(sendCall).toBeUndefined();
+  });
+
+  it("applyAck 后 revoke file localUrl", async () => {
+    vi.spyOn(filesApi, "getUploadUrl").mockResolvedValue({
+      uploadUrl: "https://put",
+      objectKey: "files/2026/07/k.pdf",
+    });
+    vi.spyOn(filesApi, "uploadToTicket").mockResolvedValue(undefined);
+
+    const file = new File(["x"], "a.pdf", { type: "application/pdf" });
+    await useMessageStore.getState().sendFile(CONV, file);
+    const clientId = useMessageStore.getState().messagesByConv[CONV][0].clientMsgId!;
+    useMessageStore.getState().applyAck(clientId, "srv-f-1", CONV, 3, Date.now());
+
+    const after = useMessageStore.getState().messagesByConv[CONV][0];
+    expect(after.status).toBe("sent");
+    expect(after.file?.localUrl).toBeUndefined();
+    expect(after.file?.key).toBe("files/2026/07/k.pdf");
+    expect(revokeSpy).toHaveBeenCalledWith("blob:file-1");
+  });
+});
+
 describe("messageStore (mock mode)", () => {
   it("simulates sent → read receipts without network", () => {
     setMessageMockMode(true);

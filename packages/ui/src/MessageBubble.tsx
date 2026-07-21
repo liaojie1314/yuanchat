@@ -29,6 +29,7 @@ import {
   Copy,
   Download,
   Loader2,
+  Pause,
   Play,
   Reply,
   Sparkles,
@@ -36,11 +37,13 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { getDownloadUrl, showToast } from "@yuanchat/shared";
 import type { ChatMessage } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
 import { MessageImage } from "./MessageImage";
 import { copyText } from "./copyText";
+import { currentPlayingId, playVoice, subscribeVoicePlayer } from "./voicePlayer";
 
 /** 把文本中的 @xxx 提及切分为高亮 token（简单前缀匹配，接入真实数据后按实体渲染） */
 function renderTextWithMentions(text: string, mentions?: string[]) {
@@ -86,6 +89,13 @@ export function MessageBubble({
   // 避免在 render 里调用 Date.now()（不纯，react-hooks/purity 禁止）
   const [recallInWindow, setRecallInWindow] = useState(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 语音播放态：模块级单例播放器广播当前播放的 messageId
+  const [voicePlayingId, setVoicePlayingId] = useState<string | null>(() => currentPlayingId());
+
+  useEffect(() => {
+    if (msg.kind !== "voice") return;
+    return subscribeVoicePlayer(setVoicePlayingId);
+  }, [msg.kind]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -255,6 +265,13 @@ export function MessageBubble({
                 </div>
                 <button
                   aria-label={t("file.download")}
+                  onClick={() => {
+                    const key = msg.file?.key;
+                    if (!key) return;
+                    void getDownloadUrl(key)
+                      .then((url) => window.open(url, "_blank"))
+                      .catch(() => showToast("error", t("chat.file.downloadFailed")));
+                  }}
                   className={cn(
                     "grid h-8 w-8 shrink-0 place-items-center rounded-full transition-colors",
                     isSelf
@@ -270,16 +287,30 @@ export function MessageBubble({
             {msg.kind === "voice" && msg.voice && (
               <div>
                 <div className="flex min-w-[140px] items-center gap-2.5">
-                  <span
+                  <button
+                    onClick={() => {
+                      const src = msg.voice?.localUrl;
+                      const key = msg.voice?.key;
+                      const resolveUrl = src
+                        ? Promise.resolve(src)
+                        : key
+                          ? getDownloadUrl(key)
+                          : null;
+                      if (!resolveUrl) return;
+                      void resolveUrl
+                        .then((url) => playVoice(msg.id, url))
+                        .catch(() => showToast("error", t("chat.voice.playFailed")));
+                    }}
+                    aria-label={t("chat.input.voice")}
                     className={cn(
-                      "grid h-8 w-8 shrink-0 place-items-center rounded-full",
+                      "grid h-8 w-8 shrink-0 place-items-center rounded-full transition-transform active:scale-90",
                       isSelf
                         ? "bg-white/25 text-white"
                         : "bg-primary-container text-primary-on-container",
                     )}
                   >
-                    <Play size={14} />
-                  </span>
+                    {voicePlayingId === msg.id ? <Pause size={14} /> : <Play size={14} />}
+                  </button>
                   <span className="flex h-5 items-center gap-0.5" aria-hidden>
                     {msg.voice.wave.map((h, i) => (
                       <i
