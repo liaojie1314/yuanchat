@@ -36,6 +36,7 @@ export { ChatDetail } from "./ChatDetail";
 export { ChatScreen } from "./ChatScreen";
 export { MembersView } from "./MembersView";
 export { CreateGroupModal } from "./CreateGroupModal";
+export { InviteMembersModal } from "./InviteMembersModal";
 
 // 通讯录组件
 export { ContactsScreen } from "./ContactsScreen";

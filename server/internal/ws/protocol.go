@@ -33,7 +33,22 @@ const (
 	TypeContactAccepted     = "contact.accepted"
 	TypeConversationCreated = "conversation.created"
 	TypeMessageRecalled     = "message.recalled"
+	TypeConversationUpdated = "conversation.updated"
+	TypeConversationRemoved = "conversation.removed"
 )
+
+// ConversationUpdatedPayload 群资料/成员数变更推送（改名/邀请/踢人/退群后刷新列表态）。
+type ConversationUpdatedPayload struct {
+	ConversationID uuid.UUID `json:"conversation_id"`
+	Name           string    `json:"name,omitempty"`
+	MemberCount    int64     `json:"member_count,omitempty"`
+}
+
+// ConversationRemovedPayload 会话移出列表推送（被踢 / 本人退群多端同步 / 群解散）。
+type ConversationRemovedPayload struct {
+	ConversationID uuid.UUID `json:"conversation_id"`
+	Reason         string    `json:"reason"` // kicked | left | dissolved
+}
 
 // ConversationCreatedPayload 新会话创建推送（建群），推给全部成员。
 // Conversation 字段为 service.ConversationDTO 的 JSON（避免 ws→service 循环导入，用 any）。

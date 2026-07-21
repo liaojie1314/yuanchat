@@ -108,4 +108,28 @@ describe("conversationStore", () => {
       expect(conv?.unreadCount).toBe(0);
     });
   });
+
+  describe("removeConversation", () => {
+    it("移除会话并清空 activeId", () => {
+      useConversationStore.setState({
+        conversations: [
+          { id: "g1", type: "group", name: "群", unreadCount: 0, isMuted: false },
+          { id: "c2", type: "private", name: "b", unreadCount: 0, isMuted: false },
+        ],
+        activeId: "g1",
+      });
+      useConversationStore.getState().removeConversation("g1");
+      expect(useConversationStore.getState().conversations.map((c) => c.id)).toEqual(["c2"]);
+      expect(useConversationStore.getState().activeId).toBeNull();
+    });
+
+    it("非活跃会话不影响 activeId", () => {
+      useConversationStore.setState({
+        conversations: [{ id: "g1", type: "group", name: "群", unreadCount: 0, isMuted: false }],
+        activeId: "other",
+      });
+      useConversationStore.getState().removeConversation("g1");
+      expect(useConversationStore.getState().activeId).toBe("other");
+    });
+  });
 });

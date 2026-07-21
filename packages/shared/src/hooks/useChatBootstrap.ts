@@ -24,8 +24,10 @@ import {
 import { useAuthStore } from "../store/authStore";
 import { useContactStore } from "../store/contactStore";
 import { useConversationStore } from "../store/conversationStore";
+import type { Conversation } from "../store/conversationStore";
 import { setMessageMockMode, useMessageStore } from "../store/messageStore";
 import { resetChatStores, revokeAllLocalPreviews } from "../store/resetStores";
+import { showToast } from "../store/toastStore";
 import type { ChatMessage } from "../store/messageStore";
 import { chatSocket } from "../ws/chatSocket";
 
@@ -64,11 +66,12 @@ function wireSocket() {
       const isSelf = p.sender_id === selfId;
       const iso = new Date(p.timestamp).toISOString();
       const isImage = p.content.type === "image";
+      const isSystem = p.content.type === "system";
 
       const msg: ChatMessage = {
         id: p.message_id,
         conversationId: p.conversation_id,
-        kind: isImage ? "image" : "text",
+        kind: isSystem ? "system" : isImage ? "image" : "text",
         isSelf,
         senderName: p.sender_nickname,
         text: isImage ? undefined : p.content.text,
@@ -79,17 +82,20 @@ function wireSocket() {
         time: formatMessageTime(iso),
         dateKey: dateKeyOf(new Date(p.timestamp)),
         createdAtMs: p.timestamp,
-        status: isSelf ? "sent" : undefined,
+        status: isSelf && !isSystem ? "sent" : undefined,
         clientMsgId: p.client_msg_id,
       };
       useMessageStore.getState().receiveMessage(msg);
 
       const convStore = useConversationStore.getState();
       const conv = convStore.conversations.find((c) => c.id === p.conversation_id);
-      // 图片消息列表预览走「[图片]」占位；文本用正文
+      // 图片消息列表预览走「[图片]」占位；文本/系统消息用正文
       const body = isImage ? i18n.t("chat.message.image") : (p.content.text ?? "");
+      // system 消息不加昵称前缀
       const preview =
-        conv && conv.type === "group" && !isSelf ? p.sender_nickname + ": " + body : body;
+        conv && conv.type === "group" && !isSelf && !isSystem
+          ? p.sender_nickname + ": " + body
+          : body;
 
       if (isSelf) {
         // 自己发的消息（本设备或其他设备）：只刷新预览，不加未读
@@ -179,6 +185,19 @@ function wireSocket() {
       // 发起者已由 POST 响应把会话插入本地：按 id 去重，避免帧重复冒出
       if (convStore.conversations.some((c) => c.id === conv.id)) return;
       convStore.addConversation(conv);
+    },
+
+    "conversation.updated": (p) => {
+      const patch: Partial<Conversation> = {};
+      if (p.name) patch.name = p.name;
+      if (p.member_count) patch.memberCount = p.member_count;
+      useConversationStore.getState().updateConversation(p.conversation_id, patch);
+    },
+
+    "conversation.removed": (p) => {
+      useConversationStore.getState().removeConversation(p.conversation_id);
+      if (p.reason === "kicked") showToast("info", i18n.t("chat.group.kickedNotice"));
+      else if (p.reason === "dissolved") showToast("info", i18n.t("chat.group.dissolvedNotice"));
     },
   });
 

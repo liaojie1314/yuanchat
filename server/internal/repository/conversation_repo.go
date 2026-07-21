@@ -66,6 +66,33 @@ func (r *ConversationRepository) IsMember(ctx context.Context, convID, userID uu
 	return count > 0, err
 }
 
+// GetMemberRole 返回成员角色；非成员返回 (0, false, nil)。
+func (r *ConversationRepository) GetMemberRole(ctx context.Context, convID, userID uuid.UUID) (int16, bool, error) {
+	var m model.ConversationMember
+	err := r.db.WithContext(ctx).
+		Where("conversation_id = ? AND user_id = ?", convID, userID).First(&m).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return m.Role, true, nil
+}
+
+// FindByID 按 ID 查会话（软删过滤），不存在返回 nil。
+func (r *ConversationRepository) FindByID(ctx context.Context, id uuid.UUID) (*model.Conversation, error) {
+	var conv model.Conversation
+	err := r.db.WithContext(ctx).First(&conv, "id = ?", id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &conv, nil
+}
+
 // UpdateLastReadSeq 推进成员的已读进度（只前进不后退）。
 func (r *ConversationRepository) UpdateLastReadSeq(ctx context.Context, convID, userID uuid.UUID, seq int64) error {
 	return r.db.WithContext(ctx).

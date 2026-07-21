@@ -80,6 +80,11 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		chat.POST("/conversations", convH.Create)
 		chat.GET("/conversations/:id/messages", msgH.History)
 		chat.GET("/conversations/:id/members", convH.Members)
+		chat.PATCH("/conversations/:id", convH.Rename)
+		chat.POST("/conversations/:id/members", convH.Invite)
+		chat.DELETE("/conversations/:id/members/:userId", convH.Kick)
+		chat.POST("/conversations/:id/leave", convH.Leave)
+		chat.DELETE("/conversations/:id", convH.Dissolve)
 		chat.POST("/messages/:id/recall", msgH.Recall)
 
 		chat.POST("/files/upload-url", fileH.UploadURL)

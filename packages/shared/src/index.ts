@@ -10,6 +10,7 @@ export * from "./api/chat";
 export * from "./api/contacts";
 export * from "./api/users";
 export * from "./api/files";
+export * from "./api/groups";
 export {
   setRefreshHandler,
   ensureFreshToken,

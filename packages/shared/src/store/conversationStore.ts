@@ -93,6 +93,8 @@ interface ConversationState {
   incrementUnread: (id: string) => void;
   /** 清零指定会话的未读计数并上报已读进度（用户点击进入会话时调用） */
   clearUnread: (id: string) => void;
+  /** 从列表移除会话（被踢/退群/解散）；若正是活跃会话则回到未选中态 */
+  removeConversation: (id: string) => void;
 }
 
 /**
@@ -132,6 +134,12 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
   updateConversation: (id, partial) =>
     set((s) => ({
       conversations: s.conversations.map((c) => (c.id === id ? { ...c, ...partial } : c)),
+    })),
+
+  removeConversation: (id) =>
+    set((s) => ({
+      conversations: s.conversations.filter((c) => c.id !== id),
+      activeId: s.activeId === id ? null : s.activeId,
     })),
 
   applyIncoming: (convId, preview, time, seq) =>
