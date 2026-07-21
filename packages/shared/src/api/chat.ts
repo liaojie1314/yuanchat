@@ -56,6 +56,8 @@ export interface MessageDTO {
   created_at: string;
   sender_nickname: string;
   sender_avatar_url?: string | null;
+  /** 表情回应聚合（mine 相对请求者） */
+  reactions?: { emoji: string; count: number; mine: boolean }[];
 }
 
 // ========================================
@@ -260,6 +262,7 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     image: isImage ? parseImageContent(dto.content) : undefined,
     file,
     voice,
+    reactions: dto.reactions,
     seq: dto.seq,
     time: formatMessageTime(dto.created_at),
     dateKey: dateKeyOf(new Date(dto.created_at)),
@@ -353,4 +356,12 @@ export async function fetchMembers(conversationId: string): Promise<Conversation
  */
 export async function recallMessage(messageId: string): Promise<void> {
   await apiPost<Record<string, never>>("/api/v1/messages/" + messageId + "/recall", {});
+}
+
+/** 切换自己对消息的某个 emoji 回应（结果由 message.reaction 帧驱动，不乐观更新） */
+export async function toggleReaction(messageId: string, emoji: string): Promise<void> {
+  await apiPost<{ emoji: string; count: number; reacted: boolean }>(
+    "/api/v1/messages/" + messageId + "/reactions",
+    { emoji },
+  );
 }

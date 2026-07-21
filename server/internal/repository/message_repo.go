@@ -14,6 +14,8 @@ type MessageWithSender struct {
 	model.Message
 	SenderNickname  string  `json:"sender_nickname"`
 	SenderAvatarURL *string `json:"sender_avatar_url"`
+	// Reactions 表情回应聚合（service 层 GetHistory 回填，非查询列）
+	Reactions []ReactionAgg `json:"reactions,omitempty" gorm:"-"`
 }
 
 // MessageRepository 处理 messages 表。

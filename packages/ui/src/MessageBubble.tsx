@@ -43,7 +43,11 @@ import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
 import { MessageImage } from "./MessageImage";
 import { copyText } from "./copyText";
+import { fileIconOf } from "./fileIcon";
 import { currentPlayingId, playVoice, subscribeVoicePlayer } from "./voicePlayer";
+
+/** 菜单快捷回应条的固定 emoji */
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🎉"];
 
 /** 把文本中的 @xxx 提及切分为高亮 token（简单前缀匹配，接入真实数据后按实体渲染） */
 function renderTextWithMentions(text: string, mentions?: string[]) {
@@ -72,6 +76,7 @@ export function MessageBubble({
   onReply,
   onRecall,
   onReEdit,
+  onReact,
   onImageClick,
 }: {
   msg: ChatMessage;
@@ -80,6 +85,7 @@ export function MessageBubble({
   onReply?: () => void;
   onRecall?: () => void;
   onReEdit?: () => void;
+  onReact?: (emoji: string) => void;
   onImageClick?: (url: string) => void;
 }) {
   const { t } = useTranslation();
@@ -143,14 +149,14 @@ export function MessageBubble({
   const openMenu = (e: { preventDefault: () => void }) => {
     // 窗口判定放事件里（Date.now 不纯，不能在 render 调用）
     const withinWindow = recallEligible && Date.now() - (msg.createdAtMs ?? 0) < 120_000;
-    if (!withinWindow && !canCopy && !canReply) return;
+    if (!withinWindow && !canCopy && !canReply && !onReact) return;
     e.preventDefault();
     setRecallInWindow(withinWindow);
     setMenuOpen(true);
   };
 
   const startLongPress = (e: { preventDefault: () => void }) => {
-    if (!recallEligible && !canCopy && !canReply) return;
+    if (!recallEligible && !canCopy && !canReply && !onReact) return;
     longPressTimer.current = setTimeout(() => openMenu(e), 500);
   };
 
@@ -254,9 +260,19 @@ export function MessageBubble({
 
             {msg.kind === "file" && msg.file && (
               <div className="flex min-w-[220px] items-center gap-2.5">
-                <span className="text-label-sm flex h-11 w-9 shrink-0 items-center justify-center rounded-lg bg-red-600 font-bold text-white">
-                  {msg.file.ext}
-                </span>
+                {(() => {
+                  const { Icon, bg } = fileIconOf(msg.file.ext);
+                  return (
+                    <span
+                      className={cn(
+                        "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white",
+                        bg,
+                      )}
+                    >
+                      <Icon size={20} strokeWidth={1.75} />
+                    </span>
+                  );
+                })()}
                 <div className="min-w-0 flex-1">
                   <div className="text-body-md truncate font-semibold">{msg.file.name}</div>
                   <div className="text-label-sm mt-0.5 opacity-80">
@@ -333,7 +349,7 @@ export function MessageBubble({
               </div>
             )}
 
-            {/* 内联操作菜单：右键 / 长按弹出，复制 + 引用 + 撤回（撤回仅自己 2 分钟内） */}
+            {/* 内联操作菜单：右键 / 长按弹出，快捷回应条 + 复制 + 引用 + 撤回 */}
             {menuOpen && (
               <div
                 role="menu"
@@ -343,6 +359,23 @@ export function MessageBubble({
                   isSelf ? "right-0" : "left-0",
                 )}
               >
+                {onReact && (
+                  <div className="border-outline-variant flex gap-0.5 border-b px-1.5 pb-1">
+                    {QUICK_REACTIONS.map((e) => (
+                      <button
+                        key={e}
+                        role="menuitem"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onReact(e);
+                        }}
+                        className="hover:bg-surface-container-low grid h-7 w-7 place-items-center rounded-lg text-base transition-transform active:scale-90"
+                      >
+                        {e}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {canCopy && (
                   <button
                     role="menuitem"
@@ -375,12 +408,13 @@ export function MessageBubble({
           </div>
         </div>
 
-        {/* 表情回应 */}
+        {/* 表情回应：点击气泡 toggle 自己的参与态 */}
         {msg.reactions && msg.reactions.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
             {msg.reactions.map((r) => (
               <button
                 key={r.emoji}
+                onClick={() => onReact?.(r.emoji)}
                 className={cn(
                   "text-label-md inline-flex h-6 items-center gap-1 rounded-full border px-2 transition-colors",
                   r.mine

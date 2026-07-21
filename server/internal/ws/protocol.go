@@ -35,7 +35,18 @@ const (
 	TypeMessageRecalled     = "message.recalled"
 	TypeConversationUpdated = "conversation.updated"
 	TypeConversationRemoved = "conversation.removed"
+	TypeMessageReaction     = "message.reaction"
 )
+
+// MessageReactionPayload 表情回应变更推送（推会话全员，含操作者多端）。
+type MessageReactionPayload struct {
+	MessageID      uuid.UUID `json:"message_id"`
+	ConversationID uuid.UUID `json:"conversation_id"`
+	UserID         uuid.UUID `json:"user_id"`
+	Emoji          string    `json:"emoji"`
+	Count          int64     `json:"count"`
+	Reacted        bool      `json:"reacted"`
+}
 
 // ConversationUpdatedPayload 群资料/成员数变更推送（改名/邀请/踢人/退群后刷新列表态）。
 type ConversationUpdatedPayload struct {

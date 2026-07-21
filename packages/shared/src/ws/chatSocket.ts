@@ -52,6 +52,14 @@ export interface ServerFrames {
     operator_id: string;
     operator_nickname: string;
   };
+  "message.reaction": {
+    message_id: string;
+    conversation_id: string;
+    user_id: string;
+    emoji: string;
+    count: number;
+    reacted: boolean;
+  };
   typing: { conversation_id: string; user_id: string; nickname: string };
   "contact.request": {
     request_id: string;

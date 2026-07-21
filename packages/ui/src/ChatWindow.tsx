@@ -32,6 +32,7 @@ import {
   recallMessage,
   RE_EDIT_WINDOW_MS,
   showToast,
+  toggleReaction,
   useConversationStore,
   useMessageStore,
 } from "@yuanchat/shared";
@@ -267,6 +268,16 @@ export function ChatWindow({
                             useMessageStore.getState().setComposerInsert(msg.recalledText ?? "");
                           }
                         : undefined
+                    }
+                    onReact={
+                      // 排除撤回/系统消息/未 ack 乐观消息（其 id 还是 client id，服务端 404）
+                      msg.recalled || msg.kind === "system" || !msg.seq
+                        ? undefined
+                        : (emoji) => {
+                            void toggleReaction(msg.id, emoji).catch(() =>
+                              showToast("error", t("common.opFailed")),
+                            );
+                          }
                     }
                   />
                 </Fragment>

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,6 +25,8 @@ var (
 	ErrNotSender = errors.New("only the sender can recall the message")
 	// ErrRecallWindowExpired 已超出可撤回时间窗口。
 	ErrRecallWindowExpired = errors.New("recall window expired")
+	// ErrInvalidEmoji 回应 emoji 为空或超长。
+	ErrInvalidEmoji = errors.New("invalid emoji")
 )
 
 // RecallWindow 消息可撤回的时间窗口（自发送起 2 分钟）。
@@ -45,21 +48,29 @@ type RecallResult struct {
 	Idempotent       bool
 }
 
-// MessageService 消息核心服务：发送、历史、已读、撤回。
+// MessageService 消息核心服务：发送、历史、已读、撤回、表情回应。
 type MessageService struct {
-	msgRepo  *repository.MessageRepository
-	convRepo *repository.ConversationRepository
-	userRepo *repository.UserRepository
-	logger   *zap.Logger
+	msgRepo      *repository.MessageRepository
+	convRepo     *repository.ConversationRepository
+	userRepo     *repository.UserRepository
+	reactionRepo *repository.ReactionRepository
+	logger       *zap.Logger
 }
 
 func NewMessageService(
 	msgRepo *repository.MessageRepository,
 	convRepo *repository.ConversationRepository,
 	userRepo *repository.UserRepository,
+	reactionRepo *repository.ReactionRepository,
 	logger *zap.Logger,
 ) *MessageService {
-	return &MessageService{msgRepo: msgRepo, convRepo: convRepo, userRepo: userRepo, logger: logger}
+	return &MessageService{
+		msgRepo:      msgRepo,
+		convRepo:     convRepo,
+		userRepo:     userRepo,
+		reactionRepo: reactionRepo,
+		logger:       logger,
+	}
 }
 
 // SendText 校验成员身份后持久化文本消息（seq 事务内原子分配）。
@@ -145,7 +156,27 @@ func (s *MessageService) GetHistory(
 	if limit <= 0 || limit > 100 {
 		limit = 30
 	}
-	return s.msgRepo.ListBefore(ctx, convID, beforeSeq, limit)
+	messages, err := s.msgRepo.ListBefore(ctx, convID, beforeSeq, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	// 回填表情回应聚合（Mine 相对当前用户）
+	if len(messages) > 0 {
+		ids := make([]uuid.UUID, 0, len(messages))
+		for _, m := range messages {
+			ids = append(ids, m.ID)
+		}
+		aggs, err := s.reactionRepo.AggregateFor(ctx, ids, userID)
+		if err != nil {
+			s.logger.Warn("load reactions failed", zap.Error(err))
+			return messages, nil
+		}
+		for i := range messages {
+			messages[i].Reactions = aggs[messages[i].ID]
+		}
+	}
+	return messages, nil
 }
 
 // MarkRead 推进用户已读进度并返回会话成员（供推送已读回执）。
@@ -232,5 +263,57 @@ func (s *MessageService) Recall(ctx context.Context, userID, messageID uuid.UUID
 		Message:          msg,
 		OperatorNickname: operator.Nickname,
 		MemberIDs:        memberIDs,
+	}, nil
+}
+
+// ReactionResult 表情回应 toggle 结果，供 handler 组帧推送。
+type ReactionResult struct {
+	Message   *model.Message
+	Emoji     string
+	Count     int64
+	Reacted   bool
+	MemberIDs []uuid.UUID
+}
+
+// ToggleReaction 切换用户对消息的某个 emoji 回应（有则删、无则加）。
+// 已撤回消息视同不存在（不可回应）。
+func (s *MessageService) ToggleReaction(ctx context.Context, userID, messageID uuid.UUID, emoji string) (*ReactionResult, error) {
+	emoji = strings.TrimSpace(emoji)
+	if emoji == "" || len([]rune(emoji)) > 8 {
+		return nil, ErrInvalidEmoji
+	}
+
+	msg, err := s.msgRepo.FindByID(ctx, messageID)
+	if err != nil {
+		return nil, fmt.Errorf("find message: %w", err)
+	}
+	if msg == nil || msg.Status != model.MessageStatusNormal {
+		return nil, ErrMessageNotFound
+	}
+
+	ok, err := s.convRepo.IsMember(ctx, msg.ConversationID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("check membership: %w", err)
+	}
+	if !ok {
+		return nil, ErrNotMember
+	}
+
+	reacted, count, err := s.reactionRepo.Toggle(ctx, messageID, userID, emoji)
+	if err != nil {
+		return nil, fmt.Errorf("toggle reaction: %w", err)
+	}
+
+	memberIDs, err := s.convRepo.GetMemberIDs(ctx, msg.ConversationID)
+	if err != nil {
+		return nil, fmt.Errorf("load members: %w", err)
+	}
+
+	return &ReactionResult{
+		Message:   msg,
+		Emoji:     emoji,
+		Count:     count,
+		Reacted:   reacted,
+		MemberIDs: memberIDs,
 	}, nil
 }

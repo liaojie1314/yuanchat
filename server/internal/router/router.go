@@ -36,10 +36,11 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	convRepo := repository.NewConversationRepository(db)
 	msgRepo := repository.NewMessageRepository(db)
 	contactRepo := repository.NewContactRepository(db)
+	reactionRepo := repository.NewReactionRepository(db)
 	sidGen := shortid.NewGenerator(db)
 
 	userSvc := service.NewUserService(userRepo, jwtGen, sidGen, logger)
-	msgSvc := service.NewMessageService(msgRepo, convRepo, userRepo, logger)
+	msgSvc := service.NewMessageService(msgRepo, convRepo, userRepo, reactionRepo, logger)
 	convSvc := service.NewConversationService(convRepo, msgRepo, contactRepo, userRepo, logger)
 	contactSvc := service.NewContactService(contactRepo, userRepo, logger)
 
@@ -86,6 +87,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		chat.POST("/conversations/:id/leave", convH.Leave)
 		chat.DELETE("/conversations/:id", convH.Dissolve)
 		chat.POST("/messages/:id/recall", msgH.Recall)
+		chat.POST("/messages/:id/reactions", msgH.React)
 
 		chat.POST("/files/upload-url", fileH.UploadURL)
 		chat.GET("/files/download-url", fileH.DownloadURL)

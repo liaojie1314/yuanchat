@@ -18,6 +18,7 @@ func newMessageSvc(db *gorm.DB) *MessageService {
 		repository.NewMessageRepository(db),
 		repository.NewConversationRepository(db),
 		repository.NewUserRepository(db),
+		repository.NewReactionRepository(db),
 		zap.NewNop(),
 	)
 }

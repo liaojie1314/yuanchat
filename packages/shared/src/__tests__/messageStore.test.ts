@@ -294,6 +294,36 @@ describe("messageStore (real mode)", () => {
     useMessageStore.getState().setComposerInsert(null);
     expect(useMessageStore.getState().composerInsert).toBeNull();
   });
+
+  it("applyReaction 新增/更新/清零回应聚合", () => {
+    useMessageStore.setState({
+      messagesByConv: {
+        c1: [
+          {
+            id: "m1",
+            conversationId: "c1",
+            kind: "text",
+            isSelf: false,
+            text: "hi",
+            time: "10:00",
+          },
+        ],
+      },
+    });
+    const apply = useMessageStore.getState().applyReaction;
+    apply("c1", "m1", "👍", 1, true);
+    expect(useMessageStore.getState().messagesByConv.c1[0].reactions).toEqual([
+      { emoji: "👍", count: 1, mine: true },
+    ]);
+    apply("c1", "m1", "👍", 2, undefined); // 他人 +1，mine 保持
+    expect(useMessageStore.getState().messagesByConv.c1[0].reactions![0]).toEqual({
+      emoji: "👍",
+      count: 2,
+      mine: true,
+    });
+    apply("c1", "m1", "👍", 0, false); // 自己取消且归零 → 条目移除
+    expect(useMessageStore.getState().messagesByConv.c1[0].reactions).toEqual([]);
+  });
 });
 
 describe("messageStore.sendImage (real mode)", () => {

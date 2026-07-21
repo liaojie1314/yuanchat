@@ -188,6 +188,19 @@ function wireSocket() {
       useMessageStore.getState().setTyping(p.conversation_id, p.nickname);
     },
 
+    "message.reaction": (p) => {
+      const selfId = useAuthStore.getState().user?.id ?? "";
+      useMessageStore
+        .getState()
+        .applyReaction(
+          p.conversation_id,
+          p.message_id,
+          p.emoji,
+          p.count,
+          p.user_id === selfId ? p.reacted : undefined,
+        );
+    },
+
     "contact.request": (p) => {
       useContactStore.getState().applyIncomingRequest({
         id: p.request_id,

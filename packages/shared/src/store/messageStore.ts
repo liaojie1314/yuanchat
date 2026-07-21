@@ -167,6 +167,17 @@ interface MessageState {
    * @param operatorName 撤回操作者昵称（预留给调用方拼列表预览，store 内不用）
    */
   applyRecall: (convId: string, messageId: string, operatorName: string) => void;
+  /**
+   * WebSocket message.reaction：更新消息的 emoji 回应聚合。
+   * @param mine 仅当操作者是自己时传 reacted（true/false）；他人操作传 undefined 保持原 mine
+   */
+  applyReaction: (
+    convId: string,
+    messageId: string,
+    emoji: string,
+    count: number,
+    mine: boolean | undefined,
+  ) => void;
   /** typing 帧：显示"正在输入"，4 秒无后续自动清除 */
   setTyping: (convId: string, name: string) => void;
   /** 更新消息状态（重试 / 回执） */
@@ -567,6 +578,28 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
         },
       };
     }),
+
+  applyReaction: (convId, messageId, emoji, count, mine) =>
+    set((s) => ({
+      messagesByConv: {
+        ...s.messagesByConv,
+        [convId]: (s.messagesByConv[convId] ?? []).map((m) => {
+          if (m.id !== messageId) return m;
+          const prev = m.reactions ?? [];
+          const existing = prev.find((r) => r.emoji === emoji);
+          if (count <= 0) return { ...m, reactions: prev.filter((r) => r.emoji !== emoji) };
+          const nextMine = mine === undefined ? (existing?.mine ?? false) : mine;
+          const entry = { emoji, count, mine: nextMine };
+          // 已存在原位替换（保持展示顺序稳定），否则追加
+          return {
+            ...m,
+            reactions: existing
+              ? prev.map((r) => (r.emoji === emoji ? entry : r))
+              : [...prev, entry],
+          };
+        }),
+      },
+    })),
 
   setTyping: (convId, name) => {
     const prev = typingTimers.get(convId);
