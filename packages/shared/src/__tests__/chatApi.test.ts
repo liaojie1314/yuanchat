@@ -113,7 +113,12 @@ describe("formatDateDivider", () => {
     "-" +
     String(d.getDate()).padStart(2, "0");
 
-  it("今天/昨天/日期", () => {
+  it("今天/昨天/日期", async () => {
+    // CI runner locale 是 en_US → detectLocale() 走 en-US 分支导致 i18n.t 返回英文；
+    // 本用例验证的是"今天/昨天/月日"的分支逻辑，强制切 zh-CN 保证 locale 无关
+    const { default: i18n } = await import("@yuanchat/design-system/i18n");
+    await i18n.changeLanguage("zh-CN");
+
     const today = new Date();
     expect(formatDateDivider(key(today))).toBe("今天");
     const y = new Date(today.getTime() - 86400000);
