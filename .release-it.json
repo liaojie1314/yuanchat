@@ -10,8 +10,9 @@
   "github": {
     "release": true,
     "releaseName": "v${version}",
-    "web": true,
-    "draft": true
+    "web": false,
+    "draft": true,
+    "releaseNotes": "echo \"See CHANGELOG.md for full release notes.\""
   },
   "npm": {
     "publish": false
@@ -25,7 +26,6 @@
     }
   },
   "hooks": {
-    "before:init": ["pnpm test"],
     "after:bump": "node scripts/sync-version.mjs && git add -A",
     "after:release": "echo 'Release v${version} tagged & pushed. GitHub Actions will now build platform installers and upload to: https://github.com/liaojie1314/yuanchat/releases/tag/v${version}'"
   }
