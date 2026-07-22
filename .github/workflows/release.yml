@@ -4,6 +4,13 @@ on:
   push:
     tags:
       - "v*"
+  # 允许手动补跑：Actions 页面选 workflow → Run workflow → 输入已有的 tag
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "已存在的 tag（如 v0.1.0）"
+        required: true
+        type: string
 
 # tag 触发工作流写权限用于上传附件到 Release
 permissions:
@@ -16,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
       - uses: pnpm/action-setup@v4
         with:
           version: 10.22.0
@@ -30,7 +39,7 @@ jobs:
         run: pnpm --filter @yuanchat/web build
       - name: Package
         env:
-          REF_NAME: ${{ github.ref_name }}
+          REF_NAME: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           cd apps/web/dist
           tar czf "../../../yuanchat-web-${REF_NAME}.tar.gz" .
@@ -59,6 +68,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -130,8 +141,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: apps/desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: ${{ github.event.inputs.tag || github.ref_name }}
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
@@ -151,8 +162,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: ${{ github.event.inputs.tag || github.ref_name }}
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
@@ -163,6 +174,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -252,28 +265,42 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        # 生成 keystore.properties + 修改 build.gradle.kts 引用签名配置
+        # 生成 keystore.properties + 注入 signingConfigs 到 build.gradle.kts
         run: |
           GEN_DIR=apps/desktop/src-tauri/gen/android
+          APP_GRADLE="$GEN_DIR/app/build.gradle.kts"
+
+          # 1. 生成 keystore.properties（rootProject 目录 = gen/android）
           cat > "$GEN_DIR/keystore.properties" <<EOF
           storePassword=$KEYSTORE_PASSWORD
           keyPassword=$KEY_PASSWORD
           keyAlias=$KEY_ALIAS
           storeFile=$KEYSTORE_PATH
           EOF
+          echo "--- keystore.properties (脱敏) ---"
+          sed -e 's/=.*/=***/' "$GEN_DIR/keystore.properties"
 
-          # 注入 signingConfigs 与 buildTypes.release.signingConfig
-          APP_GRADLE="$GEN_DIR/app/build.gradle.kts"
-          python3 <<'PY'
-          import re, os
-          path = os.environ['APP_GRADLE'] if 'APP_GRADLE' in os.environ else 'apps/desktop/src-tauri/gen/android/app/build.gradle.kts'
-          # 上面 env 未导出，直接写死路径
-          path = 'apps/desktop/src-tauri/gen/android/app/build.gradle.kts'
+          # 2. 修改 build.gradle.kts：加 import + signingConfigs 块 + release 引用签名
+          python3 <<PY
+          import re
+          path = "$APP_GRADLE"
           src = open(path).read()
+
+          # 幂等：已注入过则跳过（workflow 重跑保护）
+          if 'yuanchat_signing_injected' in src:
+              print("Already injected, skipping")
+              raise SystemExit
+
+          # a) 顶部加 import（放在首个 plugins/import 之前）
+          if 'import java.util.Properties' not in src:
+              src = 'import java.util.Properties\n\n' + src
+
+          # b) 在 android { ... } 内 buildTypes 之前插入 signingConfigs
           inject = '''
+              // yuanchat_signing_injected
               signingConfigs {
                   create("release") {
-                      val kp = java.util.Properties()
+                      val kp = Properties()
                       val kpf = rootProject.file("keystore.properties")
                       if (kpf.exists()) kp.load(kpf.inputStream())
                       storeFile = file(kp.getProperty("storeFile"))
@@ -283,16 +310,24 @@ jobs:
                   }
               }
           '''
-          # 在 buildTypes 之前插入 signingConfigs
-          if 'signingConfigs {' not in src:
-              src = re.sub(r'(\n\s*buildTypes\s*\{)', inject + r'\1', src, count=1)
-          # release 块加 signingConfig
+          new_src, count = re.subn(
+              r'(\n\s*buildTypes\s*\{)', inject + r'\1', src, count=1
+          )
+          if count == 0:
+              print("::error::Failed to locate buildTypes block")
+              print(src[:2000])
+              raise SystemExit(1)
+          src = new_src
+
+          # c) release 块内加 signingConfig 引用
           src = re.sub(
               r'(getByName\("release"\)\s*\{)',
               r'\1\n            signingConfig = signingConfigs.getByName("release")',
               src, count=1
           )
           open(path, 'w').write(src)
+          print("--- build.gradle.kts 修改后前 80 行 ---")
+          print('\n'.join(src.splitlines()[:80]))
           PY
 
       - name: Build APK
@@ -304,7 +339,7 @@ jobs:
 
       - name: Locate & rename APKs
         env:
-          REF_NAME: ${{ github.ref_name }}
+          REF_NAME: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           mkdir -p artifacts
           find apps/desktop/src-tauri/gen/android/app/build/outputs -name "*-release.apk" | while read apk; do
