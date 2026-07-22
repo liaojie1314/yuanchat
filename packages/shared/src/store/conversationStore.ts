@@ -95,6 +95,10 @@ interface ConversationState {
   clearUnread: (id: string) => void;
   /** 从列表移除会话（被踢/退群/解散）；若正是活跃会话则回到未选中态 */
   removeConversation: (id: string) => void;
+  /** presence 帧：按 peerId 单点更新单聊在线态 */
+  applyPresence: (userId: string, online: boolean) => void;
+  /** 登录/重连快照：命中集合的单聊 online，其余单聊 offline（群聊不动） */
+  applyPresenceSnapshot: (onlineIds: string[]) => void;
 }
 
 /**
@@ -141,6 +145,26 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       conversations: s.conversations.filter((c) => c.id !== id),
       activeId: s.activeId === id ? null : s.activeId,
     })),
+
+  applyPresence: (userId, online) =>
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.type === "private" && c.peerId === userId
+          ? { ...c, presence: online ? "online" : "offline" }
+          : c,
+      ),
+    })),
+
+  applyPresenceSnapshot: (onlineIds) => {
+    const online = new Set(onlineIds);
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.type === "private" && c.peerId
+          ? { ...c, presence: online.has(c.peerId) ? "online" : "offline" }
+          : c,
+      ),
+    }));
+  },
 
   applyIncoming: (convId, preview, time, seq) =>
     set((s) => {

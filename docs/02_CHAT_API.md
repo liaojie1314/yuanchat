@@ -206,6 +206,17 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 - 历史消息（`GET /conversations/:id/messages`）每条附 `reactions: [{emoji, count, mine}]` 聚合
   （`mine` 相对请求者；无回应时字段省略）。前端不做乐观更新，统一由帧驱动。
 
+### GET /api/v1/presence
+
+返回**我的好友中当前在线的用户 ID**。登录/重连时拉一次做快照，之后靠 `presence` 帧增量维护。
+
+```json
+{ "code": 0, "message": "ok", "data": { "online_ids": ["uuid"] } }
+```
+
+- 在线 = 该用户在 Hub 中至少有 1 条 WebSocket 连接。多设备去重（首连触发 online、末连触发 offline）。
+- 未来横向扩展换 Redis Pub/Sub 时接口不变，Hub 抽象已预留。
+
 ### GET /api/v1/users/:id
 
 按用户 ID 查看**公开资料**（好友资料卡、群成员点击等入口）。仅返回对外可见字段，
@@ -466,6 +477,7 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 
 | type                   | payload                                                                                                            | 推送对象                                                                                                                                          |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `presence`             | `{user_id, online}`                                                                                                | 好友上下线广播（推给上下线用户的**在线好友**）。前端 `applyPresence` 按 `peerId` 匹配单聊会话，`presence` 从 `online`→`offline` 切换              |
 | `message.ack`          | `{client_msg_id, message_id, conversation_id, seq, timestamp}`                                                     | 发送者的所有设备。乐观 UI 收到后：sending → sent，补服务端 seq                                                                                    |
 | `message.receive`      | `{message_id, conversation_id, sender_id, sender_nickname, content, seq, timestamp, reply_to_id?, client_msg_id?}` | 会话全部成员（含发送者其他设备；本设备按 `client_msg_id` 去重）                                                                                   |
 | `message.read`         | `{conversation_id, user_id, seq}`                                                                                  | 会话全部成员。`user_id`=自己 → 多端未读同步清零；`user_id`=他人 → 把自己 `seq ≤` 该值的已送达消息翻为已读                                         |

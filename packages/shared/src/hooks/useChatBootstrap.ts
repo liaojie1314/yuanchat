@@ -21,6 +21,8 @@ import {
   pseudoWave,
 } from "../api/chat";
 import { setTokenProvider } from "../api/client";
+import { fetchPresence } from "../api/presence";
+import { notifyIncoming } from "../notify";
 import {
   DEMO_CONVERSATIONS,
   DEMO_FRIENDS,
@@ -146,6 +148,8 @@ function wireSocket() {
       }
 
       convStore.applyIncoming(p.conversation_id, preview, formatListTime(iso), p.seq);
+      // 系统通知：失焦 + 非免打扰时弹（桌面端注入 Tauri 实现，web 端静默）
+      if (conv) notifyIncoming({ name: conv.name, isMuted: conv.isMuted }, preview);
 
       // 正在看这个会话：立即上报已读
       if (convStore.activeId === p.conversation_id) {
@@ -250,11 +254,21 @@ function wireSocket() {
       if (p.reason === "kicked") showToast("info", i18n.t("chat.group.kickedNotice"));
       else if (p.reason === "dissolved") showToast("info", i18n.t("chat.group.dissolvedNotice"));
     },
+
+    presence: (p) => {
+      useConversationStore.getState().applyPresence(p.user_id, p.online);
+    },
   });
 
   chatSocket.onReconnect = () => {
-    // 掉线期间可能漏消息：重拉会话列表，清空消息缓存让会话重新按需加载
-    useConversationStore.getState().loadConversations();
+    // 掉线期间可能漏消息：重拉会话列表，清空消息缓存让会话重新按需加载。
+    // 快照串在列表加载之后（applyPresenceSnapshot 按 peerId 匹配，须先有列表）
+    void useConversationStore
+      .getState()
+      .loadConversations()
+      .then(() => fetchPresence())
+      .then((ids) => useConversationStore.getState().applyPresenceSnapshot(ids))
+      .catch(() => {});
     revokeAllLocalPreviews();
     useMessageStore.setState({ messagesByConv: {}, hasMoreByConv: {} });
     const activeId = useConversationStore.getState().activeId;
@@ -298,7 +312,13 @@ export function useChatBootstrap() {
     }
 
     wireSocket();
-    void useConversationStore.getState().loadConversations();
+    // 快照串在列表加载之后（applyPresenceSnapshot 按 peerId 匹配，须先有列表）
+    void useConversationStore
+      .getState()
+      .loadConversations()
+      .then(() => fetchPresence())
+      .then((ids) => useConversationStore.getState().applyPresenceSnapshot(ids))
+      .catch(() => {});
     // 申请列表随登录拉取（"新的朋友"角标；好友列表进通讯录页再拉）
     void useContactStore.getState().loadRequests();
     chatSocket.connect();

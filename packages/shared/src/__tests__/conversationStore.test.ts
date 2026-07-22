@@ -132,4 +132,39 @@ describe("conversationStore", () => {
       expect(useConversationStore.getState().activeId).toBe("other");
     });
   });
+
+  describe("presence", () => {
+    it("applyPresenceSnapshot 按 peerId 全量刷新单聊在线态", () => {
+      useConversationStore.setState({
+        conversations: [
+          { id: "c1", type: "private", name: "a", unreadCount: 0, isMuted: false, peerId: "u1" },
+          { id: "c2", type: "private", name: "b", unreadCount: 0, isMuted: false, peerId: "u2" },
+          { id: "g1", type: "group", name: "g", unreadCount: 0, isMuted: false },
+        ],
+      });
+      useConversationStore.getState().applyPresenceSnapshot(["u1"]);
+      const convs = useConversationStore.getState().conversations;
+      expect(convs.find((c) => c.id === "c1")!.presence).toBe("online");
+      expect(convs.find((c) => c.id === "c2")!.presence).toBe("offline");
+      expect(convs.find((c) => c.id === "g1")!.presence).toBeUndefined();
+    });
+
+    it("applyPresence 单点更新", () => {
+      useConversationStore.setState({
+        conversations: [
+          {
+            id: "c1",
+            type: "private",
+            name: "a",
+            unreadCount: 0,
+            isMuted: false,
+            peerId: "u1",
+            presence: "offline",
+          },
+        ],
+      });
+      useConversationStore.getState().applyPresence("u1", true);
+      expect(useConversationStore.getState().conversations[0].presence).toBe("online");
+    });
+  });
 });

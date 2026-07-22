@@ -127,3 +127,37 @@ func TestHubConcurrentAccess(t *testing.T) {
 		}
 	}
 }
+
+func TestHubPresenceNotifyOnFirstAndLast(t *testing.T) {
+	hub := NewHub(0, zap.NewNop())
+	var mu sync.Mutex
+	var events []bool
+	hub.SetPresenceNotifier(func(_ uuid.UUID, online bool) {
+		mu.Lock()
+		events = append(events, online)
+		mu.Unlock()
+	})
+	uid := uuid.New()
+	c1 := newTestClient(uid)
+	c2 := newTestClient(uid)
+	hub.Register(c1)   // 首连 → online
+	hub.Register(c2)   // 第二设备 → 不触发
+	hub.Unregister(c1) // 还剩一连 → 不触发
+	hub.Unregister(c2) // 末连 → offline
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) != 2 || !events[0] || events[1] {
+		t.Fatalf("expected [online, offline], got %v", events)
+	}
+}
+
+func TestHubOnlineFilter(t *testing.T) {
+	hub := NewHub(0, zap.NewNop())
+	on := uuid.New()
+	off := uuid.New()
+	hub.Register(newTestClient(on))
+	got := hub.OnlineFilter([]uuid.UUID{on, off})
+	if len(got) != 1 || got[0] != on {
+		t.Fatalf("filter: %v", got)
+	}
+}

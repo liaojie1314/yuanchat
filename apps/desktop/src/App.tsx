@@ -1,7 +1,12 @@
 import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 import { MainLayout } from "@yuanchat/ui";
-import { useAuthStore, useKeyboardAwareViewport } from "@yuanchat/shared";
+import { setNotifier, useAuthStore, useKeyboardAwareViewport } from "@yuanchat/shared";
 import { TitleBar } from "./components/TitleBar";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { ChatPage } from "./pages/ChatPage";
@@ -11,6 +16,22 @@ import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { QrLoginPage } from "./pages/QrLoginPage";
+
+// 模块级一次性注册：权限就绪后把 Tauri 通知注入 shared 抽象
+// （receive 帧只在主窗口出现，子窗口注册无害；非 Tauri 环境 catch 静默）
+void (async () => {
+  try {
+    let granted = await isPermissionGranted();
+    if (!granted) {
+      granted = (await requestPermission()) === "granted";
+    }
+    if (granted) {
+      setNotifier((title, body) => sendNotification({ title, body }));
+    }
+  } catch {
+    /* 非 Tauri 环境（浏览器 dev）忽略 */
+  }
+})();
 
 function App() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);

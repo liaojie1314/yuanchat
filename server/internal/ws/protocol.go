@@ -36,7 +36,14 @@ const (
 	TypeConversationUpdated = "conversation.updated"
 	TypeConversationRemoved = "conversation.removed"
 	TypeMessageReaction     = "message.reaction"
+	TypePresence            = "presence"
 )
+
+// PresencePayload 好友上下线推送（推给其在线好友）。
+type PresencePayload struct {
+	UserID uuid.UUID `json:"user_id"`
+	Online bool      `json:"online"`
+}
 
 // MessageReactionPayload 表情回应变更推送（推会话全员，含操作者多端）。
 type MessageReactionPayload struct {
