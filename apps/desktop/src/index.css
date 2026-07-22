@@ -1,0 +1,12 @@
+/* 桌面端特定样式 — 全局样式已由 @yuanchat/design-system 提供 */
+
+/* 在此仅覆盖平台特有样式 */
+
+/* Tauri 窗口的拖拽区域 */
+.tauri-drag-region {
+  -webkit-app-region: drag;
+}
+
+.tauri-no-drag {
+  -webkit-app-region: no-drag;
+}

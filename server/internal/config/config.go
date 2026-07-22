@@ -18,6 +18,7 @@ type Config struct {
 	Log       LogConfig       `mapstructure:"log"`
 	Asynq     AsynqConfig     `mapstructure:"asynq"`
 	Upload    UploadConfig    `mapstructure:"upload"`
+	MinIO     MinIOConfig     `mapstructure:"minio"`
 }
 
 type ServerConfig struct {
@@ -104,6 +105,15 @@ type AsynqConfig struct {
 type UploadConfig struct {
 	MaxFileSize  int64    `mapstructure:"max_file_size"`
 	AllowedTypes []string `mapstructure:"allowed_types"`
+}
+
+// MinIOConfig 对象存储（MinIO / S3 兼容）连接配置。
+type MinIOConfig struct {
+	Endpoint  string `mapstructure:"endpoint"`   // 服务地址，形如 localhost:9000（不含 scheme）
+	AccessKey string `mapstructure:"access_key"` // 访问密钥
+	SecretKey string `mapstructure:"secret_key"` // 私有密钥
+	Bucket    string `mapstructure:"bucket"`     // 默认桶名
+	UseSSL    bool   `mapstructure:"use_ssl"`    // 是否使用 HTTPS
 }
 
 // Load 加载配置文件，支持环境变量覆盖

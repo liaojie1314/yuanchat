@@ -48,27 +48,27 @@ services:
       - yuanchat-net
     restart: unless-stopped
 
-  # ==================== MinIO (文件存储 — 后续启用) ====================
-  # minio:
-  #   image: minio/minio:latest
-  #   container_name: yuanchat-minio
-  #   command: server /data --console-address ":9001"
-  #   environment:
-  #     MINIO_ROOT_USER: yuanchat_minio
-  #     MINIO_ROOT_PASSWORD: yuanchat_minio_dev
-  #   ports:
-  #     - "9000:9000"
-  #     - "9001:9001"
-  #   volumes:
-  #     - minio_data:/data
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-  #   networks:
-  #     - yuanchat-net
-  #   restart: unless-stopped
+  # ==================== MinIO (文件存储) ====================
+  minio:
+    image: minio/minio:latest
+    container_name: yuanchat-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: yuanchat_minio
+      MINIO_ROOT_PASSWORD: yuanchat_minio_dev
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - yuanchat-net
+    restart: unless-stopped
 
   # ==================== Elasticsearch (搜索 — 后续启用) ====================
   # elasticsearch:
@@ -96,10 +96,14 @@ volumes:
     driver: local
   redis_data:
     driver: local
-  # minio_data:
+  minio_data:
+    driver: local
   # es_data:
 
 networks:
   yuanchat-net:
     driver: bridge
     name: yuanchat-net
+    ipam:
+      config:
+        - subnet: 172.29.0.0/16

@@ -1,0 +1,137 @@
+package repository
+
+import (
+	"context"
+	"errors"
+
+	"github.com/google/uuid"
+	"github.com/yuanchat/server/internal/model"
+	"gorm.io/gorm"
+)
+
+// ConversationListItem 会话列表查询的投影结果（含聚合字段）。
+type ConversationListItem struct {
+	model.Conversation
+	Role        int16 `json:"role"`
+	LastReadSeq int64 `json:"last_read_seq"`
+	IsMuted     bool  `json:"is_muted"`
+	MemberCount int64 `json:"member_count"`
+}
+
+// ConversationRepository 处理 conversations / conversation_members 表。
+type ConversationRepository struct {
+	db *gorm.DB
+}
+
+func NewConversationRepository(db *gorm.DB) *ConversationRepository {
+	return &ConversationRepository{db: db}
+}
+
+// DB 暴露底层连接供 service 层组织跨仓储事务。
+func (r *ConversationRepository) DB() *gorm.DB {
+	return r.db
+}
+
+// ListByUserID 查询用户参与的所有会话，按最近更新排序。
+func (r *ConversationRepository) ListByUserID(ctx context.Context, userID uuid.UUID) ([]ConversationListItem, error) {
+	var items []ConversationListItem
+	err := r.db.WithContext(ctx).
+		Table("conversations c").
+		Select(`c.*, cm.role, cm.last_read_seq, cm.is_muted,
+			(SELECT count(*) FROM conversation_members m2 WHERE m2.conversation_id = c.id) AS member_count`).
+		Joins("JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = ?", userID).
+		Where("c.deleted_at IS NULL").
+		Order("c.updated_at DESC").
+		Scan(&items).Error
+	return items, err
+}
+
+// GetMemberIDs 返回会话全部成员的用户 ID（消息分发目标）。
+func (r *ConversationRepository) GetMemberIDs(ctx context.Context, convID uuid.UUID) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := r.db.WithContext(ctx).
+		Model(&model.ConversationMember{}).
+		Where("conversation_id = ?", convID).
+		Pluck("user_id", &ids).Error
+	return ids, err
+}
+
+// IsMember 校验用户是否为会话成员。
+func (r *ConversationRepository) IsMember(ctx context.Context, convID, userID uuid.UUID) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&model.ConversationMember{}).
+		Where("conversation_id = ? AND user_id = ?", convID, userID).
+		Count(&count).Error
+	return count > 0, err
+}
+
+// GetMemberRole 返回成员角色；非成员返回 (0, false, nil)。
+func (r *ConversationRepository) GetMemberRole(ctx context.Context, convID, userID uuid.UUID) (int16, bool, error) {
+	var m model.ConversationMember
+	err := r.db.WithContext(ctx).
+		Where("conversation_id = ? AND user_id = ?", convID, userID).First(&m).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return m.Role, true, nil
+}
+
+// FindByID 按 ID 查会话（软删过滤），不存在返回 nil。
+func (r *ConversationRepository) FindByID(ctx context.Context, id uuid.UUID) (*model.Conversation, error) {
+	var conv model.Conversation
+	err := r.db.WithContext(ctx).First(&conv, "id = ?", id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &conv, nil
+}
+
+// UpdateLastReadSeq 推进成员的已读进度（只前进不后退）。
+func (r *ConversationRepository) UpdateLastReadSeq(ctx context.Context, convID, userID uuid.UUID, seq int64) error {
+	return r.db.WithContext(ctx).
+		Model(&model.ConversationMember{}).
+		Where("conversation_id = ? AND user_id = ? AND last_read_seq < ?", convID, userID, seq).
+		Update("last_read_seq", seq).Error
+}
+
+// GetPeerUser 查询单聊会话中除 userID 外的另一名成员。
+func (r *ConversationRepository) GetPeerUser(ctx context.Context, convID, userID uuid.UUID) (*model.User, error) {
+	var user model.User
+	// 不用表别名：First 会自动追加 ORDER BY users.id，别名会导致 SQL 引用失效
+	err := r.db.WithContext(ctx).
+		Joins("JOIN conversation_members cm ON cm.user_id = users.id").
+		Where("cm.conversation_id = ? AND cm.user_id <> ?", convID, userID).
+		First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &user, err
+}
+
+// MemberWithUser 群成员投影：成员行 + 用户资料。
+type MemberWithUser struct {
+	UserID    uuid.UUID `json:"user_id"`
+	Nickname  string    `json:"nickname"`
+	AvatarURL *string   `json:"avatar_url"`
+	Role      int16     `json:"role"`
+}
+
+// ListMembers 查会话全部成员（owner 在前，其余按昵称升序）。
+func (r *ConversationRepository) ListMembers(ctx context.Context, convID uuid.UUID) ([]MemberWithUser, error) {
+	var items []MemberWithUser
+	err := r.db.WithContext(ctx).
+		Table("conversation_members cm").
+		Select("cm.user_id, u.nickname, u.avatar_url, cm.role").
+		Joins("JOIN users u ON u.id = cm.user_id").
+		Where("cm.conversation_id = ?", convID).
+		Order("cm.role DESC, u.nickname ASC").
+		Scan(&items).Error
+	return items, err
+}

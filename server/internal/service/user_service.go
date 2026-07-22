@@ -1,0 +1,223 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/yuanchat/server/internal/model"
+	"github.com/yuanchat/server/internal/pkg/jwt"
+	"github.com/yuanchat/server/internal/pkg/password"
+	"github.com/yuanchat/server/internal/pkg/shortid"
+	"github.com/yuanchat/server/internal/repository"
+	"go.uber.org/zap"
+)
+
+// Common errors returned by UserService.
+var (
+	ErrDuplicateUser   = errors.New("phone or email already registered")
+	ErrInvalidPassword = errors.New("invalid password")
+	ErrUserNotFound    = errors.New("user not found")
+	ErrInvalidRefresh  = errors.New("invalid or expired refresh token")
+)
+
+// UserService handles user registration, login, and profile operations.
+type UserService struct {
+	repo      *repository.UserRepository
+	jwtGen    *jwt.Generator
+	sidGen    *shortid.Generator
+	logger    *zap.Logger
+}
+
+func NewUserService(repo *repository.UserRepository, jwtGen *jwt.Generator, sidGen *shortid.Generator, logger *zap.Logger) *UserService {
+	return &UserService{repo: repo, jwtGen: jwtGen, sidGen: sidGen, logger: logger}
+}
+
+// RegisterRequest is the input for creating a new account.
+type RegisterRequest struct {
+	Phone    string `json:"phone"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Nickname string `json:"nickname"`
+}
+
+// LoginRequest is the input for authenticating.
+type LoginRequest struct {
+	Account  string `json:"account"` // phone or email
+	Password string `json:"password"`
+}
+
+// AuthResult contains the tokens and user info returned on successful login/register.
+type AuthResult struct {
+	User         model.User     `json:"user"`
+	TokenPair    jwt.TokenPair  `json:"-"`
+	AccessToken  string         `json:"access_token"`
+	RefreshToken string         `json:"refresh_token"`
+	ExpiresIn    int64          `json:"expires_in"`
+}
+
+// Register creates a new user account and returns JWT tokens.
+func (s *UserService) Register(ctx context.Context, req RegisterRequest) (*AuthResult, error) {
+	// 生成短号
+	shortID, err := s.sidGen.Next(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("generate short id: %w", err)
+	}
+
+	// Check for duplicate
+	exists, err := s.repo.ExistsByPhoneOrEmail(ctx, req.Phone, req.Email)
+	if err != nil {
+		return nil, fmt.Errorf("check duplicate: %w", err)
+	}
+	if exists {
+		return nil, ErrDuplicateUser
+	}
+
+	// Hash password
+	hash, err := password.Hash(req.Password)
+	if err != nil {
+		return nil, fmt.Errorf("hash password: %w", err)
+	}
+
+	user := &model.User{
+		ID:           uuid.New(),
+		ShortID:      shortID,
+		Phone:        strPtr(req.Phone),
+		Email:        strPtr(req.Email),
+		PasswordHash: hash,
+		Nickname:     req.Nickname,
+	}
+
+	if err := s.repo.Create(ctx, user); err != nil {
+		return nil, fmt.Errorf("create user: %w", err)
+	}
+
+	s.logger.Info("User registered", zap.String("user_id", user.ID.String()))
+
+	return s.buildAuthResult(*user, "web")
+}
+
+// Login authenticates a user by phone/email + password and returns JWT tokens.
+func (s *UserService) Login(ctx context.Context, req LoginRequest) (*AuthResult, error) {
+	// Find user by phone or email
+	var user *model.User
+	var err error
+
+	if strings.Contains(req.Account, "@") {
+		user, err = s.repo.FindByEmail(ctx, req.Account)
+	} else {
+		user, err = s.repo.FindByPhone(ctx, req.Account)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find user: %w", err)
+	}
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+
+	// Verify password
+	if !password.Verify(user.PasswordHash, req.Password) {
+		return nil, ErrInvalidPassword
+	}
+
+	s.logger.Info("User logged in", zap.String("user_id", user.ID.String()))
+
+	return s.buildAuthResult(*user, "web")
+}
+
+// Profile returns the current user's profile.
+func (s *UserService) Profile(ctx context.Context, userID uuid.UUID) (*model.User, error) {
+	user, err := s.repo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("find user: %w", err)
+	}
+	// FindByID 对未命中返回 (nil, nil)，须转成领域错误，防止调用方解引用 nil
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+	return user, nil
+}
+
+// UpdateProfile 更新用户资料字段（nil 表示不改），持久化后返回最新 user。
+func (s *UserService) UpdateProfile(
+	ctx context.Context,
+	userID uuid.UUID,
+	nickname, avatarURL, bio *string,
+	gender *int16,
+) (*model.User, error) {
+	user, err := s.repo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("find user: %w", err)
+	}
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+
+	if nickname != nil {
+		user.Nickname = *nickname
+	}
+	if avatarURL != nil {
+		user.AvatarURL = avatarURL
+	}
+	if bio != nil {
+		user.Bio = bio
+	}
+	if gender != nil {
+		user.Gender = *gender
+	}
+
+	if err := s.repo.Update(ctx, user); err != nil {
+		return nil, fmt.Errorf("update user: %w", err)
+	}
+	return user, nil
+}
+
+// Refresh exchanges a valid refresh token for a brand-new token pair.
+//
+// 滑动会话（轮换）策略：access 与 refresh 都重新签发、各自重置 TTL，
+// 持续活跃的用户永不掉线。旧 refresh 在剩余有效期内仍可用（无服务端存储）。
+func (s *UserService) Refresh(ctx context.Context, refreshToken string) (*jwt.TokenPair, error) {
+	claims, err := s.jwtGen.Validate(refreshToken)
+	if err != nil || claims.TokenUse != "refresh" {
+		return nil, ErrInvalidRefresh
+	}
+
+	// 用户被注销/封禁后 refresh 立即失效
+	user, err := s.repo.FindByID(ctx, claims.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("find user: %w", err)
+	}
+	if user == nil {
+		return nil, ErrInvalidRefresh
+	}
+
+	pair, err := s.jwtGen.GeneratePair(claims.UserID, claims.DeviceID)
+	if err != nil {
+		return nil, fmt.Errorf("generate tokens: %w", err)
+	}
+	return pair, nil
+}
+
+func (s *UserService) buildAuthResult(user model.User, deviceID string) (*AuthResult, error) {
+	pair, err := s.jwtGen.GeneratePair(user.ID, deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("generate tokens: %w", err)
+	}
+
+	return &AuthResult{
+		User:         user,
+		TokenPair:    *pair,
+		AccessToken:  pair.AccessToken,
+		RefreshToken: pair.RefreshToken,
+		ExpiresIn:    pair.ExpiresIn,
+	}, nil
+}
+
+func strPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}

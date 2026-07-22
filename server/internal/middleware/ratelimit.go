@@ -9,7 +9,12 @@ import (
 )
 
 // RateLimiter 简易令牌桶限流器（单机版）
-// 生产环境建议替换为 Redis 版本的分布式限流
+//
+// 使用内存 map 存储每个 IP 的令牌桶，适用于单机部署。
+// 生产环境应替换为 Redis 分布式限流（如 go-redis/redis_rate），
+// 以保证多实例下的限流一致性。
+//
+// 自动清理：每 10 分钟扫描一次，删除超过 10 分钟无活动的桶。
 type RateLimiter struct {
 	mu       sync.Mutex
 	buckets  map[string]*tokenBucket

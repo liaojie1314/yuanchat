@@ -1,0 +1,81 @@
+{
+  "name": "yuanchat",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "元聊 YuanChat — 企业级即时通讯软件 Monorepo",
+  "scripts": {
+    "dev": "turbo dev",
+    "dev:web": "node scripts/dev.mjs web",
+    "dev:web:mock": "node scripts/dev.mjs web --mock",
+    "dev:desktop": "node scripts/dev.mjs desktop",
+    "dev:desktop:mock": "node scripts/dev.mjs desktop --mock",
+    "dev:android": "node scripts/dev.mjs android",
+    "dev:android:mock": "node scripts/dev.mjs android --mock",
+    "dev:server": "node scripts/dev.mjs server",
+    "dev:stop": "node scripts/dev.mjs stop",
+    "build": "turbo build",
+    "build:pkg": "node scripts/build.mjs",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "lint:fix": "eslint . --ext ts,tsx --fix",
+    "format": "prettier --write \"**/*.{ts,tsx,css,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,css,json,md}\"",
+    "check": "pnpm lint && pnpm format:check && pnpm lint:style",
+    "lint:style": "stylelint \"**/*.css\" --ignore-path .gitignore",
+    "lint:style:fix": "stylelint \"**/*.css\" --fix --ignore-path .gitignore",
+    "release": "release-it",
+    "release:patch": "release-it patch",
+    "release:minor": "release-it minor",
+    "release:major": "release-it major",
+    "release:dry": "release-it --dry-run",
+    "clean": "turbo clean",
+    "test": "turbo test",
+    "test:coverage": "turbo test:coverage",
+    "preinstall": "node scripts/check-env.mjs",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@release-it/conventional-changelog": "^11.0.1",
+    "eslint": "^10.5.0",
+    "eslint-import-resolver-typescript": "^4.4.5",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "eslint-plugin-unused-imports": "^4.4.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.7",
+    "prettier": "^3.8.4",
+    "prettier-plugin-tailwindcss": "^0.8.0",
+    "release-it": "^20.2.0",
+    "stylelint": "^17.13.0",
+    "stylelint-config-standard": "^40.0.0",
+    "stylelint-config-tailwindcss": "^1.0.1",
+    "turbo": "^2.4.0",
+    "typescript": "~5.6.0",
+    "typescript-eslint": "^8.61.0"
+  },
+  "packageManager": "pnpm@10.22.0",
+  "engines": {
+    "node": ">=20.19.0",
+    "pnpm": ">=10"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix --max-warnings 0",
+      "prettier --write"
+    ],
+    "*.css": [
+      "stylelint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md}": [
+      "prettier --write"
+    ]
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

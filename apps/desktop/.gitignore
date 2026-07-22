@@ -1,0 +1,40 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Tauri / Rust
+src-tauri/target/
+# 注意：不整体忽略 src-tauri/gen/。
+# Android 工程（gen/android）含手改源码（MainActivity.kt 软键盘适配、AndroidManifest、
+# Gradle 配置），Tauri 在 gen/android/ 与 gen/android/app/ 内置了 .gitignore 精确排除
+# 构建产物（build/、.gradle/、.cxx/、*.so 等），其余源码应纳入版本控制。
+# 仅忽略未使用的 iOS 工程与首次 init 生成的 schema。
+src-tauri/gen/apple/
+src-tauri/gen/schemas/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Vite config type
+vite.config.d.ts

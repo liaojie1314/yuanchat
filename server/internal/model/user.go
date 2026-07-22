@@ -13,6 +13,7 @@ type User struct {
 	Phone        *string        `gorm:"type:varchar(20);uniqueIndex" json:"phone,omitempty"`
 	Email        *string        `gorm:"type:varchar(255);uniqueIndex" json:"email,omitempty"`
 	PasswordHash string         `gorm:"type:varchar(255);not null" json:"-"`
+	ShortID      int64          `gorm:"type:bigint;uniqueIndex;not null" json:"short_id"` // QQ 号风格短号
 	Nickname     string         `gorm:"type:varchar(50);not null" json:"nickname"`
 	AvatarURL    *string        `gorm:"type:varchar(500)" json:"avatar_url,omitempty"`
 	Bio          *string        `gorm:"type:varchar(500)" json:"bio,omitempty"`

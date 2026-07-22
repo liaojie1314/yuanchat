@@ -1,0 +1,17 @@
+{
+  "name": "元聊 YuanChat",
+  "short_name": "元聊",
+  "description": "企业级即时通讯软件",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f8f9fa",
+  "theme_color": "#4a7cc4",
+  "icons": [
+    {
+      "src": "/yuanchat-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

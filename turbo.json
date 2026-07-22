@@ -1,0 +1,49 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "outputs": ["dist/**", "build/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "dependsOn": ["^lint"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"],
+      "inputs": ["src/**", "test/**", "**/*.test.*", "**/*.spec.*", "vitest.config.*"]
+    },
+    "test:coverage": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"],
+      "inputs": ["src/**", "test/**", "**/*.test.*", "**/*.spec.*", "vitest.config.*"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "format": {
+      "dependsOn": ["^format"]
+    },
+    "clean": {
+      "cache": false
+    },
+    "test:e2e": {
+      "cache": false,
+      "dependsOn": ["^build"]
+    },
+    "tauri:dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "tauri:build": {
+      "dependsOn": ["build"],
+      "outputs": ["src-tauri/target/release/**"]
+    }
+  }
+}
