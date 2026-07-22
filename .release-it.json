@@ -1,7 +1,7 @@
 {
   "$schema": "https://unpkg.com/release-it/schema/release-it.json",
   "git": {
-    "requireBranch": "dev",
+    "requireBranch": "main",
     "commitMessage": "chore(release): release v${version}",
     "tagName": "v${version}",
     "tagAnnotation": "Release v${version}",
@@ -10,7 +10,8 @@
   "github": {
     "release": true,
     "releaseName": "v${version}",
-    "web": true
+    "web": true,
+    "draft": true
   },
   "npm": {
     "publish": false
@@ -24,7 +25,8 @@
     }
   },
   "hooks": {
-    "before:init": ["pnpm check", "pnpm --filter @yuanchat/web build"],
-    "after:release": "echo 'Release v${version} completed. GitHub release created: https://github.com/liaojie1314/yuanchat/releases/tag/v${version}'"
+    "before:init": ["pnpm test"],
+    "after:bump": "node scripts/sync-version.mjs && git add -A",
+    "after:release": "echo 'Release v${version} tagged & pushed. GitHub Actions will now build platform installers and upload to: https://github.com/liaojie1314/yuanchat/releases/tag/v${version}'"
   }
 }
