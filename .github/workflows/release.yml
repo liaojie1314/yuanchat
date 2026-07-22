@@ -101,18 +101,52 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Build Tauri app
+      # macOS/Windows 签名：只有 secret 存在时才注入环境变量，
+      # 避免空值让 tauri 误以为要签名（会去 security import 一个空 pfx）
+      - name: Prepare signing env
+        id: signing
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            echo "sign_macos=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sign_macos=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping macOS codesign (no APPLE_CERTIFICATE secret set)"
+          fi
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "sign_tauri=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sign_tauri=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build Tauri app (unsigned)
+        if: steps.signing.outputs.sign_macos == 'false'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS 签名（secrets 存在时才启用）
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Build Tauri app (signed)
+        if: steps.signing.outputs.sign_macos == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # Windows 签名（未来买证书时补 secret）
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
@@ -183,7 +217,27 @@ jobs:
             echo "::error::ANDROID_KEYSTORE_BASE64 secret is not set. See docs/RELEASE.md"
             exit 1
           fi
-          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          # 用 python base64 更宽容：容忍换行/空格/padding 差异（keytool 生成的 pfx 里可能有）
+          python3 - <<'PY' > "$RUNNER_TEMP/release.keystore"
+          import base64, os, sys
+          data = os.environ['KEYSTORE_B64']
+          # 去除所有空白字符（换行/空格/tab）
+          cleaned = ''.join(data.split())
+          # 补齐 base64 padding
+          missing = (-len(cleaned)) % 4
+          cleaned += '=' * missing
+          sys.stdout.buffer.write(base64.b64decode(cleaned))
+          PY
+          ls -la "$RUNNER_TEMP/release.keystore"
+          # 用 keytool 验证 keystore 可读（早失败早暴露密码/别名问题）
+          if command -v keytool >/dev/null 2>&1; then
+            keytool -list -keystore "$RUNNER_TEMP/release.keystore" \
+              -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+              -alias "${{ secrets.ANDROID_KEY_ALIAS }}" || {
+              echo "::error::keystore 验证失败：可能是 base64 解码错误或密码/别名不匹配"
+              exit 1
+            }
+          fi
           echo "KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
 
       - name: Init Tauri Android
