@@ -58,7 +58,7 @@ func main() {
 	defer database.Close(db)
 
 	// 定向迁移新表（seed 可能先于 server 首次运行）
-	if err := db.AutoMigrate(&model.FriendRequest{}); err != nil {
+	if err := db.AutoMigrate(&model.FriendRequest{}, &model.MessageReaction{}); err != nil {
 		log.Fatalf("migrate friend_requests: %v", err)
 	}
 

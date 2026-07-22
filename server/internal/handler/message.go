@@ -122,3 +122,64 @@ func (h *MessageHandler) Recall(c *gin.Context) {
 	}
 	Success(c, gin.H{"message": "recalled"})
 }
+
+// ReactBody 表情回应请求体。
+type ReactBody struct {
+	Emoji string `json:"emoji" binding:"required"`
+}
+
+// React 切换自己对消息的 emoji 回应（toggle 语义），推 message.reaction 帧给会话全员。
+//
+//	@Summary		Toggle a message reaction
+//	@Tags			chat
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"message id"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/messages/{id}/reactions [post]
+func (h *MessageHandler) React(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		Unauthorized(c, "unauthorized")
+		return
+	}
+	msgID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid message id")
+		return
+	}
+	var body ReactBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	result, err := h.svc.ToggleReaction(c.Request.Context(), userID, msgID, body.Emoji)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrMessageNotFound):
+			NotFound(c, "message not found")
+		case errors.Is(err, service.ErrNotMember):
+			Error(c, http.StatusForbidden, 403, "not a conversation member")
+		case errors.Is(err, service.ErrInvalidEmoji):
+			BadRequest(c, "invalid emoji")
+		default:
+			h.logger.Error("toggle reaction failed", zap.Error(err))
+			InternalError(c, "toggle reaction failed")
+		}
+		return
+	}
+
+	if frame, err := ws.Encode(ws.TypeMessageReaction, ws.MessageReactionPayload{
+		MessageID:      result.Message.ID,
+		ConversationID: result.Message.ConversationID,
+		UserID:         userID,
+		Emoji:          result.Emoji,
+		Count:          result.Count,
+		Reacted:        result.Reacted,
+	}); err == nil {
+		h.dispatcher.SendToUsers(result.MemberIDs, frame)
+	} else {
+		h.logger.Error("encode message.reaction failed", zap.Error(err))
+	}
+	Success(c, gin.H{"emoji": result.Emoji, "count": result.Count, "reacted": result.Reacted})
+}

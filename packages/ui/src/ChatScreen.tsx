@@ -19,12 +19,15 @@
  * // apps/web 与 apps/desktop 的 ChatPage 直接渲染
  * <ChatScreen />
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { MessageSquare } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   fetchMembers,
   isMockEnabled,
+  kickMember,
+  showToast,
+  useAuthStore,
   useBreakpoint,
   useChatBootstrap,
   useConversationStore,
@@ -61,9 +64,12 @@ export function ChatScreen() {
   const [showDetail, setShowDetail] = useState(false);
   const [detailView, setDetailView] = useState<"info" | "members">("info");
   const [members, setMembers] = useState<ConversationMember[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
   const [groupOpen, setGroupOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const leftPanel = useResizable(300, 240, 380);
+  const selfId = useAuthStore((s) => s.user?.id ?? "");
+  const myRole = members.find((m) => m.userId === selfId)?.role ?? 0;
 
   // 切换会话时收起详情，避免面板残留上一个会话的信息
   useEffect(() => {
@@ -71,25 +77,35 @@ export function ChatScreen() {
     setDetailView("info");
   }, [activeId]);
 
-  // 切到成员全列表时拉取成员（mock 模式回退静态数组）
-  useEffect(() => {
-    if (detailView !== "members" || !activeId) return;
+  const refetchMembers = useCallback(() => {
+    if (!activeId) return;
     if (isMockEnabled()) {
       setMembers(MOCK_MEMBERS);
       return;
     }
-    let alive = true;
+    setMembersLoading(true);
     void fetchMembers(activeId)
       .then((list) => {
-        if (alive) setMembers(list);
+        setMembers(list);
       })
       .catch(() => {
-        if (alive) setMembers([]);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [detailView, activeId]);
+        setMembers([]);
+      })
+      .finally(() => setMembersLoading(false));
+  }, [activeId]);
+
+  // 切到成员全列表时拉取成员（mock 模式回退静态数组）
+  useEffect(() => {
+    if (detailView !== "members" || !activeId) return;
+    refetchMembers();
+  }, [detailView, activeId, refetchMembers]);
+
+  const handleKick = (userId: string) => {
+    if (!activeId) return;
+    kickMember(activeId, userId)
+      .then(refetchMembers)
+      .catch(() => showToast("error", t("detail.kickFailed")));
+  };
 
   const modals = (
     <>
@@ -101,7 +117,14 @@ export function ChatScreen() {
   /** 详情面板内容：info（ChatDetail）↔ members（MembersView） */
   const detailPanel = (onClose: () => void) =>
     detailView === "members" ? (
-      <MembersView members={members} onBack={() => setDetailView("info")} />
+      <MembersView
+        members={members}
+        loading={membersLoading}
+        myRole={myRole}
+        selfId={selfId}
+        onKick={handleKick}
+        onBack={() => setDetailView("info")}
+      />
     ) : (
       <ChatDetail onClose={onClose} onShowAllMembers={() => setDetailView("members")} />
     );

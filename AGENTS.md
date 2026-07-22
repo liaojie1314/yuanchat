@@ -34,7 +34,7 @@
 
 ## 当前状态
 
-> 更新于 2026-07-20
+> 更新于 2026-07-22
 
 **MVP 核心链路已打通**（阶段一进行中）：
 
@@ -50,12 +50,26 @@
   `avatars/` 公开 URL，落库持久化，`PUT /users/me`）
 - ✅ 建群流程：好友多选建群（校验全员互为好友）→ 系统消息 + `conversation.created`
   实时推送（`CreateGroupModal.tsx`，端点见 `docs/02_CHAT_API.md`）
-- ✅ 消息撤回：发送后 2 分钟内本人可撤回 → `message.recalled` 全员推送 + 气泡占位
+- ✅ 群管理五操作：改名 / 邀请（好友校验）/ 踢人（role 权限）/ 退群 / 解散（软删）→
+  `conversation.updated` + `conversation.removed` + `message.receive[system]` 帧驱动
+- ✅ 消息撤回：发送后 2 分钟内本人可撤回 → `message.recalled` 全员推送 + 气泡占位；
+  自己文本 5 分钟内可「重新编辑」回填输入框
 - ✅ 图片消息：MinIO 对象存储 + 预签名直传（canvas 压缩、乐观缩略图、失败重试）、
   Lightbox 全屏查看、粘贴/选图发送、列表 `[图片]` 预览（files 端点见 `docs/02_CHAT_API.md`）
+- ✅ 文件消息：任意扩展直传 MinIO（`files/` 前缀）→ 气泡按类型显示 lucide 图标 + 品类色 +
+  预签名下载（`fileIconOf`：pdf/doc/表格/演示/压缩/音视频/图片/代码，未识别回退 File）
+- ✅ 语音消息：MediaRecorder + audio/webm（1-60s，超 60s 自动截断）→ 直传 → 气泡播放
+  （模块级单例 Audio，toggle 播放/停止）
+- ✅ 表情回应（Reactions）：右键菜单快捷 6 emoji + 气泡点击 toggle → `message_reactions`
+  持久化 + `message.reaction` 帧全员实时 + 历史聚合回填（mine 相对请求者）
+- ✅ Presence 在线状态：Hub 首连/末连回调 → 广播给在线好友；`GET /presence` 快照
+  加 `presence` 帧增量；`applyPresence` 按 peerId 匹配单聊，副标题「在线/离线」实时同步
+- ✅ 桌面系统通知：Tauri notification plugin 注入 shared `notifyIncoming`，
+  失焦 + 非免打扰时弹（正文截 60 字）
 - ✅ 一键启动：`pnpm dev:web` / `dev:web:mock` / `dev:desktop` / `dev:android` /
   `dev:server` / `dev:stop`（`scripts/dev.mjs`，见 `docs/DEVELOPMENT.md` 第零章）
-- ⏳ 未做：语音/文件消息、presence（在线状态）、删好友/黑名单
+- ⏳ 未做：管理员任命/转让、语音转文字、消息搜索（需 ES）、删好友/黑名单、
+  presence 换 Redis Pub/Sub（多实例部署时再做）
 
 后端单进程双端口：REST :8080 + WebSocket :8081；消息分发为内存 Hub
 （`Dispatcher` 接口，多实例时换 Redis Pub/Sub 实现）。对象存储为 MinIO（`:9000` S3 端点、

@@ -56,6 +56,8 @@ export interface MessageDTO {
   created_at: string;
   sender_nickname: string;
   sender_avatar_url?: string | null;
+  /** 表情回应聚合（mine 相对请求者） */
+  reactions?: { emoji: string; count: number; mine: boolean }[];
 }
 
 // ========================================
@@ -172,6 +174,57 @@ export function parseImageContent(content: string): {
   }
 }
 
+/** 字节数 → 可读大小文案（B/KB/MB，1 位小数） */
+function humanSize(bytes: number): string {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+/** 文件名 + 字节数 → 气泡展示元数据（扩展名大写，无扩展名回退 FILE） */
+export function formatFileMeta(name: string, bytes: number): { size: string; ext: string } {
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toUpperCase() : "FILE";
+  return { size: humanSize(bytes), ext };
+}
+
+/** content JSON → 文件载荷；非法 JSON 回退空名 */
+export function parseFileContent(content: string): { key?: string; name: string; size: number } {
+  try {
+    const p = JSON.parse(content) as { key?: string; name?: string; size?: number };
+    return {
+      key: typeof p.key === "string" ? p.key : undefined,
+      name: typeof p.name === "string" ? p.name : "",
+      size: typeof p.size === "number" ? p.size : 0,
+    };
+  } catch {
+    return { name: "", size: 0 };
+  }
+}
+
+/** content JSON → 语音载荷；非法 JSON 回退 0 时长 */
+export function parseVoiceContent(content: string): { key?: string; duration: number } {
+  try {
+    const p = JSON.parse(content) as { key?: string; duration?: number };
+    return {
+      key: typeof p.key === "string" ? p.key : undefined,
+      duration: typeof p.duration === "number" ? p.duration : 0,
+    };
+  } catch {
+    return { duration: 0 };
+  }
+}
+
+/** duration 为种子生成固定伪波形（12-20 根，高度 6-18px 确定性伪随机） */
+export function pseudoWave(duration: number): number[] {
+  const bars = Math.min(20, Math.max(12, duration + 8));
+  const wave: number[] = [];
+  for (let i = 0; i < bars; i++) {
+    wave.push(6 + ((i * 7 + duration * 13) % 13));
+  }
+  return wave;
+}
+
 export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
   const isSelf = dto.sender_id === selfUserId;
   const kindMap: Record<number, ChatMessage["kind"]> = {
@@ -184,6 +237,18 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
   // status=2 表示已撤回：气泡走灰字系统占位，忽略 kind/text
   const recalled = dto.status === 2;
   const isImage = dto.message_type === 2;
+  const isFile = dto.message_type === 3;
+  let file: ChatMessage["file"];
+  if (isFile) {
+    const parsed = parseFileContent(dto.content);
+    file = { name: parsed.name, ...formatFileMeta(parsed.name, parsed.size), key: parsed.key };
+  }
+  const isVoice = dto.message_type === 4;
+  let voice: ChatMessage["voice"];
+  if (isVoice) {
+    const parsed = parseVoiceContent(dto.content);
+    voice = { seconds: parsed.duration, wave: pseudoWave(parsed.duration), key: parsed.key };
+  }
 
   return {
     id: dto.id,
@@ -195,6 +260,9 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
       dto.message_type === 1 || dto.message_type === 6 ? parseTextContent(dto.content) : undefined,
     // 历史图片：解析 key + 宽高，渲染时按 key 签下载 URL（无 localUrl）
     image: isImage ? parseImageContent(dto.content) : undefined,
+    file,
+    voice,
+    reactions: dto.reactions,
     seq: dto.seq,
     time: formatMessageTime(dto.created_at),
     dateKey: dateKeyOf(new Date(dto.created_at)),
@@ -288,4 +356,12 @@ export async function fetchMembers(conversationId: string): Promise<Conversation
  */
 export async function recallMessage(messageId: string): Promise<void> {
   await apiPost<Record<string, never>>("/api/v1/messages/" + messageId + "/recall", {});
+}
+
+/** 切换自己对消息的某个 emoji 回应（结果由 message.reaction 帧驱动，不乐观更新） */
+export async function toggleReaction(messageId: string, emoji: string): Promise<void> {
+  await apiPost<{ emoji: string; count: number; reacted: boolean }>(
+    "/api/v1/messages/" + messageId + "/reactions",
+    { emoji },
+  );
 }

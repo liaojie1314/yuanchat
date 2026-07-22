@@ -18,6 +18,7 @@ import {
   createGroup,
   groupFriends,
   isMockEnabled,
+  showToast,
   useContactStore,
   useConversationStore,
 } from "@yuanchat/shared";
@@ -91,7 +92,8 @@ export function CreateGroupModal({ open, onClose }: CreateGroupModalProps) {
       store.clearUnread(conv.id);
       onClose();
     } catch {
-      // 建群失败：解除 busy 让用户重试（错误反馈后续统一 toast，此处不阻断）
+      // 建群失败：解除 busy 让用户重试
+      showToast("error", t("chat.group.createFailed"));
       setBusy(false);
     }
   };

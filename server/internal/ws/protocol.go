@@ -33,7 +33,40 @@ const (
 	TypeContactAccepted     = "contact.accepted"
 	TypeConversationCreated = "conversation.created"
 	TypeMessageRecalled     = "message.recalled"
+	TypeConversationUpdated = "conversation.updated"
+	TypeConversationRemoved = "conversation.removed"
+	TypeMessageReaction     = "message.reaction"
+	TypePresence            = "presence"
 )
+
+// PresencePayload 好友上下线推送（推给其在线好友）。
+type PresencePayload struct {
+	UserID uuid.UUID `json:"user_id"`
+	Online bool      `json:"online"`
+}
+
+// MessageReactionPayload 表情回应变更推送（推会话全员，含操作者多端）。
+type MessageReactionPayload struct {
+	MessageID      uuid.UUID `json:"message_id"`
+	ConversationID uuid.UUID `json:"conversation_id"`
+	UserID         uuid.UUID `json:"user_id"`
+	Emoji          string    `json:"emoji"`
+	Count          int64     `json:"count"`
+	Reacted        bool      `json:"reacted"`
+}
+
+// ConversationUpdatedPayload 群资料/成员数变更推送（改名/邀请/踢人/退群后刷新列表态）。
+type ConversationUpdatedPayload struct {
+	ConversationID uuid.UUID `json:"conversation_id"`
+	Name           string    `json:"name,omitempty"`
+	MemberCount    int64     `json:"member_count,omitempty"`
+}
+
+// ConversationRemovedPayload 会话移出列表推送（被踢 / 本人退群多端同步 / 群解散）。
+type ConversationRemovedPayload struct {
+	ConversationID uuid.UUID `json:"conversation_id"`
+	Reason         string    `json:"reason"` // kicked | left | dissolved
+}
 
 // ConversationCreatedPayload 新会话创建推送（建群），推给全部成员。
 // Conversation 字段为 service.ConversationDTO 的 JSON（避免 ws→service 循环导入，用 any）。
@@ -73,16 +106,18 @@ type ContactAcceptedPayload struct {
 	ConversationID uuid.UUID `json:"conversation_id"`
 }
 
-// ContentPayload 是消息体的传输结构（text / image）。
+// ContentPayload 是消息体的传输结构（text / image / file / voice）。
 //
-// 向后兼容：text 帧只用 Type/Text，image 字段带 omitempty，不会污染文本消息。
+// 向后兼容：text 帧只用 Type/Text，其余字段带 omitempty，不会污染文本消息。
 type ContentPayload struct {
-	Type   string `json:"type"`
-	Text   string `json:"text,omitempty"`
-	Key    string `json:"key,omitempty"`    // image: MinIO object key
-	Width  int    `json:"width,omitempty"`  // image: 像素宽
-	Height int    `json:"height,omitempty"` // image: 像素高
-	Size   int64  `json:"size,omitempty"`   // image: 字节大小
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	Key      string `json:"key,omitempty"`      // image/file/voice: MinIO object key
+	Width    int    `json:"width,omitempty"`    // image: 像素宽
+	Height   int    `json:"height,omitempty"`   // image: 像素高
+	Size     int64  `json:"size,omitempty"`     // image/file/voice: 字节大小
+	Name     string `json:"name,omitempty"`     // file: 原始文件名（展示用）
+	Duration int    `json:"duration,omitempty"` // voice: 时长（秒）
 }
 
 // SendPayload 客户端发送消息请求。

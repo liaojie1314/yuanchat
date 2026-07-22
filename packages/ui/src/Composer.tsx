@@ -19,6 +19,7 @@ import { useTranslation } from "react-i18next";
 import { chatSocket, useConversationStore, useMessageStore } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { EmojiPicker } from "./EmojiPicker";
+import { VoiceRecorderBar } from "./VoiceRecorderBar";
 
 /** typing 帧节流间隔：输入期间最多每 3s 上报一次 */
 const TYPING_THROTTLE_MS = 3000;
@@ -33,14 +34,25 @@ export function Composer({
   const { t } = useTranslation();
   const [value, setValue] = useState("");
   const [showEmoji, setShowEmoji] = useState(false);
+  const [recording, setRecording] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const anyFileInputRef = useRef<HTMLInputElement>(null);
   const lastTypingSentRef = useRef(0);
   const replyingTo = useMessageStore((s) => s.replyingTo);
   const setReplyingTo = useMessageStore((s) => s.setReplyingTo);
+  const composerInsert = useMessageStore((s) => s.composerInsert);
   const activeId = useConversationStore((s) => s.activeId);
 
   const canSend = value.trim().length > 0;
+
+  // 撤回重新编辑：composerInsert 非空 → 覆盖输入框值 + 聚焦，随即清空该字段
+  useEffect(() => {
+    if (composerInsert === null) return;
+    setValue(composerInsert);
+    useMessageStore.getState().setComposerInsert(null);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [composerInsert]);
 
   // 表情面板打开时，监听 document mousedown：点击面板外部即关闭
   // （面板根元素 onMouseDown 已 stopPropagation，故点内部不会触发）
@@ -110,15 +122,31 @@ export function Composer({
   /** 打开系统文件选择器（图片按钮 / 移动端回形针触发） */
   const openFilePicker = () => fileInputRef.current?.click();
 
+  /** 打开任意文件选择器（回形针按钮） */
+  const openAnyFilePicker = () => anyFileInputRef.current?.click();
+
+  /** 回形针选中任意文件：图片走图片路径（压缩预览），其余走文件消息 */
+  const handleAnyFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && activeId) {
+      if (file.type.indexOf("image/") === 0) sendImageFile(file);
+      else void useMessageStore.getState().sendFile(activeId, file);
+    }
+    e.target.value = "";
+  };
+
   /** 隐藏的图片文件选择器（两种布局共用） */
   const fileInput = (
-    <input
-      ref={fileInputRef}
-      type="file"
-      accept="image/*"
-      className="hidden"
-      onChange={handleFilePick}
-    />
+    <>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFilePick}
+      />
+      <input ref={anyFileInputRef} type="file" className="hidden" onChange={handleAnyFilePick} />
+    </>
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -152,8 +180,22 @@ export function Composer({
     </div>
   );
 
+  /** 录音条（两种布局共用）：替换输入行，完成后交 store 发送 */
+  const voiceBar = (
+    <VoiceRecorderBar
+      onDone={(blob, duration) => {
+        setRecording(false);
+        if (activeId) void useMessageStore.getState().sendVoice(activeId, blob, duration);
+      }}
+      onCancel={() => setRecording(false)}
+    />
+  );
+
   if (compact) {
     // 移动端：单行胶囊输入 + 附件/表情/发送
+    if (recording) {
+      return <div className="bg-surface-container-low shrink-0 px-2.5 pt-2 pb-3">{voiceBar}</div>;
+    }
     return (
       <div className="bg-surface-container-low shrink-0 px-2.5 pt-2 pb-3">
         {replyBar}
@@ -166,6 +208,7 @@ export function Composer({
             <ImageIcon size={20} />
           </button>
           <button
+            onClick={openAnyFilePicker}
             className="md3-icon-btn text-on-surface-variant"
             aria-label={t("chat.input.file")}
           >
@@ -204,6 +247,7 @@ export function Composer({
             </button>
           ) : (
             <button
+              onClick={() => setRecording(true)}
               className="md3-icon-btn text-on-surface-variant"
               aria-label={t("chat.input.voice")}
             >
@@ -232,61 +276,65 @@ export function Composer({
         </div>
       )}
       {replyBar}
-      <div className="border-outline-variant focus-within:border-primary focus-within:ring-primary/15 bg-surface-bright dark:bg-surface-container group rounded-2xl border transition-shadow focus-within:ring-[3px]">
-        <textarea
-          ref={textareaRef}
-          rows={1}
-          value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            autoGrow(e.target);
-            notifyTyping();
-          }}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          placeholder={t("chat.input.placeholder")}
-          aria-label={t("chat.input.placeholder")}
-          className="text-body-lg text-on-surface placeholder:text-on-surface-variant/70 block max-h-40 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 leading-relaxed focus:outline-none"
-        />
-        <div className="flex items-center gap-0.5 px-2 pb-1.5">
-          <ToolButton label={t("chat.input.image")} onClick={openFilePicker}>
-            <ImageIcon size={19} />
-          </ToolButton>
-          <ToolButton label={t("chat.input.file")}>
-            <Paperclip size={19} />
-          </ToolButton>
-          <ToolButton
-            label={t("chat.input.emoji")}
-            onClick={() => setShowEmoji((s) => !s)}
-            active={showEmoji}
-          >
-            <Smile size={19} />
-          </ToolButton>
-          <ToolButton label={t("chat.input.voice")}>
-            <Mic size={19} />
-          </ToolButton>
-          <ToolButton label={t("chat.input.more")}>
-            <Plus size={19} />
-          </ToolButton>
-          <span className="flex-1" />
-          <span className="text-label-sm text-on-surface-variant mr-2 hidden opacity-0 transition-opacity duration-150 group-focus-within:opacity-70 sm:inline">
-            {t("chat.input.hint")}
-          </span>
-          <button
-            onClick={send}
-            disabled={!canSend}
-            aria-label={t("chat.input.send")}
-            className={cn(
-              "brand-gradient grid h-9 w-9 shrink-0 place-items-center rounded-full text-white transition-all",
-              canSend
-                ? "hover:brightness-105 active:scale-90"
-                : "cursor-not-allowed opacity-40 grayscale-[0.3]",
-            )}
-          >
-            <Send size={16} />
-          </button>
+      {recording ? (
+        voiceBar
+      ) : (
+        <div className="border-outline-variant focus-within:border-primary focus-within:ring-primary/15 bg-surface-bright dark:bg-surface-container group rounded-2xl border transition-shadow focus-within:ring-[3px]">
+          <textarea
+            ref={textareaRef}
+            rows={1}
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+              autoGrow(e.target);
+              notifyTyping();
+            }}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            placeholder={t("chat.input.placeholder")}
+            aria-label={t("chat.input.placeholder")}
+            className="text-body-lg text-on-surface placeholder:text-on-surface-variant/70 block max-h-40 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 leading-relaxed focus:outline-none"
+          />
+          <div className="flex items-center gap-0.5 px-2 pb-1.5">
+            <ToolButton label={t("chat.input.image")} onClick={openFilePicker}>
+              <ImageIcon size={19} />
+            </ToolButton>
+            <ToolButton label={t("chat.input.file")} onClick={openAnyFilePicker}>
+              <Paperclip size={19} />
+            </ToolButton>
+            <ToolButton
+              label={t("chat.input.emoji")}
+              onClick={() => setShowEmoji((s) => !s)}
+              active={showEmoji}
+            >
+              <Smile size={19} />
+            </ToolButton>
+            <ToolButton label={t("chat.input.voice")} onClick={() => setRecording(true)}>
+              <Mic size={19} />
+            </ToolButton>
+            <ToolButton label={t("chat.input.more")}>
+              <Plus size={19} />
+            </ToolButton>
+            <span className="flex-1" />
+            <span className="text-label-sm text-on-surface-variant mr-2 hidden opacity-0 transition-opacity duration-150 group-focus-within:opacity-70 sm:inline">
+              {t("chat.input.hint")}
+            </span>
+            <button
+              onClick={send}
+              disabled={!canSend}
+              aria-label={t("chat.input.send")}
+              className={cn(
+                "brand-gradient grid h-9 w-9 shrink-0 place-items-center rounded-full text-white transition-all",
+                canSend
+                  ? "hover:brightness-105 active:scale-90"
+                  : "cursor-not-allowed opacity-40 grayscale-[0.3]",
+              )}
+            >
+              <Send size={16} />
+            </button>
+          </div>
         </div>
-      </div>
+      )}
       {fileInput}
     </div>
   );

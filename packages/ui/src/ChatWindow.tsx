@@ -30,6 +30,9 @@ import {
   ApiError,
   formatDateDivider,
   recallMessage,
+  RE_EDIT_WINDOW_MS,
+  showToast,
+  toggleReaction,
   useConversationStore,
   useMessageStore,
 } from "@yuanchat/shared";
@@ -139,11 +142,12 @@ export function ChatWindow({
   };
 
   // 撤回：调服务端（用服务端 id）→ 成功靠 message.recalled 帧统一 applyRecall，不乐观翻转。
-  // 4031（超窗口）行内提示；其余错误静默（消息保持原样）。
   const handleRecall = (messageId: string) => {
     recallMessage(messageId).catch((err) => {
       if (err instanceof ApiError && err.code === 4031) {
-        window.alert(t("chat.message.recallExpired"));
+        showToast("error", t("chat.message.recallExpired"));
+      } else {
+        showToast("error", t("common.opFailed"));
       }
     });
   };
@@ -253,6 +257,27 @@ export function ChatWindow({
                       msg.isSelf && (msg.status === "sent" || msg.status === "read")
                         ? () => handleRecall(msg.id)
                         : undefined
+                    }
+                    onReEdit={
+                      msg.recalled && msg.isSelf && msg.recalledText
+                        ? () => {
+                            if (Date.now() - (msg.recalledAtMs ?? 0) > RE_EDIT_WINDOW_MS) {
+                              showToast("info", t("chat.message.reEditExpired"));
+                              return;
+                            }
+                            useMessageStore.getState().setComposerInsert(msg.recalledText ?? "");
+                          }
+                        : undefined
+                    }
+                    onReact={
+                      // 排除撤回/系统消息/未 ack 乐观消息（其 id 还是 client id，服务端 404）
+                      msg.recalled || msg.kind === "system" || !msg.seq
+                        ? undefined
+                        : (emoji) => {
+                            void toggleReaction(msg.id, emoji).catch(() =>
+                              showToast("error", t("common.opFailed")),
+                            );
+                          }
                     }
                   />
                 </Fragment>

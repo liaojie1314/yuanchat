@@ -15,10 +15,18 @@
  *   demo 数据由 mocks/demoData.ts 注入
  */
 import { create } from "zustand";
-import { fetchMessages, dateKeyOf, formatMessageTime } from "../api/chat";
+import i18n from "@yuanchat/design-system/i18n";
+import {
+  fetchMessages,
+  dateKeyOf,
+  formatFileMeta,
+  formatMessageTime,
+  pseudoWave,
+} from "../api/chat";
 import { compressImage, getUploadUrl, uploadToTicket } from "../api/files";
 import { chatSocket } from "../ws/chatSocket";
 import { useAuthStore } from "./authStore";
+import { showToast } from "./toastStore";
 
 /** 消息在气泡里呈现的内容类别 */
 export type ChatMessageKind = "text" | "image" | "file" | "voice" | "system";
@@ -47,6 +55,10 @@ export interface FilePayload {
   size: string;
   /** 扩展名标签，如 "PDF" */
   ext: string;
+  /** 对象存储 key，收到/确认后据此签下载 URL */
+  key?: string;
+  /** 本地 blob URL，上传期间保留供失败重试 */
+  localUrl?: string;
 }
 
 /** 语音消息载荷 */
@@ -55,6 +67,10 @@ export interface VoicePayload {
   seconds: number;
   /** 波形采样高度（px 值数组，仅供展示） */
   wave: number[];
+  /** 对象存储 key，播放时据此签下载 URL */
+  key?: string;
+  /** 本地 blob URL，上传期间保留供重试/即时回放 */
+  localUrl?: string;
 }
 
 /** 聊天消息（UI 层结构，与后端 Message 实体分离，由 api/chat.ts 映射） */
@@ -88,6 +104,10 @@ export interface ChatMessage {
   edited?: boolean;
   /** 已撤回：气泡渲染灰字系统占位，忽略 kind/text */
   recalled?: boolean;
+  /** 撤回前的原文本（仅本端自己的 text 消息保留，供「重新编辑」回填） */
+  recalledText?: string;
+  /** 撤回发生时刻（epoch ms），重新编辑 5 分钟窗口判定用 */
+  recalledAtMs?: number;
   /** 服务端分配的会话内序列号（已读进度比对用） */
   seq?: number;
   /** 消息创建时间（epoch ms），用于撤回 2 分钟窗口的客户端判定 */
@@ -106,6 +126,9 @@ interface MessageState {
   /** 正在引用回复的消息（composer 上方的引用条） */
   replyingTo: ChatMessage | null;
   setReplyingTo: (msg: ChatMessage | null) => void;
+  /** 待回填输入框的文本（撤回重新编辑）；Composer 消费后置回 null */
+  composerInsert: string | null;
+  setComposerInsert: (text: string | null) => void;
   /** 首次加载会话历史（已有消息时跳过） */
   loadHistory: (conversationId: string) => Promise<void>;
   /** 向上翻页加载更早的历史 */
@@ -117,6 +140,13 @@ interface MessageState {
    * 任一步失败置该消息为 failed（可点击重试，走 retrySend 重跑整个流程）。
    */
   sendImage: (conversationId: string, file: Blob) => Promise<void>;
+  /**
+   * 发送一个文件：乐观插入（文件名/大小/扩展名）→ 申请上传 URL → 直传 → WS file 帧。
+   * 无压缩步骤；localUrl 保留供失败重试取回字节。
+   */
+  sendFile: (conversationId: string, file: File) => Promise<void>;
+  /** 发送一段语音：乐观插入（伪波形）→ 直传 webm → WS voice 帧 */
+  sendVoice: (conversationId: string, blob: Blob, duration: number) => Promise<void>;
   /** 重试发送失败的消息（复用原 client_msg_id；图片则从 localUrl 重传） */
   retrySend: (conversationId: string, messageId: string) => void;
   /** WebSocket message.receive：追加新消息（自动按 clientMsgId 去重自己的回显） */
@@ -137,6 +167,17 @@ interface MessageState {
    * @param operatorName 撤回操作者昵称（预留给调用方拼列表预览，store 内不用）
    */
   applyRecall: (convId: string, messageId: string, operatorName: string) => void;
+  /**
+   * WebSocket message.reaction：更新消息的 emoji 回应聚合。
+   * @param mine 仅当操作者是自己时传 reacted（true/false）；他人操作传 undefined 保持原 mine
+   */
+  applyReaction: (
+    convId: string,
+    messageId: string,
+    emoji: string,
+    count: number,
+    mine: boolean | undefined,
+  ) => void;
   /** typing 帧：显示"正在输入"，4 秒无后续自动清除 */
   setTyping: (convId: string, name: string) => void;
   /** 更新消息状态（重试 / 回执） */
@@ -171,6 +212,9 @@ const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const ACK_TIMEOUT_MS = 5000;
 const TYPING_CLEAR_MS = 4000;
 
+/** 撤回后可重新编辑的时间窗口（5 分钟） */
+export const RE_EDIT_WINDOW_MS = 5 * 60_000;
+
 const now = () =>
   new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
 
@@ -186,8 +230,11 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
   hasMoreByConv: {},
   typingByConv: {},
   replyingTo: null,
+  composerInsert: null,
 
   setReplyingTo: (msg) => set({ replyingTo: msg }),
+
+  setComposerInsert: (text) => set({ composerInsert: text }),
 
   loadHistory: async (conversationId) => {
     if (mockMode) return;
@@ -304,6 +351,68 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     await dispatchImageSend(conversationId, blob, width, height, clientMsgId, get);
   },
 
+  sendFile: async (conversationId, file) => {
+    const clientMsgId = newClientMsgId();
+    const localUrl = URL.createObjectURL(file);
+    const msg: ChatMessage = {
+      id: clientMsgId,
+      conversationId,
+      kind: "file",
+      isSelf: true,
+      file: { name: file.name, ...formatFileMeta(file.name, file.size), localUrl },
+      time: now(),
+      dateKey: dateKeyOf(new Date()),
+      createdAtMs: Date.now(),
+      status: "sending",
+      clientMsgId,
+    };
+    set((s) => ({
+      messagesByConv: {
+        ...s.messagesByConv,
+        [conversationId]: [...(s.messagesByConv[conversationId] ?? []), msg],
+      },
+      replyingTo: null,
+    }));
+
+    if (mockMode) {
+      setTimeout(() => get().setStatus(conversationId, clientMsgId, "sent"), 700);
+      return;
+    }
+
+    await dispatchFileSend(conversationId, file, clientMsgId, get);
+  },
+
+  sendVoice: async (conversationId, blob, duration) => {
+    const clientMsgId = newClientMsgId();
+    const localUrl = URL.createObjectURL(blob);
+    const msg: ChatMessage = {
+      id: clientMsgId,
+      conversationId,
+      kind: "voice",
+      isSelf: true,
+      voice: { seconds: duration, wave: pseudoWave(duration), localUrl },
+      time: now(),
+      dateKey: dateKeyOf(new Date()),
+      createdAtMs: Date.now(),
+      status: "sending",
+      clientMsgId,
+    };
+    set((s) => ({
+      messagesByConv: {
+        ...s.messagesByConv,
+        [conversationId]: [...(s.messagesByConv[conversationId] ?? []), msg],
+      },
+      replyingTo: null,
+    }));
+
+    if (mockMode) {
+      setTimeout(() => get().setStatus(conversationId, clientMsgId, "sent"), 700);
+      return;
+    }
+
+    await dispatchVoiceSend(conversationId, blob, duration, clientMsgId, get);
+  },
+
   retrySend: (conversationId, messageId) => {
     const msg = (get().messagesByConv[conversationId] ?? []).find((m) => m.id === messageId);
     if (!msg) return;
@@ -323,6 +432,49 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       void fetch(localUrl)
         .then((r) => r.blob())
         .then((blob) => dispatchImageSend(conversationId, blob, w, h, clientMsgId, get))
+        .catch(() => get().setStatus(conversationId, messageId, "failed"));
+      return;
+    }
+
+    // 文件：从 localUrl 取回字节重跑上传 + 发送（File 名从 file.name 还原）
+    if (msg.kind === "file") {
+      const localUrl = msg.file?.localUrl;
+      const fileName = msg.file?.name;
+      if (!localUrl || !fileName) return;
+      get().setStatus(conversationId, messageId, "sending");
+      if (mockMode) {
+        setTimeout(() => get().setStatus(conversationId, messageId, "sent"), 700);
+        return;
+      }
+      const clientMsgId = msg.clientMsgId ?? messageId;
+      void fetch(localUrl)
+        .then((r) => r.blob())
+        .then((blob) =>
+          dispatchFileSend(
+            conversationId,
+            new File([blob], fileName, { type: blob.type }),
+            clientMsgId,
+            get,
+          ),
+        )
+        .catch(() => get().setStatus(conversationId, messageId, "failed"));
+      return;
+    }
+
+    // 语音：从 localUrl 取回 webm 字节重跑
+    if (msg.kind === "voice") {
+      const localUrl = msg.voice?.localUrl;
+      const duration = msg.voice?.seconds;
+      if (!localUrl || !duration) return;
+      get().setStatus(conversationId, messageId, "sending");
+      if (mockMode) {
+        setTimeout(() => get().setStatus(conversationId, messageId, "sent"), 700);
+        return;
+      }
+      const clientMsgId = msg.clientMsgId ?? messageId;
+      void fetch(localUrl)
+        .then((r) => r.blob())
+        .then((blob) => dispatchVoiceSend(conversationId, blob, duration, clientMsgId, get))
         .catch(() => get().setStatus(conversationId, messageId, "failed"));
       return;
     }
@@ -370,9 +522,11 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
         ...s.messagesByConv,
         [convId]: (s.messagesByConv[convId] ?? []).map((m) => {
           if (m.clientMsgId !== clientMsgId) return m;
-          // 图片已确认：本地 blob 预览到此为止（新挂载据 key 签下载渲染），
+          // 已确认：本地 blob 预览到此为止（新挂载据 key 签下载渲染），
           // 撤销 object URL 释放内存并清除 localUrl，防长会话内 blob 无限堆积。
           const image = revokeLocalPreview(m.image);
+          const file = revokeFileLocalUrl(m.file);
+          const voice = revokeVoiceLocalUrl(m.voice);
           return {
             ...m,
             // 本地 client id 提升为服务端 message id：撤回/去重以服务端 id 为准，
@@ -384,6 +538,8 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
             dateKey: dateKeyOf(new Date(timestamp)),
             createdAtMs: timestamp,
             ...(image ? { image } : {}),
+            ...(file ? { file } : {}),
+            ...(voice ? { voice } : {}),
           };
         }),
       },
@@ -409,12 +565,41 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       return {
         messagesByConv: {
           ...s.messagesByConv,
-          [convId]: list.map((m) =>
-            m.id === messageId ? { ...m, recalled: true, text: undefined } : m,
-          ),
+          [convId]: list.map((m) => {
+            if (m.id !== messageId) return m;
+            const keepText = m.isSelf && m.kind === "text" && m.text ? m.text : undefined;
+            return {
+              ...m,
+              recalled: true,
+              text: undefined,
+              ...(keepText ? { recalledText: keepText, recalledAtMs: Date.now() } : {}),
+            };
+          }),
         },
       };
     }),
+
+  applyReaction: (convId, messageId, emoji, count, mine) =>
+    set((s) => ({
+      messagesByConv: {
+        ...s.messagesByConv,
+        [convId]: (s.messagesByConv[convId] ?? []).map((m) => {
+          if (m.id !== messageId) return m;
+          const prev = m.reactions ?? [];
+          const existing = prev.find((r) => r.emoji === emoji);
+          if (count <= 0) return { ...m, reactions: prev.filter((r) => r.emoji !== emoji) };
+          const nextMine = mine === undefined ? (existing?.mine ?? false) : mine;
+          const entry = { emoji, count, mine: nextMine };
+          // 已存在原位替换（保持展示顺序稳定），否则追加
+          return {
+            ...m,
+            reactions: existing
+              ? prev.map((r) => (r.emoji === emoji ? entry : r))
+              : [...prev, entry],
+          };
+        }),
+      },
+    })),
 
   setTyping: (convId, name) => {
     const prev = typingTimers.get(convId);
@@ -508,6 +693,26 @@ function revokeLocalPreview(image: ChatMessage["image"]): ChatMessage["image"] {
   return rest;
 }
 
+/** 文件消息 ack 后撤销本地 blob 并清除 localUrl（与图片同路径） */
+function revokeFileLocalUrl(file: ChatMessage["file"]): ChatMessage["file"] {
+  if (!file || !file.localUrl) return file;
+  if (typeof URL !== "undefined" && URL.revokeObjectURL) {
+    URL.revokeObjectURL(file.localUrl);
+  }
+  const { localUrl: _dropped, ...rest } = file;
+  return rest;
+}
+
+/** 语音消息 ack 后撤销本地 blob 并清除 localUrl */
+function revokeVoiceLocalUrl(voice: ChatMessage["voice"]): ChatMessage["voice"] {
+  if (!voice || !voice.localUrl) return voice;
+  if (typeof URL !== "undefined" && URL.revokeObjectURL) {
+    URL.revokeObjectURL(voice.localUrl);
+  }
+  const { localUrl: _dropped, ...rest } = voice;
+  return rest;
+}
+
 /** 把对象 key 写回乐观图片消息（保留已有 localUrl，二者并存） */
 function writeBackImageKey(conversationId: string, clientMsgId: string, key: string) {
   useMessageStore.setState((s) => ({
@@ -518,6 +723,91 @@ function writeBackImageKey(conversationId: string, clientMsgId: string, key: str
       ),
     },
   }));
+}
+
+/**
+ * 文件发送：申请上传 URL → 直传对象存储 → 发 WS file 帧（含对象 key + 原始文件名）。
+ * 后端按扩展名白名单校验（4001 不支持类型），失败置 failed 并 toast。
+ */
+async function dispatchFileSend(
+  conversationId: string,
+  file: File | Blob,
+  clientMsgId: string,
+  get: () => MessageState,
+) {
+  const name = file instanceof File ? file.name : "file.bin";
+  const contentType = file.type || "application/octet-stream";
+  let key: string;
+  try {
+    const ticket = await getUploadUrl(name, contentType, file.size);
+    await uploadToTicket(ticket, file, contentType);
+    key = ticket.objectKey;
+  } catch {
+    const pending = (get().messagesByConv[conversationId] ?? []).find(
+      (m) => m.clientMsgId === clientMsgId,
+    );
+    if (pending) get().setStatus(conversationId, pending.id, "failed");
+    showToast("error", i18n.t("chat.file.unsupported"));
+    return;
+  }
+
+  // 回填对象 key：ack 后可据 key 签下载
+  useMessageStore.setState((s) => ({
+    messagesByConv: {
+      ...s.messagesByConv,
+      [conversationId]: (s.messagesByConv[conversationId] ?? []).map((m) =>
+        m.clientMsgId === clientMsgId && m.file ? { ...m, file: { ...m.file, key } } : m,
+      ),
+    },
+  }));
+
+  chatSocket.send("message.send", {
+    conversation_id: conversationId,
+    content: { type: "file", key, name, size: file.size },
+    client_msg_id: clientMsgId,
+  });
+  armAckTimeout(conversationId, clientMsgId, get);
+}
+
+/**
+ * 语音发送：直传 webm → 发 WS voice 帧（key + duration + size）。
+ * 失败置 failed；ack 后 revoke localUrl（与图片/文件同路径）。
+ */
+async function dispatchVoiceSend(
+  conversationId: string,
+  blob: Blob,
+  duration: number,
+  clientMsgId: string,
+  get: () => MessageState,
+) {
+  let key: string;
+  try {
+    const ticket = await getUploadUrl("voice.webm", "audio/webm", blob.size);
+    await uploadToTicket(ticket, blob, "audio/webm");
+    key = ticket.objectKey;
+  } catch {
+    const pending = (get().messagesByConv[conversationId] ?? []).find(
+      (m) => m.clientMsgId === clientMsgId,
+    );
+    if (pending) get().setStatus(conversationId, pending.id, "failed");
+    return;
+  }
+
+  useMessageStore.setState((s) => ({
+    messagesByConv: {
+      ...s.messagesByConv,
+      [conversationId]: (s.messagesByConv[conversationId] ?? []).map((m) =>
+        m.clientMsgId === clientMsgId && m.voice ? { ...m, voice: { ...m.voice, key } } : m,
+      ),
+    },
+  }));
+
+  chatSocket.send("message.send", {
+    conversation_id: conversationId,
+    content: { type: "voice", key, duration, size: blob.size },
+    client_msg_id: clientMsgId,
+  });
+  armAckTimeout(conversationId, clientMsgId, get);
 }
 
 /** 挂 ack 超时定时器：ACK_TIMEOUT_MS 内未收到回执则置 failed */

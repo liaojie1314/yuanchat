@@ -141,3 +141,13 @@ func (r *ContactRepository) ListFriends(ctx context.Context, userID uuid.UUID) (
 		Scan(&items).Error
 	return items, err
 }
+
+// FriendIDs 返回用户全部好友的用户 ID（presence 广播目标）。
+func (r *ContactRepository) FriendIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := r.db.WithContext(ctx).
+		Model(&model.Contact{}).
+		Where("user_id = ? AND status = ? AND deleted_at IS NULL", userID, model.ContactStatusAccepted).
+		Pluck("contact_user_id", &ids).Error
+	return ids, err
+}

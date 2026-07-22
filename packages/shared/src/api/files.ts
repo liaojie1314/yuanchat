@@ -140,8 +140,13 @@ export interface CompressedImage {
 /** canvas 默认最长边（超过则等比缩小），2560 兼顾清晰度与体积 */
 const DEFAULT_MAX_EDGE = 2560;
 
+/** 压缩输出 MIME：png 保持 png（canvas 重编码保留 alpha），其余统一 jpeg */
+export function outputTypeFor(mime: string): string {
+  return mime === "image/png" ? "image/png" : "image/jpeg";
+}
+
 /**
- * 发送前压缩图片：等比缩到最长边 ≤ maxEdge，编码为 jpeg（默认质量 0.85）。
+ * 发送前压缩图片：等比缩到最长边 ≤ maxEdge，png 保持 png（保 alpha），其余编码 jpeg（质量 0.85）。
  *
  * @param file - 原始图片 blob（来自 file input / 剪贴板）
  * @param maxEdge - 最长边像素上限，默认 2560
@@ -182,7 +187,7 @@ export async function compressImage(
   ctx.drawImage(bitmap, 0, 0, outW, outH);
   dispose(bitmap);
 
-  const blob = await canvasToBlob(canvas, "image/jpeg", 0.85);
+  const blob = await canvasToBlob(canvas, outputTypeFor(file.type), 0.85);
   // toBlob 失败（极少数环境）回退原图，宽高仍用压缩后的目标尺寸
   return { blob: blob ?? file, width: outW, height: outH };
 }

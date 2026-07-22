@@ -3,11 +3,16 @@ export * from "./store/conversationStore";
 export * from "./store/messageStore";
 export * from "./store/authStore";
 export * from "./store/contactStore";
+export * from "./store/toastStore";
+export * from "./store/resetStores";
 export * from "./api/client";
 export * from "./api/chat";
 export * from "./api/contacts";
 export * from "./api/users";
 export * from "./api/files";
+export * from "./api/groups";
+export * from "./api/presence";
+export { setNotifier, notifyIncoming, __resetNotifier } from "./notify";
 export {
   setRefreshHandler,
   ensureFreshToken,
@@ -23,3 +28,5 @@ export { useKeyboardAwareViewport } from "./hooks/useKeyboardAwareViewport";
 export { useBreakpoint, BREAKPOINTS } from "./hooks/useBreakpoint";
 export type { Breakpoint } from "./hooks/useBreakpoint";
 export { useChatBootstrap, isMockEnabled } from "./hooks/useChatBootstrap";
+export { useVoiceRecorder } from "./hooks/useVoiceRecorder";
+export type { VoiceRecorderState } from "./hooks/useVoiceRecorder";

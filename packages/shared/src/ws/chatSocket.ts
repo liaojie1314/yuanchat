@@ -27,7 +27,8 @@ export interface ServerFrames {
     conversation_id: string;
     sender_id: string;
     sender_nickname: string;
-    // text 帧只用 type/text；image 帧带 key/width/height/size（后端 omitempty，不污染文本）
+    // text 帧只用 type/text；image 帧带 key/width/height/size；file 帧带 key/name/size；
+    // voice 帧带 key/duration/size（后端 omitempty，不污染文本）
     content: {
       type: string;
       text?: string;
@@ -35,6 +36,8 @@ export interface ServerFrames {
       width?: number;
       height?: number;
       size?: number;
+      name?: string;
+      duration?: number;
     };
     seq: number;
     timestamp: number;
@@ -49,6 +52,14 @@ export interface ServerFrames {
     operator_id: string;
     operator_nickname: string;
   };
+  "message.reaction": {
+    message_id: string;
+    conversation_id: string;
+    user_id: string;
+    emoji: string;
+    count: number;
+    reacted: boolean;
+  };
   typing: { conversation_id: string; user_id: string; nickname: string };
   "contact.request": {
     request_id: string;
@@ -62,6 +73,9 @@ export interface ServerFrames {
     conversation_id: string;
   };
   "conversation.created": { conversation: ConversationDTO };
+  "conversation.updated": { conversation_id: string; name?: string; member_count?: number };
+  "conversation.removed": { conversation_id: string; reason: "kicked" | "left" | "dissolved" };
+  presence: { user_id: string; online: boolean };
   error: { code: number; message: string; client_msg_id?: string };
 }
 

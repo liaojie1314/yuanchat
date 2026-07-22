@@ -108,4 +108,63 @@ describe("conversationStore", () => {
       expect(conv?.unreadCount).toBe(0);
     });
   });
+
+  describe("removeConversation", () => {
+    it("移除会话并清空 activeId", () => {
+      useConversationStore.setState({
+        conversations: [
+          { id: "g1", type: "group", name: "群", unreadCount: 0, isMuted: false },
+          { id: "c2", type: "private", name: "b", unreadCount: 0, isMuted: false },
+        ],
+        activeId: "g1",
+      });
+      useConversationStore.getState().removeConversation("g1");
+      expect(useConversationStore.getState().conversations.map((c) => c.id)).toEqual(["c2"]);
+      expect(useConversationStore.getState().activeId).toBeNull();
+    });
+
+    it("非活跃会话不影响 activeId", () => {
+      useConversationStore.setState({
+        conversations: [{ id: "g1", type: "group", name: "群", unreadCount: 0, isMuted: false }],
+        activeId: "other",
+      });
+      useConversationStore.getState().removeConversation("g1");
+      expect(useConversationStore.getState().activeId).toBe("other");
+    });
+  });
+
+  describe("presence", () => {
+    it("applyPresenceSnapshot 按 peerId 全量刷新单聊在线态", () => {
+      useConversationStore.setState({
+        conversations: [
+          { id: "c1", type: "private", name: "a", unreadCount: 0, isMuted: false, peerId: "u1" },
+          { id: "c2", type: "private", name: "b", unreadCount: 0, isMuted: false, peerId: "u2" },
+          { id: "g1", type: "group", name: "g", unreadCount: 0, isMuted: false },
+        ],
+      });
+      useConversationStore.getState().applyPresenceSnapshot(["u1"]);
+      const convs = useConversationStore.getState().conversations;
+      expect(convs.find((c) => c.id === "c1")!.presence).toBe("online");
+      expect(convs.find((c) => c.id === "c2")!.presence).toBe("offline");
+      expect(convs.find((c) => c.id === "g1")!.presence).toBeUndefined();
+    });
+
+    it("applyPresence 单点更新", () => {
+      useConversationStore.setState({
+        conversations: [
+          {
+            id: "c1",
+            type: "private",
+            name: "a",
+            unreadCount: 0,
+            isMuted: false,
+            peerId: "u1",
+            presence: "offline",
+          },
+        ],
+      });
+      useConversationStore.getState().applyPresence("u1", true);
+      expect(useConversationStore.getState().conversations[0].presence).toBe("online");
+    });
+  });
 });

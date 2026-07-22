@@ -110,6 +110,30 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 - 响应 `data` 结构同 `GET /conversations` 列表条目；`type` 固定为 2（群聊）。
 - 发起者由本响应把会话插入本地列表并激活，随后到达的 `conversation.created` 帧按会话 id 去重吞掉。
 
+### 群管理五操作
+
+权限模型（`role`：0 普通 / 1 管理员 / 2 群主）：改名 role ≥ 1；邀请任意成员（被邀请者须为邀请者好友）；踢人须操作者 role > 目标 role；退群仅非群主；解散仅群主。
+
+| 方法   | 路径                                        | 请求体                       | 成功响应 data      |
+| ------ | ------------------------------------------- | ---------------------------- | ------------------ |
+| PATCH  | `/api/v1/conversations/:id`                 | `{"name": "新群名"}`（≤100） | `{name}`           |
+| POST   | `/api/v1/conversations/:id/members`         | `{"member_ids": ["uuid"]}`   | `{member_count}`   |
+| DELETE | `/api/v1/conversations/:id/members/:userId` | —                            | `{member_count}`   |
+| POST   | `/api/v1/conversations/:id/leave`           | —                            | `{}`               |
+| DELETE | `/api/v1/conversations/:id`                 | —                            | `{}`（解散，软删） |
+
+错误码：
+
+- `400`：非群聊 / 群名空或超长 / 群主退群 / 邀请对象全部已在群 / 被邀请者非好友（`all members must be your friends`）
+- `403`：非会话成员 / 角色权限不足（普通成员改名、踢平级或群主等）
+- `404`：会话不存在（含已解散）/ 踢的目标不在群内
+
+成功后的状态同步全部走 WS 帧（REST 响应仅回执，前端不做乐观更新）：
+
+- 改名/邀请/踢人/退群：全体在群成员收 `message.receive`（`content.type="system"` 系统消息）+ `conversation.updated`
+- 邀请：新成员额外收 `conversation.created`（新成员视角 DTO，`unread_count`=1）
+- 被踢者收 `conversation.removed(reason="kicked")`；退群者本人多端收 `reason="left"`；解散时全员收 `reason="dissolved"`
+
 ### GET /api/v1/conversations/:id/messages
 
 历史消息分页（seq 降序返回，前端反转为升序展示）。
@@ -163,6 +187,35 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 - `:id` 非合法 UUID 返回 `400`（`invalid message id`）。
 - 消息不存在返回 `404`；非发送者本人返回 `403`（`only the sender can recall`）。
 - 超出 2 分钟窗口返回 **`403`，body `code=4031`**（`recall window expired`）——前端据此行内提示「超过可撤回时间」。
+
+### POST /api/v1/messages/:id/reactions
+
+切换自己对消息的某个 emoji 回应（**toggle 语义**：有则删、无则加），推 `message.reaction` 帧给会话全员。
+
+```json
+// 请求
+{ "emoji": "👍" }
+
+// 响应（count 为该 emoji 操作后的总数，reacted 表示自己操作后的参与态）
+{ "code": 0, "message": "ok", "data": { "emoji": "👍", "count": 2, "reacted": true } }
+```
+
+- `emoji`：trim 后非空且 ≤8 rune，否则 `400`（`invalid emoji`）。
+- 消息不存在或**已撤回**返回 `404`；非会话成员返回 `403`。
+- 表 `message_reactions`：`(message_id, user_id, emoji)` 联合唯一（一人一消息一 emoji 至多一条）。
+- 历史消息（`GET /conversations/:id/messages`）每条附 `reactions: [{emoji, count, mine}]` 聚合
+  （`mine` 相对请求者；无回应时字段省略）。前端不做乐观更新，统一由帧驱动。
+
+### GET /api/v1/presence
+
+返回**我的好友中当前在线的用户 ID**。登录/重连时拉一次做快照，之后靠 `presence` 帧增量维护。
+
+```json
+{ "code": 0, "message": "ok", "data": { "online_ids": ["uuid"] } }
+```
+
+- 在线 = 该用户在 Hub 中至少有 1 条 WebSocket 连接。多设备去重（首连触发 online、末连触发 offline）。
+- 未来横向扩展换 Redis Pub/Sub 时接口不变，Hub 抽象已预留。
 
 ### GET /api/v1/users/:id
 
@@ -408,27 +461,39 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 | -------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `message.send` | `{conversation_id, content: {type:"text", text}, client_msg_id, reply_to_id?}`                      | 发送文本（≤4000 字符）。`client_msg_id` 客户端生成，幂等/回执匹配用                                                                                                                                          |
 | `message.send` | `{conversation_id, content: {type:"image", key, width, height, size}, client_msg_id, reply_to_id?}` | 发送图片。`content` 走图片分支：`key`=`upload-url` 返回的 object_key，`width`/`height`=像素宽高（气泡等比占位防 CLS），`size`=字节；四者缺一或非正 → `400`（`image content requires key/width/height/size`） |
+| `message.send` | `{conversation_id, content: {type:"file", key, name, size}, client_msg_id, reply_to_id?}`           | 发送文件。`name`=原始文件名（展示用，≤255 rune），三者缺一 → `400`；MIME 须在 `upload.allowed_types` 白名单内（upload-url 阶段拦截 `4001`）                                                                  |
+| `message.send` | `{conversation_id, content: {type:"voice", key, duration, size}, client_msg_id, reply_to_id?}`      | 发送语音（webm/opus）。`duration`=秒数，**1-60s** 之外 → `400`（`voice content requires key/duration(1-60s)/size`）                                                                                          |
 | `message.read` | `{conversation_id, seq}`                                                                            | 上报已读进度（已读到的最大 seq，只前进不后退）                                                                                                                                                               |
 | `typing`       | `{conversation_id}`                                                                                 | 正在输入（客户端节流 ~3s/次）                                                                                                                                                                                |
 
-> **ContentPayload（消息体传输结构）**：`{type, text?, key?, width?, height?, size?}`。text 帧只用 `type`/`text`；
-> image 帧用 `type:"image"` + `key`/`width`/`height`/`size`（均 `omitempty`，不污染文本消息）。
-> 服务端落库时按 `content.type` 分流 `message_type`（text=1、image=2），`message.receive` 原样回传
-> `content`，接收端据 `type` 渲染文本气泡或图片气泡（图片气泡用 `key` 换 `download-url` 拉预签名 GET）。
+> **ContentPayload（消息体传输结构）**：`{type, text?, key?, width?, height?, size?, name?, duration?}`。
+> text 帧只用 `type`/`text`；image 帧用 `key`/`width`/`height`/`size`；file 帧用 `key`/`name`/`size`；
+> voice 帧用 `key`/`duration`/`size`（均 `omitempty`，不污染文本消息）。
+> 服务端落库时按 `content.type` 分流 `message_type`（text=1、image=2、file=3、voice=4、system=6），
+> `message.receive` 原样回传 `content`，接收端据 `type` 渲染对应气泡
+> （image/file/voice 均用 `key` 换 `download-url` 拉预签名 GET；voice 播放走单例 Audio）。
 
 ### 服务端 → 客户端
 
-| type                   | payload                                                                                                            | 推送对象                                                                                                                   |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `message.ack`          | `{client_msg_id, message_id, conversation_id, seq, timestamp}`                                                     | 发送者的所有设备。乐观 UI 收到后：sending → sent，补服务端 seq                                                             |
-| `message.receive`      | `{message_id, conversation_id, sender_id, sender_nickname, content, seq, timestamp, reply_to_id?, client_msg_id?}` | 会话全部成员（含发送者其他设备；本设备按 `client_msg_id` 去重）                                                            |
-| `message.read`         | `{conversation_id, user_id, seq}`                                                                                  | 会话全部成员。`user_id`=自己 → 多端未读同步清零；`user_id`=他人 → 把自己 `seq ≤` 该值的已送达消息翻为已读                  |
-| `typing`               | `{conversation_id, user_id, nickname}`                                                                             | 会话中除输入者外的成员（前端显示 4s 后自动消失）                                                                           |
-| `contact.request`      | `{request_id, requester: {id, nickname, avatar_url, short_id}, message, created_at}`                               | 被申请方全部设备。前端置顶插入"新的朋友"列表 + 角标 +1                                                                     |
-| `contact.accepted`     | `{request_id, friend: {id, nickname, avatar_url, short_id}, conversation_id}`                                      | 申请方全部设备。前端翻转申请状态 + 加好友 + 拉会话列表（随后收到打招呼 `message.receive`）                                 |
-| `conversation.created` | `{conversation: ConversationDTO}`                                                                                  | 新建群会话的全部成员（含发起者，前端按会话 id 去重）。帧内 DTO 取成员视角（`unread_count`=1、`my_last_read_seq`=0）        |
-| `message.recalled`     | `{message_id, conversation_id, seq, operator_id, operator_nickname}`                                               | 会话全部成员。前端把对应气泡翻成撤回占位（本人「你撤回了一条消息」/ 他人「X 撤回了一条消息」）；撤回最后一条时刷新列表预览 |
-| `error`                | `{code, message, client_msg_id?}`                                                                                  | 当前连接。`client_msg_id` 非空表示对应那次发送失败                                                                         |
+| type                   | payload                                                                                                            | 推送对象                                                                                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `presence`             | `{user_id, online}`                                                                                                | 好友上下线广播（推给上下线用户的**在线好友**）。前端 `applyPresence` 按 `peerId` 匹配单聊会话，`presence` 从 `online`→`offline` 切换              |
+| `message.ack`          | `{client_msg_id, message_id, conversation_id, seq, timestamp}`                                                     | 发送者的所有设备。乐观 UI 收到后：sending → sent，补服务端 seq                                                                                    |
+| `message.receive`      | `{message_id, conversation_id, sender_id, sender_nickname, content, seq, timestamp, reply_to_id?, client_msg_id?}` | 会话全部成员（含发送者其他设备；本设备按 `client_msg_id` 去重）                                                                                   |
+| `message.read`         | `{conversation_id, user_id, seq}`                                                                                  | 会话全部成员。`user_id`=自己 → 多端未读同步清零；`user_id`=他人 → 把自己 `seq ≤` 该值的已送达消息翻为已读                                         |
+| `typing`               | `{conversation_id, user_id, nickname}`                                                                             | 会话中除输入者外的成员（前端显示 4s 后自动消失）                                                                                                  |
+| `contact.request`      | `{request_id, requester: {id, nickname, avatar_url, short_id}, message, created_at}`                               | 被申请方全部设备。前端置顶插入"新的朋友"列表 + 角标 +1                                                                                            |
+| `contact.accepted`     | `{request_id, friend: {id, nickname, avatar_url, short_id}, conversation_id}`                                      | 申请方全部设备。前端翻转申请状态 + 加好友 + 拉会话列表（随后收到打招呼 `message.receive`）                                                        |
+| `conversation.created` | `{conversation: ConversationDTO}`                                                                                  | 新建群会话的全部成员（含发起者，前端按会话 id 去重）。帧内 DTO 取成员视角（`unread_count`=1、`my_last_read_seq`=0）；被邀请入群时也推给新成员     |
+| `conversation.updated` | `{conversation_id, name?, member_count?}`                                                                          | 群改名/成员数变更后推给全体在群成员，前端 patch 会话列表条目                                                                                      |
+| `conversation.removed` | `{conversation_id, reason}`                                                                                        | `reason`：`kicked`（被踢者）/ `left`（退群者本人多端同步）/ `dissolved`（解散全员）。前端把会话移出列表，kicked/dissolved 弹提示                  |
+| `message.recalled`     | `{message_id, conversation_id, seq, operator_id, operator_nickname}`                                               | 会话全部成员。前端把对应气泡翻成撤回占位（本人「你撤回了一条消息」/ 他人「X 撤回了一条消息」）；撤回最后一条时刷新列表预览                        |
+| `message.reaction`     | `{message_id, conversation_id, user_id, emoji, count, reacted}`                                                    | 会话全员（含操作者多端）。`count`=该 emoji 最新总数；`reacted`=操作者动作是加是删。前端 `user_id`=自己时按 reacted 更新 mine，他人操作保持原 mine |
+| `error`                | `{code, message, client_msg_id?}`                                                                                  | 当前连接。`client_msg_id` 非空表示对应那次发送失败                                                                                                |
+
+> **系统消息**：群管理操作（改名/邀请/踢人/退群）产生的系统消息复用 `message.receive` 帧下发，
+> `content.type = "system"`、`content.text` 为文案（如「Alice 修改群名为「X」」）。
+> 前端渲染为居中胶囊，列表预览不加发送者昵称前缀。落库 `message_type=6`。
 
 ## 四、seq 与已读机制
 

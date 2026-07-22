@@ -331,7 +331,11 @@ Compose 含三个服务：**PostgreSQL**（`:5433`→5432）、**Redis**（`:637
   用户名 `yuanchat_minio` / 密码 `yuanchat_minio_dev`，默认桶 `yuanchat`。
 - **健康检查**：`curl http://localhost:9000/minio/health/live` 返回 200 即就绪。
 - 后端首次连接时幂等创建 `yuanchat` 桶，并对 `avatars/` 前缀开放匿名公共读（头像用永久 public URL，
-  免签名）；图片消息落 `images/` 前缀，走一次性预签名 GET（详见 `docs/02_CHAT_API.md` 的 files 端点）。
+  免签名）；图片消息落 `images/` 前缀，文件/语音消息落 `files/` 前缀，均走一次性预签名 GET
+  （详见 `docs/02_CHAT_API.md` 的 files 端点）。
+- **上传 MIME 白名单**（`server/config/config.yaml` 的 `upload.allowed_types`）：图片 4 类
+  （jpeg/png/gif/webp）+ 文档（pdf/doc/docx/xlsx/pptx/txt/zip）+ 语音 `audio/webm`。
+  新增可传类型时在此追加，重启后端生效；白名单外的 MIME 在 `upload-url` 阶段被 `4001` 拒绝。
 
 > **真机联调注意**：MinIO 预签名 URL 里的 host 来自 `minio.endpoint`（默认 `localhost:9000`）。
 > 手机/平板真机访问宿主机的 `localhost` 会指向设备自身而非开发机，导致图片上传/下载失败。

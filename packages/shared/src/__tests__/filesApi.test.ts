@@ -16,8 +16,17 @@ import {
   uploadToTicket,
   getDownloadUrl,
   centerSquareCrop,
+  outputTypeFor,
   __resetDownloadUrlCache,
 } from "../api/files";
+
+describe("outputTypeFor", () => {
+  it("png 保持 png（保 alpha），其余统一 jpeg", () => {
+    expect(outputTypeFor("image/png")).toBe("image/png");
+    expect(outputTypeFor("image/jpeg")).toBe("image/jpeg");
+    expect(outputTypeFor("image/webp")).toBe("image/jpeg");
+  });
+});
 
 /** 桩：一次 apiGet/apiPost 信封响应 */
 function mockApiOnce(data: unknown) {

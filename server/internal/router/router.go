@@ -1,7 +1,11 @@
 package router
 
 import (
+	"context"
+	"time"
+
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/yuanchat/server/internal/config"
 	"github.com/yuanchat/server/internal/handler"
@@ -36,10 +40,11 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	convRepo := repository.NewConversationRepository(db)
 	msgRepo := repository.NewMessageRepository(db)
 	contactRepo := repository.NewContactRepository(db)
+	reactionRepo := repository.NewReactionRepository(db)
 	sidGen := shortid.NewGenerator(db)
 
 	userSvc := service.NewUserService(userRepo, jwtGen, sidGen, logger)
-	msgSvc := service.NewMessageService(msgRepo, convRepo, userRepo, logger)
+	msgSvc := service.NewMessageService(msgRepo, convRepo, userRepo, reactionRepo, logger)
 	convSvc := service.NewConversationService(convRepo, msgRepo, contactRepo, userRepo, logger)
 	contactSvc := service.NewContactService(contactRepo, userRepo, logger)
 
@@ -53,6 +58,25 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	contactH := handler.NewContactHandler(contactSvc, hub, logger)
 	convH := handler.NewConversationHandler(convSvc, hub, logger)
 	fileH := handler.NewFileHandler(st, cfg.Upload, logger)
+	presenceH := handler.NewPresenceHandler(contactRepo, hub, logger)
+
+	// 好友上下线广播：独立 goroutine 通知在线好友，不阻塞连接注册路径
+	hub.SetPresenceNotifier(func(userID uuid.UUID, online bool) {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			friendIDs, err := contactRepo.FriendIDs(ctx, userID)
+			if err != nil {
+				logger.Warn("presence friend lookup failed", zap.Error(err))
+				return
+			}
+			frame, err := ws.Encode(ws.TypePresence, ws.PresencePayload{UserID: userID, Online: online})
+			if err != nil {
+				return
+			}
+			hub.SendToUsers(friendIDs, frame)
+		}()
+	})
 
 	// --- Routes ---
 	api := r.Group("/api/v1")
@@ -80,10 +104,18 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		chat.POST("/conversations", convH.Create)
 		chat.GET("/conversations/:id/messages", msgH.History)
 		chat.GET("/conversations/:id/members", convH.Members)
+		chat.PATCH("/conversations/:id", convH.Rename)
+		chat.POST("/conversations/:id/members", convH.Invite)
+		chat.DELETE("/conversations/:id/members/:userId", convH.Kick)
+		chat.POST("/conversations/:id/leave", convH.Leave)
+		chat.DELETE("/conversations/:id", convH.Dissolve)
 		chat.POST("/messages/:id/recall", msgH.Recall)
+		chat.POST("/messages/:id/reactions", msgH.React)
 
 		chat.POST("/files/upload-url", fileH.UploadURL)
 		chat.GET("/files/download-url", fileH.DownloadURL)
+
+		chat.GET("/presence", presenceH.Snapshot)
 
 		chat.GET("/contacts", contactH.ListFriends)
 		chat.POST("/contacts/requests", contactH.SendRequest)

@@ -4,16 +4,50 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   formatDateDivider,
+  formatFileMeta,
   formatListTime,
   formatMessageTime,
   mapConversation,
   mapMessage,
   parseTextContent,
   parseImageContent,
+  parseFileContent,
+  parseVoiceContent,
+  pseudoWave,
   fetchMembers,
   recallMessage,
 } from "../api/chat";
 import type { ConversationDTO, MessageDTO } from "../api/chat";
+
+describe("file message mapping", () => {
+  it("formatFileMeta 产出可读大小与大写扩展名", () => {
+    expect(formatFileMeta("报告.pdf", 3355443)).toEqual({ size: "3.2 MB", ext: "PDF" });
+    expect(formatFileMeta("a.tar.gz", 512)).toEqual({ size: "512 B", ext: "GZ" });
+    expect(formatFileMeta("noext", 2048)).toEqual({ size: "2.0 KB", ext: "FILE" });
+  });
+  it("parseFileContent 解析落库 JSON，非法时回退", () => {
+    expect(parseFileContent('{"key":"files/2026/07/x.pdf","name":"报告.pdf","size":100}')).toEqual({
+      key: "files/2026/07/x.pdf",
+      name: "报告.pdf",
+      size: 100,
+    });
+    expect(parseFileContent("broken")).toEqual({ name: "", size: 0 });
+  });
+  it("parseVoiceContent 解析 duration/key", () => {
+    expect(parseVoiceContent('{"key":"files/2026/07/v.webm","duration":12,"size":100}')).toEqual({
+      key: "files/2026/07/v.webm",
+      duration: 12,
+    });
+    expect(parseVoiceContent("bad")).toEqual({ duration: 0 });
+  });
+  it("pseudoWave 确定性伪波形（同 duration 同输出）", () => {
+    const w = pseudoWave(12);
+    expect(w).toEqual(pseudoWave(12));
+    expect(w.length).toBeGreaterThanOrEqual(12);
+    expect(w.length).toBeLessThanOrEqual(20);
+    for (const h of w) expect(h).toBeGreaterThanOrEqual(6);
+  });
+});
 
 describe("parseTextContent", () => {
   it("extracts text from JSON content", () => {

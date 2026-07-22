@@ -19,6 +19,8 @@ export type { ButtonVariant } from "./Button";
 export { Input } from "./Input";
 export { Avatar } from "./Avatar";
 export { ResizeHandle } from "./ResizeHandle";
+export { ToastHost } from "./Toast";
+export { ConfirmDialog } from "./ConfirmDialog";
 
 // 聊天组件
 export { ConversationList } from "./ConversationList";
@@ -34,6 +36,7 @@ export { ChatDetail } from "./ChatDetail";
 export { ChatScreen } from "./ChatScreen";
 export { MembersView } from "./MembersView";
 export { CreateGroupModal } from "./CreateGroupModal";
+export { InviteMembersModal } from "./InviteMembersModal";
 
 // 通讯录组件
 export { ContactsScreen } from "./ContactsScreen";

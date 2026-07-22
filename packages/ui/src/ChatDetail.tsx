@@ -3,24 +3,47 @@
  *
  * @description
  * 位于三/四栏布局的最右侧（平板端以抽屉呈现），展示当前选中会话的：
- * - 头像、名称、类别（群聊显示成员数）
+ * - 头像、名称（群主/管理员可内联改名）、类别（群聊显示成员数）
  * - 快捷操作：邀请成员 / 群文件 / 群二维码（群聊），发消息 / 通话（单聊）
  * - 成员头像墙（群聊，+N 折叠）
  * - 设置行：消息免打扰、置顶会话（开关）
- * - 危险操作：清空聊天记录、退出群组
+ * - 危险操作：清空聊天记录、退出群组（群主为解散群聊，二次确认）
  *
- * 菜单项点击后直接操作 Zustand Store 更新状态。
+ * 群管理操作（改名/邀请/退群/解散）成功后不做本地乐观更新，
+ * 由 conversation.updated / removed 帧统一驱动列表态。
  *
  * @param onClose - 关闭面板回调，非空时右上角显示关闭按钮
  * @param onShowAllMembers - 「查看全部」成员回调，非空时群聊头像墙显示该按钮
  */
 import { useEffect, useState } from "react";
-import { Hash, LogOut, Paperclip, Phone, Trash2, UserPlus, X, MessageCircle } from "lucide-react";
+import {
+  Check,
+  Hash,
+  LogOut,
+  Paperclip,
+  Pencil,
+  Phone,
+  Trash2,
+  UserPlus,
+  X,
+  MessageCircle,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { fetchMembers, isMockEnabled, useConversationStore } from "@yuanchat/shared";
+import {
+  dissolveGroup,
+  fetchMembers,
+  isMockEnabled,
+  leaveGroup,
+  renameGroup,
+  showToast,
+  useAuthStore,
+  useConversationStore,
+} from "@yuanchat/shared";
 import type { ConversationMember } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { InviteMembersModal } from "./InviteMembersModal";
 
 /** 群成员头像墙 mock 数据，mock 模式下回退使用 */
 const MOCK_MEMBERS: ConversationMember[] = [
@@ -45,14 +68,22 @@ export function ChatDetail({
   const activeId = useConversationStore((s) => s.activeId);
   const conversations = useConversationStore((s) => s.conversations);
   const updateConversation = useConversationStore((s) => s.updateConversation);
+  const selfId = useAuthStore((s) => s.user?.id ?? "");
   const conv = conversations.find((c) => c.id === activeId);
 
   const [members, setMembers] = useState<ConversationMember[]>([]);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [confirmDanger, setConfirmDanger] = useState(false);
 
   const convId = conv?.id;
   const isGroup = conv?.type === "group";
+  const memberCount = conv?.memberCount;
+  const myRole = members.find((m) => m.userId === selfId)?.role ?? 0;
 
-  // 群聊拉取真实成员；mock 模式回退静态数组
+  // 群聊拉取真实成员；mock 模式回退静态数组。
+  // memberCount 变化（邀请/踢人/退群帧）时重拉，头像墙实时刷新。
   useEffect(() => {
     if (!isGroup || !convId) {
       setMembers([]);
@@ -73,13 +104,29 @@ export function ChatDetail({
     return () => {
       alive = false;
     };
-  }, [isGroup, convId]);
+  }, [isGroup, convId, memberCount]);
 
   // 防御：如果找不到对应会话（数据不一致），不渲染任何内容
   if (!conv) return null;
 
   const shownMembers = members.slice(0, WALL_LIMIT);
   const extraMembers = (conv.memberCount ?? members.length) - Math.min(members.length, WALL_LIMIT);
+
+  const saveName = () => {
+    const trimmed = nameDraft.trim();
+    setEditingName(false);
+    if (!trimmed || trimmed === conv.name) return;
+    // 成功由 conversation.updated 帧刷新，不做本地乐观更新
+    renameGroup(conv.id, trimmed).catch(() => showToast("error", t("detail.renameFailed")));
+  };
+
+  const isOwner = myRole === 2;
+  const handleDanger = () => {
+    setConfirmDanger(false);
+    const action = isOwner ? dissolveGroup(conv.id) : leaveGroup(conv.id);
+    // 成功由 conversation.removed 帧移除会话
+    action.catch(() => showToast("error", t("common.opFailed")));
+  };
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
@@ -104,7 +151,45 @@ export function ChatDetail({
         <div className="mb-2.5 inline-flex">
           <Avatar name={conv.name} src={conv.avatarUrl} size="xl" presence={conv.presence} />
         </div>
-        <h3 className="text-title-md text-on-surface font-semibold">{conv.name}</h3>
+        {editingName ? (
+          <div className="mx-auto flex max-w-[220px] items-center gap-1">
+            <input
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveName();
+                if (e.key === "Escape") setEditingName(false);
+              }}
+              maxLength={100}
+              autoFocus
+              aria-label={t("detail.renameGroup")}
+              className="bg-surface-container-high text-title-md text-on-surface focus:ring-primary/40 w-full min-w-0 rounded-lg px-2 py-1 text-center font-semibold transition-shadow focus:ring-2 focus:outline-none"
+            />
+            <button
+              onClick={saveName}
+              className="md3-icon-btn text-primary !h-8 !w-8 shrink-0"
+              aria-label={t("common.confirm")}
+            >
+              <Check size={16} />
+            </button>
+          </div>
+        ) : (
+          <h3 className="text-title-md text-on-surface inline-flex items-center gap-1.5 font-semibold">
+            {conv.name}
+            {isGroup && myRole >= 1 && (
+              <button
+                onClick={() => {
+                  setNameDraft(conv.name);
+                  setEditingName(true);
+                }}
+                className="text-on-surface-variant hover:text-primary transition-colors"
+                aria-label={t("detail.renameGroup")}
+              >
+                <Pencil size={14} />
+              </button>
+            )}
+          </h3>
+        )}
         <p className="text-label-sm text-on-surface-variant mt-1">
           {isGroup
             ? `${t("chat.groupChat")}${conv.memberCount ? ` · ${t("chat.members", { count: conv.memberCount })}` : ""}`
@@ -116,7 +201,11 @@ export function ChatDetail({
       <div className="border-outline-variant flex border-t border-b">
         {isGroup ? (
           <>
-            <QuickAction icon={<UserPlus size={19} />} label={t("detail.invite")} />
+            <QuickAction
+              icon={<UserPlus size={19} />}
+              label={t("detail.invite")}
+              onClick={() => setInviteOpen(true)}
+            />
             <QuickAction icon={<Paperclip size={19} />} label={t("detail.groupFiles")} />
             <QuickAction icon={<Hash size={19} />} label={t("detail.groupQrcode")} />
           </>
@@ -169,15 +258,49 @@ export function ChatDetail({
       {/* 危险操作 */}
       <div className="border-outline-variant mt-auto border-t p-2">
         <DangerRow icon={<Trash2 size={17} />} label={t("detail.clearHistory")} />
-        {isGroup && <DangerRow icon={<LogOut size={17} />} label={t("detail.leaveGroup")} />}
+        {isGroup && (
+          <DangerRow
+            icon={<LogOut size={17} />}
+            label={isOwner ? t("detail.dissolveGroup") : t("detail.leaveGroup")}
+            onClick={() => setConfirmDanger(true)}
+          />
+        )}
       </div>
+
+      {isGroup && (
+        <InviteMembersModal
+          open={inviteOpen}
+          onClose={() => setInviteOpen(false)}
+          convId={conv.id}
+          existingMemberIds={members.map((m) => m.userId)}
+        />
+      )}
+      <ConfirmDialog
+        open={confirmDanger}
+        title={isOwner ? t("detail.dissolveGroup") : t("detail.leaveGroup")}
+        message={isOwner ? t("detail.dissolveConfirm") : t("detail.leaveConfirm")}
+        danger
+        onConfirm={handleDanger}
+        onCancel={() => setConfirmDanger(false)}
+      />
     </div>
   );
 }
 
-function QuickAction({ icon, label }: { icon: React.ReactNode; label: string }) {
+function QuickAction({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick?: () => void;
+}) {
   return (
-    <button className="text-on-surface-variant hover:bg-surface-container-high hover:text-primary text-label-sm flex h-16 flex-1 flex-col items-center justify-center gap-1 font-medium transition-colors">
+    <button
+      onClick={onClick}
+      className="text-on-surface-variant hover:bg-surface-container-high hover:text-primary text-label-sm flex h-16 flex-1 flex-col items-center justify-center gap-1 font-medium transition-colors"
+    >
       {icon}
       {label}
     </button>
@@ -220,9 +343,20 @@ function SettingRow({
   );
 }
 
-function DangerRow({ icon, label }: { icon: React.ReactNode; label: string }) {
+function DangerRow({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick?: () => void;
+}) {
   return (
-    <button className="text-error hover:bg-error/10 text-body-md flex h-11 w-full items-center gap-2.5 rounded-lg px-3 font-medium transition-colors">
+    <button
+      onClick={onClick}
+      className="text-error hover:bg-error/10 text-body-md flex h-11 w-full items-center gap-2.5 rounded-lg px-3 font-medium transition-colors"
+    >
       {icon}
       {label}
     </button>

@@ -36,7 +36,7 @@ func testDB(t *testing.T) *gorm.DB {
 	if err != nil || sqlDB.Ping() != nil {
 		t.Skip("dev postgres unavailable, skip integration test")
 	}
-	if err := db.AutoMigrate(&model.FriendRequest{}); err != nil {
+	if err := db.AutoMigrate(&model.FriendRequest{}, &model.MessageReaction{}); err != nil {
 		t.Fatalf("migrate friend_requests: %v", err)
 	}
 	return db
