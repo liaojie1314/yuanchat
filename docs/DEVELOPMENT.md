@@ -629,10 +629,71 @@ apps/web/e2e/
 
 ---
 
-## 十、文档更新规则
+## 十、CI/CD 与发版
+
+### CI（每次 push / PR 触发）
+
+`.github/workflows/ci.yml`：dev / main 分支的 push + PR 触发，两个 job 并行：
+
+| Job        | 内容                                                                            |
+| ---------- | ------------------------------------------------------------------------------- |
+| `frontend` | `pnpm test`（全部 workspace）+ `apps/web` 和 `apps/desktop` 分别 `tsc --noEmit` |
+| `backend`  | `go vet ./...` + `go test ./...` + `go test -race ./internal/ws/`               |
+
+### Release（tag `v*` push 触发）
+
+`.github/workflows/release.yml`：并行打包 5 类产物 → 自动上传到 GitHub Release：
+
+| Job                 | Runner         | 产物                                                      |
+| ------------------- | -------------- | --------------------------------------------------------- |
+| `web`               | ubuntu-latest  | `yuanchat-web-vX.Y.Z.tar.gz`（Vite dist）                 |
+| `desktop (linux)`   | ubuntu-22.04   | `.deb` + `.AppImage`                                      |
+| `desktop (windows)` | windows-latest | `.msi` + `.exe`                                           |
+| `desktop (macos)`   | macos-latest   | `.dmg`（`universal-apple-darwin` = Intel + M 系列）       |
+| `android`           | ubuntu-22.04   | `.apk`（`--split-per-abi`：arm64-v8a/armeabi-v7a/x86_64） |
+
+### 发版命令（本地在 main 分支执行）
+
+```bash
+git checkout main
+pnpm release            # 交互式，选 patch/minor/major
+pnpm release:patch      # 0.1.0 → 0.1.1
+pnpm release:minor      # 0.1.0 → 0.2.0
+pnpm release:major      # 0.1.0 → 1.0.0
+pnpm release:dry        # 模拟运行
+```
+
+release-it 会：跑 `pnpm test` 前置门禁 → bump version → 同步 `apps/*/package.json` +
+`tauri.conf.json` 版本号（`scripts/sync-version.mjs`）→ 生成/更新 `CHANGELOG.md` →
+commit + tag `vX.Y.Z` + push → 在 GitHub 创建 draft Release。
+
+**tag push 的瞬间**触发 release workflow，20-30 分钟后所有产物 attach 到 draft，
+手动 publish 即完成发布。
+
+### GitHub Secrets（一次性配置）
+
+Android 签名必需：
+
+- `ANDROID_KEYSTORE_BASE64` — release keystore 的 base64
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+macOS / Windows 代码签名（可选，用 `if` 门控——secrets 存在时才签）：
+
+- `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD` / `APPLE_SIGNING_IDENTITY`
+- `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID`（notarize 用）
+- `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（更新签名，未来做自动更新用）
+
+完整流程、keystore 生成命令、签名策略详见 **[docs/RELEASE.md](RELEASE.md)**。
+
+---
+
+## 十一、文档更新规则
 
 1. 任何 `package.json` scripts 的**增删改**，必须同步更新本文档的对应章节
 2. 任何 Tauri 配置（`tauri.conf.json`、`capabilities/`）的变更，必须同步更新本文档
 3. 环境变量的**新增/修改/删除**，必须同步更新本文档第七章
 4. 故障排查 / 踩坑记录 → 追加到 `.claude/TROUBLESHOOTING.md`（按平台分类）
 5. 本文档和 `.claude/TROUBLESHOOTING.md` 必须并行更新，所有 AI 会话必须遵守此规则
+6. `.github/workflows/` 的变更须同步更新本文档"CI/CD 与发版"章节，签名策略变化须更新 `docs/RELEASE.md`

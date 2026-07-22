@@ -2,31 +2,72 @@
 
 即时通讯软件 — 从零构建的现代 IM 解决方案。
 
+**当前状态**：MVP 已完成，v0.1.0 发版准备就绪。GitHub Actions 自动打包 Web + Desktop 三平台 + Android APK。
+
 ## 平台支持（Tauri 2 统一桌面 + 移动端）
 
-| 平台    | 技术                             | 状态                              |
-| ------- | -------------------------------- | --------------------------------- |
-| Web     | React + Vite                     | 🚧 开发中（登录/注册/聊天已可用） |
-| Desktop | Tauri 2 + React（Win/Mac/Linux） | 🚧 开发中（与 Web 同一套 UI）     |
-| Mobile  | Tauri 2 + React（Android）       | 🚧 开发中（与 Web 同一套 UI）     |
-| iOS     | Tauri 2 + React                  | 📋 计划中                         |
+| 平台            | 技术                                | 状态                             |
+| --------------- | ----------------------------------- | -------------------------------- |
+| Web             | React + Vite                        | ✅ 可用（`.tar.gz` 静态部署）    |
+| Desktop Linux   | Tauri 2                             | ✅ 可用（`.deb` + `.AppImage`）  |
+| Desktop Windows | Tauri 2                             | ✅ 可用（`.msi` + `.exe`）       |
+| Desktop macOS   | Tauri 2（universal Intel + M 系列） | ✅ 可用（`.dmg`）                |
+| Android         | Tauri 2                             | ✅ 可用（签名 APK）              |
+| iOS             | Tauri 2                             | 📋 计划中（需 Apple 开发者账户） |
 
 ## 已实现功能
 
-- **认证**：手机号/邮箱 + 密码注册登录、SVG 验证码、JWT 双 Token
-- **聊天核心闭环**：会话列表（未读数/置顶/免打扰）、文本消息实时收发（WebSocket）、
-  已读回执（双勾）、正在输入指示、历史消息游标分页、断线自动重连、失败重试
-- **三端响应式聊天主界面**：桌面四栏 / 平板抽屉 / 手机栈式，同一套 React 代码
-- **i18n**：zh-CN / en-US 双语
-- **主题**：多皮肤 + 亮暗模式
+### 认证与用户体系
+
+- 手机号/邮箱 + 密码注册登录、SVG 图形验证码
+- JWT 双 Token 静默刷新（滑动会话轮换 + 401 兜底重试）
+- 个人资料（昵称/头像/签名/性别），512px 中心裁方头像上传至 MinIO
+
+### 好友与关系
+
+- 精确搜索（手机号/元聊号/邮箱）→ 发送申请（WS 实时推送）→ 同意/拒绝
+- 同意即原子建单聊 + 打招呼消息 → 字母分组好友列表
+
+### 会话与消息
+
+- 会话列表（未读数 / 置顶 / 免打扰）+ 三端响应式布局（桌面四栏 / 平板抽屉 / 手机栈式）
+- 文本消息 WebSocket 实时收发 + 已读回执（双勾）+ 正在输入指示
+- 历史消息游标分页、断线自动重连、失败重试
+- **消息撤回**：发送后 2 分钟内可撤回；自己文本 5 分钟内可「重新编辑」回填输入框
+- **图片消息**：canvas 压缩 → MinIO 预签名直传，Lightbox 全屏查看，粘贴/选图发送，PNG 保 alpha
+- **文件消息**：任意扩展直传 MinIO，气泡按类型显示 lucide 图标（PDF/Word/表格/演示/压缩/音视频/图片/代码）+ 品类色 + 预签名下载
+- **语音消息**：MediaRecorder + audio/webm（1-60s，超 60s 自动截断），模块级单例播放器
+- **表情回应 Reactions**：右键菜单快捷 6 emoji 条 + 气泡点击 toggle，全员实时同步 + 历史聚合回填（mine 相对请求者）
+
+### 群管理
+
+- 建群（好友多选 → 系统消息 + `conversation.created` 帧全员推送）
+- 五操作：**改名 / 邀请 / 踢人 / 退群 / 解散**，权限模型（role：0 普通 / 1 管理员 / 2 群主），全部由 `conversation.updated` / `conversation.removed` / `message.receive[system]` 帧驱动
+
+### 实时状态与通知
+
+- **Presence 在线状态**：Hub 首连/末连回调 → 广播给在线好友；`GET /presence` 快照 + `presence` 帧增量
+- **桌面系统通知**：Tauri notification plugin，窗口失焦 + 非免打扰时弹（正文截断 60 字）
+
+### 系统能力
+
+- **i18n**：zh-CN / en-US 双语（`react-i18next`，扁平 key）
+- **主题**：多皮肤（Aurora / Ocean / Emerald 等）+ 亮暗模式，字体缩放
+- **兼容性**：所有 `build.target` 保持 `es2019`，支持旧 Android WebView（Chrome 74+）
+
+### 未做（明确留待下轮迭代）
+
+- 管理员任命/转让群主、语音转文字、消息全文搜索（需 ES）
+- 删好友/黑名单、多实例部署 Presence 换 Redis Pub/Sub
 
 ## 技术栈
 
-- **前端**：React 19 + TypeScript + Vite + Tailwind CSS + Zustand
-- **桌面 + 移动**：Tauri 2（Rust + WebView）
-- **后端**：Go + Gin + GORM + gorilla/websocket（REST :8080 + WS :8081）
-- **存储**：PostgreSQL 16 + Redis 7（MinIO / Elasticsearch 规划中）
-- **部署**：Docker Compose / Kubernetes
+- **前端**：React 19 + TypeScript + Vite + Tailwind CSS + Zustand v5 + lucide-react + react-i18next
+- **桌面 + 移动**：Tauri 2（Rust 内核 + WebView，同一套 React UI 全平台复用）
+- **后端**：Go 1.25 + Gin + GORM + gorilla/websocket + MinIO SDK（REST :8080 + WS :8081）
+- **存储**：PostgreSQL 16 + Redis 7 + MinIO（S3 兼容，用于图片/文件/语音/头像）
+- **测试**：vitest（前端 249+）+ go test（集成测试 -race）+ Playwright E2E
+- **发版**：release-it + GitHub Actions（tag 触发 5 平台并行打包）
 
 ## 快速开始
 
@@ -36,16 +77,16 @@ pnpm install    # 安装依赖（含环境检查）
 
 ### 一键启动（推荐）
 
-| 命令                    | 说明                                                                |
-| ----------------------- | ------------------------------------------------------------------- |
-| `pnpm dev:web`          | **真实后端** + Web：自动起 docker(pg/redis) → seed → Go 服务 → Vite |
-| `pnpm dev:web:mock`     | **Mock 数据** + Web：无需后端/数据库，MSW + demo 数据               |
-| `pnpm dev:desktop`      | 真实后端 + Tauri 桌面窗口                                           |
-| `pnpm dev:desktop:mock` | Mock 数据 + Tauri 桌面窗口                                          |
-| `pnpm dev:android`      | 真实后端 + Tauri Android（自动 `adb reverse` 8080/8081）            |
-| `pnpm dev:android:mock` | Mock 数据 + Tauri Android                                           |
-| `pnpm dev:server`       | 仅后端（docker → seed → Go 服务）                                   |
-| `pnpm dev:stop`         | 停止全部（应用/后端进程 + docker 容器）                             |
+| 命令                    | 说明                                                                      |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `pnpm dev:web`          | **真实后端** + Web：自动起 docker(pg/redis/minio) → seed → Go 服务 → Vite |
+| `pnpm dev:web:mock`     | **Mock 数据** + Web：无需后端/数据库，MSW + demo 数据                     |
+| `pnpm dev:desktop`      | 真实后端 + Tauri 桌面窗口                                                 |
+| `pnpm dev:desktop:mock` | Mock 数据 + Tauri 桌面窗口                                                |
+| `pnpm dev:android`      | 真实后端 + Tauri Android（自动 `adb reverse` 8080/8081）                  |
+| `pnpm dev:android:mock` | Mock 数据 + Tauri Android                                                 |
+| `pnpm dev:server`       | 仅后端（docker → seed → Go 服务）                                         |
+| `pnpm dev:stop`         | 停止全部（应用/后端进程 + docker 容器）                                   |
 
 真实模式测试账号（seed 自动创建，密码均为 `Test@1234`）：
 
@@ -55,25 +96,51 @@ pnpm install    # 安装依赖（含环境检查）
 | Bob   | `13800000002` |
 | Carol | `13800000003` |
 
-两个浏览器分别登录 Alice / Bob 即可互发消息，体验实时收发、已读回执、正在输入。
+Alice ↔ Bob、Bob ↔ Carol 互为好友。用两个浏览器分别登录即可体验实时收发/已读/正在输入/文件/语音/reactions/presence 全套。
 
 > Ctrl+C 停止当前会话拉起的进程（docker 容器保留以加速下次启动）；
 > 彻底清理用 `pnpm dev:stop`。分步启动与更多命令见
 > [开发与打包指南](docs/DEVELOPMENT.md)。
 
+## 发布安装包
+
+主分支 tag push（`v*`）自动触发 GitHub Actions 打包并上传到 [Releases](https://github.com/liaojie1314/yuanchat/releases)：
+
+```bash
+git checkout main
+pnpm release            # 交互式，选 patch/minor/major
+pnpm release:dry        # 模拟运行，看会做什么
+```
+
+产物清单（每次发版自动上传）：
+
+| 平台            | 产物                                                    |
+| --------------- | ------------------------------------------------------- |
+| Web             | `yuanchat-web-vX.Y.Z.tar.gz`                            |
+| Linux Desktop   | `.deb` + `.AppImage`                                    |
+| Windows Desktop | `.msi` + `.exe`                                         |
+| macOS Desktop   | `.dmg`（Intel + M 系列 universal binary）               |
+| Android         | `.apk`（按 ABI 分包：arm64-v8a / armeabi-v7a / x86_64） |
+
+完整发版流程 + Android keystore 配置 + 未来 macOS/Windows 代码签名 → **[发版指南](docs/RELEASE.md)**
+
 ## 文档
 
-- [总体计划书](docs/00_MASTER_PLAN.md)
-- [详细架构设计](docs/01_ARCHITECTURE.md)
-- [聊天 API 与 WebSocket 协议](docs/02_CHAT_API.md)
-- [数据库设计](docs/03_DB_SCHEMA.md)
-- **[开发与打包指南](docs/DEVELOPMENT.md)** ← 启动/构建/打包/测试命令看这里
+- **[总体计划书](docs/00_MASTER_PLAN.md)** — 技术选型、系统架构、路线图
+- **[详细架构设计](docs/01_ARCHITECTURE.md)** — 前后端模块划分、数据流
+- **[聊天 API 与 WebSocket 协议](docs/02_CHAT_API.md)** — REST 端点 + WS 帧 + 系统消息约定
+- **[数据库设计](docs/03_DB_SCHEMA.md)** — 表结构 + 索引 + 迁移
+- **[开发与打包指南](docs/DEVELOPMENT.md)** — 启动/构建/调试/测试命令
+- **[发版指南](docs/RELEASE.md)** — release-it + GitHub Actions + 签名策略
+- **[UI/UX 设计规范](docs/design/README.md)** — Material Design 3 Aurora 主题、组件、多端适配
 
 ## 开发规范
 
-- **GitFlow 工作流**：main ← dev ← feature/bugfix/release/hotfix
-- **Commit 规范**：Conventional Commits
-- **分支策略**：详见 `.claude/CLAUDE.md`
+- **GitFlow 工作流**：main ← dev ← feature / bugfix / release / hotfix
+- **Commit 规范**：Conventional Commits（`feat`/`fix`/`chore`/`docs`/`test`/`refactor`/`build`/`ci`）
+- **分支策略**：详见 [`AGENTS.md`](AGENTS.md)
+- **CI 门禁**：dev/main 每次 push + PR 触发 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+  （前端 test + 双端 tsc + go vet/test + ws -race）
 
 ## License
 
