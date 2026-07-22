@@ -168,3 +168,19 @@ describe("conversationStore", () => {
     });
   });
 });
+
+describe("applyRoleChanged", () => {
+  it("increments memberVersion for the target conversation only", () => {
+    useConversationStore.setState({
+      conversations: [
+        { id: "g1", type: "group", name: "g", unreadCount: 0, isMuted: false },
+        { id: "g2", type: "group", name: "h", unreadCount: 0, isMuted: false },
+      ],
+    });
+    useConversationStore.getState().applyRoleChanged("g1");
+    useConversationStore.getState().applyRoleChanged("g1");
+    const convs = useConversationStore.getState().conversations;
+    expect(convs.find((c) => c.id === "g1")!.memberVersion).toBe(2);
+    expect(convs.find((c) => c.id === "g2")!.memberVersion).toBeUndefined();
+  });
+});

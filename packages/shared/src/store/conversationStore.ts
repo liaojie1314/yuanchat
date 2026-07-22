@@ -70,6 +70,8 @@ export interface Conversation {
   myLastReadSeq?: number;
   /** 单聊对端用户 ID */
   peerId?: string;
+  /** 成员/角色变更版本号（role_changed 帧递增，详情面板据此重拉成员） */
+  memberVersion?: number;
 }
 
 interface ConversationState {
@@ -99,6 +101,8 @@ interface ConversationState {
   applyPresence: (userId: string, online: boolean) => void;
   /** 登录/重连快照：命中集合的单聊 online，其余单聊 offline（群聊不动） */
   applyPresenceSnapshot: (onlineIds: string[]) => void;
+  /** role_changed 帧：递增会话 memberVersion，驱动详情面板重拉成员 */
+  applyRoleChanged: (conversationId: string) => void;
 }
 
 /**
@@ -165,6 +169,13 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       ),
     }));
   },
+
+  applyRoleChanged: (conversationId) =>
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === conversationId ? { ...c, memberVersion: (c.memberVersion ?? 0) + 1 } : c,
+      ),
+    })),
 
   applyIncoming: (convId, preview, time, seq) =>
     set((s) => {

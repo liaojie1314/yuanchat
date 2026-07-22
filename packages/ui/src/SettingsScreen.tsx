@@ -4,12 +4,12 @@
  * @description
  * 对齐 docs/design/04_SETTINGS_PAGE.md 子集，三端形态（useBreakpoint 驱动）：
  *
- * - **desktop / tablet（≥768px）**：左列 240px 分组导航（个人资料卡片 + 4 组项
- *   + 底部退出登录）｜右内容区渲染选中 view，默认选 "profile"
+ * - **desktop / tablet（≥768px）**：左列 240px 分组导航（个人资料卡片 + 分组项）
+ *   ｜右内容区渲染选中 view，默认选 "profile"（退出登录走左侧导航栏，不重复）
  * - **mobile（<768px）**：view==="index" 渲染全屏分组列表（用户卡片 + 分组行
  *   + 退出 + 版本号居中）；选中后栈式推入子页（子页自带返回箭头）
  *
- * 语言/主题切换即时生效；退出登录点击弹行内确认态（不做全局 Dialog）。
+ * 语言/主题切换即时生效；移动端退出登录点击弹行内确认态（不做全局 Dialog）。
  * 挂载时对齐 i18n.language 与已持久化的 themeStore.locale。
  */
 import { useEffect, useState } from "react";
@@ -106,7 +106,7 @@ export function SettingsScreen() {
     </button>
   );
 
-  /** 退出登录：行内两按钮确认态 */
+  /** 退出登录：行内两按钮确认态（仅移动端渲染；桌面端走左侧导航栏） */
   const logoutBlock = confirmLogout ? (
     <div className="flex flex-col gap-2 px-1">
       <p className="text-body-sm text-on-surface-variant text-center">
@@ -195,7 +195,6 @@ export function SettingsScreen() {
             </button>
           );
         })}
-        <div className="mt-auto pt-2">{logoutBlock}</div>
       </aside>
 
       {/* 右内容区 */}

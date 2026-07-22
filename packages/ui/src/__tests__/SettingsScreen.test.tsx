@@ -37,4 +37,9 @@ describe("SettingsScreen", () => {
     fireEvent.click(screen.getByText("Account & Security"));
     expect(screen.getByText("138****0001")).toBeInTheDocument();
   });
+
+  it("桌面端不渲染退出登录（登出唯一入口在左侧导航栏）", () => {
+    render(<SettingsScreen />);
+    expect(screen.queryByText("Sign Out")).toBeNull();
+  });
 });

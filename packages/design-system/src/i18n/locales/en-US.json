@@ -14,6 +14,7 @@
   "common.offline": "Offline",
   "common.busy": "Busy",
   "common.more": "More",
+  "common.comingSoon": "Coming soon",
 
   "settings.title": "Settings",
   "settings.general": "General",
@@ -205,6 +206,16 @@
   "detail.kickMember": "Remove from group",
   "detail.kickConfirm": "Remove %{name} from the group?",
   "detail.kickFailed": "Failed to remove",
+
+  "group.appointAdmin": "Make admin",
+  "group.revokeAdmin": "Remove admin",
+  "group.transferOwner": "Transfer ownership",
+  "group.confirmTransferTitle": "Transfer ownership?",
+  "group.confirmTransferMessage": "%{name} will become the new owner and you will be demoted to admin.",
+  "group.transferredToast": "Ownership transferred",
+  "group.becameOwnerToast": "You are now the group owner",
+  "group.becameAdminToast": "You have been made an admin",
+  "group.revokedAdminToast": "You are no longer an admin",
 
   "contacts.title": "Contacts",
   "contacts.search": "Search contacts…",

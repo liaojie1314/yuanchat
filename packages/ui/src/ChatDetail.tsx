@@ -80,10 +80,12 @@ export function ChatDetail({
   const convId = conv?.id;
   const isGroup = conv?.type === "group";
   const memberCount = conv?.memberCount;
+  const memberVersion = conv?.memberVersion;
   const myRole = members.find((m) => m.userId === selfId)?.role ?? 0;
 
   // 群聊拉取真实成员；mock 模式回退静态数组。
-  // memberCount 变化（邀请/踢人/退群帧）时重拉，头像墙实时刷新。
+  // memberCount（邀请/踢人/退群帧）或 memberVersion（角色变更帧）变化时重拉，
+  // 头像墙与"我"的角色实时刷新。
   useEffect(() => {
     if (!isGroup || !convId) {
       setMembers([]);
@@ -104,7 +106,7 @@ export function ChatDetail({
     return () => {
       alive = false;
     };
-  }, [isGroup, convId, memberCount]);
+  }, [isGroup, convId, memberCount, memberVersion]);
 
   // 防御：如果找不到对应会话（数据不一致），不渲染任何内容
   if (!conv) return null;

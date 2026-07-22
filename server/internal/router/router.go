@@ -112,6 +112,9 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		chat.DELETE("/conversations/:id/members/:userId", convH.Kick)
 		chat.POST("/conversations/:id/leave", convH.Leave)
 		chat.DELETE("/conversations/:id", convH.Dissolve)
+		chat.POST("/conversations/:id/admins", convH.AppointAdmin)
+		chat.DELETE("/conversations/:id/admins/:userId", convH.RevokeAdmin)
+		chat.POST("/conversations/:id/owner-transfer", convH.TransferOwner)
 		chat.POST("/messages/:id/recall", msgH.Recall)
 		chat.POST("/messages/:id/reactions", msgH.React)
 

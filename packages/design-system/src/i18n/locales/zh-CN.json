@@ -14,6 +14,7 @@
   "common.offline": "离线",
   "common.busy": "忙碌",
   "common.more": "更多",
+  "common.comingSoon": "功能开发中，敬请期待",
 
   "settings.title": "设置",
   "settings.general": "通用",
@@ -205,6 +206,16 @@
   "detail.kickMember": "移出群聊",
   "detail.kickConfirm": "确定将 %{name} 移出群聊？",
   "detail.kickFailed": "移出失败",
+
+  "group.appointAdmin": "设为管理员",
+  "group.revokeAdmin": "取消管理员",
+  "group.transferOwner": "转让群主",
+  "group.confirmTransferTitle": "转让群主？",
+  "group.confirmTransferMessage": "转让后 %{name} 将成为新群主，你将降为管理员。",
+  "group.transferredToast": "群主已转让",
+  "group.becameOwnerToast": "你已成为群主",
+  "group.becameAdminToast": "你已被任命为管理员",
+  "group.revokedAdminToast": "你已被取消管理员",
 
   "contacts.title": "通讯录",
   "contacts.search": "搜索联系人…",

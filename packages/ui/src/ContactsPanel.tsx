@@ -11,7 +11,7 @@
 import { useMemo, useRef, useState } from "react";
 import { Ban, Search, UserPlus, UserRoundPlus, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useContactStore, groupFriends } from "@yuanchat/shared";
+import { useContactStore, usePresenceStore, groupFriends } from "@yuanchat/shared";
 import type { Friend } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
@@ -48,6 +48,7 @@ export function ContactsPanel({
   const { t } = useTranslation();
   const friends = useContactStore((s) => s.friends);
   const requests = useContactStore((s) => s.requests);
+  const onlineIds = usePresenceStore((s) => s.onlineIds);
   const pendingCount = useMemo(
     () => requests.filter((r) => r.direction === "in" && r.status === 0).length,
     [requests],
@@ -176,7 +177,12 @@ export function ContactsPanel({
                     f.id === selectedId ? "bg-primary-container/60" : "hover:bg-surface-container",
                   )}
                 >
-                  <Avatar name={f.nickname} src={f.avatarUrl} size="md" />
+                  <Avatar
+                    name={f.nickname}
+                    src={f.avatarUrl}
+                    size="md"
+                    online={onlineIds.includes(f.id)}
+                  />
                   <span className="text-body-lg text-on-surface min-w-0 flex-1 truncate">
                     {f.nickname}
                   </span>

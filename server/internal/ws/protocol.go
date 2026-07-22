@@ -38,6 +38,7 @@ const (
 	TypeMessageReaction     = "message.reaction"
 	TypePresence            = "presence"
 	TypeFriendRemoved       = "friend.removed"
+	TypeRoleChanged         = "conversation.role_changed"
 )
 
 // FriendRemovedPayload 好友关系解除推送（删好友双向下发）。
@@ -50,6 +51,15 @@ type FriendRemovedPayload struct {
 type PresencePayload struct {
 	UserID uuid.UUID `json:"user_id"`
 	Online bool      `json:"online"`
+}
+
+// RoleChangedPayload 群成员角色变更推送（任命/免除/转让，推群内全员）。
+// 转让群主会连发两帧：新群主 role=2、原群主 role=1。
+type RoleChangedPayload struct {
+	ConversationID uuid.UUID `json:"conversation_id"`
+	UserID         uuid.UUID `json:"user_id"`
+	NewRole        int16     `json:"new_role"`
+	ChangedBy      uuid.UUID `json:"changed_by"`
 }
 
 // MessageReactionPayload 表情回应变更推送（推会话全员，含操作者多端）。

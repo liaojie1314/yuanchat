@@ -50,8 +50,8 @@ export function ContactsScreen() {
   const [addOpen, setAddOpen] = useState(false);
   const leftPanel = useResizable(300, 240, 380);
 
-  // 进入通讯录拉好友 + 申请列表（直接刷新进本页时 ChatScreen 的
-  // bootstrap 未挂载，须自行拉取；mock 模式数据已由 bootstrap 注入）
+  // 进入通讯录拉好友 + 申请列表（保持数据新鲜；WS 连接由 MainLayout
+  // 的 bootstrap 维持；mock 模式数据已由 bootstrap 注入）
   useEffect(() => {
     if (!isMockEnabled()) {
       void loadFriends();

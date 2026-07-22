@@ -75,6 +75,12 @@ export interface ServerFrames {
   "conversation.created": { conversation: ConversationDTO };
   "conversation.updated": { conversation_id: string; name?: string; member_count?: number };
   "conversation.removed": { conversation_id: string; reason: "kicked" | "left" | "dissolved" };
+  "conversation.role_changed": {
+    conversation_id: string;
+    user_id: string;
+    new_role: number;
+    changed_by: string;
+  };
   "friend.removed": { friend_id: string };
   presence: { user_id: string; online: boolean };
   error: { code: number; message: string; client_msg_id?: string };
