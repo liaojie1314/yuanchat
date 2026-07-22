@@ -46,6 +46,8 @@ jobs:
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
+          # workflow_dispatch 触发时 ref 是分支名（如 main），需显式指定 tag
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: yuanchat-web-*.tar.gz
           fail_on_unmatched_files: true
 
@@ -351,5 +353,6 @@ jobs:
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: artifacts/*.apk
           fail_on_unmatched_files: true
