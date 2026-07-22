@@ -21,20 +21,27 @@
 
 ### 2.1 前端技术方案
 
-| 方案                         | 适用范围                | 推荐度     | 说明                                                                        |
-| ---------------------------- | ----------------------- | ---------- | --------------------------------------------------------------------------- |
-| **React (Vite) + Capacitor** | Web / iOS / Android     | ⭐⭐⭐⭐⭐ | 一套 React 代码，Capacitor 打包为移动端原生应用；PWA 支持离线；维护成本最低 |
-| **React (Vite) + Tauri**     | Desktop (Win/Mac/Linux) | ⭐⭐⭐⭐⭐ | Rust 内核，体积小，性能高，比 Electron 轻量                                 |
-| **React Native**             | Mobile (Android/iOS)    | ⭐⭐⭐     | 原生体验更好，但需要维护两套代码（Web + RN），仅当 Capacitor 性能不足时考虑 |
-| **Electron**                 | Desktop (Win/Mac/Linux) | ⭐⭐⭐     | 成熟但体积大，Tauri 是更好的替代品                                          |
+| 方案                         | 适用范围                | 推荐度     | 说明                                                                                                             |
+| ---------------------------- | ----------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------- |
+| **React (Vite) + Tauri 2**   | Desktop + Mobile + Web  | ⭐⭐⭐⭐⭐ | Rust 内核，同一套 React UI 全平台复用（Win/Mac/Linux/Android/iOS）；体积小、性能高                               |
+| **React (Vite) + Capacitor** | Web / iOS / Android     | ⭐⭐⭐     | 曾评估但未采用：Tauri 2 已具备移动端能力，无需两套原生打包工具                                                   |
+| **React Native**             | Mobile (Android/iOS)    | ⭐⭐       | 原生体验更好，但 `<View>`/`<Text>` 与 Web `<div>`/`<span>` 是两套渲染体系，Tailwind CSS 无法复用，团队维护成本高 |
+| **Electron**                 | Desktop (Win/Mac/Linux) | ⭐⭐       | 成熟但体积大，Tauri 是更好的替代品                                                                               |
 
-**最终推荐组合：**
+**最终采用方案（当前实现）：**
 
-- **Web 端**：React + TypeScript + Vite + PWA
-- **桌面端**：Tauri（React 作为 UI 层）
-- **移动端**：Capacitor（复用 Web 端 React 代码）
+- **Web 端**：React 19 + TypeScript + Vite（`build.target=es2019` 兼容旧 WebView）
+- **桌面端**：Tauri 2（Rust 内核 + WebView，Win/Mac/Linux 全覆盖）
+- **移动端**：Tauri 2 Android（同一套 React UI，与桌面共享代码）
+- **iOS**：Tauri 2 iOS（需 Apple Developer 账户，规划中）
 
-> **关于 macOS/iOS 测试的说明**：由于没有 macOS 设备，iOS 和 macOS 版本通过 Capacitor/Tauri 的跨平台能力保证一致性。CI/CD 中可以集成 GitHub Actions 的 macOS runner 进行构建验证。
+> **为什么弃用 Capacitor？** 详见 `.claude/CLAUDE.md` 的"跨平台策略"章节：Tauri 2 已原生支持
+> 移动端，同一套 React 代码 + Tailwind CSS 在桌面/移动/Web 100% 复用；Capacitor 会引入独立的
+> 移动打包链路，团队维护成本翻倍。
+
+> **macOS/iOS 构建说明**：无 macOS 本地设备时，通过 GitHub Actions 的 `macos-latest` runner
+> 自动打包（已实现，见 `.github/workflows/release.yml`）；产物为 universal `.dmg`（Intel + M 系列）。
+> iOS 需 Apple Developer 账户（$99/年）+ 证书 secrets，后续接入。
 
 ### 2.2 后端技术方案
 
@@ -60,7 +67,7 @@
 │                        客户端层                              │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
 │  │  Web 端  │  │ 桌面端   │  │  iOS 端  │  │Android端 │   │
-│  │React+PWA │  │Tauri+React│ │Capacitor │  │Capacitor │   │
+│  │React+Vite│  │Tauri2+React││Tauri2+React│ │Tauri2+React│  │
 │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘   │
 │       │             │             │             │          │
 │       └─────────────┴──────┬──────┴─────────────┘          │
@@ -132,74 +139,56 @@ yuanchat/
 │
 ├── AGENTS.md                     # AI Agent 指南（根目录）
 │
-├── server/                       # 🔧 后端 Go 服务
-│   ├── go.mod                    # Go 模块定义
-│   ├── go.sum
-│   ├── Makefile                  # 编译/运行脚本
-│   ├── cmd/                      # 各服务入口
-│   │   ├── gateway/              # API 网关
-│   │   ├── ws-gateway/           # WebSocket 长连接网关
-│   │   ├── user-service/         # 用户服务
-│   │   ├── message-service/      # 消息服务
-│   │   ├── group-service/        # 群组服务
-│   │   ├── file-service/         # 文件服务
-│   │   ├── notification-service/ # 通知服务
-│   │   ├── session-service/      # 会话服务
-│   │   └── search-service/       # 搜索服务
-│   ├── internal/                 # 内部共享代码
-│   │   ├── proto/                # Protobuf/gRPC 定义
-│   │   ├── pkg/                  # 公共工具包
-│   │   ├── middleware/           # 中间件
-│   │   └── model/                # 数据模型
-│   ├── api/                      # API 定义（OpenAPI/Proto）
-│   └── config/                   # 配置文件
+├── server/                       # 🔧 后端 Go 服务（单进程双端口：REST :8080 + WS :8081）
+│   ├── go.mod
+│   ├── cmd/
+│   │   ├── server/               # 主服务入口（含 REST + WS 网关 + 内存 Hub 分发）
+│   │   └── seed/                 # 开发种子数据（Alice/Bob/Carol 测试账号）
+│   ├── internal/
+│   │   ├── config/               # Viper 配置加载
+│   │   ├── handler/              # HTTP handlers（user/conversation/message/contact/file/presence）
+│   │   ├── middleware/           # 认证 / 限流 / CORS / 日志
+│   │   ├── model/                # GORM 模型（user/conversation/message/reaction/friend_request）
+│   │   ├── pkg/                  # jwt / password / shortid
+│   │   ├── repository/           # 数据访问层
+│   │   ├── router/               # 路由装配
+│   │   ├── service/              # 业务服务（user/conversation/conversation_manage/message/contact）
+│   │   ├── storage/              # MinIO 对象存储封装（预签名 URL / 桶管理）
+│   │   └── ws/                   # WebSocket Hub + protocol 帧定义
+│   └── config/config.yaml
 │
-├── web/                          # 🌐 Web 前端 (React + Vite)
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── vite.config.ts
-│   ├── index.html
-│   ├── src/
-│   │   ├── main.tsx
-│   │   ├── App.tsx
-│   │   ├── assets/               # 静态资源
-│   │   ├── components/           # 通用组件
-│   │   ├── pages/                # 页面组件
-│   │   ├── hooks/                # 自定义 Hooks
-│   │   ├── store/                # 状态管理 (Zustand)
-│   │   ├── services/             # API 调用层
-│   │   ├── types/                # TypeScript 类型定义
-│   │   ├── utils/                # 工具函数
-│   │   └── styles/               # 样式文件 (Tailwind CSS)
-│   └── public/
-│       └── manifest.json         # PWA 配置
+├── apps/                         # 🎨 前端应用（monorepo workspace）
+│   ├── web/                      # 🌐 Web (Vite + React 19)
+│   │   ├── src/                  # 页面路由 + 应用壳
+│   │   └── e2e/                  # Playwright E2E
+│   └── desktop/                  # 🖥️📱 Desktop + Mobile (Tauri 2)
+│       ├── src/                  # React UI（复用 packages/ui）
+│       └── src-tauri/            # Rust 内核 + 平台配置
+│           ├── Cargo.toml
+│           ├── tauri.conf.json
+│           ├── capabilities/     # Tauri 2 权限声明
+│           └── gen/android/      # Tauri Android 生成的 Gradle 工程
 │
-├── desktop/                      # 🖥️ 桌面端 (Tauri + React)
-│   ├── src-tauri/                # Tauri (Rust) 部分
-│   │   ├── Cargo.toml
-│   │   ├── tauri.conf.json
-│   │   └── src/
-│   │       └── main.rs
-│   └── src/                      # 复用 web/ 的 React 代码
-│
-├── mobile/                       # 📱 移动端 (Capacitor)
-│   ├── capacitor.config.ts
-│   ├── android/                  # Android 原生工程
-│   └── ios/                      # iOS 原生工程
+├── packages/                     # 📦 前端共享包（workspace）
+│   ├── shared/                   # 跨端共享：api/store/hooks/ws/utils
+│   ├── ui/                       # React UI 组件库（跨端复用）
+│   └── design-system/            # 设计令牌 + i18n 资源 + Tailwind preset
 │
 ├── deploy/                       # 🚀 部署配置
-│   ├── docker-compose.yml        # 开发环境
-│   ├── docker-compose.prod.yml   # 生产环境
-│   ├── nginx/                    # Nginx 配置
-│   └── k8s/                      # Kubernetes 配置（可选）
+│   ├── docker-compose.yml        # 开发环境（PostgreSQL/Redis/MinIO）
+│   └── init-scripts/             # DB 初始化 SQL
 │
 ├── scripts/                      # 📜 脚本工具
-│   ├── dev.sh                    # 开发环境启动
-│   └── build.sh                  # 构建脚本
+│   ├── dev.mjs                   # 一键启动（web/desktop/android/server + 停止）
+│   ├── build.mjs                 # 打包脚本
+│   └── sync-version.mjs          # release-it 用：同步版本到子包与 tauri.conf.json
 │
+├── .github/workflows/            # ⚙️ CI/CD
+│   ├── ci.yml                    # 每次 push/PR：前端 test + tsc + 后端 vet/test/-race
+│   └── release.yml               # tag v* 触发：Web + Desktop 三平台 + Android 打包
+│
+├── .release-it.json              # release-it 配置（requireBranch: main）
 ├── .gitignore
-├── .gitflow.yml                  # GitFlow 配置
-├── .commitlintrc.js              # Commit 信息规范
 └── README.md                     # 项目说明
 ```
 
@@ -207,36 +196,38 @@ yuanchat/
 
 ## 五、核心功能清单
 
-> 进度更新于 2026-07-16
+> 进度更新于 2026-07-22（MVP 已完成，v0.1.0 发版准备就绪）
 
-### 阶段一：基础能力（MVP — 第1~3个月）
+### 阶段一：基础能力（MVP — 第1~3个月）✅ 全部完成
 
-- [x] 用户注册/登录（手机号/邮箱 + 密码 + SVG 验证码，JWT 双 Token）
-- [x] 单聊消息（文本；表情待做）
-- [ ] 联系人管理（添加/删除/搜索）
-- [ ] 在线状态（在线/离线）
+- [x] 用户注册/登录（手机号/邮箱 + 密码 + SVG 验证码，JWT 双 Token 静默刷新）
+- [x] 单聊消息（文本 + 图片 + 文件 + 语音 + 表情回应）
+- [x] 联系人管理（精确搜索 手机号/元聊号/邮箱、申请/接受/拒绝、字母分组好友列表）
+- [x] 在线状态（Hub 首连/末连回调 → 广播好友 + REST 快照，`presence` 帧增量）
 - [x] Web 端基础 UI（登录/注册/三端响应式聊天主界面）
-- [x] 消息持久化存储（PostgreSQL，seq 会话内有序）
+- [x] 消息持久化存储（PostgreSQL，seq 会话内原子分配）
 
-### 阶段二：核心体验（第3~6个月）
+### 阶段二：核心体验（第3~6个月）✅ MVP 部分完成
 
-- [ ] 群组聊天（创建/加入/管理群组；群聊收发已支持，管理流程未做）
-- [ ] 图片/文件消息（需 MinIO）
-- [ ] 语音消息
-- [x] 消息已读/未读（last_read_seq 回执机制 + 未读角标，提前实现）
-- [ ] 离线消息推送
-- [x] 桌面端基础版本 (Tauri)（与 Web 同一套 UI，提前实现）
-- [ ] 消息搜索
+- [x] 群组聊天（建群 + 群管理五操作：改名/邀请/踢人/退群/解散，权限模型 role 0/1/2）
+- [x] 图片/文件消息（MinIO 预签名直传，气泡 lucide 图标 + 预签名下载）
+- [x] 语音消息（MediaRecorder + audio/webm，60s 自动截断，模块级单例播放器）
+- [x] 消息已读/未读（last_read_seq 回执机制 + 未读角标）
+- [ ] 离线消息推送（Web Push / FCM，未做）
+- [x] 桌面端基础版本（Tauri 2 Windows/macOS/Linux + Android，同一套 React UI）
+- [ ] 消息全文搜索（需 Elasticsearch，未做）
+- [x] 桌面系统通知（Tauri notification plugin，失焦 + 非免打扰时弹）
 
-### 阶段三：进阶功能（第6~9个月）
+### 阶段三：进阶功能（第6~9个月）— 计划中
 
 - [ ] 语音/视频通话 (WebRTC)
 - [ ] 端到端加密 (E2EE)
-- [ ] 多设备消息同步（WS 协议已支持多设备推送，同步补齐机制待做）
-- [ ] 移动端基础版本（Tauri 2 Android，已可运行，替代原 Capacitor 方案）
+- [x] 多设备消息同步（WS 协议已支持多设备推送 + 已读多端同步）
+- [x] 移动端基础版本（Tauri 2 Android，签名 APK 已可通过 CI 打包）
 - [ ] 聊天机器人/自动化
-- [ ] 消息引用/回复（UI 已支持，后端 reply_to_id 已留字段）
-- [ ] 消息撤回/编辑
+- [x] 消息引用/回复（UI + 后端 reply_to_id 联通）
+- [x] 消息撤回/编辑（2 分钟撤回窗口 + 5 分钟内可「重新编辑」回填输入框）
+- [x] 表情回应 Reactions（快捷 6 emoji 条 + 气泡 toggle + 历史聚合回填）
 
 ### 阶段四：企业级特性（第9~12个月）
 
