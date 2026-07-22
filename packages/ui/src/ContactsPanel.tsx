@@ -9,7 +9,7 @@
  * - 字母分组好友列表 + 右侧字母索引条（≥5 人启用快跳）
  */
 import { useMemo, useRef, useState } from "react";
-import { Search, UserPlus, UserRoundPlus, ChevronRight } from "lucide-react";
+import { Ban, Search, UserPlus, UserRoundPlus, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useContactStore, groupFriends } from "@yuanchat/shared";
 import type { Friend } from "@yuanchat/shared";
@@ -26,18 +26,24 @@ interface ContactsPanelProps {
   onSelectFriend: (friend: Friend) => void;
   /** 点击"新的朋友" */
   onOpenRequests: () => void;
+  /** 点击"黑名单" */
+  onOpenBlocklist: () => void;
   /** 点击 [+] 添加联系人 */
   onOpenAdd: () => void;
   /** "新的朋友"入口是否处于选中态 */
   requestsActive?: boolean;
+  /** "黑名单"入口是否处于选中态 */
+  blocklistActive?: boolean;
 }
 
 export function ContactsPanel({
   selectedId,
   onSelectFriend,
   onOpenRequests,
+  onOpenBlocklist,
   onOpenAdd,
   requestsActive = false,
+  blocklistActive = false,
 }: ContactsPanelProps) {
   const { t } = useTranslation();
   const friends = useContactStore((s) => s.friends);
@@ -99,7 +105,7 @@ export function ContactsPanel({
         </div>
       </div>
 
-      {/* 功能入口：新的朋友（搜索时隐藏） */}
+      {/* 功能入口：新的朋友 + 黑名单（搜索时隐藏） */}
       {!searching && (
         <div className="shrink-0 px-2 py-2">
           <button
@@ -123,6 +129,21 @@ export function ContactsPanel({
                 {pendingCount}
               </span>
             )}
+            <ChevronRight size={16} className="text-on-surface-variant" />
+          </button>
+          <button
+            onClick={onOpenBlocklist}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors",
+              blocklistActive ? "bg-primary-container/60" : "hover:bg-surface-container",
+            )}
+          >
+            <span className="bg-surface-container-high text-on-surface-variant flex h-10 w-10 items-center justify-center rounded-xl">
+              <Ban size={20} />
+            </span>
+            <span className="text-body-lg text-on-surface flex-1 font-semibold">
+              {t("contacts.blocked")}
+            </span>
             <ChevronRight size={16} className="text-on-surface-variant" />
           </button>
         </div>

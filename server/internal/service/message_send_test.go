@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/model"
+	"github.com/yuanchat/server/internal/repository"
 	"gorm.io/gorm"
 )
 
@@ -128,5 +129,87 @@ func TestSendContentRejectsNonMember(t *testing.T) {
 	db.Model(&model.Message{}).Where("conversation_id = ?", convID).Count(&count)
 	if count != 0 {
 		t.Fatalf("non-member send must not persist, got %d rows", count)
+	}
+}
+
+// TestSendPrivate_BlockedByReceiver 接收方拉黑发送者：单聊发送被拒且不落库。
+func TestSendPrivate_BlockedByReceiver(t *testing.T) {
+	db := testDB(t)
+	svc := newMessageSvc(db)
+	blocklistRepo := repository.NewBlocklistRepository(db)
+	a := newTestUser(t, db, "send-blk-a")
+	b := newTestUser(t, db, "send-blk-b")
+	convID := newSendConv(t, db, a, b)
+
+	// B 拉黑 A → A 发给 B 应被拒
+	if err := blocklistRepo.Block(context.Background(), b.ID, a.ID); err != nil {
+		t.Fatalf("seed block: %v", err)
+	}
+
+	_, err := svc.SendText(context.Background(), a.ID, convID, "hello?", "c-blk-1", nil)
+	if !errors.Is(err, ErrBlocked) {
+		t.Fatalf("expected ErrBlocked, got %v", err)
+	}
+
+	var count int64
+	db.Model(&model.Message{}).Where("conversation_id = ?", convID).Count(&count)
+	if count != 0 {
+		t.Fatalf("blocked send must not persist, got %d rows", count)
+	}
+}
+
+// TestSendPrivate_SenderBlockedReceiver 发送方自己拉黑了接收方：同样拒绝（双向拦截）。
+func TestSendPrivate_SenderBlockedReceiver(t *testing.T) {
+	db := testDB(t)
+	svc := newMessageSvc(db)
+	blocklistRepo := repository.NewBlocklistRepository(db)
+	a := newTestUser(t, db, "send-blk2-a")
+	b := newTestUser(t, db, "send-blk2-b")
+	convID := newSendConv(t, db, a, b)
+
+	// A 拉黑 B → A 发给 B 也应被拒（先解除拉黑才能聊）
+	if err := blocklistRepo.Block(context.Background(), a.ID, b.ID); err != nil {
+		t.Fatalf("seed block: %v", err)
+	}
+
+	_, err := svc.SendText(context.Background(), a.ID, convID, "hey", "c-blk-2", nil)
+	if !errors.Is(err, ErrBlocked) {
+		t.Fatalf("expected ErrBlocked, got %v", err)
+	}
+}
+
+// TestSendGroup_NotAffectedByBlocklist 群聊不受 blocklist 拦截（成员间拉黑不阻断群消息）。
+func TestSendGroup_NotAffectedByBlocklist(t *testing.T) {
+	db := testDB(t)
+	svc := newMessageSvc(db)
+	blocklistRepo := repository.NewBlocklistRepository(db)
+	a := newTestUser(t, db, "send-grp-a")
+	b := newTestUser(t, db, "send-grp-b")
+	c := newTestUser(t, db, "send-grp-c")
+
+	// 建 3 人群
+	conv := &model.Conversation{ID: uuid.New(), Type: model.ConversationTypeGroup}
+	if err := db.Create(conv).Error; err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	for _, u := range []*model.User{a, b, c} {
+		if err := db.Create(&model.ConversationMember{
+			ID: uuid.New(), ConversationID: conv.ID, UserID: u.ID,
+		}).Error; err != nil {
+			t.Fatalf("create member: %v", err)
+		}
+	}
+
+	// B 拉黑 A，但群消息不拦截
+	if err := blocklistRepo.Block(context.Background(), b.ID, a.ID); err != nil {
+		t.Fatalf("seed block: %v", err)
+	}
+
+	result, err := svc.SendText(context.Background(), a.ID, conv.ID, "group msg", "c-grp-1", nil)
+	if err != nil {
+		t.Fatalf("group send should not be blocked: %v", err)
+	}
+	if len(result.MemberIDs) != 3 {
+		t.Fatalf("expect 3 member ids, got %d", len(result.MemberIDs))
 	}
 }

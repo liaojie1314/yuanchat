@@ -37,7 +37,14 @@ const (
 	TypeConversationRemoved = "conversation.removed"
 	TypeMessageReaction     = "message.reaction"
 	TypePresence            = "presence"
+	TypeFriendRemoved       = "friend.removed"
 )
+
+// FriendRemovedPayload 好友关系解除推送（删好友双向下发）。
+// FriendID 为被删好友的用户 ID；接收端据此清理本地联系人 + 隐藏相关单聊会话。
+type FriendRemovedPayload struct {
+	FriendID uuid.UUID `json:"friend_id"`
+}
 
 // PresencePayload 好友上下线推送（推给其在线好友）。
 type PresencePayload struct {

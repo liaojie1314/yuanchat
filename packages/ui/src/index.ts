@@ -42,6 +42,7 @@ export { InviteMembersModal } from "./InviteMembersModal";
 export { ContactsScreen } from "./ContactsScreen";
 export { ContactsPanel } from "./ContactsPanel";
 export { ContactDetail } from "./ContactDetail";
+export { BlocklistView } from "./BlocklistView";
 export { NewFriendsView } from "./NewFriendsView";
 export { AddContactModal } from "./AddContactModal";
 

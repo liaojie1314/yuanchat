@@ -1,3 +1,4 @@
+import { useBlocklistStore } from "./blocklistStore";
 import { useContactStore } from "./contactStore";
 import { useConversationStore } from "./conversationStore";
 import { useMessageStore } from "./messageStore";
@@ -13,6 +14,7 @@ export function resetChatStores(): void {
   });
   useConversationStore.setState({ conversations: [], activeId: null, loading: false });
   useContactStore.setState({ friends: [], requests: [], loading: false });
+  useBlocklistStore.setState({ items: [], loading: false });
 }
 
 /** 遍历所有会话消息，撤销未清理的本地 blob 预览 URL（图片 + 文件 + 语音） */

@@ -58,7 +58,7 @@ func main() {
 	zapLogger.Info("PostgreSQL connected")
 
 	// 3.1 定向迁移：仅新表（已有表由 init-scripts SQL 管理，不做全量 AutoMigrate）
-	if err := db.AutoMigrate(&model.FriendRequest{}, &model.MessageReaction{}); err != nil {
+	if err := db.AutoMigrate(&model.FriendRequest{}, &model.MessageReaction{}, &model.Blocklist{}); err != nil {
 		zapLogger.Fatal("Failed to migrate friend_requests", zap.Error(err))
 	}
 

@@ -303,6 +303,43 @@ func (h *ContactHandler) ListFriends(c *gin.Context) {
 	Success(c, gin.H{"friends": friends})
 }
 
+// DeleteFriend 双向删除好友关系；成功后向双方在线设备下发 friend.removed。
+//
+//	@Summary	Delete a friend
+//	@Tags		contacts
+//	@Security	BearerAuth
+//	@Router		/api/v1/contacts/{id} [delete]
+func (h *ContactHandler) DeleteFriend(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		Unauthorized(c, "unauthorized")
+		return
+	}
+	friendID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid friend id")
+		return
+	}
+	if err := h.svc.DeleteFriend(c.Request.Context(), userID, friendID); err != nil {
+		if errors.Is(err, service.ErrSelfRequest) {
+			BadRequest(c, "cannot delete yourself")
+			return
+		}
+		h.logger.Error("delete friend failed", zap.Error(err))
+		InternalError(c, "delete failed")
+		return
+	}
+
+	// 双向 WS 推送：给 actor 自己所有设备 + 给对方所有设备
+	if frame, err := ws.Encode(ws.TypeFriendRemoved, ws.FriendRemovedPayload{FriendID: friendID}); err == nil {
+		h.dispatcher.SendToUsers([]uuid.UUID{userID}, frame)
+	}
+	if frame, err := ws.Encode(ws.TypeFriendRemoved, ws.FriendRemovedPayload{FriendID: userID}); err == nil {
+		h.dispatcher.SendToUsers([]uuid.UUID{friendID}, frame)
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // --- Request types ---
 
 type SendFriendRequestBody struct {

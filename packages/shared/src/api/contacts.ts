@@ -1,16 +1,20 @@
 /**
- * 联系人 REST API — 搜索 / 好友申请 / 好友列表 + DTO 映射
+ * 联系人 REST API — 搜索 / 好友申请 / 好友列表 / 删好友 / 黑名单 + DTO 映射
  *
  * @description
- * 对应后端 `server/internal/handler/contact.go`：
- * - GET  /api/v1/users/search?q=            精确搜索（手机号/元聊号/邮箱）
- * - POST /api/v1/contacts/requests          发起申请
- * - GET  /api/v1/contacts/requests          申请列表（收到 + 发出）
- * - POST /api/v1/contacts/requests/:id/accept
- * - POST /api/v1/contacts/requests/:id/reject
- * - GET  /api/v1/contacts                   好友列表（含单聊会话 ID）
+ * 对应后端 `server/internal/handler/{contact,blocklist}.go`：
+ * - GET    /api/v1/users/search?q=            精确搜索（手机号/元聊号/邮箱）
+ * - POST   /api/v1/contacts/requests          发起申请
+ * - GET    /api/v1/contacts/requests          申请列表（收到 + 发出）
+ * - POST   /api/v1/contacts/requests/:id/accept
+ * - POST   /api/v1/contacts/requests/:id/reject
+ * - GET    /api/v1/contacts                   好友列表（含单聊会话 ID）
+ * - DELETE /api/v1/contacts/:id               删除好友（双向）
+ * - GET    /api/v1/blocks                     黑名单列表
+ * - POST   /api/v1/blocks                     拉黑
+ * - DELETE /api/v1/blocks/:targetId           解除拉黑
  */
-import { apiGet, apiPost } from "./client";
+import { apiDelete, apiGet, apiPost } from "./client";
 
 // ========================================
 // 前端模型
@@ -147,4 +151,55 @@ export async function rejectFriendRequest(requestId: string): Promise<void> {
 export async function fetchFriends(): Promise<Friend[]> {
   const data = await apiGet<{ friends: FriendDTO[] }>("/api/v1/contacts");
   return (data.friends || []).map(mapFriend);
+}
+
+/** 删除好友（双向解除关系；单聊会话与历史保留，由 WS friend.removed 帧驱动双端清理） */
+export async function deleteFriend(friendId: string): Promise<void> {
+  await apiDelete("/api/v1/contacts/" + friendId);
+}
+
+// ========================================
+// 黑名单
+// ========================================
+
+/** 黑名单条目（后端已 join 用户资料） */
+export interface BlockedUser {
+  targetId: string;
+  nickname: string;
+  avatarUrl?: string | null;
+  shortId: number;
+  createdAt: number;
+}
+
+interface BlockedUserDTO {
+  target_id: string;
+  nickname: string;
+  avatar_url?: string | null;
+  short_id: number;
+  created_at: number;
+}
+
+export function mapBlockedUser(dto: BlockedUserDTO): BlockedUser {
+  return {
+    targetId: dto.target_id,
+    nickname: dto.nickname,
+    avatarUrl: dto.avatar_url,
+    shortId: dto.short_id,
+    createdAt: dto.created_at,
+  };
+}
+
+export async function listBlocked(): Promise<BlockedUser[]> {
+  const data = await apiGet<{ items: BlockedUserDTO[] }>("/api/v1/blocks");
+  return (data.items || []).map(mapBlockedUser);
+}
+
+/** 拉黑目标用户（幂等） */
+export async function blockUser(targetId: string): Promise<void> {
+  await apiPost("/api/v1/blocks", { target_id: targetId });
+}
+
+/** 解除拉黑（幂等） */
+export async function unblockUser(targetId: string): Promise<void> {
+  await apiDelete("/api/v1/blocks/" + targetId);
 }

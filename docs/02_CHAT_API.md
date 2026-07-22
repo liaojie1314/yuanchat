@@ -390,6 +390,48 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 
 - `conversation_id` 为双方共同所在、恰好 2 人的 private 会话（accept 事务保证"好友必有会话"，`null` 仅容忍脏数据）。
 
+### DELETE /api/v1/contacts/:id
+
+删除好友（`:id` 为好友的用户 UUID）。**双向软删** `contacts` 两行，幂等（已非好友仍返回 `204`）。单聊会话与历史消息保留（重新加好友可继续对话）。
+
+- 成功：`204 No Content`。
+- 副作用：向**双方**所有在线设备推送 `friend.removed` 帧（见 WS 帧表），前端据此移除好友 + 隐藏关联单聊会话。
+- `400`：`:id` 非法或试图删除自己。
+
+### GET /api/v1/blocks
+
+黑名单列表（含目标用户资料，按拉黑时间倒序；目标已注销的条目自动跳过）。
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "items": [
+      {
+        "target_id": "uuid",
+        "nickname": "Bob",
+        "avatar_url": null,
+        "short_id": 10002,
+        "created_at": 1753150000000
+      }
+    ]
+  }
+}
+```
+
+### POST /api/v1/blocks
+
+拉黑用户。body `{"target_id": "uuid"}`。幂等（重复拉黑返回 `200`）。
+
+- 效果：**单聊消息双向拦截**——任一方拉黑另一方后，双方互发单聊消息都会被拒（`error` 帧 `code=403, message=BLOCKED`）；先解除拉黑才能恢复。群聊消息不受成员间拉黑影响。
+- `400`：拉黑自己；`404`：目标用户不存在。
+- 拉黑**不**解除好友关系、**不**推送任何 WS 帧（纯个人视角数据）。
+
+### DELETE /api/v1/blocks/:targetId
+
+解除拉黑（`:targetId` 为被拉黑用户 UUID）。幂等，成功 `204 No Content`。
+
 ### POST /api/v1/files/upload-url
 
 签发**预签名上传 URL**，客户端凭此 PUT 直传对象存储（MinIO / S3 兼容），服务端不中转文件字节。
@@ -489,7 +531,8 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 | `conversation.removed` | `{conversation_id, reason}`                                                                                        | `reason`：`kicked`（被踢者）/ `left`（退群者本人多端同步）/ `dissolved`（解散全员）。前端把会话移出列表，kicked/dissolved 弹提示                  |
 | `message.recalled`     | `{message_id, conversation_id, seq, operator_id, operator_nickname}`                                               | 会话全部成员。前端把对应气泡翻成撤回占位（本人「你撤回了一条消息」/ 他人「X 撤回了一条消息」）；撤回最后一条时刷新列表预览                        |
 | `message.reaction`     | `{message_id, conversation_id, user_id, emoji, count, reacted}`                                                    | 会话全员（含操作者多端）。`count`=该 emoji 最新总数；`reacted`=操作者动作是加是删。前端 `user_id`=自己时按 reacted 更新 mine，他人操作保持原 mine |
-| `error`                | `{code, message, client_msg_id?}`                                                                                  | 当前连接。`client_msg_id` 非空表示对应那次发送失败                                                                                                |
+| `friend.removed`       | `{friend_id}`                                                                                                      | 删好友后推给**双方**所有设备（各自视角的 `friend_id` 是对方）。前端移除好友 + 隐藏关联单聊会话（历史保留）                                        |
+| `error`                | `{code, message, client_msg_id?}`                                                                                  | 当前连接。`client_msg_id` 非空表示对应那次发送失败。`code=403, message=BLOCKED`：单聊被拉黑拒发，前端翻 failed + toast                            |
 
 > **系统消息**：群管理操作（改名/邀请/踢人/退群）产生的系统消息复用 `message.receive` 帧下发，
 > `content.type = "system"`、`content.text` 为文案（如「Alice 修改群名为「X」」）。

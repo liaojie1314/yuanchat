@@ -25,13 +25,18 @@ import {
 import type { Friend } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { AddContactModal } from "./AddContactModal";
+import { BlocklistView } from "./BlocklistView";
 import { ContactDetail } from "./ContactDetail";
 import { ContactsPanel } from "./ContactsPanel";
 import { NewFriendsView } from "./NewFriendsView";
 import { ResizeHandle } from "./ResizeHandle";
 
-/** 内容区视图：空 / 好友资料 / 新的朋友 */
-type ContentView = { kind: "empty" } | { kind: "friend"; friend: Friend } | { kind: "requests" };
+/** 内容区视图：空 / 好友资料 / 新的朋友 / 黑名单 */
+type ContentView =
+  | { kind: "empty" }
+  | { kind: "friend"; friend: Friend }
+  | { kind: "requests" }
+  | { kind: "blocklist" };
 
 export function ContactsScreen() {
   const { t } = useTranslation();
@@ -64,8 +69,10 @@ export function ContactsScreen() {
     <ContactsPanel
       selectedId={view.kind === "friend" ? view.friend.id : null}
       requestsActive={view.kind === "requests"}
+      blocklistActive={view.kind === "blocklist"}
       onSelectFriend={(friend) => setView({ kind: "friend", friend })}
       onOpenRequests={() => setView({ kind: "requests" })}
+      onOpenBlocklist={() => setView({ kind: "blocklist" })}
       onOpenAdd={() => setAddOpen(true)}
     />
   );
@@ -75,6 +82,7 @@ export function ContactsScreen() {
       <ContactDetail
         friend={view.friend}
         onMessage={goChat}
+        onDeleted={() => setView({ kind: "empty" })}
         onBack={showBack ? () => setView({ kind: "empty" }) : undefined}
       />
     ) : view.kind === "requests" ? (
@@ -82,6 +90,8 @@ export function ContactsScreen() {
         onAccepted={goChat}
         onBack={showBack ? () => setView({ kind: "empty" }) : undefined}
       />
+    ) : view.kind === "blocklist" ? (
+      <BlocklistView onBack={showBack ? () => setView({ kind: "empty" }) : undefined} />
     ) : null;
 
   // ── 手机端：栈式单屏 ──

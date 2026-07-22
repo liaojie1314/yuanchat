@@ -20,6 +20,7 @@ import { create } from "zustand";
 import { pinyin } from "pinyin-pro";
 import {
   acceptFriendRequest,
+  deleteFriend as deleteFriendApi,
   fetchFriends,
   listFriendRequests,
   rejectFriendRequest,
@@ -102,6 +103,13 @@ interface ContactState {
   applyIncomingRequest: (item: FriendRequestItem) => void;
   /** WS contact.accepted：我发出的申请被同意（好友列表加人 + 出向申请翻状态） */
   applyAccepted: (requestId: string, friend: ContactUser, conversationId: string) => void;
+  /**
+   * 本地移除好友 + 关联单聊会话（幂等）。
+   * WS friend.removed 帧与 deleteFriend 成功后共用。
+   */
+  removeFriend: (friendId: string) => void;
+  /** 删除好友：REST 调用成功后本地清理（对方端由 WS 帧驱动） */
+  deleteFriend: (friendId: string) => Promise<void>;
 }
 
 export const useContactStore = create<ContactState>()((set, get) => ({
@@ -171,5 +179,20 @@ export const useContactStore = create<ContactState>()((set, get) => ({
     });
     // 新会话（含打招呼消息）进入会话列表
     void useConversationStore.getState().loadConversations();
+  },
+
+  removeFriend: (friendId) => {
+    const target = get().friends.find((f) => f.id === friendId);
+    if (!target) return;
+    set((s) => ({ friends: s.friends.filter((f) => f.id !== friendId) }));
+    // 关联单聊会话同步移出列表（历史消息服务端保留，重新加好友可恢复）
+    if (target.conversationId) {
+      useConversationStore.getState().removeConversation(target.conversationId);
+    }
+  },
+
+  deleteFriend: async (friendId) => {
+    await deleteFriendApi(friendId);
+    get().removeFriend(friendId);
   },
 }));

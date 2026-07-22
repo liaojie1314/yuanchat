@@ -255,6 +255,18 @@ function wireSocket() {
       else if (p.reason === "dissolved") showToast("info", i18n.t("chat.group.dissolvedNotice"));
     },
 
+    "friend.removed": (p) => {
+      useContactStore.getState().removeFriend(p.friend_id);
+    },
+
+    error: (p) => {
+      // BLOCKED：单聊被拉黑拒发。把对应乐观消息翻 failed + toast 提示
+      if (p.message === "BLOCKED" && p.client_msg_id) {
+        useMessageStore.getState().failByClientMsgId(p.client_msg_id);
+        showToast("error", i18n.t("chat.message.blockedRejected"));
+      }
+    },
+
     presence: (p) => {
       useConversationStore.getState().applyPresence(p.user_id, p.online);
     },

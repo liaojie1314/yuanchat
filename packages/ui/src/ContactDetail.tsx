@@ -9,18 +9,27 @@
  * mock 模式跳过请求，失败时显示小字提示但不阻塞已有信息。
  */
 import { useEffect, useState } from "react";
-import { ArrowLeft, Check, Copy, MessageSquare } from "lucide-react";
+import { ArrowLeft, Ban, Check, Copy, MessageSquare, UserRoundX } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { fetchPublicProfile, isMockEnabled } from "@yuanchat/shared";
+import {
+  fetchPublicProfile,
+  isMockEnabled,
+  showToast,
+  useBlocklistStore,
+  useContactStore,
+} from "@yuanchat/shared";
 import type { Friend, PublicProfile } from "@yuanchat/shared";
 import { Avatar } from "./Avatar";
 import { Button } from "./Button";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { copyText } from "./copyText";
 
 interface ContactDetailProps {
   friend: Friend;
   /** 点「发消息」（携带单聊会话 ID） */
   onMessage: (conversationId: string) => void;
+  /** 删除好友成功后回调（上层退回空状态） */
+  onDeleted?: () => void;
   /** 移动端返回按钮 */
   onBack?: () => void;
 }
@@ -31,10 +40,14 @@ const GENDER_KEY: Record<1 | 2, string> = {
   2: "profile.genderFemale",
 };
 
-export function ContactDetail({ friend, onMessage, onBack }: ContactDetailProps) {
+export function ContactDetail({ friend, onMessage, onDeleted, onBack }: ContactDetailProps) {
   const { t } = useTranslation();
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [failed, setFailed] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const deleteFriend = useContactStore((s) => s.deleteFriend);
+  const block = useBlocklistStore((s) => s.block);
 
   // 拉取公开资料补全签名 / 性别；mock 模式跳过（数据已由 bootstrap 注入）
   useEffect(() => {
@@ -56,6 +69,32 @@ export function ContactDetail({ friend, onMessage, onBack }: ContactDetailProps)
 
   const gender = profile?.gender;
   const genderKey = gender === 1 || gender === 2 ? GENDER_KEY[gender] : null;
+
+  const handleDelete = async () => {
+    setBusy(true);
+    try {
+      await deleteFriend(friend.id);
+      setConfirmDelete(false);
+      showToast("info", t("contacts.deletedToast"));
+      if (onDeleted) onDeleted();
+    } catch {
+      showToast("error", t("common.opFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleBlock = async () => {
+    setBusy(true);
+    try {
+      await block(friend.id);
+      showToast("info", t("contacts.blockedToast"));
+    } catch {
+      showToast("error", t("common.opFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -98,7 +137,39 @@ export function ContactDetail({ friend, onMessage, onBack }: ContactDetailProps)
             {t("contacts.sendMessage")}
           </Button>
         )}
+
+        {/* 危险区：拉黑 / 删除好友 */}
+        <div className="mt-4 flex w-full max-w-60 flex-col gap-2">
+          <Button
+            variant="ghost"
+            className="w-full"
+            disabled={busy}
+            onClick={() => void handleBlock()}
+          >
+            <Ban size={16} className="mr-2" />
+            {t("contacts.blockUser")}
+          </Button>
+          <Button
+            variant="ghost"
+            className="text-error w-full"
+            disabled={busy}
+            onClick={() => setConfirmDelete(true)}
+          >
+            <UserRoundX size={16} className="mr-2" />
+            {t("contacts.deleteFriend")}
+          </Button>
+        </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title={t("contacts.confirmDeleteTitle")}
+        message={t("contacts.confirmDeleteMessage", { name: friend.nickname })}
+        confirmLabel={t("contacts.deleteFriend")}
+        danger
+        onConfirm={() => void handleDelete()}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </div>
   );
 }

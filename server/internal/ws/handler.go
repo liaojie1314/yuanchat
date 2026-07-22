@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -145,6 +146,10 @@ func (h *Handler) handleSend(c *Client, env *Envelope) {
 
 	result, err := h.msgSvc.SendContent(ctx, c.userID, p.ConversationID, messageType, contentJSON, p.ClientMsgID, p.ReplyToID)
 	if err != nil {
+		if errors.Is(err, service.ErrBlocked) {
+			c.sendError(403, "BLOCKED", p.ClientMsgID)
+			return
+		}
 		h.logger.Error("send message failed", zap.Error(err), zap.String("user_id", c.userID.String()))
 		c.sendError(500, "send failed", p.ClientMsgID)
 		return

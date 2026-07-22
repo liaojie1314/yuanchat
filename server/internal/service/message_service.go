@@ -50,11 +50,12 @@ type RecallResult struct {
 
 // MessageService 消息核心服务：发送、历史、已读、撤回、表情回应。
 type MessageService struct {
-	msgRepo      *repository.MessageRepository
-	convRepo     *repository.ConversationRepository
-	userRepo     *repository.UserRepository
-	reactionRepo *repository.ReactionRepository
-	logger       *zap.Logger
+	msgRepo       *repository.MessageRepository
+	convRepo      *repository.ConversationRepository
+	userRepo      *repository.UserRepository
+	reactionRepo  *repository.ReactionRepository
+	blocklistRepo *repository.BlocklistRepository
+	logger        *zap.Logger
 }
 
 func NewMessageService(
@@ -62,14 +63,16 @@ func NewMessageService(
 	convRepo *repository.ConversationRepository,
 	userRepo *repository.UserRepository,
 	reactionRepo *repository.ReactionRepository,
+	blocklistRepo *repository.BlocklistRepository,
 	logger *zap.Logger,
 ) *MessageService {
 	return &MessageService{
-		msgRepo:      msgRepo,
-		convRepo:     convRepo,
-		userRepo:     userRepo,
-		reactionRepo: reactionRepo,
-		logger:       logger,
+		msgRepo:       msgRepo,
+		convRepo:      convRepo,
+		userRepo:      userRepo,
+		reactionRepo:  reactionRepo,
+		blocklistRepo: blocklistRepo,
+		logger:        logger,
 	}
 }
 
@@ -106,6 +109,27 @@ func (s *MessageService) SendContent(
 	}
 	if !ok {
 		return nil, ErrNotMember
+	}
+
+	// 单聊会话：任一方拉黑另一方即拒发（群聊不受成员间拉黑影响）
+	conv, err := s.convRepo.FindByID(ctx, convID)
+	if err != nil {
+		return nil, fmt.Errorf("load conversation: %w", err)
+	}
+	if conv != nil && conv.Type == model.ConversationTypePrivate {
+		peer, err := s.convRepo.GetPeerUser(ctx, convID, senderID)
+		if err != nil {
+			return nil, fmt.Errorf("load peer: %w", err)
+		}
+		if peer != nil {
+			blocked, err := s.blocklistRepo.IsBlockedEitherDirection(ctx, senderID, peer.ID)
+			if err != nil {
+				return nil, fmt.Errorf("check blocklist: %w", err)
+			}
+			if blocked {
+				return nil, ErrBlocked
+			}
+		}
 	}
 
 	msg := &model.Message{

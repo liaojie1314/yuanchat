@@ -182,6 +182,11 @@ interface MessageState {
   setTyping: (convId: string, name: string) => void;
   /** 更新消息状态（重试 / 回执） */
   setStatus: (conversationId: string, messageId: string, status: ChatMessageStatus) => void;
+  /**
+   * WS error 帧（如 BLOCKED）按 clientMsgId 定位乐观消息并翻 failed。
+   * 找不到目标（如重连后 store 已清）静默忽略。
+   */
+  failByClientMsgId: (clientMsgId: string) => void;
 }
 
 // ========================================
@@ -623,6 +628,30 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
         ),
       },
     })),
+
+  failByClientMsgId: (clientMsgId) => {
+    // 先解除 ack 超时（error 帧已是终态，避免超时重复翻 failed）
+    const timer = ackTimers.get(clientMsgId);
+    if (timer) {
+      clearTimeout(timer);
+      ackTimers.delete(clientMsgId);
+    }
+    set((s) => {
+      for (const [convId, list] of Object.entries(s.messagesByConv)) {
+        if (list.some((m) => m.clientMsgId === clientMsgId)) {
+          return {
+            messagesByConv: {
+              ...s.messagesByConv,
+              [convId]: list.map((m) =>
+                m.clientMsgId === clientMsgId ? { ...m, status: "failed" as const } : m,
+              ),
+            },
+          };
+        }
+      }
+      return s;
+    });
+  },
 }));
 
 /** 经 WebSocket 发出 message.send 并挂 ack 超时（超时 → failed） */

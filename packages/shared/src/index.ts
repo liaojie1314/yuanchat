@@ -3,6 +3,7 @@ export * from "./store/conversationStore";
 export * from "./store/messageStore";
 export * from "./store/authStore";
 export * from "./store/contactStore";
+export * from "./store/blocklistStore";
 export * from "./store/toastStore";
 export * from "./store/resetStores";
 export * from "./api/client";

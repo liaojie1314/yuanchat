@@ -58,7 +58,7 @@ func main() {
 	defer database.Close(db)
 
 	// 定向迁移新表（seed 可能先于 server 首次运行）
-	if err := db.AutoMigrate(&model.FriendRequest{}, &model.MessageReaction{}); err != nil {
+	if err := db.AutoMigrate(&model.FriendRequest{}, &model.MessageReaction{}, &model.Blocklist{}); err != nil {
 		log.Fatalf("migrate friend_requests: %v", err)
 	}
 
@@ -246,19 +246,21 @@ type seedMsg struct {
 	text     string
 }
 
-// ensureFriendship 幂等写入双向好友行（已存在则置为 accepted）。
+// ensureFriendship 幂等写入双向好友行（已存在则置为 accepted；
+// 软删行复活——deleted_at 占住唯一索引，直接 Create 会撞约束）。
 func ensureFriendship(ctx context.Context, db *gorm.DB, a, b uuid.UUID) error {
 	src := "seed"
 	for _, pair := range [][2]uuid.UUID{{a, b}, {b, a}} {
 		var existing model.Contact
-		err := db.WithContext(ctx).
+		err := db.WithContext(ctx).Unscoped().
 			First(&existing, "user_id = ? AND contact_user_id = ?", pair[0], pair[1]).Error
 		if err == nil {
-			if existing.Status != model.ContactStatusAccepted {
-				if err := db.WithContext(ctx).Model(&existing).
-					Update("status", model.ContactStatusAccepted).Error; err != nil {
-					return err
-				}
+			if err := db.WithContext(ctx).Unscoped().Model(&existing).
+				Updates(map[string]any{
+					"status":     model.ContactStatusAccepted,
+					"deleted_at": nil,
+				}).Error; err != nil {
+				return err
 			}
 			continue
 		}
