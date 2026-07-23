@@ -33,6 +33,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	r.Use(middleware.Logger(logger))
 	r.Use(middleware.Recovery(logger))
 	r.Use(middleware.CORS())
+	r.Use(middleware.Prometheus())
 
 	// --- Dependency wiring ---
 	jwtGen := jwt.NewGenerator(cfg.JWT.Secret, cfg.JWT.AccessTokenTTL, cfg.JWT.RefreshTokenTTL)

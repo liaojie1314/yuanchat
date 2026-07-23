@@ -9,10 +9,10 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/yuanchat/server/internal/config"
 	"github.com/yuanchat/server/internal/database"
 	"github.com/yuanchat/server/internal/logger"
-	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/redis"
 	"github.com/yuanchat/server/internal/router"
 	"github.com/yuanchat/server/internal/storage"
@@ -57,10 +57,16 @@ func main() {
 	defer database.Close(db)
 	zapLogger.Info("PostgreSQL connected")
 
-	// 3.1 定向迁移：仅新表（已有表由 init-scripts SQL 管理，不做全量 AutoMigrate）
-	if err := db.AutoMigrate(&model.FriendRequest{}, &model.MessageReaction{}, &model.Blocklist{}, &model.Message{}, &model.ConversationMember{}); err != nil {
-		zapLogger.Fatal("Failed to migrate friend_requests", zap.Error(err))
+	// 3.1 执行 goose 数据库迁移（嵌入式 SQL，替代 AutoMigrate）
+	zapLogger.Info("Running database migrations...")
+	sqlDB, err := db.DB()
+	if err != nil {
+		zapLogger.Fatal("Failed to get sql.DB for migrations", zap.Error(err))
 	}
+	if err := database.RunMigrations(sqlDB); err != nil {
+		zapLogger.Fatal("Failed to run migrations", zap.Error(err))
+	}
+	zapLogger.Info("Database migrations complete")
 
 	// 4. 连接 Redis
 	zapLogger.Info("Connecting to Redis...")
@@ -104,6 +110,15 @@ func main() {
 		Handler: wsMux,
 	}
 
+	// Prometheus metrics 服务器（独立端口 :9090，避免混入业务路由）
+	metricsAddr := fmt.Sprintf("%s:9090", cfg.Server.Host)
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", promhttp.Handler())
+	metricsSrv := &http.Server{
+		Addr:    metricsAddr,
+		Handler: metricsMux,
+	}
+
 	// 7. 优雅启停
 	go func() {
 		zapLogger.Info("HTTP server listening", zap.String("addr", addr))
@@ -119,6 +134,13 @@ func main() {
 		}
 	}()
 
+	go func() {
+		zapLogger.Info("Metrics server listening", zap.String("addr", metricsAddr))
+		if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			zapLogger.Warn("Metrics server stopped", zap.Error(err))
+		}
+	}()
+
 	// 8. 等待中断信号
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -130,6 +152,9 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 	defer cancel()
 
+	if err := metricsSrv.Shutdown(ctx); err != nil {
+		zapLogger.Error("Metrics server forced to shutdown", zap.Error(err))
+	}
 	if err := wsSrv.Shutdown(ctx); err != nil {
 		zapLogger.Error("WebSocket server forced to shutdown", zap.Error(err))
 	}

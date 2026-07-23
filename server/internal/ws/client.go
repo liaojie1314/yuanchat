@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/yuanchat/server/internal/metrics"
 	"go.uber.org/zap"
 )
 
@@ -49,6 +50,8 @@ func (c *Client) readPump(maxMessageSize int64, pongTimeout time.Duration) {
 			}
 			return
 		}
+
+		metrics.WSMessagesTotal.WithLabelValues("receive").Inc()
 
 		var env Envelope
 		if err := json.Unmarshal(data, &env); err != nil {

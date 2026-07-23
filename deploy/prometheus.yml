@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'yuanchat-server'
+    static_configs:
+      # host.docker.internal 在 Linux 下由 extra_hosts: host-gateway 解析为宿主机 IP
+      - targets: ['host.docker.internal:9090']
