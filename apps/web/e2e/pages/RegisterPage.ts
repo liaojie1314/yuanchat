@@ -14,6 +14,7 @@ export class RegisterPage {
   readonly passwordInput: Locator;
   readonly captchaInput: Locator;
   readonly captchaButton: Locator;
+  readonly captchaImage: Locator;
   readonly registerButton: Locator;
   readonly loginLink: Locator;
 
@@ -24,6 +25,9 @@ export class RegisterPage {
     this.passwordInput = page.getByPlaceholder("密码（至少 8 位）");
     this.captchaInput = page.getByPlaceholder("验证码答案");
     this.captchaButton = page.locator("button[title='点击刷新验证码']");
+    // 按钮内含两个 svg（验证码图片 + hover 时的 RefreshCw 图标），
+    // 取第一个即验证码图片本身，避免 strict mode violation
+    this.captchaImage = this.captchaButton.locator("svg").first();
     this.registerButton = page.getByRole("button", { name: /注 册|注册中…/ });
     this.loginLink = page.getByRole("link", { name: "立即登录" });
   }

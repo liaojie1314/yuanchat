@@ -22,6 +22,9 @@ export default defineConfig({
     baseURL: "http://localhost:5173",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
+    // 强制中文环境：detectLocale() 读 navigator.language，若不固定则 CI runner
+    // 走 en-US 分支，导致 UI 渲染英文而测试文案硬编码中文全部失败
+    locale: "zh-CN",
   },
 
   // 自动启动 Vite dev server（使用 .env.development，MSW mock 开启）
