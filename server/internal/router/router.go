@@ -120,6 +120,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		chat.POST("/messages/:id/recall", msgH.Recall)
 		chat.POST("/messages/:id/reactions", msgH.React)
 		chat.POST("/messages/:id/forward", forwardH.Forward)
+		chat.GET("/messages/search", middleware.LimitByIP(20, 40), msgH.Search)
 
 		chat.POST("/files/upload-url", fileH.UploadURL)
 		chat.GET("/files/download-url", fileH.DownloadURL)

@@ -302,5 +302,13 @@
   "error.network": "Network connection failed. Please check your network settings.",
   "error.server": "Server error. Please try again later.",
   "error.timeout": "Request timeout. Please try again.",
-  "error.unknown": "Unknown error"
+  "error.unknown": "Unknown error",
+
+  "search.close": "Close search",
+  "search.empty": "No messages found",
+  "search.hint": "Type at least 3 characters",
+  "search.jumpTo": "Jump to message",
+  "search.loading": "Searching…",
+  "search.placeholder": "Search messages…",
+  "search.title": "Search messages"
 }

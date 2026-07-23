@@ -204,6 +204,14 @@ interface MessageState {
    * 找不到目标（如重连后 store 已清）静默忽略。
    */
   failByClientMsgId: (clientMsgId: string) => void;
+  /** 搜索跳转后高亮的消息 ID（2 秒后 ChatWindow 自动清除） */
+  highlightMsgId: string | null;
+  setHighlightMsgId: (id: string | null) => void;
+  /**
+   * 跳转到历史消息：若消息不在当前列表则拉取该 seq 附近的历史并替换当前列表，
+   * 然后设置 highlightMsgId 触发 ChatWindow 滚动定位。
+   */
+  seekToMessage: (convId: string, msgId: string, seq: number) => Promise<void>;
 }
 
 // ========================================
@@ -253,10 +261,35 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
   typingByConv: {},
   replyingTo: null,
   composerInsert: null,
+  highlightMsgId: null,
 
   setReplyingTo: (msg) => set({ replyingTo: msg }),
 
   setComposerInsert: (text) => set({ composerInsert: text }),
+
+  setHighlightMsgId: (id) => set({ highlightMsgId: id }),
+
+  seekToMessage: async (convId, msgId, seq) => {
+    if (mockMode) {
+      set({ highlightMsgId: msgId });
+      return;
+    }
+    const existing = get().messagesByConv[convId] ?? [];
+    const found = existing.some((m) => m.id === msgId);
+    if (!found) {
+      try {
+        const { messages, hasMore } = await fetchMessages(convId, seq + 1, PAGE_SIZE, selfUserId());
+        set((s) => ({
+          messagesByConv: { ...s.messagesByConv, [convId]: messages },
+          hasMoreByConv: { ...s.hasMoreByConv, [convId]: hasMore },
+        }));
+      } catch {
+        // 拉取失败时不跳转，静默忽略
+        return;
+      }
+    }
+    set({ highlightMsgId: msgId });
+  },
 
   loadHistory: async (conversationId) => {
     if (mockMode) return;

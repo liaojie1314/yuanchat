@@ -42,6 +42,7 @@ import { Avatar } from "./Avatar";
 import { Composer } from "./Composer";
 import { ForwardModal } from "./ForwardModal";
 import { ImageLightbox } from "./ImageLightbox";
+import { InConversationSearch } from "./InConversationSearch";
 import { MessageBubble, TypingIndicator } from "./MessageBubble";
 
 export function ChatWindow({
@@ -69,12 +70,17 @@ export function ChatWindow({
   const setReplyingTo = useMessageStore((s) => s.setReplyingTo);
   const replyingTo = useMessageStore((s) => s.replyingTo);
 
+  const highlightMsgId = useMessageStore((s) => s.highlightMsgId);
+  const setHighlightMsgId = useMessageStore((s) => s.setHighlightMsgId);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadingMoreRef = useRef(false);
   // 全屏查看的图片 URL（null 表示未打开）
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   // 转发弹窗当前源消息 ID（null 表示关闭）
   const [forwardMsgId, setForwardMsgId] = useState<string | null>(null);
+  // 会话内搜索面板开关
+  const [showSearch, setShowSearch] = useState(false);
 
   // 进入会话时按需加载历史（真实模式；mock 模式内部直接跳过）
   useEffect(() => {
@@ -90,6 +96,17 @@ export function ChatWindow({
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages?.length, activeId]);
+
+  // 搜索跳转：highlightMsgId 变化时滚动到目标消息并 2 秒后清除高亮
+  useEffect(() => {
+    if (!highlightMsgId || !scrollRef.current) return;
+    const el = scrollRef.current.querySelector(`[data-msg-id="${highlightMsgId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      const timer = setTimeout(() => setHighlightMsgId(null), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightMsgId, setHighlightMsgId]);
 
   // 滚动到顶部时向上翻页
   const handleScroll = useCallback(() => {
@@ -191,6 +208,7 @@ export function ChatWindow({
           <Video size={19} />
         </button>
         <button
+          onClick={() => setShowSearch((v) => !v)}
           className="md3-icon-btn text-on-surface-variant hidden sm:grid"
           title={t("chat.searchHistory")}
           aria-label={t("chat.searchHistory")}
@@ -208,6 +226,11 @@ export function ChatWindow({
           </button>
         )}
       </header>
+
+      {/* 会话内搜索面板 */}
+      {showSearch && activeId && (
+        <InConversationSearch conversationId={activeId} onClose={() => setShowSearch(false)} />
+      )}
 
       {/* 置顶消息条 */}
       {conv.pinnedMessage && (
@@ -247,50 +270,59 @@ export function ChatWindow({
               return (
                 <Fragment key={msg.id}>
                   {showDivider && <DateDivider label={formatDateDivider(msg.dateKey!)} />}
-                  <MessageBubble
-                    msg={msg}
-                    compact={compact}
-                    onRetry={
-                      msg.status === "failed" && activeId
-                        ? () => retrySend(activeId, msg.id)
+                  <div
+                    data-msg-id={msg.id}
+                    className={
+                      highlightMsgId === msg.id
+                        ? "rounded-lg ring-2 ring-blue-400 ring-offset-1"
                         : undefined
                     }
-                    onReply={() => setReplyingTo(msg)}
-                    onImageClick={setLightboxUrl}
-                    onRecall={
-                      // 仅自己且已送达（sent/read）的消息可撤回：sending/failed 只有本地
-                      // client id、无服务端 id，撤回需用服务端 id，故不提供
-                      msg.isSelf && (msg.status === "sent" || msg.status === "read")
-                        ? () => handleRecall(msg.id)
-                        : undefined
-                    }
-                    onReEdit={
-                      msg.recalled && msg.isSelf && msg.recalledText
-                        ? () => {
-                            if (Date.now() - (msg.recalledAtMs ?? 0) > RE_EDIT_WINDOW_MS) {
-                              showToast("info", t("chat.message.reEditExpired"));
-                              return;
+                  >
+                    <MessageBubble
+                      msg={msg}
+                      compact={compact}
+                      onRetry={
+                        msg.status === "failed" && activeId
+                          ? () => retrySend(activeId, msg.id)
+                          : undefined
+                      }
+                      onReply={() => setReplyingTo(msg)}
+                      onImageClick={setLightboxUrl}
+                      onRecall={
+                        // 仅自己且已送达（sent/read）的消息可撤回：sending/failed 只有本地
+                        // client id、无服务端 id，撤回需用服务端 id，故不提供
+                        msg.isSelf && (msg.status === "sent" || msg.status === "read")
+                          ? () => handleRecall(msg.id)
+                          : undefined
+                      }
+                      onReEdit={
+                        msg.recalled && msg.isSelf && msg.recalledText
+                          ? () => {
+                              if (Date.now() - (msg.recalledAtMs ?? 0) > RE_EDIT_WINDOW_MS) {
+                                showToast("info", t("chat.message.reEditExpired"));
+                                return;
+                              }
+                              useMessageStore.getState().setComposerInsert(msg.recalledText ?? "");
                             }
-                            useMessageStore.getState().setComposerInsert(msg.recalledText ?? "");
-                          }
-                        : undefined
-                    }
-                    onReact={
-                      // 排除撤回/系统消息/未 ack 乐观消息（其 id 还是 client id，服务端 404）
-                      msg.recalled || msg.kind === "system" || !msg.seq
-                        ? undefined
-                        : (emoji) => {
-                            void toggleReaction(msg.id, emoji).catch(() =>
-                              showToast("error", t("common.opFailed")),
-                            );
-                          }
-                    }
-                    onForward={
-                      msg.recalled || msg.kind === "system" || !msg.seq
-                        ? undefined
-                        : () => handleForward(msg.id)
-                    }
-                  />
+                          : undefined
+                      }
+                      onReact={
+                        // 排除撤回/系统消息/未 ack 乐观消息（其 id 还是 client id，服务端 404）
+                        msg.recalled || msg.kind === "system" || !msg.seq
+                          ? undefined
+                          : (emoji) => {
+                              void toggleReaction(msg.id, emoji).catch(() =>
+                                showToast("error", t("common.opFailed")),
+                              );
+                            }
+                      }
+                      onForward={
+                        msg.recalled || msg.kind === "system" || !msg.seq
+                          ? undefined
+                          : () => handleForward(msg.id)
+                      }
+                    />
+                  </div>
                 </Fragment>
               );
             })}

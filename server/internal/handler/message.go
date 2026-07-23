@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -182,4 +183,51 @@ func (h *MessageHandler) React(c *gin.Context) {
 		h.logger.Error("encode message.reaction failed", zap.Error(err))
 	}
 	Success(c, gin.H{"emoji": result.Emoji, "count": result.Count, "reacted": result.Reacted})
+}
+
+// Search 全文搜索当前用户有权访问的消息。
+//
+//	@Summary		Search messages
+//	@Tags			chat
+//	@Security		BearerAuth
+//	@Param			q				query	string	true	"search keyword (min 3 chars)"
+//	@Param			conversation_id	query	string	false	"limit to this conversation"
+//	@Param			before			query	string	false	"pagination cursor (RFC3339)"
+//	@Param			limit			query	int		false	"page size (default 20, max 50)"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/messages/search [get]
+func (h *MessageHandler) Search(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		Unauthorized(c, "unauthorized")
+		return
+	}
+
+	q := strings.TrimSpace(c.Query("q"))
+	if q == "" {
+		BadRequest(c, "q is required")
+		return
+	}
+
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	results, hasMore, err := h.svc.Search(
+		c.Request.Context(),
+		userID,
+		q,
+		c.Query("conversation_id"),
+		c.Query("before"),
+		limit,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrSearchQueryTooShort):
+			BadRequest(c, "search query must be at least 3 characters")
+		default:
+			h.logger.Error("message search failed", zap.Error(err))
+			InternalError(c, "search failed")
+		}
+		return
+	}
+
+	Success(c, gin.H{"results": results, "has_more": hasMore})
 }

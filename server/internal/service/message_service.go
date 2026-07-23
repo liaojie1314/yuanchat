@@ -18,6 +18,9 @@ import (
 // ErrNotMember 用户不是会话成员。
 var ErrNotMember = errors.New("not a conversation member")
 
+// ErrSearchQueryTooShort 搜索关键词少于 3 个字符。
+var ErrSearchQueryTooShort = errors.New("search query too short")
+
 // 撤回相关错误。
 var (
 	// ErrMessageNotFound 目标消息不存在（或已软删）。
@@ -468,4 +471,82 @@ func (s *MessageService) ToggleReaction(ctx context.Context, userID, messageID u
 		Reacted:   reacted,
 		MemberIDs: memberIDs,
 	}, nil
+}
+
+// MessageSearchResult 搜索结果 DTO，供 handler 层 JSON 序列化。
+type MessageSearchResult struct {
+	MessageID      uuid.UUID `json:"message_id"`
+	ConversationID uuid.UUID `json:"conversation_id"`
+	ConvName       string    `json:"conv_name"`
+	SenderNickname string    `json:"sender_nickname"`
+	Excerpt        string    `json:"excerpt"`
+	CreatedAt      time.Time `json:"created_at"`
+	Seq            int64     `json:"seq"`
+}
+
+// Search 全文搜索消息，返回最多 limit 条按时间倒序的结果。
+func (s *MessageService) Search(
+	ctx context.Context,
+	userID uuid.UUID,
+	query string,
+	convIDStr string,
+	beforeStr string,
+	limit int,
+) ([]MessageSearchResult, bool, error) {
+	if len([]rune(query)) < 3 {
+		return nil, false, ErrSearchQueryTooShort
+	}
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+
+	var convID *uuid.UUID
+	if convIDStr != "" {
+		id, err := uuid.Parse(convIDStr)
+		if err != nil {
+			return nil, false, fmt.Errorf("invalid conversation_id: %w", err)
+		}
+		convID = &id
+	}
+
+	var beforeTime *time.Time
+	if beforeStr != "" {
+		t, err := time.Parse(time.RFC3339, beforeStr)
+		if err != nil {
+			return nil, false, fmt.Errorf("invalid before timestamp: %w", err)
+		}
+		beforeTime = &t
+	}
+
+	rows, err := s.msgRepo.Search(ctx, userID, query, convID, beforeTime, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+
+	results := make([]MessageSearchResult, 0, len(rows))
+	for _, row := range rows {
+		var content struct {
+			Text string `json:"text"`
+		}
+		_ = json.Unmarshal([]byte(row.Content), &content)
+		excerpt := []rune(content.Text)
+		if len(excerpt) > 120 {
+			excerpt = append(excerpt[:120], []rune("…")...)
+		}
+		results = append(results, MessageSearchResult{
+			MessageID:      row.ID,
+			ConversationID: row.ConversationID,
+			ConvName:       row.ConvName,
+			SenderNickname: row.SenderNickname,
+			Excerpt:        string(excerpt),
+			CreatedAt:      row.CreatedAt,
+			Seq:            row.Seq,
+		})
+	}
+	return results, hasMore, nil
 }

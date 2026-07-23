@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/model"
@@ -98,4 +99,43 @@ func (r *MessageRepository) GetLastMessage(ctx context.Context, convID uuid.UUID
 		return nil, err
 	}
 	return &rows[0], nil
+}
+
+// SearchResult 全文搜索命中消息（含会话名）。
+type SearchResult struct {
+	MessageWithSender
+	ConvName string `json:"conv_name" gorm:"column:conv_name"`
+}
+
+// Search 按关键词搜索当前用户有权访问的消息文本（pg_trgm GIN 加速）。
+// convID 非 nil 时限定在单个会话内。
+// beforeTime 为翻页游标（created_at < beforeTime），nil 表示从最新开始。
+// 最少 3 个字符时才命中 GIN 索引；更短时后端拒绝（service 层校验）。
+func (r *MessageRepository) Search(
+	ctx context.Context,
+	userID uuid.UUID,
+	query string,
+	convID *uuid.UUID,
+	beforeTime *time.Time,
+	limit int,
+) ([]SearchResult, error) {
+	q := r.db.WithContext(ctx).
+		Table("messages m").
+		Select("m.*, u.nickname AS sender_nickname, u.avatar_url AS sender_avatar_url, c.name AS conv_name").
+		Joins("JOIN users u ON u.id = m.sender_id").
+		Joins("JOIN conversations c ON c.id = m.conversation_id").
+		Joins("JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = ?", userID).
+		Where("m.deleted_at IS NULL AND m.status = ?", model.MessageStatusNormal).
+		Where("(m.content->>'text') ILIKE ?", "%"+query+"%")
+
+	if convID != nil {
+		q = q.Where("m.conversation_id = ?", *convID)
+	}
+	if beforeTime != nil {
+		q = q.Where("m.created_at < ?", *beforeTime)
+	}
+
+	var rows []SearchResult
+	err := q.Order("m.created_at DESC").Limit(limit).Scan(&rows).Error
+	return rows, err
 }

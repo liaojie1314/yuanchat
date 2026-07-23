@@ -54,6 +54,8 @@ export { ProfileEditView } from "./ProfileEditView";
 
 // 布局组件
 export { MainLayout } from "./MainLayout";
+export { SearchModal } from "./SearchModal";
+export { InConversationSearch } from "./InConversationSearch";
 
 // 错误边界
 export { AppErrorBoundary } from "./AppErrorBoundary";
