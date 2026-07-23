@@ -25,13 +25,18 @@ import {
 import type { Friend } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { AddContactModal } from "./AddContactModal";
+import { BlocklistView } from "./BlocklistView";
 import { ContactDetail } from "./ContactDetail";
 import { ContactsPanel } from "./ContactsPanel";
 import { NewFriendsView } from "./NewFriendsView";
 import { ResizeHandle } from "./ResizeHandle";
 
-/** 内容区视图：空 / 好友资料 / 新的朋友 */
-type ContentView = { kind: "empty" } | { kind: "friend"; friend: Friend } | { kind: "requests" };
+/** 内容区视图：空 / 好友资料 / 新的朋友 / 黑名单 */
+type ContentView =
+  | { kind: "empty" }
+  | { kind: "friend"; friend: Friend }
+  | { kind: "requests" }
+  | { kind: "blocklist" };
 
 export function ContactsScreen() {
   const { t } = useTranslation();
@@ -45,8 +50,8 @@ export function ContactsScreen() {
   const [addOpen, setAddOpen] = useState(false);
   const leftPanel = useResizable(300, 240, 380);
 
-  // 进入通讯录拉好友 + 申请列表（直接刷新进本页时 ChatScreen 的
-  // bootstrap 未挂载，须自行拉取；mock 模式数据已由 bootstrap 注入）
+  // 进入通讯录拉好友 + 申请列表（保持数据新鲜；WS 连接由 MainLayout
+  // 的 bootstrap 维持；mock 模式数据已由 bootstrap 注入）
   useEffect(() => {
     if (!isMockEnabled()) {
       void loadFriends();
@@ -64,8 +69,10 @@ export function ContactsScreen() {
     <ContactsPanel
       selectedId={view.kind === "friend" ? view.friend.id : null}
       requestsActive={view.kind === "requests"}
+      blocklistActive={view.kind === "blocklist"}
       onSelectFriend={(friend) => setView({ kind: "friend", friend })}
       onOpenRequests={() => setView({ kind: "requests" })}
+      onOpenBlocklist={() => setView({ kind: "blocklist" })}
       onOpenAdd={() => setAddOpen(true)}
     />
   );
@@ -75,6 +82,7 @@ export function ContactsScreen() {
       <ContactDetail
         friend={view.friend}
         onMessage={goChat}
+        onDeleted={() => setView({ kind: "empty" })}
         onBack={showBack ? () => setView({ kind: "empty" }) : undefined}
       />
     ) : view.kind === "requests" ? (
@@ -82,6 +90,8 @@ export function ContactsScreen() {
         onAccepted={goChat}
         onBack={showBack ? () => setView({ kind: "empty" }) : undefined}
       />
+    ) : view.kind === "blocklist" ? (
+      <BlocklistView onBack={showBack ? () => setView({ kind: "empty" }) : undefined} />
     ) : null;
 
   // ── 手机端：栈式单屏 ──

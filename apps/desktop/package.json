@@ -33,6 +33,7 @@
     "react-router-dom": "^7.0.0"
   },
   "devDependencies": {
+    "@sentry/vite-plugin": "^5.4.0",
     "@tauri-apps/cli": "^2.2.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",

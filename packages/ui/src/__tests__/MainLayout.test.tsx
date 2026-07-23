@@ -65,12 +65,10 @@ describe("MainLayout", () => {
       </MemoryRouter>,
     );
     // jsdom 默认 locale 为 en-US, t("settings.logout") → "Sign Out"
-    const btn = screen.getByTitle("Sign Out");
-    expect(btn).toBeInTheDocument();
+    expect(screen.getByTitle("Sign Out")).toBeInTheDocument();
   });
 
   it("clears auth state on logout click", async () => {
-    // 先设置为已登录
     useAuthStore.setState({
       user: { id: "1", nickname: "Test" },
       accessToken: "token",

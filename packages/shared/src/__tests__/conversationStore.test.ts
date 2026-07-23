@@ -168,3 +168,55 @@ describe("conversationStore", () => {
     });
   });
 });
+
+describe("applyRoleChanged", () => {
+  it("increments memberVersion for the target conversation only", () => {
+    useConversationStore.setState({
+      conversations: [
+        { id: "g1", type: "group", name: "g", unreadCount: 0, isMuted: false },
+        { id: "g2", type: "group", name: "h", unreadCount: 0, isMuted: false },
+      ],
+    });
+    useConversationStore.getState().applyRoleChanged("g1");
+    useConversationStore.getState().applyRoleChanged("g1");
+    const convs = useConversationStore.getState().conversations;
+    expect(convs.find((c) => c.id === "g1")!.memberVersion).toBe(2);
+    expect(convs.find((c) => c.id === "g2")!.memberVersion).toBeUndefined();
+  });
+});
+
+describe("mentionUnread", () => {
+  it("markMentioned 只对目标会话设 mentionUnread=true", () => {
+    useConversationStore.setState({
+      conversations: [
+        { id: "a", type: "group", name: "x", unreadCount: 0, isMuted: false },
+        { id: "b", type: "group", name: "y", unreadCount: 0, isMuted: false },
+      ],
+    });
+    useConversationStore.getState().markMentioned("a");
+    const convs = useConversationStore.getState().conversations;
+    expect(convs.find((c) => c.id === "a")!.mentionUnread).toBe(true);
+    expect(convs.find((c) => c.id === "b")!.mentionUnread).toBeFalsy();
+  });
+
+  it("clearUnread 顺带清 mentionUnread", () => {
+    useConversationStore.setState({
+      conversations: [
+        {
+          id: "a",
+          type: "group",
+          name: "x",
+          unreadCount: 3,
+          isMuted: false,
+          mentionUnread: true,
+          lastSeq: 10,
+          myLastReadSeq: 7,
+        },
+      ],
+    });
+    useConversationStore.getState().clearUnread("a");
+    const conv = useConversationStore.getState().conversations[0];
+    expect(conv.unreadCount).toBe(0);
+    expect(conv.mentionUnread).toBe(false);
+  });
+});

@@ -37,8 +37,10 @@ import {
   useMessageStore,
 } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
+import type { MentionRef } from "@yuanchat/shared";
 import { Avatar } from "./Avatar";
 import { Composer } from "./Composer";
+import { ForwardModal } from "./ForwardModal";
 import { ImageLightbox } from "./ImageLightbox";
 import { MessageBubble, TypingIndicator } from "./MessageBubble";
 
@@ -71,6 +73,8 @@ export function ChatWindow({
   const loadingMoreRef = useRef(false);
   // 全屏查看的图片 URL（null 表示未打开）
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  // 转发弹窗当前源消息 ID（null 表示关闭）
+  const [forwardMsgId, setForwardMsgId] = useState<string | null>(null);
 
   // 进入会话时按需加载历史（真实模式；mock 模式内部直接跳过）
   useEffect(() => {
@@ -127,19 +131,21 @@ export function ChatWindow({
         ? t("common.online")
         : t("common.offline");
 
-  const handleSend = (text: string) => {
+  const handleSend = (text: string, mentions: MentionRef[]) => {
     if (!activeId) return;
-    sendText(
-      activeId,
-      text,
-      replyingTo
+    sendText(activeId, text, {
+      mentions,
+      quote: replyingTo
         ? {
+            messageId: replyingTo.id,
             senderName: replyingTo.senderName ?? "我",
             excerpt: (replyingTo.text ?? replyingTo.file?.name ?? "").slice(0, 40),
           }
         : undefined,
-    );
+    });
   };
+
+  const handleForward = (messageId: string) => setForwardMsgId(messageId);
 
   // 撤回：调服务端（用服务端 id）→ 成功靠 message.recalled 帧统一 applyRecall，不乐观翻转。
   const handleRecall = (messageId: string) => {
@@ -279,6 +285,11 @@ export function ChatWindow({
                             );
                           }
                     }
+                    onForward={
+                      msg.recalled || msg.kind === "system" || !msg.seq
+                        ? undefined
+                        : () => handleForward(msg.id)
+                    }
                   />
                 </Fragment>
               );
@@ -294,6 +305,13 @@ export function ChatWindow({
 
       {/* 图片全屏查看器（点击气泡内图片打开） */}
       {lightboxUrl && <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
+
+      <ForwardModal
+        open={forwardMsgId !== null}
+        sourceMessageId={forwardMsgId}
+        sourceConversationId={activeId}
+        onClose={() => setForwardMsgId(null)}
+      />
     </div>
   );
 }

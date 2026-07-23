@@ -317,6 +317,16 @@ func (s *ContactService) Accept(ctx context.Context, userID, requestID uuid.UUID
 	return result, nil
 }
 
+// DeleteFriend 双向软删好友关系（contacts 两行）。幂等。
+// 单聊会话与历史消息保留（前端可选择性隐藏或允许重新加好友后继续对话）。
+// 自删（userID == friendID）视为无效请求。
+func (s *ContactService) DeleteFriend(ctx context.Context, userID, friendID uuid.UUID) error {
+	if userID == friendID {
+		return ErrSelfRequest
+	}
+	return s.repo.Delete(ctx, userID, friendID)
+}
+
 // Reject 拒绝好友申请（仅 target 本人、仅 pending 可拒；不推送给申请方）。
 func (s *ContactService) Reject(ctx context.Context, userID, requestID uuid.UUID) error {
 	req, err := s.repo.FindRequestByID(ctx, requestID)

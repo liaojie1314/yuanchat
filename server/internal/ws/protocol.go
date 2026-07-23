@@ -37,12 +37,29 @@ const (
 	TypeConversationRemoved = "conversation.removed"
 	TypeMessageReaction     = "message.reaction"
 	TypePresence            = "presence"
+	TypeFriendRemoved       = "friend.removed"
+	TypeRoleChanged         = "conversation.role_changed"
 )
+
+// FriendRemovedPayload 好友关系解除推送（删好友双向下发）。
+// FriendID 为被删好友的用户 ID；接收端据此清理本地联系人 + 隐藏相关单聊会话。
+type FriendRemovedPayload struct {
+	FriendID uuid.UUID `json:"friend_id"`
+}
 
 // PresencePayload 好友上下线推送（推给其在线好友）。
 type PresencePayload struct {
 	UserID uuid.UUID `json:"user_id"`
 	Online bool      `json:"online"`
+}
+
+// RoleChangedPayload 群成员角色变更推送（任命/免除/转让，推群内全员）。
+// 转让群主会连发两帧：新群主 role=2、原群主 role=1。
+type RoleChangedPayload struct {
+	ConversationID uuid.UUID `json:"conversation_id"`
+	UserID         uuid.UUID `json:"user_id"`
+	NewRole        int16     `json:"new_role"`
+	ChangedBy      uuid.UUID `json:"changed_by"`
 }
 
 // MessageReactionPayload 表情回应变更推送（推会话全员，含操作者多端）。
@@ -126,6 +143,7 @@ type SendPayload struct {
 	Content        ContentPayload `json:"content"`
 	ClientMsgID    string         `json:"client_msg_id"`
 	ReplyToID      *uuid.UUID     `json:"reply_to_id,omitempty"`
+	Mentions       []uuid.UUID    `json:"mentions,omitempty"`
 }
 
 // ReadPayload 客户端上报已读进度（已读到的最大 seq）。
@@ -159,6 +177,7 @@ type ReceivePayload struct {
 	Seq            int64          `json:"seq"`
 	Timestamp      int64          `json:"timestamp"`
 	ReplyToID      *uuid.UUID     `json:"reply_to_id,omitempty"`
+	Mentions       []uuid.UUID    `json:"mentions,omitempty"`
 	ClientMsgID    string         `json:"client_msg_id,omitempty"`
 }
 

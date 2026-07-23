@@ -70,6 +70,10 @@ export interface Conversation {
   myLastReadSeq?: number;
   /** 单聊对端用户 ID */
   peerId?: string;
+  /** 成员/角色变更版本号（role_changed 帧递增，详情面板据此重拉成员） */
+  memberVersion?: number;
+  /** 群消息 @ 我未读标记（列表侧显示 [@我] 前缀 / 红点，进入会话调 MarkRead 清零） */
+  mentionUnread?: boolean;
 }
 
 interface ConversationState {
@@ -99,6 +103,12 @@ interface ConversationState {
   applyPresence: (userId: string, online: boolean) => void;
   /** 登录/重连快照：命中集合的单聊 online，其余单聊 offline（群聊不动） */
   applyPresenceSnapshot: (onlineIds: string[]) => void;
+  /** role_changed 帧：递增会话 memberVersion，驱动详情面板重拉成员 */
+  applyRoleChanged: (conversationId: string) => void;
+  /** 群消息 @ 我：置 mentionUnread 为 true（非活跃会话时列表红点） */
+  markMentioned: (conversationId: string) => void;
+  /** MarkRead 清零 mentionUnread（配合 clearUnread 内部调用） */
+  clearMention: (conversationId: string) => void;
 }
 
 /**
@@ -166,6 +176,27 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
     }));
   },
 
+  applyRoleChanged: (conversationId) =>
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === conversationId ? { ...c, memberVersion: (c.memberVersion ?? 0) + 1 } : c,
+      ),
+    })),
+
+  markMentioned: (conversationId) =>
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === conversationId ? { ...c, mentionUnread: true } : c,
+      ),
+    })),
+
+  clearMention: (conversationId) =>
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === conversationId ? { ...c, mentionUnread: false } : c,
+      ),
+    })),
+
   applyIncoming: (convId, preview, time, seq) =>
     set((s) => {
       const conv = s.conversations.find((c) => c.id === convId);
@@ -199,7 +230,14 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
     }
     set((s) => ({
       conversations: s.conversations.map((c) =>
-        c.id === id ? { ...c, unreadCount: 0, myLastReadSeq: c.lastSeq ?? c.myLastReadSeq } : c,
+        c.id === id
+          ? {
+              ...c,
+              unreadCount: 0,
+              mentionUnread: false,
+              myLastReadSeq: c.lastSeq ?? c.myLastReadSeq,
+            }
+          : c,
       ),
     }));
   },

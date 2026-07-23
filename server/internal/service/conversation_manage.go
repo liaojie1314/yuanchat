@@ -23,7 +23,16 @@ var (
 	ErrOwnerCannotLeave     = errors.New("owner cannot leave the group")
 	ErrGroupMemberNotFound  = errors.New("member not found")
 	ErrInvalidName          = errors.New("invalid group name")
+	ErrAlreadyAdmin         = errors.New("member is already an admin")
+	ErrNotAdmin             = errors.New("member is not an admin")
+	ErrCannotTransferToSelf = errors.New("cannot transfer ownership to yourself")
 )
+
+// RoleChange 单个成员的角色变更（handler 组 conversation.role_changed 帧用）。
+type RoleChange struct {
+	UserID  uuid.UUID
+	NewRole int16
+}
 
 // GroupOpResult 群管理操作结果，供 handler 组帧推送。
 type GroupOpResult struct {
@@ -33,6 +42,7 @@ type GroupOpResult struct {
 	RemovedID    uuid.UUID        // 被踢/退群者（其余操作为 uuid.Nil）
 	NewMemberIDs []uuid.UUID      // 邀请新入群者
 	NewMemberDTO *ConversationDTO // 新成员视角会话 DTO（仅邀请）
+	RoleChanges  []RoleChange     // 任命/免除/转让引发的角色变更
 	MemberCount  int64
 	Name         string // 操作后群名
 }
@@ -346,4 +356,125 @@ func (s *ConversationService) DissolveGroup(ctx context.Context, operatorID, con
 		zap.String("conversation_id", convID.String()),
 		zap.String("operator_id", operatorID.String()))
 	return memberIDs, nil
+}
+
+// requireOwnerAndTarget 校验操作者为群主，返回目标成员当前角色。
+func (s *ConversationService) requireOwnerAndTarget(ctx context.Context, operatorID, convID, targetID uuid.UUID) (int16, error) {
+	_, role, err := s.loadGroupAndRole(ctx, convID, operatorID)
+	if err != nil {
+		return 0, err
+	}
+	if role != model.MemberRoleOwner {
+		return 0, ErrForbidden
+	}
+	targetRole, ok, err := s.convRepo.GetMemberRole(ctx, convID, targetID)
+	if err != nil {
+		return 0, fmt.Errorf("get target role: %w", err)
+	}
+	if !ok {
+		return 0, ErrGroupMemberNotFound
+	}
+	return targetRole, nil
+}
+
+// finishRoleOp 角色变更共用收尾：事务里更新角色 + 落系统消息，返回组好的结果。
+func (s *ConversationService) finishRoleOp(ctx context.Context, convID, operatorID uuid.UUID, sysText string, changes []RoleChange) (*GroupOpResult, error) {
+	var sysMsg *model.Message
+	err := s.convRepo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, ch := range changes {
+			if err := tx.Model(&model.ConversationMember{}).
+				Where("conversation_id = ? AND user_id = ?", convID, ch.UserID).
+				Update("role", ch.NewRole).Error; err != nil {
+				return err
+			}
+		}
+		var err error
+		sysMsg, err = appendSystemMessage(ctx, tx, convID, operatorID, sysText)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("apply role change: %w", err)
+	}
+
+	memberIDs, err := s.convRepo.GetMemberIDs(ctx, convID)
+	if err != nil {
+		return nil, fmt.Errorf("load members: %w", err)
+	}
+	return &GroupOpResult{
+		SysMsg:      sysMsg,
+		SysText:     sysText,
+		MemberIDs:   memberIDs,
+		RoleChanges: changes,
+		MemberCount: int64(len(memberIDs)),
+	}, nil
+}
+
+// AppointAdmin 任命管理员（仅群主；目标须为普通成员）。
+func (s *ConversationService) AppointAdmin(ctx context.Context, operatorID, convID, targetID uuid.UUID) (*GroupOpResult, error) {
+	targetRole, err := s.requireOwnerAndTarget(ctx, operatorID, convID, targetID)
+	if err != nil {
+		return nil, err
+	}
+	if targetRole == model.MemberRoleOwner {
+		return nil, ErrForbidden
+	}
+	if targetRole == model.MemberRoleAdmin {
+		return nil, ErrAlreadyAdmin
+	}
+
+	sysText := fmt.Sprintf("%s 被任命为管理员", s.nicknameOf(ctx, targetID))
+	res, err := s.finishRoleOp(ctx, convID, operatorID, sysText,
+		[]RoleChange{{UserID: targetID, NewRole: model.MemberRoleAdmin}})
+	if err != nil {
+		return nil, err
+	}
+	s.logger.Info("group admin appointed",
+		zap.String("conversation_id", convID.String()),
+		zap.String("target_id", targetID.String()))
+	return res, nil
+}
+
+// RevokeAdmin 免除管理员（仅群主；目标须为管理员）。
+func (s *ConversationService) RevokeAdmin(ctx context.Context, operatorID, convID, targetID uuid.UUID) (*GroupOpResult, error) {
+	targetRole, err := s.requireOwnerAndTarget(ctx, operatorID, convID, targetID)
+	if err != nil {
+		return nil, err
+	}
+	if targetRole != model.MemberRoleAdmin {
+		return nil, ErrNotAdmin
+	}
+
+	sysText := fmt.Sprintf("%s 被免除管理员", s.nicknameOf(ctx, targetID))
+	res, err := s.finishRoleOp(ctx, convID, operatorID, sysText,
+		[]RoleChange{{UserID: targetID, NewRole: model.MemberRoleNormal}})
+	if err != nil {
+		return nil, err
+	}
+	s.logger.Info("group admin revoked",
+		zap.String("conversation_id", convID.String()),
+		zap.String("target_id", targetID.String()))
+	return res, nil
+}
+
+// TransferOwner 转让群主（仅群主）：一个事务里新群主升 owner、原群主降管理员（微信语义）。
+func (s *ConversationService) TransferOwner(ctx context.Context, operatorID, convID, newOwnerID uuid.UUID) (*GroupOpResult, error) {
+	if operatorID == newOwnerID {
+		return nil, ErrCannotTransferToSelf
+	}
+	if _, err := s.requireOwnerAndTarget(ctx, operatorID, convID, newOwnerID); err != nil {
+		return nil, err
+	}
+
+	sysText := fmt.Sprintf("群主已由 %s 转让至 %s", s.nicknameOf(ctx, operatorID), s.nicknameOf(ctx, newOwnerID))
+	res, err := s.finishRoleOp(ctx, convID, operatorID, sysText, []RoleChange{
+		{UserID: newOwnerID, NewRole: model.MemberRoleOwner},
+		{UserID: operatorID, NewRole: model.MemberRoleAdmin},
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.logger.Info("group owner transferred",
+		zap.String("conversation_id", convID.String()),
+		zap.String("new_owner_id", newOwnerID.String()))
+	return res, nil
 }

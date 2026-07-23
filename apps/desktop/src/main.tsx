@@ -1,5 +1,5 @@
 /**
- * 桌面端入口 — 初始化 i18n、M3 主题、MSW Mock（仅 dev），挂载 React 应用
+ * 桌面端入口 — 初始化 i18n、M3 主题、Sentry、MSW Mock（仅 dev），挂载 React 应用
  *
  * 与 Web 端的区别：
  * - 监听 auth-success 事件（来自注册窗口），自动跳转到聊天页
@@ -9,11 +9,18 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import "@yuanchat/design-system/i18n";
 import "@yuanchat/design-system/global.css";
-import { useThemeStore } from "@yuanchat/shared";
+import { useThemeStore, initSentry } from "@yuanchat/shared";
 import App from "./App";
 
 // 初始化 M3 主题（在 React 渲染前，避免首屏闪烁）
 useThemeStore.getState().applyTheme();
+
+// Sentry 错误监控初始化（无 DSN 时静默跳过，适用于开发/未配置环境）
+initSentry({
+  dsn: import.meta.env.VITE_SENTRY_DSN,
+  release: __APP_VERSION__,
+  environment: import.meta.env.MODE,
+});
 
 // 监听来自注册窗口的登录成功事件
 // 桌面端注册在独立窗口中完成，完成后 emit "auth-success" 事件

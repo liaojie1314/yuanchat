@@ -52,7 +52,20 @@ base64 -w0 release.keystore
 # ⚠️ 妥善保管：keystore 丢失或密码遗忘 = 你无法再发布同一签名的 APK 更新（用户须卸载重装）
 ```
 
-### 3. `.release-it.json` 配置
+### 3. Sentry 错误监控（可选）
+
+在同一 Secrets 页面添加以下 4 个 Secret（未配置时 CI 构建正常通过，仅跳过 source map 上传）：
+
+| Secret 名                | 值                                       | 说明                       |
+| ------------------------ | ---------------------------------------- | -------------------------- |
+| `SENTRY_AUTH_TOKEN`      | 从 Sentry 「Settings → Auth Tokens」创建 | 用于上传 source maps       |
+| `SENTRY_ORG`             | Sentry 组织 slug                         | 你在 Sentry 创建的组织标识 |
+| `SENTRY_PROJECT_WEB`     | Sentry Web 项目 slug                     | Web 端项目名               |
+| `SENTRY_PROJECT_DESKTOP` | Sentry Desktop 项目 slug                 | 桌面端项目名               |
+
+**注册 Sentry：** 访问 https://sentry.io/signup/ 注册，创建 React 类型项目，在项目设置「Client Keys (DSN)」中复制 DSN，配置到各端 `.env` 文件的 `VITE_SENTRY_DSN=` 字段。
+
+### 4. `.release-it.json` 配置
 
 已配置好（`requireBranch: "main"`），无需改动。首次运行会自动生成 `CHANGELOG.md`。
 

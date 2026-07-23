@@ -274,3 +274,146 @@ func TestDissolveGroup(t *testing.T) {
 		t.Fatalf("post-dissolve rename: want ErrConversationNotFound, got %v", err)
 	}
 }
+
+// memberRole 查询成员当前角色（不存在时 -1）。
+func memberRole(t *testing.T, db *gorm.DB, convID, userID uuid.UUID) int16 {
+	t.Helper()
+	var m model.ConversationMember
+	err := db.First(&m, "conversation_id = ? AND user_id = ?", convID, userID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return -1
+	}
+	if err != nil {
+		t.Fatalf("load member: %v", err)
+	}
+	return m.Role
+}
+
+func TestAppointAdmin(t *testing.T) {
+	db := testDB(t)
+	svc := newConvSvc(db)
+	owner := newTestUser(t, db, "ra-o")
+	m1 := newTestUser(t, db, "ra-m1")
+	m2 := newTestUser(t, db, "ra-m2")
+	outsider := newTestUser(t, db, "ra-x")
+	makeFriends(t, db, owner.ID, m1.ID)
+	makeFriends(t, db, owner.ID, m2.ID)
+	convID := newManagedGroup(t, svc, owner.ID, []uuid.UUID{m1.ID, m2.ID})
+
+	res, err := svc.AppointAdmin(context.Background(), owner.ID, convID, m1.ID)
+	if err != nil {
+		t.Fatalf("appoint: %v", err)
+	}
+	if memberRole(t, db, convID, m1.ID) != model.MemberRoleAdmin {
+		t.Fatal("target role not updated to admin")
+	}
+	if res.SysMsg == nil || res.SysMsg.MessageType != model.MessageTypeSystem {
+		t.Fatal("system message not persisted")
+	}
+	if len(res.RoleChanges) != 1 || res.RoleChanges[0].UserID != m1.ID || res.RoleChanges[0].NewRole != model.MemberRoleAdmin {
+		t.Fatalf("role changes: %+v", res.RoleChanges)
+	}
+	if len(res.MemberIDs) != 3 {
+		t.Fatalf("member ids: %v", res.MemberIDs)
+	}
+
+	// 已是管理员 → ErrAlreadyAdmin
+	if _, err := svc.AppointAdmin(context.Background(), owner.ID, convID, m1.ID); !errors.Is(err, ErrAlreadyAdmin) {
+		t.Fatalf("want ErrAlreadyAdmin, got %v", err)
+	}
+	// 管理员无权任命
+	if _, err := svc.AppointAdmin(context.Background(), m1.ID, convID, m2.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("admin appoint: want ErrForbidden, got %v", err)
+	}
+	// 目标不在群内
+	if _, err := svc.AppointAdmin(context.Background(), owner.ID, convID, outsider.ID); !errors.Is(err, ErrGroupMemberNotFound) {
+		t.Fatalf("outsider target: want ErrGroupMemberNotFound, got %v", err)
+	}
+	// 目标是群主
+	if _, err := svc.AppointAdmin(context.Background(), owner.ID, convID, owner.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("appoint owner: want ErrForbidden, got %v", err)
+	}
+}
+
+func TestRevokeAdmin(t *testing.T) {
+	db := testDB(t)
+	svc := newConvSvc(db)
+	owner := newTestUser(t, db, "rr-o")
+	m1 := newTestUser(t, db, "rr-m1")
+	m2 := newTestUser(t, db, "rr-m2")
+	makeFriends(t, db, owner.ID, m1.ID)
+	makeFriends(t, db, owner.ID, m2.ID)
+	convID := newManagedGroup(t, svc, owner.ID, []uuid.UUID{m1.ID, m2.ID})
+
+	if _, err := svc.AppointAdmin(context.Background(), owner.ID, convID, m1.ID); err != nil {
+		t.Fatalf("seed appoint: %v", err)
+	}
+
+	// 管理员无权免除
+	if _, err := svc.RevokeAdmin(context.Background(), m1.ID, convID, m1.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("admin revoke: want ErrForbidden, got %v", err)
+	}
+	// 目标不是管理员
+	if _, err := svc.RevokeAdmin(context.Background(), owner.ID, convID, m2.ID); !errors.Is(err, ErrNotAdmin) {
+		t.Fatalf("normal target: want ErrNotAdmin, got %v", err)
+	}
+
+	res, err := svc.RevokeAdmin(context.Background(), owner.ID, convID, m1.ID)
+	if err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if memberRole(t, db, convID, m1.ID) != model.MemberRoleNormal {
+		t.Fatal("target role not reset to normal")
+	}
+	if len(res.RoleChanges) != 1 || res.RoleChanges[0].NewRole != model.MemberRoleNormal {
+		t.Fatalf("role changes: %+v", res.RoleChanges)
+	}
+	if res.SysMsg == nil {
+		t.Fatal("system message not persisted")
+	}
+}
+
+func TestTransferOwner(t *testing.T) {
+	db := testDB(t)
+	svc := newConvSvc(db)
+	owner := newTestUser(t, db, "to-o")
+	m1 := newTestUser(t, db, "to-m1")
+	outsider := newTestUser(t, db, "to-x")
+	makeFriends(t, db, owner.ID, m1.ID)
+	convID := newManagedGroup(t, svc, owner.ID, []uuid.UUID{m1.ID})
+
+	// 转给自己
+	if _, err := svc.TransferOwner(context.Background(), owner.ID, convID, owner.ID); !errors.Is(err, ErrCannotTransferToSelf) {
+		t.Fatalf("self transfer: want ErrCannotTransferToSelf, got %v", err)
+	}
+	// 非群主
+	if _, err := svc.TransferOwner(context.Background(), m1.ID, convID, owner.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("member transfer: want ErrForbidden, got %v", err)
+	}
+	// 目标不在群内
+	if _, err := svc.TransferOwner(context.Background(), owner.ID, convID, outsider.ID); !errors.Is(err, ErrGroupMemberNotFound) {
+		t.Fatalf("outsider transfer: want ErrGroupMemberNotFound, got %v", err)
+	}
+
+	res, err := svc.TransferOwner(context.Background(), owner.ID, convID, m1.ID)
+	if err != nil {
+		t.Fatalf("transfer: %v", err)
+	}
+	// 事务两端角色都翻转
+	if memberRole(t, db, convID, m1.ID) != model.MemberRoleOwner {
+		t.Fatal("new owner role not updated")
+	}
+	if memberRole(t, db, convID, owner.ID) != model.MemberRoleAdmin {
+		t.Fatal("old owner not demoted to admin")
+	}
+	if len(res.RoleChanges) != 2 {
+		t.Fatalf("role changes: %+v", res.RoleChanges)
+	}
+	if res.SysMsg == nil {
+		t.Fatal("system message not persisted")
+	}
+	// 原群主已非 owner，再转让 → forbidden
+	if _, err := svc.TransferOwner(context.Background(), owner.ID, convID, m1.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("double transfer: want ErrForbidden, got %v", err)
+	}
+}

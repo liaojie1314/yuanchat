@@ -26,6 +26,7 @@
     "clean": "echo 'shared: clean'"
   },
   "dependencies": {
+    "@sentry/react": "^10.67.0",
     "@yuanchat/design-system": "workspace:*",
     "clsx": "^2.1.1",
     "pinyin-pro": "^3.28.1",

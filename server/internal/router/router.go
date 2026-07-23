@@ -41,12 +41,14 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	msgRepo := repository.NewMessageRepository(db)
 	contactRepo := repository.NewContactRepository(db)
 	reactionRepo := repository.NewReactionRepository(db)
+	blocklistRepo := repository.NewBlocklistRepository(db)
 	sidGen := shortid.NewGenerator(db)
 
 	userSvc := service.NewUserService(userRepo, jwtGen, sidGen, logger)
-	msgSvc := service.NewMessageService(msgRepo, convRepo, userRepo, reactionRepo, logger)
+	msgSvc := service.NewMessageService(msgRepo, convRepo, userRepo, reactionRepo, blocklistRepo, logger)
 	convSvc := service.NewConversationService(convRepo, msgRepo, contactRepo, userRepo, logger)
 	contactSvc := service.NewContactService(contactRepo, userRepo, logger)
+	blocklistSvc := service.NewBlocklistService(blocklistRepo, userRepo, logger)
 
 	healthH := handler.NewHealthHandler()
 	captchaH := handler.NewCaptchaHandler(rdb)
@@ -59,6 +61,8 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	convH := handler.NewConversationHandler(convSvc, hub, logger)
 	fileH := handler.NewFileHandler(st, cfg.Upload, logger)
 	presenceH := handler.NewPresenceHandler(contactRepo, hub, logger)
+	blocklistH := handler.NewBlocklistHandler(blocklistSvc, logger)
+	forwardH := handler.NewForwardHandler(msgSvc, hub, logger)
 
 	// 好友上下线广播：独立 goroutine 通知在线好友，不阻塞连接注册路径
 	hub.SetPresenceNotifier(func(userID uuid.UUID, online bool) {
@@ -109,8 +113,12 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		chat.DELETE("/conversations/:id/members/:userId", convH.Kick)
 		chat.POST("/conversations/:id/leave", convH.Leave)
 		chat.DELETE("/conversations/:id", convH.Dissolve)
+		chat.POST("/conversations/:id/admins", convH.AppointAdmin)
+		chat.DELETE("/conversations/:id/admins/:userId", convH.RevokeAdmin)
+		chat.POST("/conversations/:id/owner-transfer", convH.TransferOwner)
 		chat.POST("/messages/:id/recall", msgH.Recall)
 		chat.POST("/messages/:id/reactions", msgH.React)
+		chat.POST("/messages/:id/forward", forwardH.Forward)
 
 		chat.POST("/files/upload-url", fileH.UploadURL)
 		chat.GET("/files/download-url", fileH.DownloadURL)
@@ -122,6 +130,11 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		chat.GET("/contacts/requests", contactH.ListRequests)
 		chat.POST("/contacts/requests/:id/accept", contactH.Accept)
 		chat.POST("/contacts/requests/:id/reject", contactH.Reject)
+		chat.DELETE("/contacts/:id", contactH.DeleteFriend)
+
+		chat.GET("/blocks", blocklistH.List)
+		chat.POST("/blocks", blocklistH.Block)
+		chat.DELETE("/blocks/:targetId", blocklistH.Unblock)
 	}
 
 	return r, wsH

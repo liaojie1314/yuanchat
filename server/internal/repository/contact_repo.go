@@ -151,3 +151,13 @@ func (r *ContactRepository) FriendIDs(ctx context.Context, userID uuid.UUID) ([]
 		Pluck("contact_user_id", &ids).Error
 	return ids, err
 }
+
+// Delete 双向软删好友关系（contacts 两行）。
+// 幂等：已不存在返回 nil（RowsAffected 可为 0）。
+// 单聊会话与历史消息保留，前端"隐藏但可恢复"。
+func (r *ContactRepository) Delete(ctx context.Context, userID, friendID uuid.UUID) error {
+	return r.db.WithContext(ctx).
+		Where("(user_id = ? AND contact_user_id = ?) OR (user_id = ? AND contact_user_id = ?)",
+			userID, friendID, friendID, userID).
+		Delete(&model.Contact{}).Error
+}

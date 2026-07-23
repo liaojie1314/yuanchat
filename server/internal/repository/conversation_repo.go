@@ -12,10 +12,11 @@ import (
 // ConversationListItem 会话列表查询的投影结果（含聚合字段）。
 type ConversationListItem struct {
 	model.Conversation
-	Role        int16 `json:"role"`
-	LastReadSeq int64 `json:"last_read_seq"`
-	IsMuted     bool  `json:"is_muted"`
-	MemberCount int64 `json:"member_count"`
+	Role          int16 `json:"role"`
+	LastReadSeq   int64 `json:"last_read_seq"`
+	IsMuted       bool  `json:"is_muted"`
+	MentionUnread bool  `json:"mention_unread"`
+	MemberCount   int64 `json:"member_count"`
 }
 
 // ConversationRepository 处理 conversations / conversation_members 表。
@@ -37,7 +38,7 @@ func (r *ConversationRepository) ListByUserID(ctx context.Context, userID uuid.U
 	var items []ConversationListItem
 	err := r.db.WithContext(ctx).
 		Table("conversations c").
-		Select(`c.*, cm.role, cm.last_read_seq, cm.is_muted,
+		Select(`c.*, cm.role, cm.last_read_seq, cm.is_muted, cm.mention_unread,
 			(SELECT count(*) FROM conversation_members m2 WHERE m2.conversation_id = c.id) AS member_count`).
 		Joins("JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = ?", userID).
 		Where("c.deleted_at IS NULL").
@@ -93,12 +94,24 @@ func (r *ConversationRepository) FindByID(ctx context.Context, id uuid.UUID) (*m
 	return &conv, nil
 }
 
-// UpdateLastReadSeq 推进成员的已读进度（只前进不后退）。
+// UpdateLastReadSeq 推进成员的已读进度（只前进不后退）；顺带清除 mention_unread。
 func (r *ConversationRepository) UpdateLastReadSeq(ctx context.Context, convID, userID uuid.UUID, seq int64) error {
 	return r.db.WithContext(ctx).
 		Model(&model.ConversationMember{}).
 		Where("conversation_id = ? AND user_id = ? AND last_read_seq < ?", convID, userID, seq).
-		Update("last_read_seq", seq).Error
+		Updates(map[string]any{"last_read_seq": seq, "mention_unread": false}).Error
+}
+
+// SetMentionUnread 将指定成员的 mention_unread 置为 true（仅当当前为 false 时更新，
+// 避免因群消息重复触发写热点）。
+func (r *ConversationRepository) SetMentionUnread(ctx context.Context, convID uuid.UUID, userIDs []uuid.UUID) error {
+	if len(userIDs) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).
+		Model(&model.ConversationMember{}).
+		Where("conversation_id = ? AND user_id IN ? AND mention_unread = false", convID, userIDs).
+		Update("mention_unread", true).Error
 }
 
 // GetPeerUser 查询单聊会话中除 userID 外的另一名成员。

@@ -36,8 +36,18 @@ export type ChatMessageStatus = "sending" | "sent" | "read" | "failed";
 
 /** 被引用消息的摘要（嵌在气泡内的 quote 块） */
 export interface QuoteRef {
+  /** 被引用消息的服务端 ID（点击时可 emit scroll 到源消息） */
+  messageId?: string;
   senderName: string;
   excerpt: string;
+}
+
+/** @提及目标（Composer 收集，随 message.send 提交给后端） */
+export interface MentionRef {
+  /** 用户 ID */
+  id: string;
+  /** 昵称（渲染 token 用，接收端只需重新 lookup） */
+  name: string;
 }
 
 /** 表情回应聚合项，如 👍 x2 */
@@ -94,8 +104,11 @@ export interface ChatMessage {
   voice?: VoicePayload;
   quote?: QuoteRef;
   reactions?: Reaction[];
-  /** @提及的名字列表（渲染为高亮 token） */
+  /** @提及的用户 ID 列表（渲染时高亮相应昵称段） */
   mentions?: string[];
+  /** 引用消息的服务端 ID（reply_to_id）：可能与 quote.messageId 重复，
+   * quote 是"发送时的 UI 快照"，reply_to_id 是"服务端真源"，两者独立以便惰性拉取 */
+  replyToId?: string;
   /** HH:mm 时间标签 */
   time: string;
   /** 本地日期键（YYYY-MM-DD），用于消息按日分组与日期分隔线 */
@@ -133,8 +146,12 @@ interface MessageState {
   loadHistory: (conversationId: string) => Promise<void>;
   /** 向上翻页加载更早的历史 */
   loadMore: (conversationId: string) => Promise<void>;
-  /** 发送一条文本消息，返回消息 ID */
-  sendText: (conversationId: string, text: string, quote?: QuoteRef) => string;
+  /** 发送一条文本消息，返回消息 ID；mentions/quote 一并提交给后端 */
+  sendText: (
+    conversationId: string,
+    text: string,
+    opts?: { quote?: QuoteRef; mentions?: MentionRef[] },
+  ) => string;
   /**
    * 发送一张图片：本地压缩 → 乐观插入（本地预览）→ 申请上传 URL → 直传 → WS image 帧。
    * 任一步失败置该消息为 failed（可点击重试，走 retrySend 重跑整个流程）。
@@ -182,6 +199,11 @@ interface MessageState {
   setTyping: (convId: string, name: string) => void;
   /** 更新消息状态（重试 / 回执） */
   setStatus: (conversationId: string, messageId: string, status: ChatMessageStatus) => void;
+  /**
+   * WS error 帧（如 BLOCKED）按 clientMsgId 定位乐观消息并翻 failed。
+   * 找不到目标（如重连后 store 已清）静默忽略。
+   */
+  failByClientMsgId: (clientMsgId: string) => void;
 }
 
 // ========================================
@@ -274,8 +296,10 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     }
   },
 
-  sendText: (conversationId, text, quote) => {
+  sendText: (conversationId, text, opts) => {
     const clientMsgId = newClientMsgId();
+    const quote = opts?.quote;
+    const mentions = opts?.mentions;
     const msg: ChatMessage = {
       id: clientMsgId,
       conversationId,
@@ -283,6 +307,8 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       isSelf: true,
       text,
       quote,
+      replyToId: quote?.messageId,
+      mentions: mentions && mentions.length > 0 ? mentions.map((m) => m.id) : undefined,
       time: now(),
       dateKey: dateKeyOf(new Date()),
       createdAtMs: Date.now(),
@@ -298,13 +324,15 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     }));
 
     if (mockMode) {
-      // 无后端演示：模拟 送达 → 已读
       setTimeout(() => get().setStatus(conversationId, clientMsgId, "sent"), 700);
       setTimeout(() => get().setStatus(conversationId, clientMsgId, "read"), 1600);
       return clientMsgId;
     }
 
-    dispatchSend(conversationId, text, clientMsgId, get);
+    dispatchSend(conversationId, text, clientMsgId, get, {
+      replyToId: quote?.messageId,
+      mentionIds: mentions?.map((m) => m.id),
+    });
     return clientMsgId;
   },
 
@@ -487,7 +515,10 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       return;
     }
 
-    dispatchSend(conversationId, msg.text, msg.clientMsgId ?? messageId, get);
+    dispatchSend(conversationId, msg.text, msg.clientMsgId ?? messageId, get, {
+      replyToId: msg.replyToId,
+      mentionIds: msg.mentions,
+    });
   },
 
   receiveMessage: (msg) => {
@@ -623,6 +654,30 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
         ),
       },
     })),
+
+  failByClientMsgId: (clientMsgId) => {
+    // 先解除 ack 超时（error 帧已是终态，避免超时重复翻 failed）
+    const timer = ackTimers.get(clientMsgId);
+    if (timer) {
+      clearTimeout(timer);
+      ackTimers.delete(clientMsgId);
+    }
+    set((s) => {
+      for (const [convId, list] of Object.entries(s.messagesByConv)) {
+        if (list.some((m) => m.clientMsgId === clientMsgId)) {
+          return {
+            messagesByConv: {
+              ...s.messagesByConv,
+              [convId]: list.map((m) =>
+                m.clientMsgId === clientMsgId ? { ...m, status: "failed" as const } : m,
+              ),
+            },
+          };
+        }
+      }
+      return s;
+    });
+  },
 }));
 
 /** 经 WebSocket 发出 message.send 并挂 ack 超时（超时 → failed） */
@@ -631,12 +686,16 @@ function dispatchSend(
   text: string,
   clientMsgId: string,
   get: () => MessageState,
+  extras?: { replyToId?: string; mentionIds?: string[] },
 ) {
-  chatSocket.send("message.send", {
+  const payload: Record<string, unknown> = {
     conversation_id: conversationId,
     content: { type: "text", text },
     client_msg_id: clientMsgId,
-  });
+  };
+  if (extras?.replyToId) payload.reply_to_id = extras.replyToId;
+  if (extras?.mentionIds && extras.mentionIds.length > 0) payload.mentions = extras.mentionIds;
+  chatSocket.send("message.send", payload);
   armAckTimeout(conversationId, clientMsgId, get);
 }
 

@@ -37,11 +37,14 @@ export { ChatScreen } from "./ChatScreen";
 export { MembersView } from "./MembersView";
 export { CreateGroupModal } from "./CreateGroupModal";
 export { InviteMembersModal } from "./InviteMembersModal";
+export { MentionPicker } from "./MentionPicker";
+export { ForwardModal } from "./ForwardModal";
 
 // 通讯录组件
 export { ContactsScreen } from "./ContactsScreen";
 export { ContactsPanel } from "./ContactsPanel";
 export { ContactDetail } from "./ContactDetail";
+export { BlocklistView } from "./BlocklistView";
 export { NewFriendsView } from "./NewFriendsView";
 export { AddContactModal } from "./AddContactModal";
 
@@ -51,3 +54,6 @@ export { ProfileEditView } from "./ProfileEditView";
 
 // 布局组件
 export { MainLayout } from "./MainLayout";
+
+// 错误边界
+export { AppErrorBoundary } from "./AppErrorBoundary";

@@ -21,7 +21,9 @@ func (h *ConversationHandler) groupErr(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrGroupMemberNotFound):
 		NotFound(c, "member not found")
 	case errors.Is(err, service.ErrNotGroup), errors.Is(err, service.ErrInvalidName),
-		errors.Is(err, service.ErrOwnerCannotLeave), errors.Is(err, service.ErrNoValidMembers):
+		errors.Is(err, service.ErrOwnerCannotLeave), errors.Is(err, service.ErrNoValidMembers),
+		errors.Is(err, service.ErrAlreadyAdmin), errors.Is(err, service.ErrNotAdmin),
+		errors.Is(err, service.ErrCannotTransferToSelf):
 		BadRequest(c, err.Error())
 	case errors.Is(err, service.ErrNotAllFriends):
 		Error(c, http.StatusBadRequest, 400, "all members must be your friends")
@@ -211,4 +213,118 @@ func (h *ConversationHandler) Dissolve(c *gin.Context) {
 
 	h.pushRemoved(memberIDs, convID, "dissolved")
 	Success(c, gin.H{})
+}
+
+// pushRoleChanged 把角色变更帧逐条推给群内全员（转让时两条：升 owner + 降 admin）。
+func (h *ConversationHandler) pushRoleChanged(memberIDs []uuid.UUID, convID, changedBy uuid.UUID, changes []service.RoleChange) {
+	for _, ch := range changes {
+		if frame, err := ws.Encode(ws.TypeRoleChanged, ws.RoleChangedPayload{
+			ConversationID: convID,
+			UserID:         ch.UserID,
+			NewRole:        ch.NewRole,
+			ChangedBy:      changedBy,
+		}); err == nil {
+			h.dispatcher.SendToUsers(memberIDs, frame)
+		}
+	}
+}
+
+// finishRoleOp 角色操作共用推送：系统消息 + role_changed 帧。
+func (h *ConversationHandler) finishRoleOp(convID, actorID uuid.UUID, res *service.GroupOpResult) {
+	h.pushSystemReceive(res.MemberIDs, res.SysMsg, res.SysText)
+	h.pushRoleChanged(res.MemberIDs, convID, actorID, res.RoleChanges)
+}
+
+// AppointAdminBody 任命管理员请求体。
+type AppointAdminBody struct {
+	UserID uuid.UUID `json:"user_id" binding:"required"`
+}
+
+// AppointAdmin 任命管理员（POST /conversations/:id/admins，仅群主）。
+func (h *ConversationHandler) AppointAdmin(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		Unauthorized(c, "unauthorized")
+		return
+	}
+	convID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid conversation id")
+		return
+	}
+	var body AppointAdminBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	res, err := h.svc.AppointAdmin(c.Request.Context(), userID, convID, body.UserID)
+	if err != nil {
+		h.groupErr(c, err)
+		return
+	}
+
+	h.finishRoleOp(convID, userID, res)
+	Success(c, gin.H{"user_id": body.UserID, "new_role": 1})
+}
+
+// RevokeAdmin 免除管理员（DELETE /conversations/:id/admins/:userId，仅群主）。
+func (h *ConversationHandler) RevokeAdmin(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		Unauthorized(c, "unauthorized")
+		return
+	}
+	convID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid conversation id")
+		return
+	}
+	targetID, err := uuid.Parse(c.Param("userId"))
+	if err != nil {
+		BadRequest(c, "invalid user id")
+		return
+	}
+
+	res, err := h.svc.RevokeAdmin(c.Request.Context(), userID, convID, targetID)
+	if err != nil {
+		h.groupErr(c, err)
+		return
+	}
+
+	h.finishRoleOp(convID, userID, res)
+	Success(c, gin.H{"user_id": targetID, "new_role": 0})
+}
+
+// TransferOwnerBody 转让群主请求体。
+type TransferOwnerBody struct {
+	NewOwnerID uuid.UUID `json:"new_owner_id" binding:"required"`
+}
+
+// TransferOwner 转让群主（POST /conversations/:id/owner-transfer，仅群主）。
+func (h *ConversationHandler) TransferOwner(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		Unauthorized(c, "unauthorized")
+		return
+	}
+	convID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid conversation id")
+		return
+	}
+	var body TransferOwnerBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	res, err := h.svc.TransferOwner(c.Request.Context(), userID, convID, body.NewOwnerID)
+	if err != nil {
+		h.groupErr(c, err)
+		return
+	}
+
+	h.finishRoleOp(convID, userID, res)
+	Success(c, gin.H{"old_owner_id": userID, "new_owner_id": body.NewOwnerID})
 }

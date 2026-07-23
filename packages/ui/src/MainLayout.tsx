@@ -6,7 +6,7 @@
  *
  * 响应式两种形态（useBreakpoint 驱动）：
  * - **桌面 / 平板**：左侧品牌渐变导航栏（64px），含头像、导航入口、
- *   主题切换与登出按钮
+ *   主题切换与登出按钮（登出唯一入口，设置页不重复提供）
  * - **手机**：底部 Material 3 导航条（带 pill 高亮 + 未读角标），
  *   聊天视图打开时自动隐藏，让消息流占满全屏
  *
@@ -28,6 +28,7 @@ import { MessageCircle, Users, Settings, Sun, Moon, LogOut } from "lucide-react"
 import {
   useThemeStore,
   useAuthStore,
+  useChatBootstrap,
   useContactStore,
   useConversationStore,
   useBreakpoint,
@@ -52,6 +53,10 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
   const { user, logout } = useAuthStore();
   const { t } = useTranslation();
   const bp = useBreakpoint();
+
+  // 数据源接线：WS 连接挂在布局层，切页（聊天↔通讯录↔设置）不断连，
+  // presence/消息帧全程可达；登出（布局卸载）时断开
+  useChatBootstrap();
 
   const totalUnread = useConversationStore((s) =>
     s.conversations.reduce((sum, c) => sum + (c.isMuted ? 0 : c.unreadCount), 0),
@@ -169,7 +174,7 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
           {isDark ? <Sun size={20} /> : <Moon size={20} />}
         </button>
 
-        {/* 登出 */}
+        {/* 登出（设置页不再重复提供，桌面端唯一入口） */}
         <button
           onClick={logout}
           className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white/70 transition-all duration-200 hover:bg-white/15 hover:text-white"
