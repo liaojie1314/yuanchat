@@ -1,9 +1,25 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "path";
+import { readFileSync } from "node:fs";
+import { sentryVitePlugin } from "@sentry/vite-plugin";
+
+const version = JSON.parse(readFileSync("./package.json", "utf-8")).version as string;
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    process.env.SENTRY_AUTH_TOKEN
+      ? sentryVitePlugin({
+          authToken: process.env.SENTRY_AUTH_TOKEN,
+          org: process.env.SENTRY_ORG || "",
+          project: process.env.SENTRY_PROJECT_DESKTOP || "",
+          release: { name: version },
+          sourcemaps: { assets: "dist/**" },
+          telemetry: false,
+        })
+      : null,
+  ].filter(Boolean),
   resolve: {
     alias: {
       "@": resolve(__dirname, "./src"),
@@ -32,6 +48,9 @@ export default defineConfig({
     },
   },
   envPrefix: ["VITE_", "TAURI_"],
+  define: {
+    __APP_VERSION__: JSON.stringify(version),
+  },
   build: {
     // 目标设为 es2019：转译可选链 ?. 和空值合并 ?? 等 ES2020 语法。
     // 原因：Android System WebView 在旧机型/模拟器上可能停留在 Chrome 74
@@ -40,6 +59,6 @@ export default defineConfig({
     // es2019 在所有现代桌面 WebView（WebView2 / WebKitGTK）上同样兼容。
     target: "es2019",
     minify: process.env.TAURI_DEBUG ? false : "esbuild",
-    sourcemap: !!process.env.TAURI_DEBUG,
+    sourcemap: !!process.env.TAURI_DEBUG || !!process.env.SENTRY_AUTH_TOKEN,
   },
 });

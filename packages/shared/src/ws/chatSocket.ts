@@ -13,6 +13,7 @@
  */
 import { ensureFreshToken, needsRefresh } from "../api/tokenManager";
 import type { ConversationDTO } from "../api/chat";
+import { captureException } from "../observability/sentry";
 
 export interface ServerFrames {
   "message.ack": {
@@ -112,6 +113,7 @@ class ChatSocket {
   private retries = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private tokenProvider: () => string | null = () => null;
+  private lastErrorReport = 0;
   /** 重连成功后的回调（bootstrap 用来拉增量数据） */
   onReconnect: (() => void) | null = null;
 
@@ -181,16 +183,31 @@ class ChatSocket {
       this.handleFrame(typeof event.data === "string" ? event.data : "");
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event?: { code?: number }) => {
       if (this.ws !== ws) return;
       this.ws = null;
       if (this.state === "closed") return; // 主动断开，不重连
       this.state = "closed";
+      const code = event && event.code;
+      if (code && code !== 1000 && code !== 1001) {
+        const now = Date.now();
+        if (now - this.lastErrorReport > 30000) {
+          this.lastErrorReport = now;
+          captureException(new Error("WebSocket abnormal close " + String(code)), {
+            code,
+            url: WS_BASE,
+          });
+        }
+      }
       this.scheduleReconnect();
     };
 
     ws.onerror = () => {
-      // onclose 会紧随其后触发，重连逻辑统一放在 onclose
+      const now = Date.now();
+      if (now - this.lastErrorReport > 30000) {
+        this.lastErrorReport = now;
+        captureException(new Error("WebSocket error"), { url: WS_BASE });
+      }
     };
   }
 

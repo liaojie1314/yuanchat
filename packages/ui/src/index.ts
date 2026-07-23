@@ -54,3 +54,6 @@ export { ProfileEditView } from "./ProfileEditView";
 
 // 布局组件
 export { MainLayout } from "./MainLayout";
+
+// 错误边界
+export { AppErrorBoundary } from "./AppErrorBoundary";
