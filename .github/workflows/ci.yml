@@ -33,6 +33,35 @@ jobs:
       - name: Typecheck (desktop)
         run: cd apps/desktop && npx tsc --noEmit
 
+  # E2E：Playwright smoke tests，在 mock 模式下运行（无需真实后端）
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    needs: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.22.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright browsers
+        working-directory: apps/web
+        run: npx playwright install chromium --with-deps
+      - name: Run E2E tests
+        run: pnpm --filter @yuanchat/web test:e2e
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
+
   # 后端：go vet + go test（不依赖 postgres 的用例，集成测试自动 skip）
   backend:
     name: Backend (vet + test)
