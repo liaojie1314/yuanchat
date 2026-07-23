@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/yuanchat/server/internal/metrics"
 	"go.uber.org/zap"
 )
 
@@ -57,6 +58,9 @@ func (h *Hub) Register(c *Client) bool {
 	conns[c] = struct{}{}
 	h.mu.Unlock()
 
+	// Prometheus: 连接数 +1
+	metrics.WSConnectionsActive.Inc()
+
 	// 锁外回调：notifier 内可能反查 Hub（OnlineFilter），锁内调用会死锁
 	if first && h.presenceNotifier != nil {
 		h.presenceNotifier(c.userID, true)
@@ -80,6 +84,9 @@ func (h *Hub) Unregister(c *Client) {
 	}
 	h.mu.Unlock()
 
+	// Prometheus: 连接数 -1
+	metrics.WSConnectionsActive.Dec()
+
 	if last && h.presenceNotifier != nil {
 		h.presenceNotifier(c.userID, false)
 	}
@@ -95,6 +102,7 @@ func (h *Hub) SendToUsers(userIDs []uuid.UUID, data []byte) {
 		for c := range h.clients[uid] {
 			select {
 			case c.send <- data:
+				metrics.WSMessagesTotal.WithLabelValues("send").Inc()
 			default:
 				h.logger.Warn("ws send buffer full, frame dropped",
 					zap.String("user_id", uid.String()))
