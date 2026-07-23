@@ -58,6 +58,8 @@ func main() {
 	defer database.Close(db)
 
 	// 定向迁移新表（seed 可能先于 server 首次运行）
+	// seed 只补新表；Message/ConversationMember 的列变更由 server 启动时的 AutoMigrate 负责，
+	// 这里再迁会与 messages.idx_conversation_seq（联合唯一）等已有约束打架。
 	if err := db.AutoMigrate(&model.FriendRequest{}, &model.MessageReaction{}, &model.Blocklist{}); err != nil {
 		log.Fatalf("migrate friend_requests: %v", err)
 	}

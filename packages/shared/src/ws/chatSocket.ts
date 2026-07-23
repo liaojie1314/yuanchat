@@ -42,6 +42,7 @@ export interface ServerFrames {
     seq: number;
     timestamp: number;
     reply_to_id?: string;
+    mentions?: string[];
     client_msg_id?: string;
   };
   "message.read": { conversation_id: string; user_id: string; seq: number };

@@ -143,6 +143,7 @@ type SendPayload struct {
 	Content        ContentPayload `json:"content"`
 	ClientMsgID    string         `json:"client_msg_id"`
 	ReplyToID      *uuid.UUID     `json:"reply_to_id,omitempty"`
+	Mentions       []uuid.UUID    `json:"mentions,omitempty"`
 }
 
 // ReadPayload 客户端上报已读进度（已读到的最大 seq）。
@@ -176,6 +177,7 @@ type ReceivePayload struct {
 	Seq            int64          `json:"seq"`
 	Timestamp      int64          `json:"timestamp"`
 	ReplyToID      *uuid.UUID     `json:"reply_to_id,omitempty"`
+	Mentions       []uuid.UUID    `json:"mentions,omitempty"`
 	ClientMsgID    string         `json:"client_msg_id,omitempty"`
 }
 

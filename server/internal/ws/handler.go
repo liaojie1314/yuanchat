@@ -144,10 +144,18 @@ func (h *Handler) handleSend(c *Client, env *Envelope) {
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
 	defer cancel()
 
-	result, err := h.msgSvc.SendContent(ctx, c.userID, p.ConversationID, messageType, contentJSON, p.ClientMsgID, p.ReplyToID)
+	result, err := h.msgSvc.SendContent(ctx, c.userID, p.ConversationID, messageType, contentJSON, p.ClientMsgID, p.ReplyToID, p.Mentions)
 	if err != nil {
 		if errors.Is(err, service.ErrBlocked) {
 			c.sendError(403, "BLOCKED", p.ClientMsgID)
+			return
+		}
+		if errors.Is(err, service.ErrInvalidMention) {
+			c.sendError(400, "invalid mention target", p.ClientMsgID)
+			return
+		}
+		if errors.Is(err, service.ErrInvalidQuote) {
+			c.sendError(400, "invalid quote target", p.ClientMsgID)
 			return
 		}
 		h.logger.Error("send message failed", zap.Error(err), zap.String("user_id", c.userID.String()))
@@ -177,6 +185,7 @@ func (h *Handler) handleSend(c *Client, env *Envelope) {
 		Seq:            result.Message.Seq,
 		Timestamp:      ts,
 		ReplyToID:      p.ReplyToID,
+		Mentions:       result.MentionedMembers,
 		ClientMsgID:    p.ClientMsgID,
 	})
 	if err == nil {

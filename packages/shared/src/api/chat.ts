@@ -35,6 +35,7 @@ export interface ConversationDTO {
   member_count: number;
   unread_count: number;
   is_muted: boolean;
+  mention_unread?: boolean;
   last_seq: number;
   my_last_read_seq: number;
   last_message?: LastMessageDTO;
@@ -52,6 +53,7 @@ export interface MessageDTO {
   content: string;
   status: number;
   reply_to_id?: string | null;
+  mentions?: string[] | null;
   client_msg_id?: string | null;
   created_at: string;
   sender_nickname: string;
@@ -139,6 +141,7 @@ export function mapConversation(dto: ConversationDTO): Conversation {
     lastTime: dto.last_message ? formatListTime(dto.last_message.created_at) : "",
     unreadCount: dto.unread_count,
     isMuted: dto.is_muted,
+    mentionUnread: dto.mention_unread ?? false,
     memberCount: dto.member_count,
     lastSeq: dto.last_seq,
     myLastReadSeq: dto.my_last_read_seq,
@@ -268,6 +271,8 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     dateKey: dateKeyOf(new Date(dto.created_at)),
     createdAtMs: new Date(dto.created_at).getTime(),
     recalled: recalled ? true : undefined,
+    replyToId: dto.reply_to_id ?? undefined,
+    mentions: dto.mentions ?? undefined,
     // 历史消息不区分 sent/read（read 回执只对新消息实时生效），统一视为已读
     status: isSelf ? "read" : undefined,
   };
@@ -364,4 +369,31 @@ export async function toggleReaction(messageId: string, emoji: string): Promise<
     "/api/v1/messages/" + messageId + "/reactions",
     { emoji },
   );
+}
+
+/** 转发结果条目：目标会话 + 新消息 ID + 序列号 */
+export interface ForwardResult {
+  conversationId: string;
+  messageId: string;
+  seq: number;
+}
+
+/**
+ * 转发消息到多个会话（最多 9 个）。
+ *
+ * @remarks 每个目标会话都独立触发 message.receive 帧（转发消息与用户直接发送同构，
+ *   不做特殊标记；转发感由前端"从右键菜单进入"的交互隐式表达）。
+ */
+export async function forwardMessage(
+  messageId: string,
+  conversationIds: string[],
+): Promise<ForwardResult[]> {
+  const data = await apiPost<{
+    results: { conversation_id: string; message_id: string; seq: number }[];
+  }>("/api/v1/messages/" + messageId + "/forward", { conversation_ids: conversationIds });
+  return (data.results || []).map((r) => ({
+    conversationId: r.conversation_id,
+    messageId: r.message_id,
+    seq: r.seq,
+  }));
 }

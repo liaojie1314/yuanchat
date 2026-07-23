@@ -13,12 +13,20 @@
  * @param onSend - 发送回调，参数为去除首尾空白后的文本
  * @param compact - 移动端紧凑模式
  */
-import { useEffect, useRef, useState } from "react";
-import { Image as ImageIcon, Mic, Paperclip, Plus, Send, Smile, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AtSign, Image as ImageIcon, Mic, Paperclip, Plus, Send, Smile, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { chatSocket, useConversationStore, useMessageStore } from "@yuanchat/shared";
+import {
+  chatSocket,
+  fetchMembers,
+  isMockEnabled,
+  useConversationStore,
+  useMessageStore,
+} from "@yuanchat/shared";
+import type { ConversationMember, MentionRef } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { EmojiPicker } from "./EmojiPicker";
+import { MentionPicker } from "./MentionPicker";
 import { VoiceRecorderBar } from "./VoiceRecorderBar";
 
 /** typing 帧节流间隔：输入期间最多每 3s 上报一次 */
@@ -28,7 +36,8 @@ export function Composer({
   onSend,
   compact = false,
 }: {
-  onSend: (text: string) => void;
+  /** 发送回调：text 为去除首尾空白后的正文，mentions 为收集到的 @ 用户 ID+昵称 */
+  onSend: (text: string, mentions: MentionRef[]) => void;
   compact?: boolean;
 }) {
   const { t } = useTranslation();
@@ -43,6 +52,38 @@ export function Composer({
   const setReplyingTo = useMessageStore((s) => s.setReplyingTo);
   const composerInsert = useMessageStore((s) => s.composerInsert);
   const activeId = useConversationStore((s) => s.activeId);
+  const activeConv = useConversationStore((s) => s.conversations.find((c) => c.id === s.activeId));
+  const isGroup = activeConv?.type === "group";
+
+  // 群成员按需拉取（仅群聊，供 @ 匹配）；activeId 变化时重拉
+  const [members, setMembers] = useState<ConversationMember[]>([]);
+  useEffect(() => {
+    if (!isGroup || !activeId || isMockEnabled()) {
+      setMembers([]);
+      return;
+    }
+    let alive = true;
+    void fetchMembers(activeId)
+      .then((list) => {
+        if (alive) setMembers(list);
+      })
+      .catch(() => {
+        if (alive) setMembers([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [activeId, isGroup]);
+
+  // 已选 @ 目标（提交时随 sendText 上送；用户删完 @ 昵称也顺带移出）
+  const [pickedMentions, setPickedMentions] = useState<MentionRef[]>([]);
+  // @ 触发：光标前的 @ 与其后未空白段为 query
+  const [mentionQuery, setMentionQuery] = useState<{ start: number; query: string } | null>(null);
+  const filteredMembers = useMemo(() => {
+    if (!mentionQuery) return [];
+    const q = mentionQuery.query.toLowerCase();
+    return members.filter((m) => !q || m.nickname.toLowerCase().includes(q));
+  }, [members, mentionQuery]);
 
   const canSend = value.trim().length > 0;
 
@@ -92,9 +133,55 @@ export function Composer({
   const send = () => {
     const text = value.trim();
     if (!text) return;
-    onSend(text);
+    // 只保留仍出现在正文里的 mentions（避免用户回删 @ 后仍上送）
+    const alive = pickedMentions.filter((m) => text.includes("@" + m.name));
+    onSend(text, alive);
     setValue("");
+    setPickedMentions([]);
+    setMentionQuery(null);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
+  };
+
+  /** 处理 textarea 输入：检测 @ 触发点 */
+  const handleValueChange = (next: string) => {
+    setValue(next);
+    if (!isGroup) return;
+    const el = textareaRef.current;
+    const caret = el?.selectionStart ?? next.length;
+    // 光标位置往前找最近的 @，空白截断
+    let i = caret - 1;
+    while (i >= 0 && next[i] !== "@" && !/\s/.test(next[i])) i--;
+    if (i >= 0 && next[i] === "@") {
+      const query = next.slice(i + 1, caret);
+      // 已插入 mention 后的 @昵称 段不再弹（query 恰好命中一个已选昵称）
+      if (!query.includes(" ")) {
+        setMentionQuery({ start: i, query });
+        return;
+      }
+    }
+    setMentionQuery(null);
+  };
+
+  /** 选中 @ 目标：把 "@query" 替换成 "@昵称 " */
+  const handlePickMention = (member: ConversationMember) => {
+    if (!mentionQuery) return;
+    const before = value.slice(0, mentionQuery.start);
+    const after = value.slice(mentionQuery.start + 1 + mentionQuery.query.length);
+    const inserted = "@" + member.nickname + " ";
+    const next = before + inserted + after;
+    setValue(next);
+    setPickedMentions((prev) => {
+      const dup = prev.some((m) => m.id === member.userId);
+      return dup ? prev : [...prev, { id: member.userId, name: member.nickname }];
+    });
+    setMentionQuery(null);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      const pos = before.length + inserted.length;
+      el.setSelectionRange(pos, pos);
+    });
   };
 
   /** 发送一张图片：交给 store 的 sendImage（乐观预览 → 压缩 → 上传 → WS 帧） */
@@ -150,6 +237,14 @@ export function Composer({
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // MentionPicker 打开时 ArrowUp/Down/Enter 归它消费；避免 Enter 同时发送消息
+    if (mentionQuery && filteredMembers.length > 0) {
+      if (e.key === "Enter" || e.key === "ArrowUp" || e.key === "ArrowDown") return;
+      if (e.key === "Escape") {
+        setMentionQuery(null);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       send();
@@ -197,7 +292,12 @@ export function Composer({
       return <div className="bg-surface-container-low shrink-0 px-2.5 pt-2 pb-3">{voiceBar}</div>;
     }
     return (
-      <div className="bg-surface-container-low shrink-0 px-2.5 pt-2 pb-3">
+      <div className="bg-surface-container-low relative shrink-0 px-2.5 pt-2 pb-3">
+        {mentionQuery && filteredMembers.length > 0 && (
+          <div className="animate-slide-up absolute bottom-full left-2.5 z-20 mb-1 w-56">
+            <MentionPicker members={filteredMembers} onPick={handlePickMention} />
+          </div>
+        )}
         {replyBar}
         <div className="flex items-end gap-1.5">
           <button
@@ -219,7 +319,7 @@ export function Composer({
             rows={1}
             value={value}
             onChange={(e) => {
-              setValue(e.target.value);
+              handleValueChange(e.target.value);
               autoGrow(e.target);
               notifyTyping();
             }}
@@ -275,6 +375,11 @@ export function Composer({
           <EmojiPicker onPick={insertEmoji} onClose={() => setShowEmoji(false)} />
         </div>
       )}
+      {mentionQuery && filteredMembers.length > 0 && (
+        <div className="absolute bottom-full left-3 z-20 mb-1 w-64">
+          <MentionPicker members={filteredMembers} onPick={handlePickMention} />
+        </div>
+      )}
       {replyBar}
       {recording ? (
         voiceBar
@@ -285,7 +390,7 @@ export function Composer({
             rows={1}
             value={value}
             onChange={(e) => {
-              setValue(e.target.value);
+              handleValueChange(e.target.value);
               autoGrow(e.target);
               notifyTyping();
             }}
@@ -312,6 +417,25 @@ export function Composer({
             <ToolButton label={t("chat.input.voice")} onClick={() => setRecording(true)}>
               <Mic size={19} />
             </ToolButton>
+            {isGroup && (
+              <ToolButton
+                label={t("chat.mention.trigger")}
+                onClick={() => {
+                  const el = textareaRef.current;
+                  if (!el) return;
+                  const pos = el.selectionStart ?? value.length;
+                  handleValueChange(value.slice(0, pos) + "@" + value.slice(pos));
+                  requestAnimationFrame(() => {
+                    el.focus();
+                    el.setSelectionRange(pos + 1, pos + 1);
+                    // 手动触发 mention query（handleValueChange 已依赖 caret）
+                    handleValueChange(el.value);
+                  });
+                }}
+              >
+                <AtSign size={19} />
+              </ToolButton>
+            )}
             <ToolButton label={t("chat.input.more")}>
               <Plus size={19} />
             </ToolButton>

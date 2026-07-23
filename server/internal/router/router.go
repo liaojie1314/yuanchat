@@ -62,6 +62,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	fileH := handler.NewFileHandler(st, cfg.Upload, logger)
 	presenceH := handler.NewPresenceHandler(contactRepo, hub, logger)
 	blocklistH := handler.NewBlocklistHandler(blocklistSvc, logger)
+	forwardH := handler.NewForwardHandler(msgSvc, hub, logger)
 
 	// 好友上下线广播：独立 goroutine 通知在线好友，不阻塞连接注册路径
 	hub.SetPresenceNotifier(func(userID uuid.UUID, online bool) {
@@ -117,6 +118,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		chat.POST("/conversations/:id/owner-transfer", convH.TransferOwner)
 		chat.POST("/messages/:id/recall", msgH.Recall)
 		chat.POST("/messages/:id/reactions", msgH.React)
+		chat.POST("/messages/:id/forward", forwardH.Forward)
 
 		chat.POST("/files/upload-url", fileH.UploadURL)
 		chat.GET("/files/download-url", fileH.DownloadURL)

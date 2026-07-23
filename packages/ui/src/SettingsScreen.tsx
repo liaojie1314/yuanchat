@@ -1,16 +1,16 @@
 /**
- * SettingsScreen 组件 — 设置主界面（三端响应式）
+ * SettingsScreen 组件 — 设置主界面（三端响应式，v0.2 重设计）
  *
  * @description
- * 对齐 docs/design/04_SETTINGS_PAGE.md 子集，三端形态（useBreakpoint 驱动）：
+ * 三端形态（useBreakpoint 驱动）：
  *
- * - **desktop / tablet（≥768px）**：左列 240px 分组导航（个人资料卡片 + 分组项）
- *   ｜右内容区渲染选中 view，默认选 "profile"（退出登录走左侧导航栏，不重复）
- * - **mobile（<768px）**：view==="index" 渲染全屏分组列表（用户卡片 + 分组行
- *   + 退出 + 版本号居中）；选中后栈式推入子页（子页自带返回箭头）
+ * - **desktop / tablet（≥768px）**：左列 280px 分组导航（含用户 hero 卡片：
+ *   头像 + 昵称 + 元聊号 + 状态点；4 组导航项 with icon/说明）｜右内容区
+ *   最大宽 640px 居中显示所选分组内容，去掉重复退出登录（收敛在左侧栏）
+ * - **mobile（<768px）**：view==="index" 渲染全屏分组列表（用户 hero + 分组行
+ *   + 退出 + 版本号）；选中后栈式推入子页
  *
  * 语言/主题切换即时生效；移动端退出登录点击弹行内确认态（不做全局 Dialog）。
- * 挂载时对齐 i18n.language 与已持久化的 themeStore.locale。
  */
 import { useEffect, useState } from "react";
 import { ChevronRight, LogOut, ShieldCheck, Palette, Info, User, ArrowLeft } from "lucide-react";
@@ -26,11 +26,26 @@ import { APP_VERSION } from "./settingsUtils";
 /** 设置内容区视图 */
 type SettingsView = "index" | "profile" | "account" | "appearance" | "about";
 
-/** 分组导航项（不含 profile：profile 单独作卡片渲染） */
-const NAV_GROUPS: { view: SettingsView; icon: typeof User; labelKey: string }[] = [
-  { view: "account", icon: ShieldCheck, labelKey: "settings.account" },
-  { view: "appearance", icon: Palette, labelKey: "settings.appearance" },
-  { view: "about", icon: Info, labelKey: "settings.about" },
+/** 分组导航项（不含 profile：profile 单独作 hero 卡片） */
+const NAV_GROUPS: {
+  view: SettingsView;
+  icon: typeof User;
+  labelKey: string;
+  descKey: string;
+}[] = [
+  {
+    view: "account",
+    icon: ShieldCheck,
+    labelKey: "settings.account",
+    descKey: "settings.accountDesc",
+  },
+  {
+    view: "appearance",
+    icon: Palette,
+    labelKey: "settings.appearance",
+    descKey: "settings.appearanceDesc",
+  },
+  { view: "about", icon: Info, labelKey: "settings.about", descKey: "settings.aboutDesc" },
 ];
 
 export function SettingsScreen() {
@@ -85,24 +100,45 @@ export function SettingsScreen() {
     }
   };
 
-  const profileCard = (
+  /** Hero 用户卡片：头像 + 昵称 + 元聊号；桌面端点击进 profile，移动端进 profile 子页 */
+  const heroCard = (
     <button
       onClick={() => setView("profile")}
       className={cn(
-        "hover:bg-surface-container-high flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-colors",
-        !isMobile && view === "profile" && "bg-surface-container-high",
+        "group relative flex w-full items-center gap-4 overflow-hidden rounded-xl p-4 text-left transition-all",
+        !isMobile && view === "profile"
+          ? "bg-primary-container/40"
+          : "bg-surface-container hover:bg-surface-container-high",
       )}
     >
+      {/* 装饰渐变环，仅桌面端右上角 */}
+      {!isMobile && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -top-8 -right-8 h-24 w-24 rounded-full opacity-30 blur-2xl"
+          style={{
+            background:
+              "radial-gradient(circle, rgb(var(--md-sys-color-primary-rgb) / 60%), transparent)",
+          }}
+        />
+      )}
       <Avatar name={user?.nickname ?? "?"} src={user?.avatarUrl} size="lg" presence="online" />
       <div className="min-w-0 flex-1">
-        <p className="text-title-sm text-on-surface truncate font-semibold">{user?.nickname}</p>
+        <p className="text-title-md text-on-surface truncate font-semibold">
+          {user?.nickname ?? t("settings.profile")}
+        </p>
         {user?.shortId !== undefined && (
-          <p className="text-label-md text-on-surface-variant truncate">
-            {t("contacts.yuanId")}: {user.shortId}
+          <p className="text-label-md text-on-surface-variant mt-0.5 truncate">
+            {t("contacts.yuanId")} · {user.shortId}
+          </p>
+        )}
+        {user?.bio && (
+          <p className="text-label-md text-on-surface-variant mt-1 truncate opacity-80">
+            {user.bio}
           </p>
         )}
       </div>
-      {isMobile && <ChevronRight size={18} className="text-on-surface-variant shrink-0" />}
+      <ChevronRight size={18} className="text-on-surface-variant shrink-0" />
     </button>
   );
 
@@ -115,13 +151,13 @@ export function SettingsScreen() {
       <div className="flex gap-2">
         <button
           onClick={() => void logout()}
-          className="text-label-lg bg-error text-error-on flex-1 rounded-xl py-2.5 font-medium"
+          className="text-label-lg bg-error text-error-on flex-1 rounded-lg py-2.5 font-medium"
         >
           {t("common.confirm")}
         </button>
         <button
           onClick={() => setConfirmLogout(false)}
-          className="text-label-lg border-outline-variant text-on-surface flex-1 rounded-xl border py-2.5 font-medium"
+          className="text-label-lg border-outline-variant text-on-surface flex-1 rounded-lg border py-2.5 font-medium"
         >
           {t("common.cancel")}
         </button>
@@ -130,7 +166,7 @@ export function SettingsScreen() {
   ) : (
     <button
       onClick={() => setConfirmLogout(true)}
-      className="text-error hover:bg-error/10 text-label-lg flex w-full items-center justify-center gap-2 rounded-xl py-2.5 font-medium transition-colors"
+      className="text-error hover:bg-error/10 text-label-lg flex w-full items-center justify-center gap-2 rounded-lg py-2.5 font-medium transition-colors"
     >
       <LogOut size={18} />
       {t("settings.logout")}
@@ -151,13 +187,14 @@ export function SettingsScreen() {
         <h1 className="text-title-lg text-on-surface mb-4 px-1 font-semibold">
           {t("settings.title")}
         </h1>
-        <div className="bg-surface-container-low mb-4 rounded-2xl p-1">{profileCard}</div>
-        <div className="bg-surface-container-low mb-4 overflow-hidden rounded-2xl">
+        <div className="mb-4">{heroCard}</div>
+        <div className="mb-4 flex flex-col gap-1">
           {NAV_GROUPS.map((g) => (
-            <GroupRow
+            <MobileNavRow
               key={g.view}
               icon={g.icon}
               label={t(g.labelKey)}
+              desc={t(g.descKey)}
               onClick={() => setView(g.view)}
             />
           ))}
@@ -170,36 +207,51 @@ export function SettingsScreen() {
     );
   }
 
-  // ── 桌面 / 平板：左导航 240px + 右内容 ──
+  // ── 桌面 / 平板：左导航 280px + 右内容居中卡片 ──
   return (
     <div className="bg-surface flex min-h-0 flex-1 overflow-hidden">
       {/* 左列分组导航 */}
-      <aside className="border-outline-variant bg-surface-container-low flex w-60 shrink-0 flex-col gap-1 overflow-y-auto border-r p-3">
-        {profileCard}
-        <div className="my-1 h-px w-full" />
-        {NAV_GROUPS.map((g) => {
-          const active = view === g.view;
-          return (
-            <button
-              key={g.view}
-              onClick={() => setView(g.view)}
-              className={cn(
-                "flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors",
-                active
-                  ? "bg-surface-container-high text-on-surface"
-                  : "text-on-surface-variant hover:bg-surface-container-high",
-              )}
-            >
-              <g.icon size={18} className="shrink-0" />
-              <span className="text-body-md flex-1 font-medium">{t(g.labelKey)}</span>
-            </button>
-          );
-        })}
+      <aside className="border-outline-variant bg-surface-container-lowest flex w-72 shrink-0 flex-col gap-3 overflow-y-auto border-r p-4">
+        {heroCard}
+        <div className="mt-2 flex flex-col gap-1">
+          {NAV_GROUPS.map((g) => {
+            const active = view === g.view;
+            return (
+              <button
+                key={g.view}
+                onClick={() => setView(g.view)}
+                className={cn(
+                  "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
+                  active
+                    ? "bg-primary-container/60 text-primary-on-container"
+                    : "text-on-surface hover:bg-surface-container",
+                )}
+              >
+                <span
+                  className={cn(
+                    "grid h-9 w-9 shrink-0 place-items-center rounded-lg transition-colors",
+                    active
+                      ? "bg-primary text-primary-on"
+                      : "bg-surface-container-high text-on-surface-variant group-hover:bg-surface-container-highest",
+                  )}
+                >
+                  <g.icon size={18} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <span className="text-body-md block font-medium">{t(g.labelKey)}</span>
+                  <span className="text-label-sm text-on-surface-variant block truncate">
+                    {t(g.descKey)}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </aside>
 
-      {/* 右内容区 */}
-      <div className="min-w-0 flex-1 overflow-y-auto px-8 py-6">
-        {renderContent(() => setView("profile"))}
+      {/* 右内容区：居中卡片，最大宽 640 */}
+      <div className="min-w-0 flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-2xl px-8 py-8">{renderContent(() => setView("profile"))}</div>
       </div>
     </div>
   );
@@ -236,23 +288,30 @@ function MobileHeader({
   );
 }
 
-/** 移动端分组行 */
-function GroupRow({
+/** 移动端分组行：图标 + 主标 + 副标 + 右箭头 */
+function MobileNavRow({
   icon: Icon,
   label,
+  desc,
   onClick,
 }: {
   icon: typeof User;
   label: string;
+  desc: string;
   onClick: () => void;
 }) {
   return (
     <button
       onClick={onClick}
-      className="border-outline-variant hover:bg-surface-container-high flex h-14 w-full items-center gap-3 border-b px-4 text-left transition-colors last:border-b-0"
+      className="bg-surface-container hover:bg-surface-container-high flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors"
     >
-      <Icon size={20} className="text-on-surface-variant shrink-0" />
-      <span className="text-body-md text-on-surface flex-1">{label}</span>
+      <span className="bg-primary-container/60 text-primary-on-container grid h-9 w-9 shrink-0 place-items-center rounded-lg">
+        <Icon size={18} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <span className="text-body-lg text-on-surface block truncate font-medium">{label}</span>
+        <span className="text-label-sm text-on-surface-variant block truncate">{desc}</span>
+      </div>
       <ChevronRight size={18} className="text-on-surface-variant shrink-0" />
     </button>
   );

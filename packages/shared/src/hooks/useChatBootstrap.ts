@@ -120,6 +120,8 @@ function wireSocket() {
         createdAtMs: p.timestamp,
         status: isSelf && !isSystem ? "sent" : undefined,
         clientMsgId: p.client_msg_id,
+        replyToId: p.reply_to_id,
+        mentions: p.mentions,
       };
       useMessageStore.getState().receiveMessage(msg);
 
@@ -152,6 +154,13 @@ function wireSocket() {
       convStore.applyIncoming(p.conversation_id, preview, formatListTime(iso), p.seq);
       // 系统通知：失焦 + 非免打扰时弹（桌面端注入 Tauri 实现，web 端静默）
       if (conv) notifyIncoming({ name: conv.name, isMuted: conv.isMuted }, preview);
+
+      // 被 @ 且非当前活跃会话：置 mentionUnread 供列表红点（进入会话时 clearUnread 自动清零）
+      const selfIdNow = useAuthStore.getState().user?.id;
+      const mentionedMe = !!(selfIdNow && p.mentions?.includes(selfIdNow));
+      if (mentionedMe && convStore.activeId !== p.conversation_id) {
+        convStore.markMentioned(p.conversation_id);
+      }
 
       // 正在看这个会话：立即上报已读
       if (convStore.activeId === p.conversation_id) {

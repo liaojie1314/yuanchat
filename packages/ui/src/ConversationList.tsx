@@ -47,7 +47,7 @@ function matchFilter(conv: Conversation, filter: Filter): boolean {
     case "private":
       return conv.type === "private";
     case "mentions":
-      return !!conv.mentionedMe;
+      return !!conv.mentionUnread || !!conv.mentionedMe;
     default:
       return true;
   }
@@ -344,7 +344,7 @@ function ConversationItem({
               </>
             ) : (
               <>
-                {conv.mentionedMe && (
+                {(conv.mentionedMe || conv.mentionUnread) && (
                   <span className="font-semibold text-amber-600 dark:text-amber-400">
                     {t("chat.preview.mentionYou")}{" "}
                   </span>

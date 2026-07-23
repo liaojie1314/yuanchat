@@ -77,7 +77,7 @@ func TestSendContentImagePersistsAndBroadcasts(t *testing.T) {
 	convID := newSendConv(t, db, a, b)
 
 	imgJSON := `{"key":"images/2026/07/abc.png","width":800,"height":600,"size":123456}`
-	result, err := svc.SendContent(context.Background(), a.ID, convID, model.MessageTypeImage, imgJSON, "c-img", nil)
+	result, err := svc.SendContent(context.Background(), a.ID, convID, model.MessageTypeImage, imgJSON, "c-img", nil, nil)
 	if err != nil {
 		t.Fatalf("send image: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestSendContentRejectsNonMember(t *testing.T) {
 	convID := newSendConv(t, db, a, b)
 
 	_, err := svc.SendContent(context.Background(), outsider.ID, convID,
-		model.MessageTypeImage, `{"key":"images/2026/07/x.png","width":1,"height":1,"size":1}`, "c-x", nil)
+		model.MessageTypeImage, `{"key":"images/2026/07/x.png","width":1,"height":1,"size":1}`, "c-x", nil, nil)
 	if !errors.Is(err, ErrNotMember) {
 		t.Fatalf("expected ErrNotMember, got %v", err)
 	}
@@ -211,5 +211,237 @@ func TestSendGroup_NotAffectedByBlocklist(t *testing.T) {
 	}
 	if len(result.MemberIDs) != 3 {
 		t.Fatalf("expect 3 member ids, got %d", len(result.MemberIDs))
+	}
+}
+
+// newSendGroup 建群 + 若干成员，返回会话 ID。
+func newSendGroup(t *testing.T, db *gorm.DB, members ...*model.User) uuid.UUID {
+	t.Helper()
+	conv := &model.Conversation{ID: uuid.New(), Type: model.ConversationTypeGroup}
+	if err := db.Create(conv).Error; err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	for _, u := range members {
+		if err := db.Create(&model.ConversationMember{
+			ID: uuid.New(), ConversationID: conv.ID, UserID: u.ID,
+		}).Error; err != nil {
+			t.Fatalf("create member: %v", err)
+		}
+	}
+	return conv.ID
+}
+
+// TestSendWithValidMentions @群成员：mentions 落库 + mention_unread=true。
+func TestSendWithValidMentions(t *testing.T) {
+	db := testDB(t)
+	svc := newMessageSvc(db)
+	a := newTestUser(t, db, "mt-a")
+	b := newTestUser(t, db, "mt-b")
+	c := newTestUser(t, db, "mt-c")
+	convID := newSendGroup(t, db, a, b, c)
+
+	content, _ := json.Marshal(model.MessageContentText{Text: "@b @c hi"})
+	res, err := svc.SendContent(context.Background(), a.ID, convID,
+		model.MessageTypeText, string(content), "c-mt-1", nil, []uuid.UUID{b.ID, c.ID})
+	if err != nil {
+		t.Fatalf("send with mentions: %v", err)
+	}
+	if len(res.MentionedMembers) != 2 {
+		t.Fatalf("mentioned members: %v", res.MentionedMembers)
+	}
+	if len(res.Message.Mentions) != 2 {
+		t.Fatalf("stored mentions: %v", res.Message.Mentions)
+	}
+	// B 与 C 的 mention_unread 都应为 true
+	for _, uid := range []uuid.UUID{b.ID, c.ID} {
+		var m model.ConversationMember
+		db.First(&m, "conversation_id = ? AND user_id = ?", convID, uid)
+		if !m.MentionUnread {
+			t.Fatalf("user %s mention_unread not set", uid)
+		}
+	}
+	// A（发送者）不应被 mark
+	var self model.ConversationMember
+	db.First(&self, "conversation_id = ? AND user_id = ?", convID, a.ID)
+	if self.MentionUnread {
+		t.Fatalf("sender mention_unread must remain false")
+	}
+}
+
+// TestSendMention_RejectsOutsider @ 非群成员：ErrInvalidMention。
+func TestSendMention_RejectsOutsider(t *testing.T) {
+	db := testDB(t)
+	svc := newMessageSvc(db)
+	a := newTestUser(t, db, "mt-r-a")
+	b := newTestUser(t, db, "mt-r-b")
+	outsider := newTestUser(t, db, "mt-r-out")
+	convID := newSendGroup(t, db, a, b)
+
+	content, _ := json.Marshal(model.MessageContentText{Text: "@out"})
+	_, err := svc.SendContent(context.Background(), a.ID, convID,
+		model.MessageTypeText, string(content), "c-mt-r-1", nil, []uuid.UUID{outsider.ID})
+	if !errors.Is(err, ErrInvalidMention) {
+		t.Fatalf("want ErrInvalidMention, got %v", err)
+	}
+}
+
+// TestSendMention_RejectsPrivate 单聊不允许 @：ErrInvalidMention。
+func TestSendMention_RejectsPrivate(t *testing.T) {
+	db := testDB(t)
+	svc := newMessageSvc(db)
+	a := newTestUser(t, db, "mt-p-a")
+	b := newTestUser(t, db, "mt-p-b")
+	convID := newSendConv(t, db, a, b)
+
+	content, _ := json.Marshal(model.MessageContentText{Text: "@b"})
+	_, err := svc.SendContent(context.Background(), a.ID, convID,
+		model.MessageTypeText, string(content), "c-mt-p-1", nil, []uuid.UUID{b.ID})
+	if !errors.Is(err, ErrInvalidMention) {
+		t.Fatalf("want ErrInvalidMention, got %v", err)
+	}
+}
+
+// TestMarkRead_ClearsMentionUnread 已读推进顺带清 mention_unread。
+func TestMarkRead_ClearsMentionUnread(t *testing.T) {
+	db := testDB(t)
+	svc := newMessageSvc(db)
+	a := newTestUser(t, db, "mr-a")
+	b := newTestUser(t, db, "mr-b")
+	convID := newSendGroup(t, db, a, b)
+
+	// A 发一条 @ B 的消息
+	content, _ := json.Marshal(model.MessageContentText{Text: "@b"})
+	res, err := svc.SendContent(context.Background(), a.ID, convID,
+		model.MessageTypeText, string(content), "c-mr-1", nil, []uuid.UUID{b.ID})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	// B 端 mention_unread 应为 true
+	var before model.ConversationMember
+	db.First(&before, "conversation_id = ? AND user_id = ?", convID, b.ID)
+	if !before.MentionUnread {
+		t.Fatal("mention_unread not set after mention")
+	}
+	// B MarkRead
+	if _, err := svc.MarkRead(context.Background(), b.ID, convID, res.Message.Seq); err != nil {
+		t.Fatalf("mark read: %v", err)
+	}
+	var after model.ConversationMember
+	db.First(&after, "conversation_id = ? AND user_id = ?", convID, b.ID)
+	if after.MentionUnread {
+		t.Fatal("mention_unread not cleared by MarkRead")
+	}
+}
+
+// TestSendWithValidQuote 引用同会话消息：落库 ReplyToID 有值。
+func TestSendWithValidQuote(t *testing.T) {
+	db := testDB(t)
+	svc := newMessageSvc(db)
+	a := newTestUser(t, db, "qt-a")
+	b := newTestUser(t, db, "qt-b")
+	convID := newSendConv(t, db, a, b)
+
+	first, err := svc.SendText(context.Background(), a.ID, convID, "first", "c-qt-1", nil)
+	if err != nil {
+		t.Fatalf("first msg: %v", err)
+	}
+
+	second, err := svc.SendText(context.Background(), b.ID, convID, "reply", "c-qt-2", &first.Message.ID)
+	if err != nil {
+		t.Fatalf("reply: %v", err)
+	}
+	if second.Message.ReplyToID == nil || *second.Message.ReplyToID != first.Message.ID {
+		t.Fatalf("reply_to_id: %v", second.Message.ReplyToID)
+	}
+}
+
+// TestSendQuote_RejectsCrossConversation 跨会话引用：ErrInvalidQuote。
+func TestSendQuote_RejectsCrossConversation(t *testing.T) {
+	db := testDB(t)
+	svc := newMessageSvc(db)
+	a := newTestUser(t, db, "qtx-a")
+	b := newTestUser(t, db, "qtx-b")
+	conv1 := newSendConv(t, db, a, b)
+	conv2 := newSendConv(t, db, a, b)
+
+	first, err := svc.SendText(context.Background(), a.ID, conv1, "in conv1", "c-qtx-1", nil)
+	if err != nil {
+		t.Fatalf("first msg: %v", err)
+	}
+	_, err = svc.SendText(context.Background(), a.ID, conv2, "reply", "c-qtx-2", &first.Message.ID)
+	if !errors.Is(err, ErrInvalidQuote) {
+		t.Fatalf("want ErrInvalidQuote, got %v", err)
+	}
+}
+
+// TestForward_MultiTarget 转发到 2 个会话：source 与两个 target 都是 actor 参与的会话。
+func TestForward_MultiTarget(t *testing.T) {
+	db := testDB(t)
+	svc := newMessageSvc(db)
+	a := newTestUser(t, db, "fw-a")
+	b := newTestUser(t, db, "fw-b")
+	c := newTestUser(t, db, "fw-c")
+	src := newSendConv(t, db, a, b)
+	t1 := newSendConv(t, db, a, c)
+	t2 := newSendGroup(t, db, a, b, c)
+
+	sent, err := svc.SendText(context.Background(), a.ID, src, "hello world", "c-fw-src", nil)
+	if err != nil {
+		t.Fatalf("seed source: %v", err)
+	}
+
+	results, err := svc.Forward(context.Background(), a.ID, sent.Message.ID, []uuid.UUID{t1, t2})
+	if err != nil {
+		t.Fatalf("forward: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("results len: %d", len(results))
+	}
+	for _, r := range results {
+		if r.Message.MessageType != model.MessageTypeText {
+			t.Fatalf("copied type: %d", r.Message.MessageType)
+		}
+	}
+}
+
+// TestForward_RejectsNonMemberTarget actor 不在某个 target 会话：ErrForwardTargetInvalid。
+func TestForward_RejectsNonMemberTarget(t *testing.T) {
+	db := testDB(t)
+	svc := newMessageSvc(db)
+	a := newTestUser(t, db, "fwn-a")
+	b := newTestUser(t, db, "fwn-b")
+	c := newTestUser(t, db, "fwn-c")
+	src := newSendConv(t, db, a, b)
+	otherConv := newSendConv(t, db, b, c) // A 不在
+
+	sent, err := svc.SendText(context.Background(), a.ID, src, "x", "c-fwn-1", nil)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	_, err = svc.Forward(context.Background(), a.ID, sent.Message.ID, []uuid.UUID{otherConv})
+	if !errors.Is(err, ErrForwardTargetInvalid) {
+		t.Fatalf("want ErrForwardTargetInvalid, got %v", err)
+	}
+}
+
+// TestForward_TooMany 超过 9 个目标：ErrForwardTooMany。
+func TestForward_TooMany(t *testing.T) {
+	db := testDB(t)
+	svc := newMessageSvc(db)
+	a := newTestUser(t, db, "fwm-a")
+	b := newTestUser(t, db, "fwm-b")
+	src := newSendConv(t, db, a, b)
+
+	sent, err := svc.SendText(context.Background(), a.ID, src, "x", "c-fwm-1", nil)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	ids := make([]uuid.UUID, 10)
+	for i := range ids {
+		ids[i] = uuid.New()
+	}
+	_, err = svc.Forward(context.Background(), a.ID, sent.Message.ID, ids)
+	if !errors.Is(err, ErrForwardTooMany) {
+		t.Fatalf("want ErrForwardTooMany, got %v", err)
 	}
 }
