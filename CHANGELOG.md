@@ -1,5 +1,22 @@
 # 更新日志
 
+# [0.2.0](https://github.com/liaojie1314/yuanchat/compare/v0.1.0...v0.2.0) (2026-07-23)
+
+### Bug Fixes
+
+- **ci:** Android build.gradle.kts 注入修 java.util.Properties 未 import 的问题 + 幂等保护 + workflow_dispatch 手动补跑 ([c6d689c](https://github.com/liaojie1314/yuanchat/commit/c6d689cf78e82cb6dc53dedb6e83fec8ccc4288a))
+- **ci:** macOS 签名条件启用 + Android base64 更宽容 + 移除 release-it test 门禁与浏览器打开 ([48d5881](https://github.com/liaojie1314/yuanchat/commit/48d58819d4f7e962e50579db16b01a75928dc5f9))
+- **ci:** workflow_dispatch 触发时显式指定 tag_name（gh-release ref_name 是分支名） ([48c6a98](https://github.com/liaojie1314/yuanchat/commit/48c6a988dd138e8874f3da9c04bbea6c466cdecb)), closes [#release](https://github.com/liaojie1314/yuanchat/issues/release)
+
+### Features
+
+- **e2e:** Playwright CI integration — authenticated nav, search modal, favorites ([56e437a](https://github.com/liaojie1314/yuanchat/commit/56e437aefdd7efc497866f06df4603b199abc3fe))
+- **v0.2/A1:** delete friend + blocklist (REST + WS + UI) ([91b7e8b](https://github.com/liaojie1314/yuanchat/commit/91b7e8bcec11a51baf415ab89d48370f3c0510b4))
+- **v0.2/A2:** group role management + contact detail redesign + presence + logout dedup ([30ef199](https://github.com/liaojie1314/yuanchat/commit/30ef199dc3cf7f4c55ab47b9fad219f93bc4c0bc))
+- **v0.2/A3:** mentions + quote reply + forward + settings UI redesign ([7c0b060](https://github.com/liaojie1314/yuanchat/commit/7c0b06069aa0f201cfa4bf63217bfe316e152307))
+- **v0.2/B1:** Sentry web + desktop error monitoring + CI sourcemap upload ([98c2613](https://github.com/liaojie1314/yuanchat/commit/98c2613296829bf581b03e4afa117eee87d6e977))
+- **v0.3/D1:** goose migrations + Prometheus metrics + Grafana dashboard ([43c3173](https://github.com/liaojie1314/yuanchat/commit/43c317343cd182c84fc84186a530736e0a64fb1d))
+
 # 0.1.0 (2026-07-22)
 
 ### Bug Fixes

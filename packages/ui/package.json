@@ -1,6 +1,6 @@
 {
   "name": "@yuanchat/ui",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "元聊 UI 组件库 — 跨平台共享的 React 组件",
