@@ -14,7 +14,8 @@
  * @param onShowDetail - 打开详情面板/抽屉回调，非空时显示详情按钮
  * @param compactComposer - 移动端使用紧凑输入区
  */
-import { useCallback, useEffect, useRef, useState, Fragment } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowLeft,
   Loader2,
@@ -27,6 +28,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
+  addFavorite,
   ApiError,
   formatDateDivider,
   recallMessage,
@@ -37,9 +39,12 @@ import {
   useMessageStore,
 } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
+import type { MentionRef } from "@yuanchat/shared";
 import { Avatar } from "./Avatar";
 import { Composer } from "./Composer";
+import { ForwardModal } from "./ForwardModal";
 import { ImageLightbox } from "./ImageLightbox";
+import { InConversationSearch } from "./InConversationSearch";
 import { MessageBubble, TypingIndicator } from "./MessageBubble";
 
 export function ChatWindow({
@@ -67,50 +72,95 @@ export function ChatWindow({
   const setReplyingTo = useMessageStore((s) => s.setReplyingTo);
   const replyingTo = useMessageStore((s) => s.replyingTo);
 
+  const highlightMsgId = useMessageStore((s) => s.highlightMsgId);
+  const setHighlightMsgId = useMessageStore((s) => s.setHighlightMsgId);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadingMoreRef = useRef(false);
+  const isAtBottomRef = useRef(true);
+  const prevCountRef = useRef(0);
   // 全屏查看的图片 URL（null 表示未打开）
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  // 转发弹窗当前源消息 ID（null 表示关闭）
+  const [forwardMsgId, setForwardMsgId] = useState<string | null>(null);
+  // 会话内搜索面板开关
+  const [showSearch, setShowSearch] = useState(false);
+
+  const items = messages ?? [];
+
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const rowVirtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 80,
+    overscan: 5,
+  });
 
   // 进入会话时按需加载历史（真实模式；mock 模式内部直接跳过）
   useEffect(() => {
     if (activeId) void loadHistory(activeId);
   }, [activeId, loadHistory]);
 
-  // 消息变化 / 切换会话时滚动到底部（翻页加载不触发，避免跳动）
+  // 新消息到达时自动滚动到底部（loadMore 预置不触发，避免跳动）
   useEffect(() => {
-    if (loadingMoreRef.current) {
-      loadingMoreRef.current = false;
+    if (items.length === 0) return;
+    if (loadingMoreRef.current) return;
+    if (isAtBottomRef.current) {
+      rowVirtualizer.scrollToIndex(items.length - 1, { align: "end", behavior: "auto" });
+    }
+    // rowVirtualizer 引用稳定，不加入 deps 防止无限循环
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length, activeId]);
+
+  // loadMore 预置旧消息后恢复视口位置
+  useEffect(() => {
+    if (!loadingMoreRef.current) {
+      prevCountRef.current = items.length;
       return;
     }
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages?.length, activeId]);
+    const added = items.length - prevCountRef.current;
+    if (added > 0) {
+      rowVirtualizer.scrollToIndex(added, { align: "start", behavior: "auto" });
+    }
+    prevCountRef.current = items.length;
+    loadingMoreRef.current = false;
+    // rowVirtualizer 引用稳定，不加入 deps 防止无限循环
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length]);
+
+  // 搜索跳转：highlightMsgId 变化时滚动到目标消息并 2 秒后清除高亮
+  useEffect(() => {
+    if (!highlightMsgId || items.length === 0) return;
+    const index = items.findIndex((m) => m.id === highlightMsgId);
+    if (index === -1) return;
+    rowVirtualizer.scrollToIndex(index, { align: "center", behavior: "smooth" });
+    const timer = setTimeout(() => setHighlightMsgId(null), 2000);
+    return () => clearTimeout(timer);
+    // rowVirtualizer 引用稳定，不加入 deps 防止无限循环
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightMsgId, setHighlightMsgId, items]);
 
   // 滚动到顶部时向上翻页
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
-    if (!el || !activeId || !hasMore || loadingMoreRef.current) return;
-    if (el.scrollTop > 40) return;
-
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isAtBottomRef.current = distFromBottom < 100;
+    if (!activeId || !hasMore || loadingMoreRef.current || el.scrollTop > 40) return;
     loadingMoreRef.current = true;
-    const prevHeight = el.scrollHeight;
-    const prevCount = useMessageStore.getState().messagesByConv[activeId]?.length ?? 0;
-    void loadMore(activeId).then(() => {
-      const nextCount = useMessageStore.getState().messagesByConv[activeId]?.length ?? 0;
-      if (nextCount === prevCount) {
-        // 没有新数据（到头/失败）：解除锁，否则滚动加载永久失效
-        loadingMoreRef.current = false;
-        return;
-      }
-      // 维持视口位置：滚动差 = 新增内容高度
-      requestAnimationFrame(() => {
-        if (scrollRef.current) {
-          scrollRef.current.scrollTop = scrollRef.current.scrollHeight - prevHeight;
+    prevCountRef.current = items.length;
+    void loadMore(activeId)
+      .then(() => {
+        // 防御：loadMore 未带回新数据时解除互斥锁，防止后续加载永久失效
+        const currentCount = useMessageStore.getState().messagesByConv[activeId]?.length ?? 0;
+        if (currentCount <= prevCountRef.current) {
+          loadingMoreRef.current = false;
         }
+      })
+      .catch(() => {
+        loadingMoreRef.current = false;
       });
-    });
-  }, [activeId, hasMore, loadMore]);
+  }, [activeId, hasMore, loadMore, items.length]);
 
   // 防御：如果没找到会话（activeId 无效或为 null），不渲染
   if (!conv) return null;
@@ -127,19 +177,21 @@ export function ChatWindow({
         ? t("common.online")
         : t("common.offline");
 
-  const handleSend = (text: string) => {
+  const handleSend = (text: string, mentions: MentionRef[]) => {
     if (!activeId) return;
-    sendText(
-      activeId,
-      text,
-      replyingTo
+    sendText(activeId, text, {
+      mentions,
+      quote: replyingTo
         ? {
+            messageId: replyingTo.id,
             senderName: replyingTo.senderName ?? "我",
             excerpt: (replyingTo.text ?? replyingTo.file?.name ?? "").slice(0, 40),
           }
         : undefined,
-    );
+    });
   };
+
+  const handleForward = (messageId: string) => setForwardMsgId(messageId);
 
   // 撤回：调服务端（用服务端 id）→ 成功靠 message.recalled 帧统一 applyRecall，不乐观翻转。
   const handleRecall = (messageId: string) => {
@@ -185,6 +237,7 @@ export function ChatWindow({
           <Video size={19} />
         </button>
         <button
+          onClick={() => setShowSearch((v) => !v)}
           className="md3-icon-btn text-on-surface-variant hidden sm:grid"
           title={t("chat.searchHistory")}
           aria-label={t("chat.searchHistory")}
@@ -203,6 +256,11 @@ export function ChatWindow({
         )}
       </header>
 
+      {/* 会话内搜索面板 */}
+      {showSearch && activeId && (
+        <InConversationSearch conversationId={activeId} onClose={() => setShowSearch(false)} />
+      )}
+
       {/* 置顶消息条 */}
       {conv.pinnedMessage && (
         <div className="bg-primary-container text-primary-on-container flex h-9 shrink-0 items-center gap-2 px-4">
@@ -212,80 +270,133 @@ export function ChatWindow({
         </div>
       )}
 
-      {/* 消息流 */}
+      {/* 消息流 — 虚拟滚动 */}
       <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto">
         {messages === undefined ? (
           <MessageSkeleton />
         ) : messages.length === 0 ? (
           <EmptyMessages />
         ) : (
-          <div className="flex flex-col px-4 py-4">
-            {/* 向上翻页加载指示 */}
+          <>
+            {/* 向上翻页加载指示 — 悬浮在虚拟列表外部，不占用绝对定位空间 */}
             {hasMore && (
-              <div className="text-on-surface-variant my-1 flex justify-center">
+              <div className="text-on-surface-variant flex justify-center py-1">
                 <Loader2 size={16} className="animate-spin" />
               </div>
             )}
-
-            {messages.map((msg, i) => {
-              const prev = i > 0 ? messages[i - 1] : undefined;
-              const showDivider = !!msg.dateKey && msg.dateKey !== prev?.dateKey;
-              const compact =
-                !showDivider &&
-                !!prev &&
-                prev.kind !== "system" &&
-                msg.kind !== "system" &&
-                prev.isSelf === msg.isSelf &&
-                prev.senderName === msg.senderName &&
-                minutesBetween(prev.time, msg.time) < 1;
-              return (
-                <Fragment key={msg.id}>
-                  {showDivider && <DateDivider label={formatDateDivider(msg.dateKey!)} />}
-                  <MessageBubble
-                    msg={msg}
-                    compact={compact}
-                    onRetry={
-                      msg.status === "failed" && activeId
-                        ? () => retrySend(activeId, msg.id)
-                        : undefined
-                    }
-                    onReply={() => setReplyingTo(msg)}
-                    onImageClick={setLightboxUrl}
-                    onRecall={
-                      // 仅自己且已送达（sent/read）的消息可撤回：sending/failed 只有本地
-                      // client id、无服务端 id，撤回需用服务端 id，故不提供
-                      msg.isSelf && (msg.status === "sent" || msg.status === "read")
-                        ? () => handleRecall(msg.id)
-                        : undefined
-                    }
-                    onReEdit={
-                      msg.recalled && msg.isSelf && msg.recalledText
-                        ? () => {
-                            if (Date.now() - (msg.recalledAtMs ?? 0) > RE_EDIT_WINDOW_MS) {
-                              showToast("info", t("chat.message.reEditExpired"));
-                              return;
+            <div
+              style={{
+                height: rowVirtualizer.getTotalSize() + (typingName ? 48 : 0),
+                position: "relative",
+              }}
+              className="py-2"
+            >
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const msg = items[virtualRow.index];
+                const prev = virtualRow.index > 0 ? items[virtualRow.index - 1] : undefined;
+                const showDivider = !!msg.dateKey && msg.dateKey !== prev?.dateKey;
+                const compact =
+                  !showDivider &&
+                  !!prev &&
+                  prev.kind !== "system" &&
+                  msg.kind !== "system" &&
+                  prev.isSelf === msg.isSelf &&
+                  prev.senderName === msg.senderName &&
+                  minutesBetween(prev.time, msg.time) < 1;
+                return (
+                  <div
+                    key={virtualRow.key}
+                    ref={rowVirtualizer.measureElement}
+                    data-index={virtualRow.index}
+                    data-msg-id={msg.id}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                    className={cn(
+                      "px-4",
+                      highlightMsgId === msg.id
+                        ? "rounded-lg ring-2 ring-blue-400 ring-offset-1"
+                        : undefined,
+                    )}
+                  >
+                    {showDivider && <DateDivider label={formatDateDivider(msg.dateKey!)} />}
+                    <MessageBubble
+                      msg={msg}
+                      compact={compact}
+                      onRetry={
+                        msg.status === "failed" && activeId
+                          ? () => retrySend(activeId, msg.id)
+                          : undefined
+                      }
+                      onReply={() => setReplyingTo(msg)}
+                      onImageClick={setLightboxUrl}
+                      onRecall={
+                        // 仅自己且已送达（sent/read）的消息可撤回：sending/failed 只有本地
+                        // client id、无服务端 id，撤回需用服务端 id，故不提供
+                        msg.isSelf && (msg.status === "sent" || msg.status === "read")
+                          ? () => handleRecall(msg.id)
+                          : undefined
+                      }
+                      onReEdit={
+                        msg.recalled && msg.isSelf && msg.recalledText
+                          ? () => {
+                              if (Date.now() - (msg.recalledAtMs ?? 0) > RE_EDIT_WINDOW_MS) {
+                                showToast("info", t("chat.message.reEditExpired"));
+                                return;
+                              }
+                              useMessageStore.getState().setComposerInsert(msg.recalledText ?? "");
                             }
-                            useMessageStore.getState().setComposerInsert(msg.recalledText ?? "");
-                          }
-                        : undefined
-                    }
-                    onReact={
-                      // 排除撤回/系统消息/未 ack 乐观消息（其 id 还是 client id，服务端 404）
-                      msg.recalled || msg.kind === "system" || !msg.seq
-                        ? undefined
-                        : (emoji) => {
-                            void toggleReaction(msg.id, emoji).catch(() =>
-                              showToast("error", t("common.opFailed")),
-                            );
-                          }
-                    }
-                  />
-                </Fragment>
-              );
-            })}
-
-            {typingName && <TypingIndicator name={typingName} />}
-          </div>
+                          : undefined
+                      }
+                      onReact={
+                        // 排除撤回/系统消息/未 ack 乐观消息（其 id 还是 client id，服务端 404）
+                        msg.recalled || msg.kind === "system" || !msg.seq
+                          ? undefined
+                          : (emoji) => {
+                              void toggleReaction(msg.id, emoji).catch(() =>
+                                showToast("error", t("common.opFailed")),
+                              );
+                            }
+                      }
+                      onForward={
+                        msg.recalled || msg.kind === "system" || !msg.seq
+                          ? undefined
+                          : () => handleForward(msg.id)
+                      }
+                      onFavorite={
+                        // 只对服务端已确认消息（有 seq）且非撤回/系统消息提供收藏
+                        !msg.recalled && msg.kind !== "system" && !!msg.seq
+                          ? () => {
+                              void addFavorite(msg.id)
+                                .then(() => showToast("info", t("favorites.added")))
+                                .catch(() => showToast("error", t("favorites.addFailed")));
+                            }
+                          : undefined
+                      }
+                    />
+                  </div>
+                );
+              })}
+              {/* 正在输入指示 — 绝对定位于虚拟列表底部 */}
+              {typingName && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: rowVirtualizer.getTotalSize(),
+                    left: 0,
+                    width: "100%",
+                  }}
+                  className="px-4"
+                >
+                  <TypingIndicator name={typingName} />
+                </div>
+              )}
+            </div>
+          </>
         )}
       </div>
 
@@ -294,6 +405,13 @@ export function ChatWindow({
 
       {/* 图片全屏查看器（点击气泡内图片打开） */}
       {lightboxUrl && <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
+
+      <ForwardModal
+        open={forwardMsgId !== null}
+        sourceMessageId={forwardMsgId}
+        sourceConversationId={activeId}
+        onClose={() => setForwardMsgId(null)}
+      />
     </div>
   );
 }

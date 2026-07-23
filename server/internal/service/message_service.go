@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/repository"
 	"go.uber.org/zap"
@@ -16,6 +17,9 @@ import (
 
 // ErrNotMember 用户不是会话成员。
 var ErrNotMember = errors.New("not a conversation member")
+
+// ErrSearchQueryTooShort 搜索关键词少于 3 个字符。
+var ErrSearchQueryTooShort = errors.New("search query too short")
 
 // 撤回相关错误。
 var (
@@ -27,16 +31,30 @@ var (
 	ErrRecallWindowExpired = errors.New("recall window expired")
 	// ErrInvalidEmoji 回应 emoji 为空或超长。
 	ErrInvalidEmoji = errors.New("invalid emoji")
+	// ErrInvalidMention @ 目标不在群成员内 / 非群会话尝试 @。
+	ErrInvalidMention = errors.New("invalid mention target")
+	// ErrInvalidQuote 引用消息不属于同一会话或不存在。
+	ErrInvalidQuote = errors.New("invalid quote target")
+	// ErrForwardTargetInvalid 转发目标会话中存在非成员会话。
+	ErrForwardTargetInvalid = errors.New("forward target not accessible")
+	// ErrForwardTooMany 单次转发超过最大目标数。
+	ErrForwardTooMany = errors.New("too many forward targets")
+	// ErrForwardNoTarget 转发未提供任何目标会话。
+	ErrForwardNoTarget = errors.New("no forward target")
 )
 
 // RecallWindow 消息可撤回的时间窗口（自发送起 2 分钟）。
 const RecallWindow = 2 * time.Minute
 
+// MaxForwardTargets 单次转发最多目标会话数（UI 侧对应 CreateGroupModal 复用限制）。
+const MaxForwardTargets = 9
+
 // SendResult 消息落库后的结果，供 WS 层构造 ack / receive 推送。
 type SendResult struct {
-	Message        *model.Message
-	SenderNickname string
-	MemberIDs      []uuid.UUID
+	Message           *model.Message
+	SenderNickname    string
+	MemberIDs         []uuid.UUID
+	MentionedMembers  []uuid.UUID // SendContent 校验后回填，供 WS 层构造帧
 }
 
 // RecallResult 撤回结果，供 handler 构造 message.recalled 推送。
@@ -50,11 +68,12 @@ type RecallResult struct {
 
 // MessageService 消息核心服务：发送、历史、已读、撤回、表情回应。
 type MessageService struct {
-	msgRepo      *repository.MessageRepository
-	convRepo     *repository.ConversationRepository
-	userRepo     *repository.UserRepository
-	reactionRepo *repository.ReactionRepository
-	logger       *zap.Logger
+	msgRepo       *repository.MessageRepository
+	convRepo      *repository.ConversationRepository
+	userRepo      *repository.UserRepository
+	reactionRepo  *repository.ReactionRepository
+	blocklistRepo *repository.BlocklistRepository
+	logger        *zap.Logger
 }
 
 func NewMessageService(
@@ -62,14 +81,16 @@ func NewMessageService(
 	convRepo *repository.ConversationRepository,
 	userRepo *repository.UserRepository,
 	reactionRepo *repository.ReactionRepository,
+	blocklistRepo *repository.BlocklistRepository,
 	logger *zap.Logger,
 ) *MessageService {
 	return &MessageService{
-		msgRepo:      msgRepo,
-		convRepo:     convRepo,
-		userRepo:     userRepo,
-		reactionRepo: reactionRepo,
-		logger:       logger,
+		msgRepo:       msgRepo,
+		convRepo:      convRepo,
+		userRepo:      userRepo,
+		reactionRepo:  reactionRepo,
+		blocklistRepo: blocklistRepo,
+		logger:        logger,
 	}
 }
 
@@ -86,12 +107,17 @@ func (s *MessageService) SendText(
 	if err != nil {
 		return nil, fmt.Errorf("marshal content: %w", err)
 	}
-	return s.SendContent(ctx, senderID, convID, model.MessageTypeText, string(content), clientMsgID, replyTo)
+	return s.SendContent(ctx, senderID, convID, model.MessageTypeText, string(content), clientMsgID, replyTo, nil)
 }
 
 // SendContent 校验成员身份后持久化任意类型消息（content 为已序列化的 JSON 串，seq 事务内原子分配）。
 //
 // 调用方负责按 messageType 组装并序列化 content（文本、图片等），本方法只保证落库与成员/发送者信息装配一致。
+//
+// mentions 为群消息 @ 的用户 ID 列表：必须全部为当前会话成员且不含发送者自己。
+// 校验通过后落入 messages.mentions（uuid[]）+ 事务里把命中的成员 conversation_members.mention_unread 置 true。
+//
+// replyTo 为引用回复的目标消息 ID：必须是同一会话内的历史消息，否则返回 ErrInvalidQuote。
 func (s *MessageService) SendContent(
 	ctx context.Context,
 	senderID, convID uuid.UUID,
@@ -99,6 +125,7 @@ func (s *MessageService) SendContent(
 	contentJSON string,
 	clientMsgID string,
 	replyTo *uuid.UUID,
+	mentions []uuid.UUID,
 ) (*SendResult, error) {
 	ok, err := s.convRepo.IsMember(ctx, convID, senderID)
 	if err != nil {
@@ -106,6 +133,68 @@ func (s *MessageService) SendContent(
 	}
 	if !ok {
 		return nil, ErrNotMember
+	}
+
+	// 单聊会话：任一方拉黑另一方即拒发（群聊不受成员间拉黑影响）
+	conv, err := s.convRepo.FindByID(ctx, convID)
+	if err != nil {
+		return nil, fmt.Errorf("load conversation: %w", err)
+	}
+	if conv != nil && conv.Type == model.ConversationTypePrivate {
+		peer, err := s.convRepo.GetPeerUser(ctx, convID, senderID)
+		if err != nil {
+			return nil, fmt.Errorf("load peer: %w", err)
+		}
+		if peer != nil {
+			blocked, err := s.blocklistRepo.IsBlockedEitherDirection(ctx, senderID, peer.ID)
+			if err != nil {
+				return nil, fmt.Errorf("check blocklist: %w", err)
+			}
+			if blocked {
+				return nil, ErrBlocked
+			}
+		}
+	}
+
+	// 引用消息校验：必须同会话历史消息
+	if replyTo != nil {
+		quoted, err := s.msgRepo.FindByID(ctx, *replyTo)
+		if err != nil {
+			return nil, fmt.Errorf("load quoted message: %w", err)
+		}
+		if quoted == nil || quoted.ConversationID != convID {
+			return nil, ErrInvalidQuote
+		}
+	}
+
+	// @ 提及校验（仅群聊有意义）：所有目标都必须是当前群成员且非发送者本人
+	memberIDs, err := s.convRepo.GetMemberIDs(ctx, convID)
+	if err != nil {
+		return nil, fmt.Errorf("load members: %w", err)
+	}
+	validMentions := make([]uuid.UUID, 0, len(mentions))
+	if len(mentions) > 0 {
+		if conv == nil || conv.Type != model.ConversationTypeGroup {
+			return nil, ErrInvalidMention
+		}
+		memberSet := make(map[uuid.UUID]struct{}, len(memberIDs))
+		for _, id := range memberIDs {
+			memberSet[id] = struct{}{}
+		}
+		seen := make(map[uuid.UUID]struct{}, len(mentions))
+		for _, id := range mentions {
+			if id == senderID {
+				continue
+			}
+			if _, dup := seen[id]; dup {
+				continue
+			}
+			if _, in := memberSet[id]; !in {
+				return nil, ErrInvalidMention
+			}
+			seen[id] = struct{}{}
+			validMentions = append(validMentions, id)
+		}
 	}
 
 	msg := &model.Message{
@@ -116,6 +205,13 @@ func (s *MessageService) SendContent(
 		Status:         model.MessageStatusNormal,
 		ReplyToID:      replyTo,
 	}
+	if len(validMentions) > 0 {
+		strs := make(pq.StringArray, len(validMentions))
+		for i, id := range validMentions {
+			strs[i] = id.String()
+		}
+		msg.Mentions = strs
+	}
 	if clientMsgID != "" {
 		msg.ClientMsgID = &clientMsgID
 	}
@@ -124,17 +220,76 @@ func (s *MessageService) SendContent(
 		return nil, fmt.Errorf("persist message: %w", err)
 	}
 
+	// mention_unread 打标：命中成员的会话面板红点
+	if len(validMentions) > 0 {
+		if err := s.convRepo.SetMentionUnread(ctx, convID, validMentions); err != nil {
+			s.logger.Warn("set mention_unread failed", zap.Error(err))
+		}
+	}
+
 	sender, err := s.userRepo.FindByID(ctx, senderID)
 	if err != nil || sender == nil {
 		return nil, fmt.Errorf("load sender: %w", err)
 	}
 
-	memberIDs, err := s.convRepo.GetMemberIDs(ctx, convID)
-	if err != nil {
-		return nil, fmt.Errorf("load members: %w", err)
+	return &SendResult{
+		Message:          msg,
+		SenderNickname:   sender.Nickname,
+		MemberIDs:        memberIDs,
+		MentionedMembers: validMentions,
+	}, nil
+}
+
+// Forward 一次转发到多个目标会话：source 与所有 target 都必须是 actor 参与的会话。
+//
+// 逐个会话独立走 SendContent 骨架（含拉黑/@校验/seq 分配），任何一个失败立即回错、
+// 已成功的目标已产生独立消息不做回滚（转发本身是"广播"语义，容忍部分成功由前端顺序发起时反馈）。
+func (s *MessageService) Forward(
+	ctx context.Context,
+	actorID, sourceMsgID uuid.UUID,
+	targetConvIDs []uuid.UUID,
+) ([]*SendResult, error) {
+	if len(targetConvIDs) == 0 {
+		return nil, ErrForwardNoTarget
+	}
+	if len(targetConvIDs) > MaxForwardTargets {
+		return nil, ErrForwardTooMany
 	}
 
-	return &SendResult{Message: msg, SenderNickname: sender.Nickname, MemberIDs: memberIDs}, nil
+	src, err := s.msgRepo.FindByID(ctx, sourceMsgID)
+	if err != nil {
+		return nil, fmt.Errorf("load source message: %w", err)
+	}
+	if src == nil || src.Status != model.MessageStatusNormal {
+		return nil, ErrMessageNotFound
+	}
+	// 系统消息不允许转发
+	if src.MessageType == model.MessageTypeSystem {
+		return nil, ErrMessageNotFound
+	}
+	// actor 必须是 source 会话成员，且必须是每个 target 会话成员
+	if ok, err := s.convRepo.IsMember(ctx, src.ConversationID, actorID); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, ErrNotMember
+	}
+	for _, tid := range targetConvIDs {
+		if ok, err := s.convRepo.IsMember(ctx, tid, actorID); err != nil {
+			return nil, err
+		} else if !ok {
+			return nil, ErrForwardTargetInvalid
+		}
+	}
+
+	results := make([]*SendResult, 0, len(targetConvIDs))
+	for _, tid := range targetConvIDs {
+		res, err := s.SendContent(ctx, actorID, tid, src.MessageType, src.Content, "", nil, nil)
+		if err != nil {
+			return results, err
+		}
+		results = append(results, res)
+	}
+	return results, nil
 }
 
 // GetHistory 校验成员身份后按 seq 降序分页取历史消息。
@@ -316,4 +471,82 @@ func (s *MessageService) ToggleReaction(ctx context.Context, userID, messageID u
 		Reacted:   reacted,
 		MemberIDs: memberIDs,
 	}, nil
+}
+
+// MessageSearchResult 搜索结果 DTO，供 handler 层 JSON 序列化。
+type MessageSearchResult struct {
+	MessageID      uuid.UUID `json:"message_id"`
+	ConversationID uuid.UUID `json:"conversation_id"`
+	ConvName       string    `json:"conv_name"`
+	SenderNickname string    `json:"sender_nickname"`
+	Excerpt        string    `json:"excerpt"`
+	CreatedAt      time.Time `json:"created_at"`
+	Seq            int64     `json:"seq"`
+}
+
+// Search 全文搜索消息，返回最多 limit 条按时间倒序的结果。
+func (s *MessageService) Search(
+	ctx context.Context,
+	userID uuid.UUID,
+	query string,
+	convIDStr string,
+	beforeStr string,
+	limit int,
+) ([]MessageSearchResult, bool, error) {
+	if len([]rune(query)) < 3 {
+		return nil, false, ErrSearchQueryTooShort
+	}
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+
+	var convID *uuid.UUID
+	if convIDStr != "" {
+		id, err := uuid.Parse(convIDStr)
+		if err != nil {
+			return nil, false, fmt.Errorf("invalid conversation_id: %w", err)
+		}
+		convID = &id
+	}
+
+	var beforeTime *time.Time
+	if beforeStr != "" {
+		t, err := time.Parse(time.RFC3339, beforeStr)
+		if err != nil {
+			return nil, false, fmt.Errorf("invalid before timestamp: %w", err)
+		}
+		beforeTime = &t
+	}
+
+	rows, err := s.msgRepo.Search(ctx, userID, query, convID, beforeTime, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+
+	results := make([]MessageSearchResult, 0, len(rows))
+	for _, row := range rows {
+		var content struct {
+			Text string `json:"text"`
+		}
+		_ = json.Unmarshal([]byte(row.Content), &content)
+		excerpt := []rune(content.Text)
+		if len(excerpt) > 120 {
+			excerpt = append(excerpt[:120], []rune("…")...)
+		}
+		results = append(results, MessageSearchResult{
+			MessageID:      row.ID,
+			ConversationID: row.ConversationID,
+			ConvName:       row.ConvName,
+			SenderNickname: row.SenderNickname,
+			Excerpt:        string(excerpt),
+			CreatedAt:      row.CreatedAt,
+			Seq:            row.Seq,
+		})
+	}
+	return results, hasMore, nil
 }

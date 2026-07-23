@@ -91,12 +91,52 @@ services:
   #     - yuanchat-net
   #   restart: unless-stopped
 
+  # ==================== Prometheus ====================
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: yuanchat-prometheus
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=15d'
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - yuanchat-net
+    restart: unless-stopped
+
+  # ==================== Grafana ====================
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: yuanchat-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=yuanchat_dev
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    networks:
+      - yuanchat-net
+    restart: unless-stopped
+
 volumes:
   postgres_data:
     driver: local
   redis_data:
     driver: local
   minio_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
     driver: local
   # es_data:
 

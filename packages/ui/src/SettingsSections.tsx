@@ -1,16 +1,26 @@
 /**
- * SettingsSections — 设置页右侧内容区子视图（账号与安全 / 外观 / 关于）
+ * SettingsSections — 设置页右侧内容区子视图（v0.2 重设计）
  *
  * @description
- * 从 SettingsScreen 拆出的内容区组件，保持主文件精简（≤300 行）。
- * 三端共用：desktop/tablet 直接内联渲染，mobile 栈式推入时外层包返回头。
- *
- * - AccountSection：手机号脱敏、邮箱、元聊号 + 复制按钮
- * - AppearanceSection：主题开关（复制 ChatDetail 的 M3 switch 样式）+ 语言 radio
- * - AboutSection：应用信息 + 版本号
+ * 从 SettingsScreen 拆出的内容区组件：
+ * - AccountSection：分组卡片风信息行（图标 + 标签 + 值 + 复制）
+ * - AppearanceSection：主题双卡片可视化选择 + 语言分段控件（Segmented）
+ * - AboutSection：品牌 hero + 版本 + 内部链接（相关信息列表）
  */
 import { useState } from "react";
-import { Copy, Check, Moon, Sun } from "lucide-react";
+import {
+  BadgeCheck,
+  Check,
+  Copy,
+  Github,
+  Globe,
+  Info,
+  Key,
+  Mail,
+  Moon,
+  Phone,
+  Sun,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useThemeStore } from "@yuanchat/shared";
 import type { SupportedLocale } from "@yuanchat/design-system/i18n";
@@ -20,13 +30,39 @@ import { cn } from "@yuanchat/shared/utils";
 import { copyText } from "./copyText";
 import { APP_VERSION, maskPhone } from "./settingsUtils";
 
-/** 内容区分组标题 */
-function SectionTitle({ children }: { children: string }) {
-  return <h2 className="text-title-md text-on-surface mb-4 font-semibold">{children}</h2>;
+/** 分组标题 + 副标（页面级） */
+function SectionHeader({ title, desc }: { title: string; desc?: string }) {
+  return (
+    <div className="mb-4">
+      <h2 className="text-title-lg text-on-surface font-semibold">{title}</h2>
+      {desc && <p className="text-body-sm text-on-surface-variant mt-1">{desc}</p>}
+    </div>
+  );
 }
 
-/** 只读信息行：左标签 + 右值，可选复制按钮 */
-function InfoRow({ label, value, copyable }: { label: string; value: string; copyable?: boolean }) {
+/** 信息卡片：合并多行为一张卡，行间加分隔线 */
+function InfoCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="bg-surface-container divide-outline-variant divide-y overflow-hidden rounded-xl">
+      {children}
+    </div>
+  );
+}
+
+/** 信息卡片行：图标 + 标签 + 值 + 可选右侧动作（copy / 链接） */
+function InfoRow({
+  icon: Icon,
+  label,
+  value,
+  copyable,
+  action,
+}: {
+  icon: typeof Phone;
+  label: string;
+  value: string;
+  copyable?: boolean;
+  action?: React.ReactNode;
+}) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
@@ -38,25 +74,29 @@ function InfoRow({ label, value, copyable }: { label: string; value: string; cop
   };
 
   return (
-    <div className="border-outline-variant flex h-14 items-center justify-between border-b">
-      <span className="text-body-md text-on-surface-variant">{label}</span>
-      <div className="flex items-center gap-2">
-        <span className="text-body-md text-on-surface">{value}</span>
-        {copyable && (
-          <button
-            onClick={onCopy}
-            className="md3-icon-btn text-on-surface-variant !h-8 !w-8"
-            aria-label={copied ? t("profile.copied") : t("profile.copy")}
-          >
-            {copied ? <Check size={16} className="text-primary" /> : <Copy size={16} />}
-          </button>
-        )}
+    <div className="flex min-h-14 items-center gap-3 px-4 py-2.5">
+      <span className="bg-surface-container-high text-on-surface-variant grid h-9 w-9 shrink-0 place-items-center rounded-lg">
+        <Icon size={18} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-label-md text-on-surface-variant">{label}</p>
+        <p className="text-body-md text-on-surface mt-0.5 truncate">{value}</p>
       </div>
+      {copyable && (
+        <button
+          onClick={onCopy}
+          className="md3-icon-btn text-on-surface-variant !h-8 !w-8 shrink-0"
+          aria-label={copied ? t("profile.copied") : t("profile.copy")}
+        >
+          {copied ? <Check size={16} className="text-primary" /> : <Copy size={16} />}
+        </button>
+      )}
+      {action}
     </div>
   );
 }
 
-/** 账号与安全：手机号脱敏 + 邮箱 + 元聊号（可复制） */
+/** 账号与安全：信息卡片 + 修改密码占位入口 */
 export function AccountSection({
   phone,
   email,
@@ -69,114 +109,212 @@ export function AccountSection({
   const { t } = useTranslation();
   return (
     <div>
-      <SectionTitle>{t("settings.account")}</SectionTitle>
-      <InfoRow
-        label={t("settings.phone")}
-        value={phone ? maskPhone(phone) : t("settings.notBound")}
-      />
-      <InfoRow label={t("settings.email")} value={email || t("settings.notBound")} />
-      {shortId !== undefined && (
-        <InfoRow label={t("contacts.yuanId")} value={String(shortId)} copyable />
-      )}
+      <SectionHeader title={t("settings.account")} desc={t("settings.accountDesc")} />
+      <InfoCard>
+        <InfoRow
+          icon={Phone}
+          label={t("settings.phone")}
+          value={phone ? maskPhone(phone) : t("settings.notBound")}
+        />
+        <InfoRow icon={Mail} label={t("settings.email")} value={email || t("settings.notBound")} />
+        {shortId !== undefined && (
+          <InfoRow
+            icon={BadgeCheck}
+            label={t("contacts.yuanId")}
+            value={String(shortId)}
+            copyable
+          />
+        )}
+        <button
+          disabled
+          className="text-on-surface-variant flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left opacity-60"
+        >
+          <span className="bg-surface-container-high grid h-9 w-9 shrink-0 place-items-center rounded-lg">
+            <Key size={18} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-body-md text-on-surface">{t("settings.changePassword")}</p>
+            <p className="text-label-sm text-on-surface-variant mt-0.5">{t("common.comingSoon")}</p>
+          </div>
+        </button>
+      </InfoCard>
     </div>
   );
 }
 
-/** M3 风格开关（纯展示；复制自 ChatDetail 的 SettingRow switch，不 import） */
-function ThemeSwitch({ checked }: { checked: boolean }) {
-  return (
-    <span
-      role="switch"
-      aria-checked={checked}
-      className={cn(
-        // block 必须显式声明：父按钮非 flex 时 inline span 的宽高不生效，轨道塌缩致滑块溢出
-        "relative block h-6 w-11 shrink-0 rounded-full transition-colors",
-        checked ? "bg-primary" : "bg-outline",
-      )}
-    >
-      <span
-        className={cn(
-          "shadow-elevation-1 absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform",
-          checked && "translate-x-5",
-        )}
-      />
-    </span>
-  );
-}
-
-/** 外观：主题开关 + 语言 radio 风格选择 */
-export function AppearanceSection() {
+/** 主题双卡片：亮色 / 暗色可视化选择 */
+function ThemeCards() {
   const { t } = useTranslation();
   const mode = useThemeStore((s) => s.mode);
   const toggleMode = useThemeStore((s) => s.toggleMode);
-  const locale = useThemeStore((s) => s.locale);
-  const setLocale = useThemeStore((s) => s.setLocale);
   const isDark = mode === "dark";
 
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <button
+        onClick={() => !isDark || toggleMode()}
+        className={cn(
+          "group relative overflow-hidden rounded-xl border-2 p-3 text-left transition-all",
+          !isDark
+            ? "border-primary shadow-elevation-1"
+            : "border-outline-variant hover:border-primary/50",
+        )}
+      >
+        {/* 亮色缩略预览 */}
+        <div className="mb-2 h-20 overflow-hidden rounded-lg bg-white">
+          <div className="flex h-full">
+            <div className="w-1/3 bg-slate-100" />
+            <div className="flex-1 p-1.5">
+              <div className="mb-1 h-1.5 w-8 rounded-full bg-slate-300" />
+              <div className="mb-1 h-1.5 w-full rounded-full bg-slate-200" />
+              <div className="h-1.5 w-2/3 rounded-full bg-slate-200" />
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-body-md text-on-surface inline-flex items-center gap-1.5 font-medium">
+            <Sun size={16} />
+            {t("settings.themeLight")}
+          </span>
+          {!isDark && (
+            <span className="bg-primary text-primary-on grid h-5 w-5 place-items-center rounded-full">
+              <Check size={13} />
+            </span>
+          )}
+        </div>
+      </button>
+
+      <button
+        onClick={() => isDark || toggleMode()}
+        className={cn(
+          "group relative overflow-hidden rounded-xl border-2 p-3 text-left transition-all",
+          isDark
+            ? "border-primary shadow-elevation-1"
+            : "border-outline-variant hover:border-primary/50",
+        )}
+      >
+        {/* 暗色缩略预览 */}
+        <div className="mb-2 h-20 overflow-hidden rounded-lg bg-neutral-900">
+          <div className="flex h-full">
+            <div className="w-1/3 bg-neutral-800" />
+            <div className="flex-1 p-1.5">
+              <div className="mb-1 h-1.5 w-8 rounded-full bg-neutral-500" />
+              <div className="mb-1 h-1.5 w-full rounded-full bg-neutral-700" />
+              <div className="h-1.5 w-2/3 rounded-full bg-neutral-700" />
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-body-md text-on-surface inline-flex items-center gap-1.5 font-medium">
+            <Moon size={16} />
+            {t("settings.themeDark")}
+          </span>
+          {isDark && (
+            <span className="bg-primary text-primary-on grid h-5 w-5 place-items-center rounded-full">
+              <Check size={13} />
+            </span>
+          )}
+        </div>
+      </button>
+    </div>
+  );
+}
+
+/** 语言分段控件（Segmented） */
+function LanguageSegmented() {
+  const locale = useThemeStore((s) => s.locale);
+  const setLocale = useThemeStore((s) => s.setLocale);
   const changeLocale = (code: SupportedLocale) => {
     void i18n.changeLanguage(code);
     setLocale(code);
   };
+  return (
+    <div className="bg-surface-container inline-flex w-full rounded-lg p-1">
+      {SUPPORTED_LOCALES.map(({ code, nativeLabel }) => {
+        const active = locale === code;
+        return (
+          <button
+            key={code}
+            onClick={() => changeLocale(code)}
+            className={cn(
+              "text-label-lg flex-1 rounded-md py-2 font-medium transition-all",
+              active
+                ? "bg-surface shadow-elevation-1 text-on-surface"
+                : "text-on-surface-variant hover:text-on-surface",
+            )}
+          >
+            {nativeLabel}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 外观：主题双卡 + 语言分段 */
+export function AppearanceSection() {
+  const { t } = useTranslation();
 
   return (
-    <div>
-      <SectionTitle>{t("settings.appearance")}</SectionTitle>
-
-      {/* 主题行 */}
-      <div className="border-outline-variant flex h-14 items-center justify-between border-b">
-        <span className="text-on-surface-variant flex items-center gap-2">
-          {isDark ? <Moon size={18} /> : <Sun size={18} />}
-          <span className="text-body-md text-on-surface">
-            {isDark ? t("settings.themeDark") : t("settings.themeLight")}
-          </span>
-        </span>
-        <button onClick={toggleMode} aria-label={t("settings.theme")}>
-          <ThemeSwitch checked={isDark} />
-        </button>
+    <div className="flex flex-col gap-6">
+      <div>
+        <SectionHeader title={t("settings.appearance")} desc={t("settings.appearanceDesc")} />
       </div>
-
-      {/* 语言行 */}
-      <div className="flex items-center justify-between py-4">
-        <span className="text-body-md text-on-surface">{t("settings.language")}</span>
-        <div className="flex gap-2">
-          {SUPPORTED_LOCALES.map(({ code, nativeLabel }) => {
-            const active = locale === code;
-            return (
-              <button
-                key={code}
-                onClick={() => changeLocale(code)}
-                className={cn(
-                  "text-label-lg rounded-lg border px-4 py-2 font-medium transition-colors",
-                  active
-                    ? "border-primary bg-primary-container/60 text-primary-on-container"
-                    : "border-outline-variant text-on-surface-variant hover:bg-surface-container-high",
-                )}
-              >
-                {nativeLabel}
-              </button>
-            );
-          })}
-        </div>
+      <div>
+        <h3 className="text-title-sm text-on-surface mb-3 font-semibold">{t("settings.theme")}</h3>
+        <ThemeCards />
+      </div>
+      <div>
+        <h3 className="text-title-sm text-on-surface mb-3 font-semibold">
+          {t("settings.language")}
+        </h3>
+        <LanguageSegmented />
       </div>
     </div>
   );
 }
 
-/** 关于：应用名 + 版本号 */
+/** 关于：品牌 hero + 版本 + 开发者/开源链接 */
 export function AboutSection() {
   const { t } = useTranslation();
   return (
     <div>
-      <SectionTitle>{t("settings.about")}</SectionTitle>
-      <div className="flex flex-col items-center gap-3 py-8">
-        <div className="bg-primary text-primary-on text-title-lg grid h-16 w-16 place-items-center rounded-2xl font-bold">
+      <SectionHeader title={t("settings.about")} desc={t("settings.aboutDesc")} />
+
+      {/* 品牌 hero */}
+      <div className="mb-6 flex flex-col items-center gap-3 py-6">
+        <div className="brand-gradient shadow-elevation-2 text-headline-md grid h-20 w-20 place-items-center rounded-2xl font-bold text-white">
           元
         </div>
-        <p className="text-title-md text-on-surface font-semibold">YuanChat</p>
+        <p className="text-title-lg text-on-surface font-semibold">YuanChat</p>
         <p className="text-body-sm text-on-surface-variant">
           {t("settings.version")} {APP_VERSION}
         </p>
+        <p className="text-label-md text-on-surface-variant text-center opacity-70">
+          {t("settings.brandTagline")}
+        </p>
       </div>
+
+      {/* 链接卡片 */}
+      <InfoCard>
+        <InfoRow
+          icon={Globe}
+          label={t("settings.officialSite")}
+          value="yuanchat.example.com"
+          copyable
+        />
+        <InfoRow
+          icon={Github}
+          label={t("settings.sourceCode")}
+          value="github.com/yuanchat"
+          copyable
+        />
+        <InfoRow
+          icon={Info}
+          label={t("settings.licenseLabel")}
+          value={t("settings.licenseValue")}
+        />
+      </InfoCard>
     </div>
   );
 }

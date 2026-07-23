@@ -32,6 +32,7 @@ type ConversationDTO struct {
 	IsMuted       bool            `json:"is_muted"`
 	LastSeq       int64           `json:"last_seq"`
 	MyLastReadSeq int64           `json:"my_last_read_seq"`
+	MentionUnread bool            `json:"mention_unread"`
 	LastMessage   *LastMessageDTO `json:"last_message,omitempty"`
 	Peer          *PeerDTO        `json:"peer,omitempty"`
 	UpdatedAt     time.Time       `json:"updated_at"`
@@ -91,6 +92,7 @@ func (s *ConversationService) List(ctx context.Context, userID uuid.UUID) ([]Con
 			Type:          item.Type,
 			MemberCount:   item.MemberCount,
 			IsMuted:       item.IsMuted,
+			MentionUnread: item.MentionUnread,
 			LastSeq:       item.LastSeq,
 			MyLastReadSeq: item.LastReadSeq,
 			UnreadCount:   max(item.LastSeq-item.LastReadSeq, 0),

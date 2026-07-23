@@ -36,6 +36,11 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Build web
         # 若部署环境需要指向自定义 API/WS，请在此处或通过 secrets 注入 VITE_* 变量
+        # Sentry source map upload 在 SENTRY_AUTH_TOKEN 存在时由 vite-plugin 自动完成
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT_WEB: ${{ secrets.SENTRY_PROJECT_WEB }}
         run: pnpm --filter @yuanchat/web build
       - name: Package
         env:
@@ -141,6 +146,9 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT_DESKTOP: ${{ secrets.SENTRY_PROJECT_DESKTOP }}
         with:
           projectPath: apps/desktop
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
@@ -154,6 +162,9 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT_DESKTOP: ${{ secrets.SENTRY_PROJECT_DESKTOP }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}

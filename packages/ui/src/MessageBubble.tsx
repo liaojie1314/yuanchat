@@ -21,6 +21,7 @@
  * @param onReply - 引用回复回调（右键 / 长按菜单触发，双击气泡为快捷方式）
  * @param onRecall - 撤回回调（右键 / 长按菜单触发，仅自己 2 分钟内的消息可用）
  * @param onImageClick - 点击图片气泡打开全屏查看器的回调，参数为当前展示 URL
+ * @param onFavorite - 收藏消息回调（仅服务端已确认消息提供，撤回/系统消息不可收藏）
  */
 import {
   AlertCircle,
@@ -28,11 +29,13 @@ import {
   CheckCheck,
   Copy,
   Download,
+  Forward,
   Loader2,
   Pause,
   Play,
   Reply,
   Sparkles,
+  Star,
   Undo2,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -49,14 +52,13 @@ import { currentPlayingId, playVoice, subscribeVoicePlayer } from "./voicePlayer
 /** 菜单快捷回应条的固定 emoji */
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🎉"];
 
-/** 把文本中的 @xxx 提及切分为高亮 token（简单前缀匹配，接入真实数据后按实体渲染） */
+/** 把文本中的所有 @昵称 段切成高亮 token（只在消息 mentions 非空时启用） */
 function renderTextWithMentions(text: string, mentions?: string[]) {
   if (!mentions?.length) return text;
-  // 按提及词切分，保留分隔符
-  const pattern = mentions.map((m) => m.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-  const parts = text.split(new RegExp(`(${pattern})`, "g"));
+  // 匹配 @+ 非空白字符串（保留原文形态；后端存 uuid，前端不做 uuid → 昵称反查，直接依赖发送时插入的 @昵称 文本）
+  const parts = text.split(/(@[^\s@]+)/g);
   return parts.map((part, i) =>
-    mentions.includes(part) ? (
+    part.startsWith("@") ? (
       <span
         key={i}
         className="bg-primary-container text-primary-on-container rounded px-1 font-medium"
@@ -77,7 +79,9 @@ export function MessageBubble({
   onRecall,
   onReEdit,
   onReact,
+  onForward,
   onImageClick,
+  onFavorite,
 }: {
   msg: ChatMessage;
   compact?: boolean;
@@ -86,7 +90,9 @@ export function MessageBubble({
   onRecall?: () => void;
   onReEdit?: () => void;
   onReact?: (emoji: string) => void;
+  onForward?: () => void;
   onImageClick?: (url: string) => void;
+  onFavorite?: () => void;
 }) {
   const { t } = useTranslation();
   // 气泡内联操作菜单（右键 / 长按弹出，点外部关闭）
@@ -143,20 +149,21 @@ export function MessageBubble({
   const canCopy = msg.kind === "text" && !!msg.text;
   // 引用回复：父层给了回调即可（文本/图片/文件/语音均可引用）
   const canReply = !!onReply;
+  const canForward = !!onForward;
   // 菜单当前展示的撤回项（资格 + 窗口内）
   const showRecall = recallEligible && recallInWindow;
 
   const openMenu = (e: { preventDefault: () => void }) => {
     // 窗口判定放事件里（Date.now 不纯，不能在 render 调用）
     const withinWindow = recallEligible && Date.now() - (msg.createdAtMs ?? 0) < 120_000;
-    if (!withinWindow && !canCopy && !canReply && !onReact) return;
+    if (!withinWindow && !canCopy && !canReply && !onReact && !canForward && !onFavorite) return;
     e.preventDefault();
     setRecallInWindow(withinWindow);
     setMenuOpen(true);
   };
 
   const startLongPress = (e: { preventDefault: () => void }) => {
-    if (!recallEligible && !canCopy && !canReply && !onReact) return;
+    if (!recallEligible && !canCopy && !canReply && !onReact && !canForward && !onFavorite) return;
     longPressTimer.current = setTimeout(() => openMenu(e), 500);
   };
 
@@ -177,9 +184,19 @@ export function MessageBubble({
     onReply?.();
   };
 
+  const handleForward = () => {
+    setMenuOpen(false);
+    onForward?.();
+  };
+
   const handleRecall = () => {
     setMenuOpen(false);
     onRecall?.();
+  };
+
+  const handleFavorite = () => {
+    setMenuOpen(false);
+    onFavorite?.();
   };
 
   return (
@@ -392,6 +409,24 @@ export function MessageBubble({
                     className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
                   >
                     <Reply size={15} /> {t("chat.message.reply")}
+                  </button>
+                )}
+                {canForward && (
+                  <button
+                    role="menuitem"
+                    onClick={handleForward}
+                    className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
+                  >
+                    <Forward size={15} /> {t("chat.message.forward")}
+                  </button>
+                )}
+                {onFavorite && (
+                  <button
+                    role="menuitem"
+                    onClick={handleFavorite}
+                    className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
+                  >
+                    <Star size={15} /> {t("chat.message.favorite")}
                   </button>
                 )}
                 {showRecall && (

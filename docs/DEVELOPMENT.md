@@ -1,6 +1,6 @@
 # 元聊 YuanChat — 开发与打包指南
 
-> **最后更新**：2026-07-22（追加 CI/CD 与发版章节）
+> **最后更新**：2026-07-23（B3：新增 E2E 覆盖范围 + CI E2E job）
 >
 > ⚠️ **文档维护规则**：任何 `package.json` scripts、Tauri 配置、环境变量、workflow 的变更，**必须同步更新本文档**。此规则对所有会话生效。
 
@@ -600,13 +600,16 @@ packages/shared/coverage/
 
 #### 覆盖范围
 
-| 测试文件                   | 覆盖内容                                                   |
-| -------------------------- | ---------------------------------------------------------- |
-| `e2e/login.spec.ts`        | 登录成功/失败、表单校验错误、API 错误、Enter 快捷键        |
-| `e2e/register.spec.ts`     | 注册成功/失败、表单校验、验证码加载/刷新、Enter 快捷键     |
-| `e2e/logout.spec.ts`       | 登出跳转、localStorage 清除、登出后路由守卫                |
-| `e2e/route-guards.spec.ts` | 未登录重定向（/ → /login）、已登录重定向（/login → /chat） |
-| `e2e/navigation.spec.ts`   | 登录/注册页间跳转、表单状态独立                            |
+| 测试文件                        | 覆盖内容                                                        |
+| ------------------------------- | --------------------------------------------------------------- |
+| `e2e/login.spec.ts`             | 登录成功/失败、表单校验错误、API 错误、Enter 快捷键             |
+| `e2e/register.spec.ts`          | 注册成功/失败、表单校验、验证码加载/刷新、Enter 快捷键          |
+| `e2e/logout.spec.ts`            | 登出跳转、localStorage 清除、登出后路由守卫                     |
+| `e2e/route-guards.spec.ts`      | 未登录重定向（/ → /login）、已登录重定向（/login → /chat）      |
+| `e2e/navigation.spec.ts`        | 登录/注册页间跳转、表单状态独立                                 |
+| `e2e/authenticated-nav.spec.ts` | 已登录状态下聊天/通讯录/收藏/设置四大区域可访问、侧边栏导航链接 |
+| `e2e/search.spec.ts`            | Ctrl/Meta+K 打开搜索弹窗、输入框自动聚焦、Escape/关闭按钮关闭   |
+| `e2e/favorites.spec.ts`         | 收藏页可访问、四个分类 Tab 按钮可见且可点击                     |
 
 #### 测试文件结构
 
@@ -624,7 +627,10 @@ apps/web/e2e/
 ├── register.spec.ts
 ├── logout.spec.ts
 ├── route-guards.spec.ts
-└── navigation.spec.ts
+├── navigation.spec.ts
+├── authenticated-nav.spec.ts     # 已登录导航（聊天/通讯录/收藏/设置）
+├── search.spec.ts                # Cmd/Ctrl+K 全局搜索弹窗
+└── favorites.spec.ts             # 收藏页可访问 + Tab 过滤
 ```
 
 ---
@@ -633,12 +639,13 @@ apps/web/e2e/
 
 ### CI（每次 push / PR 触发）
 
-`.github/workflows/ci.yml`：dev / main 分支的 push + PR 触发，两个 job 并行：
+`.github/workflows/ci.yml`：dev / main 分支的 push + PR 触发，三个 job（`e2e` 依赖 `frontend` 完成后串行，`backend` 独立并行）：
 
-| Job        | 内容                                                                            |
-| ---------- | ------------------------------------------------------------------------------- |
-| `frontend` | `pnpm test`（全部 workspace）+ `apps/web` 和 `apps/desktop` 分别 `tsc --noEmit` |
-| `backend`  | `go vet ./...` + `go test ./...` + `go test -race ./internal/ws/`               |
+| Job        | 依赖       | 内容                                                                                       |
+| ---------- | ---------- | ------------------------------------------------------------------------------------------ |
+| `frontend` | —          | `pnpm test`（全部 workspace）+ `apps/web` 和 `apps/desktop` 分别 `tsc --noEmit`            |
+| `e2e`      | `frontend` | Playwright headless Chromium，MSW mock 模式（无需后端）；失败时上传 playwright-report 附件 |
+| `backend`  | —          | `go vet ./...` + `go test ./...` + `go test -race ./internal/ws/`                          |
 
 ### Release（tag `v*` push 触发）
 

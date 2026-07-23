@@ -23,13 +23,15 @@ import { useCallback, useEffect, useState } from "react";
 import { MessageSquare } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
+  appointAdmin,
   fetchMembers,
   isMockEnabled,
   kickMember,
+  revokeAdmin,
   showToast,
+  transferOwner,
   useAuthStore,
   useBreakpoint,
-  useChatBootstrap,
   useConversationStore,
   useResizable,
 } from "@yuanchat/shared";
@@ -58,9 +60,6 @@ export function ChatScreen() {
   const activeId = useConversationStore((s) => s.activeId);
   const setActive = useConversationStore((s) => s.setActive);
 
-  // 数据源接线：mock 注入 demo 数据 / 真实模式拉列表 + 建 WS 连接
-  useChatBootstrap();
-
   const [showDetail, setShowDetail] = useState(false);
   const [detailView, setDetailView] = useState<"info" | "members">("info");
   const [members, setMembers] = useState<ConversationMember[]>([]);
@@ -70,6 +69,10 @@ export function ChatScreen() {
   const leftPanel = useResizable(300, 240, 380);
   const selfId = useAuthStore((s) => s.user?.id ?? "");
   const myRole = members.find((m) => m.userId === selfId)?.role ?? 0;
+  // role_changed 帧递增 memberVersion → 成员列表打开时重拉
+  const memberVersion = useConversationStore(
+    (s) => s.conversations.find((c) => c.id === s.activeId)?.memberVersion ?? 0,
+  );
 
   // 切换会话时收起详情，避免面板残留上一个会话的信息
   useEffect(() => {
@@ -94,17 +97,41 @@ export function ChatScreen() {
       .finally(() => setMembersLoading(false));
   }, [activeId]);
 
-  // 切到成员全列表时拉取成员（mock 模式回退静态数组）
+  // 切到成员全列表 / 角色变更帧到达时拉取成员（mock 模式回退静态数组）
   useEffect(() => {
     if (detailView !== "members" || !activeId) return;
     refetchMembers();
-  }, [detailView, activeId, refetchMembers]);
+  }, [detailView, activeId, memberVersion, refetchMembers]);
 
   const handleKick = (userId: string) => {
     if (!activeId) return;
     kickMember(activeId, userId)
       .then(refetchMembers)
       .catch(() => showToast("error", t("detail.kickFailed")));
+  };
+
+  const handleAppointAdmin = (userId: string) => {
+    if (!activeId) return;
+    appointAdmin(activeId, userId)
+      .then(refetchMembers)
+      .catch(() => showToast("error", t("common.opFailed")));
+  };
+
+  const handleRevokeAdmin = (userId: string) => {
+    if (!activeId) return;
+    revokeAdmin(activeId, userId)
+      .then(refetchMembers)
+      .catch(() => showToast("error", t("common.opFailed")));
+  };
+
+  const handleTransferOwner = (userId: string) => {
+    if (!activeId) return;
+    transferOwner(activeId, userId)
+      .then(() => {
+        showToast("info", t("group.transferredToast"));
+        refetchMembers();
+      })
+      .catch(() => showToast("error", t("common.opFailed")));
   };
 
   const modals = (
@@ -123,6 +150,9 @@ export function ChatScreen() {
         myRole={myRole}
         selfId={selfId}
         onKick={handleKick}
+        onAppointAdmin={handleAppointAdmin}
+        onRevokeAdmin={handleRevokeAdmin}
+        onTransferOwner={handleTransferOwner}
         onBack={() => setDetailView("info")}
       />
     ) : (

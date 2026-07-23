@@ -1,13 +1,28 @@
+import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import { MainLayout } from "@yuanchat/ui";
+import { MainLayout, AppErrorBoundary } from "@yuanchat/ui";
 import { useAuthStore, useKeyboardAwareViewport } from "@yuanchat/shared";
-import { ChatPage } from "./pages/ChatPage";
-import { ContactsPage } from "./pages/ContactsPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import { LoginPage } from "./pages/LoginPage";
-import { RegisterPage } from "./pages/RegisterPage";
-import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
-import { QrLoginPage } from "./pages/QrLoginPage";
+
+const ChatPage = lazy(() => import("./pages/ChatPage").then((m) => ({ default: m.ChatPage })));
+const ContactsPage = lazy(() =>
+  import("./pages/ContactsPage").then((m) => ({ default: m.ContactsPage })),
+);
+const SettingsPage = lazy(() =>
+  import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
+);
+const LoginPage = lazy(() => import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })));
+const RegisterPage = lazy(() =>
+  import("./pages/RegisterPage").then((m) => ({ default: m.RegisterPage })),
+);
+const ForgotPasswordPage = lazy(() =>
+  import("./pages/ForgotPasswordPage").then((m) => ({ default: m.ForgotPasswordPage })),
+);
+const QrLoginPage = lazy(() =>
+  import("./pages/QrLoginPage").then((m) => ({ default: m.QrLoginPage })),
+);
+const FavoritesPage = lazy(() =>
+  import("./pages/FavoritesPage").then((m) => ({ default: m.FavoritesPage })),
+);
 
 function App() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -17,26 +32,35 @@ function App() {
 
   if (!isAuthenticated) {
     return (
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
-        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-        <Route path="/qr-login" element={<QrLoginPage />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
+      <AppErrorBoundary>
+        <Suspense fallback={null}>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/qr-login" element={<QrLoginPage />} />
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </Routes>
+        </Suspense>
+      </AppErrorBoundary>
     );
   }
 
   return (
-    <Routes>
-      <Route element={<MainLayout />}>
-        <Route path="/chat" element={<ChatPage />} />
-        <Route path="/chat/:conversationId" element={<ChatPage />} />
-        <Route path="/contacts" element={<ContactsPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="/chat" replace />} />
-      </Route>
-    </Routes>
+    <AppErrorBoundary>
+      <Suspense fallback={null}>
+        <Routes>
+          <Route element={<MainLayout />}>
+            <Route path="/chat" element={<ChatPage />} />
+            <Route path="/chat/:conversationId" element={<ChatPage />} />
+            <Route path="/contacts" element={<ContactsPage />} />
+            <Route path="/favorites" element={<FavoritesPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="*" element={<Navigate to="/chat" replace />} />
+          </Route>
+        </Routes>
+      </Suspense>
+    </AppErrorBoundary>
   );
 }
 

@@ -2,13 +2,14 @@
  * useChatBootstrap — 聊天数据源初始化 Hook
  *
  * @description
- * 在 ChatScreen 挂载时调用一次，按模式接线：
+ * 在 MainLayout（登录后布局层）挂载时调用一次，按模式接线：
  * - Mock 模式（VITE_ENABLE_MOCK=true）：注入 demo 会话/消息，
  *   sendText 走 setTimeout 模拟回执，不建立任何网络连接
- * - 真实模式：注册 WebSocket 帧处理器 → 拉会话列表 → 建立连接；
+ * - 真实模式：注册 WebSocket 帧处理器 → 拉会话列表 + presence 快照 → 建立连接；
  *   重连成功后自动重拉会话列表并清空消息缓存（重新按需加载，防止漏消息）
  *
- * 卸载时断开连接（登出/离开聊天页）。
+ * 挂在布局层保证聊天/通讯录/设置切页不断连（presence、消息帧全程可达）；
+ * 登出（布局卸载）时断开连接。
  */
 import { useEffect } from "react";
 import i18n from "@yuanchat/design-system/i18n";
@@ -35,6 +36,7 @@ import { useContactStore } from "../store/contactStore";
 import { useConversationStore } from "../store/conversationStore";
 import type { Conversation } from "../store/conversationStore";
 import { setMessageMockMode, useMessageStore } from "../store/messageStore";
+import { usePresenceStore } from "../store/presenceStore";
 import { resetChatStores, revokeAllLocalPreviews } from "../store/resetStores";
 import { showToast } from "../store/toastStore";
 import type { ChatMessage } from "../store/messageStore";
@@ -118,6 +120,8 @@ function wireSocket() {
         createdAtMs: p.timestamp,
         status: isSelf && !isSystem ? "sent" : undefined,
         clientMsgId: p.client_msg_id,
+        replyToId: p.reply_to_id,
+        mentions: p.mentions,
       };
       useMessageStore.getState().receiveMessage(msg);
 
@@ -150,6 +154,13 @@ function wireSocket() {
       convStore.applyIncoming(p.conversation_id, preview, formatListTime(iso), p.seq);
       // 系统通知：失焦 + 非免打扰时弹（桌面端注入 Tauri 实现，web 端静默）
       if (conv) notifyIncoming({ name: conv.name, isMuted: conv.isMuted }, preview);
+
+      // 被 @ 且非当前活跃会话：置 mentionUnread 供列表红点（进入会话时 clearUnread 自动清零）
+      const selfIdNow = useAuthStore.getState().user?.id;
+      const mentionedMe = !!(selfIdNow && p.mentions?.includes(selfIdNow));
+      if (mentionedMe && convStore.activeId !== p.conversation_id) {
+        convStore.markMentioned(p.conversation_id);
+      }
 
       // 正在看这个会话：立即上报已读
       if (convStore.activeId === p.conversation_id) {
@@ -255,8 +266,31 @@ function wireSocket() {
       else if (p.reason === "dissolved") showToast("info", i18n.t("chat.group.dissolvedNotice"));
     },
 
+    "conversation.role_changed": (p) => {
+      useConversationStore.getState().applyRoleChanged(p.conversation_id);
+      // 只对"别人对我"的角色变更 toast（自己发起的操作由 UI 层反馈；系统消息帧另行入流）
+      const selfId = useAuthStore.getState().user?.id;
+      if (p.user_id !== selfId || p.changed_by === selfId) return;
+      if (p.new_role === 2) showToast("info", i18n.t("group.becameOwnerToast"));
+      else if (p.new_role === 1) showToast("info", i18n.t("group.becameAdminToast"));
+      else showToast("info", i18n.t("group.revokedAdminToast"));
+    },
+
+    "friend.removed": (p) => {
+      useContactStore.getState().removeFriend(p.friend_id);
+    },
+
+    error: (p) => {
+      // BLOCKED：单聊被拉黑拒发。把对应乐观消息翻 failed + toast 提示
+      if (p.message === "BLOCKED" && p.client_msg_id) {
+        useMessageStore.getState().failByClientMsgId(p.client_msg_id);
+        showToast("error", i18n.t("chat.message.blockedRejected"));
+      }
+    },
+
     presence: (p) => {
       useConversationStore.getState().applyPresence(p.user_id, p.online);
+      usePresenceStore.getState().applyPresence(p.user_id, p.online);
     },
   });
 
@@ -267,7 +301,10 @@ function wireSocket() {
       .getState()
       .loadConversations()
       .then(() => fetchPresence())
-      .then((ids) => useConversationStore.getState().applyPresenceSnapshot(ids))
+      .then((ids) => {
+        useConversationStore.getState().applyPresenceSnapshot(ids);
+        usePresenceStore.getState().applySnapshot(ids);
+      })
       .catch(() => {});
     revokeAllLocalPreviews();
     useMessageStore.setState({ messagesByConv: {}, hasMoreByConv: {} });
@@ -317,7 +354,10 @@ export function useChatBootstrap() {
       .getState()
       .loadConversations()
       .then(() => fetchPresence())
-      .then((ids) => useConversationStore.getState().applyPresenceSnapshot(ids))
+      .then((ids) => {
+        useConversationStore.getState().applyPresenceSnapshot(ids);
+        usePresenceStore.getState().applySnapshot(ids);
+      })
       .catch(() => {});
     // 申请列表随登录拉取（"新的朋友"角标；好友列表进通讯录页再拉）
     void useContactStore.getState().loadRequests();

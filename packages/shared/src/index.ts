@@ -3,6 +3,8 @@ export * from "./store/conversationStore";
 export * from "./store/messageStore";
 export * from "./store/authStore";
 export * from "./store/contactStore";
+export * from "./store/blocklistStore";
+export * from "./store/presenceStore";
 export * from "./store/toastStore";
 export * from "./store/resetStores";
 export * from "./api/client";
@@ -12,6 +14,8 @@ export * from "./api/users";
 export * from "./api/files";
 export * from "./api/groups";
 export * from "./api/presence";
+export * from "./api/search";
+export * from "./api/favorites";
 export { setNotifier, notifyIncoming, __resetNotifier } from "./notify";
 export {
   setRefreshHandler,
@@ -30,3 +34,4 @@ export type { Breakpoint } from "./hooks/useBreakpoint";
 export { useChatBootstrap, isMockEnabled } from "./hooks/useChatBootstrap";
 export { useVoiceRecorder } from "./hooks/useVoiceRecorder";
 export type { VoiceRecorderState } from "./hooks/useVoiceRecorder";
+export { initSentry, captureException } from "./observability/sentry";

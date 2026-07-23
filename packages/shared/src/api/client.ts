@@ -11,6 +11,7 @@
  */
 import { ensureFreshToken, forceRefresh } from "./tokenManager";
 import type { ApiResponse } from "../types";
+import { captureException } from "../observability/sentry";
 
 interface ImportMetaEnv {
   VITE_API_BASE_URL?: string;
@@ -56,6 +57,16 @@ async function doFetch<T>(path: string, init: RequestInit, token: string | null)
   }
 
   const res = await fetch(API_BASE + path, { ...init, headers });
+  if (res.status >= 500) {
+    captureException(
+      new Error("HTTP " + String(res.status) + " " + String(init.method) + " " + path),
+      {
+        url: path,
+        method: String(init.method),
+        status: res.status,
+      },
+    );
+  }
   const json = (await res.json()) as ApiResponse<T>;
   if (json.code !== 0) {
     throw new ApiError(json.code, json.message || "Request failed");
