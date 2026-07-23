@@ -14,7 +14,8 @@
  * @param onShowDetail - 打开详情面板/抽屉回调，非空时显示详情按钮
  * @param compactComposer - 移动端使用紧凑输入区
  */
-import { useCallback, useEffect, useRef, useState, Fragment } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowLeft,
   Loader2,
@@ -75,6 +76,8 @@ export function ChatWindow({
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadingMoreRef = useRef(false);
+  const isAtBottomRef = useRef(true);
+  const prevCountRef = useRef(0);
   // 全屏查看的图片 URL（null 表示未打开）
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   // 转发弹窗当前源消息 ID（null 表示关闭）
@@ -82,56 +85,81 @@ export function ChatWindow({
   // 会话内搜索面板开关
   const [showSearch, setShowSearch] = useState(false);
 
+  const items = messages ?? [];
+
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const rowVirtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 80,
+    overscan: 5,
+  });
+
   // 进入会话时按需加载历史（真实模式；mock 模式内部直接跳过）
   useEffect(() => {
     if (activeId) void loadHistory(activeId);
   }, [activeId, loadHistory]);
 
-  // 消息变化 / 切换会话时滚动到底部（翻页加载不触发，避免跳动）
+  // 新消息到达时自动滚动到底部（loadMore 预置不触发，避免跳动）
   useEffect(() => {
-    if (loadingMoreRef.current) {
-      loadingMoreRef.current = false;
+    if (items.length === 0) return;
+    if (loadingMoreRef.current) return;
+    if (isAtBottomRef.current) {
+      rowVirtualizer.scrollToIndex(items.length - 1, { align: "end", behavior: "auto" });
+    }
+    // rowVirtualizer 引用稳定，不加入 deps 防止无限循环
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length, activeId]);
+
+  // loadMore 预置旧消息后恢复视口位置
+  useEffect(() => {
+    if (!loadingMoreRef.current) {
+      prevCountRef.current = items.length;
       return;
     }
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages?.length, activeId]);
+    const added = items.length - prevCountRef.current;
+    if (added > 0) {
+      rowVirtualizer.scrollToIndex(added, { align: "start", behavior: "auto" });
+    }
+    prevCountRef.current = items.length;
+    loadingMoreRef.current = false;
+    // rowVirtualizer 引用稳定，不加入 deps 防止无限循环
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length]);
 
   // 搜索跳转：highlightMsgId 变化时滚动到目标消息并 2 秒后清除高亮
   useEffect(() => {
-    if (!highlightMsgId || !scrollRef.current) return;
-    const el = scrollRef.current.querySelector(`[data-msg-id="${highlightMsgId}"]`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      const timer = setTimeout(() => setHighlightMsgId(null), 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [highlightMsgId, setHighlightMsgId]);
+    if (!highlightMsgId || items.length === 0) return;
+    const index = items.findIndex((m) => m.id === highlightMsgId);
+    if (index === -1) return;
+    rowVirtualizer.scrollToIndex(index, { align: "center", behavior: "smooth" });
+    const timer = setTimeout(() => setHighlightMsgId(null), 2000);
+    return () => clearTimeout(timer);
+    // rowVirtualizer 引用稳定，不加入 deps 防止无限循环
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightMsgId, setHighlightMsgId, items]);
 
   // 滚动到顶部时向上翻页
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
-    if (!el || !activeId || !hasMore || loadingMoreRef.current) return;
-    if (el.scrollTop > 40) return;
-
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isAtBottomRef.current = distFromBottom < 100;
+    if (!activeId || !hasMore || loadingMoreRef.current || el.scrollTop > 40) return;
     loadingMoreRef.current = true;
-    const prevHeight = el.scrollHeight;
-    const prevCount = useMessageStore.getState().messagesByConv[activeId]?.length ?? 0;
-    void loadMore(activeId).then(() => {
-      const nextCount = useMessageStore.getState().messagesByConv[activeId]?.length ?? 0;
-      if (nextCount === prevCount) {
-        // 没有新数据（到头/失败）：解除锁，否则滚动加载永久失效
-        loadingMoreRef.current = false;
-        return;
-      }
-      // 维持视口位置：滚动差 = 新增内容高度
-      requestAnimationFrame(() => {
-        if (scrollRef.current) {
-          scrollRef.current.scrollTop = scrollRef.current.scrollHeight - prevHeight;
+    prevCountRef.current = items.length;
+    void loadMore(activeId)
+      .then(() => {
+        // 防御：loadMore 未带回新数据时解除互斥锁，防止后续加载永久失效
+        const currentCount = useMessageStore.getState().messagesByConv[activeId]?.length ?? 0;
+        if (currentCount <= prevCountRef.current) {
+          loadingMoreRef.current = false;
         }
+      })
+      .catch(() => {
+        loadingMoreRef.current = false;
       });
-    });
-  }, [activeId, hasMore, loadMore]);
+  }, [activeId, hasMore, loadMore, items.length]);
 
   // 防御：如果没找到会话（activeId 无效或为 null），不渲染
   if (!conv) return null;
@@ -241,43 +269,60 @@ export function ChatWindow({
         </div>
       )}
 
-      {/* 消息流 */}
+      {/* 消息流 — 虚拟滚动 */}
       <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto">
         {messages === undefined ? (
           <MessageSkeleton />
         ) : messages.length === 0 ? (
           <EmptyMessages />
         ) : (
-          <div className="flex flex-col px-4 py-4">
-            {/* 向上翻页加载指示 */}
+          <>
+            {/* 向上翻页加载指示 — 悬浮在虚拟列表外部，不占用绝对定位空间 */}
             {hasMore && (
-              <div className="text-on-surface-variant my-1 flex justify-center">
+              <div className="text-on-surface-variant flex justify-center py-1">
                 <Loader2 size={16} className="animate-spin" />
               </div>
             )}
-
-            {messages.map((msg, i) => {
-              const prev = i > 0 ? messages[i - 1] : undefined;
-              const showDivider = !!msg.dateKey && msg.dateKey !== prev?.dateKey;
-              const compact =
-                !showDivider &&
-                !!prev &&
-                prev.kind !== "system" &&
-                msg.kind !== "system" &&
-                prev.isSelf === msg.isSelf &&
-                prev.senderName === msg.senderName &&
-                minutesBetween(prev.time, msg.time) < 1;
-              return (
-                <Fragment key={msg.id}>
-                  {showDivider && <DateDivider label={formatDateDivider(msg.dateKey!)} />}
+            <div
+              style={{
+                height: rowVirtualizer.getTotalSize() + (typingName ? 48 : 0),
+                position: "relative",
+              }}
+              className="py-2"
+            >
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const msg = items[virtualRow.index];
+                const prev = virtualRow.index > 0 ? items[virtualRow.index - 1] : undefined;
+                const showDivider = !!msg.dateKey && msg.dateKey !== prev?.dateKey;
+                const compact =
+                  !showDivider &&
+                  !!prev &&
+                  prev.kind !== "system" &&
+                  msg.kind !== "system" &&
+                  prev.isSelf === msg.isSelf &&
+                  prev.senderName === msg.senderName &&
+                  minutesBetween(prev.time, msg.time) < 1;
+                return (
                   <div
+                    key={virtualRow.key}
+                    ref={rowVirtualizer.measureElement}
+                    data-index={virtualRow.index}
                     data-msg-id={msg.id}
-                    className={
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                    className={cn(
+                      "px-4",
                       highlightMsgId === msg.id
                         ? "rounded-lg ring-2 ring-blue-400 ring-offset-1"
-                        : undefined
-                    }
+                        : undefined,
+                    )}
                   >
+                    {showDivider && <DateDivider label={formatDateDivider(msg.dateKey!)} />}
                     <MessageBubble
                       msg={msg}
                       compact={compact}
@@ -323,12 +368,24 @@ export function ChatWindow({
                       }
                     />
                   </div>
-                </Fragment>
-              );
-            })}
-
-            {typingName && <TypingIndicator name={typingName} />}
-          </div>
+                );
+              })}
+              {/* 正在输入指示 — 绝对定位于虚拟列表底部 */}
+              {typingName && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: rowVirtualizer.getTotalSize(),
+                    left: 0,
+                    width: "100%",
+                  }}
+                  className="px-4"
+                >
+                  <TypingIndicator name={typingName} />
+                </div>
+              )}
+            </div>
+          </>
         )}
       </div>
 

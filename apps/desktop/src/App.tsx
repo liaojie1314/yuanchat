@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import {
   isPermissionGranted,
@@ -9,13 +9,24 @@ import { MainLayout, AppErrorBoundary } from "@yuanchat/ui";
 import { setNotifier, useAuthStore, useKeyboardAwareViewport } from "@yuanchat/shared";
 import { TitleBar } from "./components/TitleBar";
 import { useIsMobile } from "./hooks/useIsMobile";
-import { ChatPage } from "./pages/ChatPage";
-import { ContactsPage } from "./pages/ContactsPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import { LoginPage } from "./pages/LoginPage";
-import { RegisterPage } from "./pages/RegisterPage";
-import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
-import { QrLoginPage } from "./pages/QrLoginPage";
+
+const ChatPage = lazy(() => import("./pages/ChatPage").then((m) => ({ default: m.ChatPage })));
+const ContactsPage = lazy(() =>
+  import("./pages/ContactsPage").then((m) => ({ default: m.ContactsPage })),
+);
+const SettingsPage = lazy(() =>
+  import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
+);
+const LoginPage = lazy(() => import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })));
+const RegisterPage = lazy(() =>
+  import("./pages/RegisterPage").then((m) => ({ default: m.RegisterPage })),
+);
+const ForgotPasswordPage = lazy(() =>
+  import("./pages/ForgotPasswordPage").then((m) => ({ default: m.ForgotPasswordPage })),
+);
+const QrLoginPage = lazy(() =>
+  import("./pages/QrLoginPage").then((m) => ({ default: m.QrLoginPage })),
+);
 
 // 模块级一次性注册：权限就绪后把 Tauri 通知注入 shared 抽象
 // （receive 帧只在主窗口出现，子窗口注册无害；非 Tauri 环境 catch 静默）
@@ -71,28 +82,32 @@ function App() {
   if (!isAuthenticated) {
     return (
       <AppErrorBoundary>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/qr-login" element={<QrLoginPage />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
+        <Suspense fallback={null}>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/qr-login" element={<QrLoginPage />} />
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </Routes>
+        </Suspense>
       </AppErrorBoundary>
     );
   }
 
   return (
     <AppErrorBoundary>
-      <Routes>
-        <Route element={<MainLayout titleBar={isMobile ? undefined : <TitleBar />} />}>
-          <Route path="/chat" element={<ChatPage />} />
-          <Route path="/chat/:conversationId" element={<ChatPage />} />
-          <Route path="/contacts" element={<ContactsPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="*" element={<Navigate to="/chat" replace />} />
-        </Route>
-      </Routes>
+      <Suspense fallback={null}>
+        <Routes>
+          <Route element={<MainLayout titleBar={isMobile ? undefined : <TitleBar />} />}>
+            <Route path="/chat" element={<ChatPage />} />
+            <Route path="/chat/:conversationId" element={<ChatPage />} />
+            <Route path="/contacts" element={<ContactsPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="*" element={<Navigate to="/chat" replace />} />
+          </Route>
+        </Routes>
+      </Suspense>
     </AppErrorBoundary>
   );
 }
