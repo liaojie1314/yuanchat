@@ -16,6 +16,7 @@
   "common.busy": "Busy",
   "common.more": "More",
   "common.comingSoon": "Coming soon",
+  "common.loadMore": "Load more",
 
   "settings.title": "Settings",
   "settings.general": "General",
@@ -310,5 +311,19 @@
   "search.jumpTo": "Jump to message",
   "search.loading": "Searching…",
   "search.placeholder": "Search messages…",
-  "search.title": "Search messages"
+  "search.title": "Search messages",
+
+  "favorites.title": "My Favorites",
+  "favorites.all": "All",
+  "favorites.text": "Text",
+  "favorites.image": "Images",
+  "favorites.file": "Files",
+  "favorites.empty": "No favorites yet",
+  "favorites.added": "Saved to favorites",
+  "favorites.addFailed": "Failed to save, please try again",
+  "favorites.removed": "Removed from favorites",
+  "favorites.removeFailed": "Failed to remove",
+  "favorites.remove": "Remove from favorites",
+  "favorites.loadFailed": "Failed to load, please try again",
+  "chat.message.favorite": "Favorite"
 }

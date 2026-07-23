@@ -16,6 +16,7 @@
   "common.busy": "忙碌",
   "common.more": "更多",
   "common.comingSoon": "功能开发中，敬请期待",
+  "common.loadMore": "加载更多",
 
   "settings.title": "设置",
   "settings.general": "通用",
@@ -310,5 +311,19 @@
   "search.jumpTo": "跳转到消息",
   "search.loading": "搜索中…",
   "search.placeholder": "搜索聊天记录…",
-  "search.title": "搜索消息"
+  "search.title": "搜索消息",
+
+  "favorites.title": "我的收藏",
+  "favorites.all": "全部",
+  "favorites.text": "文字",
+  "favorites.image": "图片",
+  "favorites.file": "文件",
+  "favorites.empty": "暂无收藏",
+  "favorites.added": "已收藏",
+  "favorites.addFailed": "收藏失败，请稍后重试",
+  "favorites.removed": "已取消收藏",
+  "favorites.removeFailed": "取消收藏失败",
+  "favorites.remove": "取消收藏",
+  "favorites.loadFailed": "加载失败，请稍后重试",
+  "chat.message.favorite": "收藏"
 }

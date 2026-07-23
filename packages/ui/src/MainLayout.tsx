@@ -24,7 +24,7 @@
  * <MainLayout />
  */
 import { Link, useLocation, Outlet } from "react-router-dom";
-import { MessageCircle, Users, Settings, Sun, Moon, LogOut } from "lucide-react";
+import { MessageCircle, Users, Settings, Star, Sun, Moon, LogOut } from "lucide-react";
 import {
   useThemeStore,
   useAuthStore,
@@ -43,6 +43,7 @@ import { ToastHost } from "./Toast";
 const NAV_ITEMS = [
   { to: "/chat", icon: MessageCircle, labelKey: "chat.title" },
   { to: "/contacts", icon: Users, labelKey: "contacts.title" },
+  { to: "/favorites", icon: Star, labelKey: "favorites.title" },
   { to: "/settings", icon: Settings, labelKey: "settings.title" },
 ];
 

@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
+  addFavorite,
   ApiError,
   formatDateDivider,
   recallMessage,
@@ -365,6 +366,16 @@ export function ChatWindow({
                         msg.recalled || msg.kind === "system" || !msg.seq
                           ? undefined
                           : () => handleForward(msg.id)
+                      }
+                      onFavorite={
+                        // 只对服务端已确认消息（有 seq）且非撤回/系统消息提供收藏
+                        !msg.recalled && msg.kind !== "system" && !!msg.seq
+                          ? () => {
+                              void addFavorite(msg.id)
+                                .then(() => showToast("info", t("favorites.added")))
+                                .catch(() => showToast("error", t("favorites.addFailed")));
+                            }
+                          : undefined
                       }
                     />
                   </div>

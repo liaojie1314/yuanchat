@@ -20,6 +20,9 @@ const ForgotPasswordPage = lazy(() =>
 const QrLoginPage = lazy(() =>
   import("./pages/QrLoginPage").then((m) => ({ default: m.QrLoginPage })),
 );
+const FavoritesPage = lazy(() =>
+  import("./pages/FavoritesPage").then((m) => ({ default: m.FavoritesPage })),
+);
 
 function App() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -51,6 +54,7 @@ function App() {
             <Route path="/chat" element={<ChatPage />} />
             <Route path="/chat/:conversationId" element={<ChatPage />} />
             <Route path="/contacts" element={<ContactsPage />} />
+            <Route path="/favorites" element={<FavoritesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/chat" replace />} />
           </Route>

@@ -15,6 +15,7 @@ export * from "./api/files";
 export * from "./api/groups";
 export * from "./api/presence";
 export * from "./api/search";
+export * from "./api/favorites";
 export { setNotifier, notifyIncoming, __resetNotifier } from "./notify";
 export {
   setRefreshHandler,

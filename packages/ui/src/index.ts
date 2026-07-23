@@ -46,6 +46,7 @@ export { ContactsPanel } from "./ContactsPanel";
 export { ContactDetail } from "./ContactDetail";
 export { BlocklistView } from "./BlocklistView";
 export { NewFriendsView } from "./NewFriendsView";
+export { FavoritesView } from "./FavoritesView";
 export { AddContactModal } from "./AddContactModal";
 
 // 设置组件

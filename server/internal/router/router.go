@@ -50,6 +50,9 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	convSvc := service.NewConversationService(convRepo, msgRepo, contactRepo, userRepo, logger)
 	contactSvc := service.NewContactService(contactRepo, userRepo, logger)
 	blocklistSvc := service.NewBlocklistService(blocklistRepo, userRepo, logger)
+	favRepo := repository.NewFavoriteRepository(db)
+	favSvc := service.NewFavoriteService(favRepo, msgRepo, convRepo, userRepo, logger)
+	favH := handler.NewFavoriteHandler(favSvc, logger)
 
 	healthH := handler.NewHealthHandler()
 	captchaH := handler.NewCaptchaHandler(rdb)
@@ -137,6 +140,10 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		chat.GET("/blocks", blocklistH.List)
 		chat.POST("/blocks", blocklistH.Block)
 		chat.DELETE("/blocks/:targetId", blocklistH.Unblock)
+
+		chat.POST("/favorites", favH.Add)
+		chat.DELETE("/favorites/:messageId", favH.Remove)
+		chat.GET("/favorites", favH.List)
 	}
 
 	return r, wsH
