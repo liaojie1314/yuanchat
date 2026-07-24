@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button, Input } from "@yuanchat/ui";
 import { useAuthStore } from "@yuanchat/shared";
-import { validatePassword } from "@yuanchat/shared/utils";
+import { validatePassword, validateYuanchatId } from "@yuanchat/shared/utils";
 import { MessageCircle, QrCode } from "lucide-react";
 
 export function LoginPage() {
@@ -35,6 +35,12 @@ export function LoginPage() {
     if (!yuanchatId.trim()) {
       setYuanchatIdError("请输入元聊号");
       valid = false;
+    } else {
+      const idResult = validateYuanchatId(yuanchatId);
+      if (!idResult.valid) {
+        setYuanchatIdError(idResult.errors[0]);
+        valid = false;
+      }
     }
     const pwResult = validatePassword(password);
     if (!pwResult.valid) {

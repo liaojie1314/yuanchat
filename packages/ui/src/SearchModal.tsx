@@ -112,7 +112,7 @@ export function SearchModal({ show, onClose }: Props) {
             <p className="px-4 py-3 text-sm text-gray-400">{t("search.empty")}</p>
           )}
 
-          {!loading && query.trim().length > 0 && query.trim().length < 3 && (
+          {!loading && query.trim().length < 3 && (
             <p className="px-4 py-3 text-sm text-gray-400">{t("search.hint")}</p>
           )}
 
