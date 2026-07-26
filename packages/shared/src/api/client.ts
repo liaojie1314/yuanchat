@@ -19,8 +19,8 @@ interface ImportMetaEnv {
 
 export const API_BASE: string =
   typeof import.meta !== "undefined"
-    ? (import.meta as { env?: ImportMetaEnv }).env?.VITE_API_BASE_URL || "http://localhost:8080"
-    : "http://localhost:8080";
+    ? (import.meta as { env?: ImportMetaEnv }).env?.VITE_API_BASE_URL || "http://localhost:8085"
+    : "http://localhost:8085";
 
 /** 业务错误：携带后端返回的 code 与 message */
 export class ApiError extends Error {

@@ -25,7 +25,7 @@ import (
 // @contact.name    YuanChat Dev Team
 // @contact.email   dev@yuanyuan.blog
 // @license.name    Proprietary
-// @host            localhost:8080
+// @host            localhost:8085
 // @BasePath        /api/v1
 // @schemes         http https
 

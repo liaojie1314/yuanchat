@@ -54,14 +54,14 @@ pnpm install                # 安装所有 workspace 依赖
 
 | 命令                    | 数据模式 | 自动完成的步骤                                                                                             |
 | ----------------------- | -------- | ---------------------------------------------------------------------------------------------------------- |
-| `pnpm dev:web`          | 真实后端 | docker(pg/redis, `--wait` 健康检查) → seed（幂等）→ Go 服务（REST :8080 + WS :8081，健康检查）→ Vite :5173 |
+| `pnpm dev:web`          | 真实后端 | docker(pg/redis, `--wait` 健康检查) → seed（幂等）→ Go 服务（REST :8085 + WS :8086，健康检查）→ Vite :5173 |
 | `pnpm dev:web:mock`     | Mock     | 仅 Vite :5173（MSW + demo 数据，无需后端/数据库）                                                          |
 | `pnpm dev:desktop`      | 真实后端 | 同 dev:web 的后端链 → `tauri dev`（桌面窗口，Vite :1420）                                                  |
 | `pnpm dev:desktop:mock` | Mock     | 仅 `tauri dev`                                                                                             |
-| `pnpm dev:android`      | 真实后端 | 后端链 → `adb reverse tcp:8080/8081`（设备直连宿主机后端）→ `tauri android dev`                            |
+| `pnpm dev:android`      | 真实后端 | 后端链 → `adb reverse tcp:8085/8086`（设备直连宿主机后端）→ `tauri android dev`                            |
 | `pnpm dev:android:mock` | Mock     | 仅 `tauri android dev`（需 ANDROID_HOME，见第三章）                                                        |
 | `pnpm dev:server`       | —        | 仅后端链（docker → seed → Go 服务），前端另起                                                              |
-| `pnpm dev:stop`         | —        | 停止 5173/1420/8080/8081 上的进程 + `docker compose stop`                                                  |
+| `pnpm dev:stop`         | —        | 停止 5173/1420/8085/8086 上的进程 + `docker compose stop`                                                  |
 
 行为约定：
 
@@ -94,7 +94,7 @@ pnpm install                # 安装所有 workspace 依赖
 | 命令               | `VITE_ENABLE_MOCK` | 行为                                                     |
 | ------------------ | ------------------ | -------------------------------------------------------- |
 | `dev` / `dev:mock` | 未设置（默认启用） | 浏览器 Service Worker 拦截 API，返回 mock 数据           |
-| `dev:real`         | `false`            | 所有请求直连 `http://localhost:8080`（需先启动 Go 后端） |
+| `dev:real`         | `false`            | 所有请求直连 `http://localhost:8085`（需先启动 Go 后端） |
 
 **切换方式**：
 
@@ -268,7 +268,7 @@ pnpm --filter @yuanchat/desktop tauri android build
 
 | 命令                                                             | 说明                                               |
 | ---------------------------------------------------------------- | -------------------------------------------------- |
-| `cd server && make dev`                                          | 启动服务（REST :8080 + WebSocket :8081，同一进程） |
+| `cd server && make dev`                                          | 启动服务（REST :8085 + WebSocket :8086，同一进程） |
 | `cd server && go run ./cmd/server`                               | 等价于 make dev                                    |
 | `cd server && go run ./cmd/seed`                                 | 灌入联调测试数据（幂等，可重复执行）               |
 | `cd server && make build`                                        | 编译为 `server/bin/yuanchat-server`                |
@@ -285,7 +285,7 @@ docker compose -f deploy/docker-compose.yml up -d
 # 2. 灌入测试数据（3 个用户 + 单聊 + 群聊 + 历史消息）
 cd server && go run ./cmd/seed
 
-# 3. 启动后端（REST :8080 + WS :8081）
+# 3. 启动后端（REST :8085 + WS :8086）
 go run ./cmd/server
 
 # 4. 另开终端，启动前端（真实模式，关闭 MSW）
@@ -492,7 +492,7 @@ npx tauri android build --aab --split-per-abi --target aarch64
 
 | 模式          | 配置文件                   | Mock | API 地址示例                   |
 | ------------- | -------------------------- | ---- | ------------------------------ |
-| `development` | `apps/*/\.env.development` | 开启 | `http://localhost:8080`        |
+| `development` | `apps/*/\.env.development` | 开启 | `http://localhost:8085`        |
 | `test`        | `apps/*/\.env.test`        | 关闭 | `http://test-api.yuanchat.com` |
 | `production`  | `apps/*/\.env.production`  | 关闭 | `https://api.yuanchat.com`     |
 
@@ -500,8 +500,8 @@ npx tauri android build --aab --split-per-abi --target aarch64
 
 | 变量                | 默认值                  | 说明                    |
 | ------------------- | ----------------------- | ----------------------- |
-| `VITE_API_BASE_URL` | `http://localhost:8080` | 后端 API 地址           |
-| `VITE_WS_URL`       | `ws://localhost:8081`   | WebSocket 地址          |
+| `VITE_API_BASE_URL` | `http://localhost:8085` | 后端 API 地址           |
+| `VITE_WS_URL`       | `ws://localhost:8086`   | WebSocket 地址          |
 | `VITE_ENABLE_MOCK`  | —                       | `false` 时关闭 MSW Mock |
 
 ---

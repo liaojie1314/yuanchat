@@ -4,13 +4,13 @@ server:
   name: yuanchat-server
   env: development          # development | staging | production
   host: 0.0.0.0
-  port: 8080
+  port: 8085
   read_timeout: 30s
   write_timeout: 30s
   shutdown_timeout: 10s
 
 websocket:
-  port: 8081
+  port: 8086
   read_timeout: 60s
   write_timeout: 10s
   ping_interval: 30s
@@ -88,3 +88,11 @@ minio:
   secret_key: yuanchat_minio_dev
   bucket: yuanchat
   use_ssl: false
+
+moderation:
+  # 敏感词命中时消息正常发送但标记 flagged=true，进入 admin 审核队列（不阻塞）
+  words:
+    - 赌博
+    - 诈骗
+    - 传销
+    - 暴恐

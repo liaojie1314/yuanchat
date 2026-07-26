@@ -19,6 +19,7 @@ type Config struct {
 	Asynq     AsynqConfig     `mapstructure:"asynq"`
 	Upload    UploadConfig    `mapstructure:"upload"`
 	MinIO     MinIOConfig     `mapstructure:"minio"`
+	Moderation ModerationConfig `mapstructure:"moderation"`
 }
 
 type ServerConfig struct {
@@ -100,6 +101,11 @@ type AsynqConfig struct {
 	RedisDB       int            `mapstructure:"redis_db"`
 	Concurrency   int            `mapstructure:"concurrency"`
 	Queues        map[string]int `mapstructure:"queues"`
+}
+
+// ModerationConfig 内容审核配置。
+type ModerationConfig struct {
+	Words []string `mapstructure:"words"` // 敏感词库；命中的消息标记 flagged 进审核队列
 }
 
 type UploadConfig struct {

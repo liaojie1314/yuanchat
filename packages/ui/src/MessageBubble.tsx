@@ -29,6 +29,7 @@ import {
   CheckCheck,
   Copy,
   Download,
+  Flag,
   Forward,
   Loader2,
   Pause,
@@ -82,6 +83,7 @@ export function MessageBubble({
   onForward,
   onImageClick,
   onFavorite,
+  onReport,
 }: {
   msg: ChatMessage;
   compact?: boolean;
@@ -93,6 +95,7 @@ export function MessageBubble({
   onForward?: () => void;
   onImageClick?: (url: string) => void;
   onFavorite?: () => void;
+  onReport?: () => void;
 }) {
   const { t } = useTranslation();
   // 气泡内联操作菜单（右键 / 长按弹出，点外部关闭）
@@ -197,6 +200,11 @@ export function MessageBubble({
   const handleFavorite = () => {
     setMenuOpen(false);
     onFavorite?.();
+  };
+
+  const handleReport = () => {
+    setMenuOpen(false);
+    onReport?.();
   };
 
   return (
@@ -427,6 +435,15 @@ export function MessageBubble({
                     className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
                   >
                     <Star size={15} /> {t("chat.message.favorite")}
+                  </button>
+                )}
+                {onReport && (
+                  <button
+                    role="menuitem"
+                    onClick={handleReport}
+                    className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
+                  >
+                    <Flag size={15} /> {t("chat.message.report")}
                   </button>
                 )}
                 {showRecall && (

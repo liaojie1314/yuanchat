@@ -98,8 +98,8 @@ interface ImportMetaEnv {
 
 const WS_BASE: string =
   typeof import.meta !== "undefined"
-    ? (import.meta as { env?: ImportMetaEnv }).env?.VITE_WS_URL || "ws://localhost:8081"
-    : "ws://localhost:8081";
+    ? (import.meta as { env?: ImportMetaEnv }).env?.VITE_WS_URL || "ws://localhost:8086"
+    : "ws://localhost:8086";
 
 const MAX_BACKOFF_MS = 30_000;
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button, Input } from "@yuanchat/ui";
-import { useAuthStore, useIsDesktop } from "@yuanchat/shared";
+import { useAuthStore, useIsDesktop, API_BASE } from "@yuanchat/shared";
 import { validatePassword, validatePhone, validateNickname } from "@yuanchat/shared/utils";
 import { useCloseAuthWindow } from "../hooks/useTauriAuth";
 import { useIsMobile } from "../hooks/useIsMobile";
@@ -44,7 +44,7 @@ export function RegisterPage() {
 
   const fetchCaptcha = async () => {
     try {
-      const res = await fetch("http://localhost:8080/api/v1/captcha");
+      const res = await fetch(`${API_BASE}/api/v1/captcha`);
       setCaptchaImg(await res.text());
       setCaptchaID(res.headers.get("X-Captcha-ID") || "");
     } catch {

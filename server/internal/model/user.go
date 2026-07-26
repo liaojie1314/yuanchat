@@ -20,6 +20,7 @@ type User struct {
 	Gender       int16          `gorm:"type:smallint;default:0" json:"gender"`
 	Birthday     *time.Time     `json:"birthday,omitempty"`
 	Status       int16          `gorm:"type:smallint;default:1" json:"status"`
+	Role         int16          `gorm:"type:smallint;default:0" json:"role"`
 	LastLoginAt  *time.Time     `json:"last_login_at,omitempty"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
@@ -43,4 +44,10 @@ const (
 	GenderUnknown int16 = 0
 	GenderMale    int16 = 1
 	GenderFemale  int16 = 2
+)
+
+// UserRole 用户角色枚举
+const (
+	RoleUser  int16 = 0
+	RoleAdmin int16 = 1
 )

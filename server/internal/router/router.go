@@ -68,6 +68,14 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	blocklistH := handler.NewBlocklistHandler(blocklistSvc, logger)
 	forwardH := handler.NewForwardHandler(msgSvc, hub, logger)
 
+	adminRepo := repository.NewAdminRepository(db)
+	adminSvc := service.NewAdminService(adminRepo, convRepo, logger)
+	adminH := handler.NewAdminHandler(adminSvc, hub, logger)
+	reportH := handler.NewReportHandler(adminSvc, logger)
+
+	// 敏感词审核：命中词库的文本消息标记 flagged 进审核队列
+	msgSvc.SetModeration(service.NewModerationService(cfg.Moderation.Words))
+
 	// 好友上下线广播：独立 goroutine 通知在线好友，不阻塞连接注册路径
 	hub.SetPresenceNotifier(func(userID uuid.UUID, online bool) {
 		go func() {
@@ -144,6 +152,24 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		chat.POST("/favorites", favH.Add)
 		chat.DELETE("/favorites/:messageId", favH.Remove)
 		chat.GET("/favorites", favH.List)
+
+		chat.POST("/reports", middleware.LimitByIP(10, 20), reportH.Create)
+	}
+
+	// 管理后台：JWT + role=admin 双重校验，所有写操作留审计日志
+	admin := api.Group("/admin", middleware.AuthRequired(cfg.JWT), middleware.RequireAdmin(db))
+	{
+		admin.GET("/users", adminH.ListUsers)
+		admin.POST("/users/:id/ban", adminH.BanUser)
+		admin.DELETE("/users/:id/ban", adminH.UnbanUser)
+		admin.GET("/conversations", adminH.ListConversations)
+		admin.POST("/conversations/:id/dissolve", adminH.DissolveConversation)
+		admin.GET("/messages", adminH.ListMessages)
+		admin.DELETE("/messages/:id", adminH.DeleteMessage)
+		admin.DELETE("/messages/:id/flag", adminH.ClearMessageFlag)
+		admin.GET("/reports", adminH.ListReports)
+		admin.POST("/reports/:id/handle", adminH.HandleReport)
+		admin.GET("/audit-logs", adminH.ListAuditLogs)
 	}
 
 	return r, wsH

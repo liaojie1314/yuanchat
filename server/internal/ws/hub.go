@@ -118,6 +118,26 @@ func (h *Hub) OnlineCount(userID uuid.UUID) int {
 	return len(h.clients[userID])
 }
 
+// DisconnectUser 强制断开某用户的全部在线连接（管理员封禁时踢线）。
+// 关闭底层 conn 触发 readPump 退出 → Unregister 自然摘除，无需在此改 map。
+func (h *Hub) DisconnectUser(userID uuid.UUID) int {
+	h.mu.RLock()
+	conns := make([]*Client, 0, len(h.clients[userID]))
+	for c := range h.clients[userID] {
+		conns = append(conns, c)
+	}
+	h.mu.RUnlock()
+
+	for _, c := range conns {
+		_ = c.conn.Close()
+	}
+	if len(conns) > 0 {
+		h.logger.Info("user force disconnected",
+			zap.String("user_id", userID.String()), zap.Int("connections", len(conns)))
+	}
+	return len(conns)
+}
+
 // OnlineFilter 过滤出给定用户中当前在线的子集（presence 快照用）。
 func (h *Hub) OnlineFilter(ids []uuid.UUID) []uuid.UUID {
 	h.mu.RLock()

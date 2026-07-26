@@ -5,7 +5,7 @@ import { useAuthStore } from "../store/authStore";
 
 // MSW Server — 在 Node 环境下拦截 fetch 请求
 const server = setupServer(
-  http.post("http://localhost:8080/api/v1/users/login", async ({ request }) => {
+  http.post("http://localhost:8085/api/v1/users/login", async ({ request }) => {
     const body = (await request.json()) as { account?: string; password?: string };
     if (body.password === "wrong") {
       return HttpResponse.json(
@@ -25,7 +25,7 @@ const server = setupServer(
     });
   }),
 
-  http.post("http://localhost:8080/api/v1/users/register", async ({ request }) => {
+  http.post("http://localhost:8085/api/v1/users/register", async ({ request }) => {
     const body = (await request.json()) as { phone?: string; password?: string; nickname?: string };
     if (!body.phone) {
       return HttpResponse.json(
@@ -45,11 +45,11 @@ const server = setupServer(
     });
   }),
 
-  http.post("http://localhost:8080/api/v1/auth/logout", () => {
+  http.post("http://localhost:8085/api/v1/auth/logout", () => {
     return HttpResponse.json({ code: 0, message: "ok", data: { message: "logged out" } });
   }),
 
-  http.put("http://localhost:8080/api/v1/users/me", async ({ request }) => {
+  http.put("http://localhost:8085/api/v1/users/me", async ({ request }) => {
     const patch = (await request.json()) as { nickname?: string };
     return HttpResponse.json({
       code: 0,

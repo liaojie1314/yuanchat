@@ -21,6 +21,7 @@ var (
 	ErrInvalidPassword = errors.New("invalid password")
 	ErrUserNotFound    = errors.New("user not found")
 	ErrInvalidRefresh  = errors.New("invalid or expired refresh token")
+	ErrUserBanned      = errors.New("user is banned")
 )
 
 // UserService handles user registration, login, and profile operations.
@@ -120,6 +121,11 @@ func (s *UserService) Login(ctx context.Context, req LoginRequest) (*AuthResult,
 	// Verify password
 	if !password.Verify(user.PasswordHash, req.Password) {
 		return nil, ErrInvalidPassword
+	}
+
+	// 封禁用户拒绝登录
+	if user.Status == model.UserStatusDisabled {
+		return nil, ErrUserBanned
 	}
 
 	s.logger.Info("User logged in", zap.String("user_id", user.ID.String()))

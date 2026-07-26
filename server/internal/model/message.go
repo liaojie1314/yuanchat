@@ -17,6 +17,7 @@ type Message struct {
 	MessageType    int16          `gorm:"type:smallint;not null" json:"message_type"`
 	Content        string         `gorm:"type:jsonb;not null" json:"content"` // JSONB 灵活存储
 	Status         int16          `gorm:"type:smallint;default:1" json:"status"`
+	Flagged        bool           `gorm:"not null;default:false" json:"flagged"` // 敏感词命中，进审核队列
 	ReplyToID      *uuid.UUID     `gorm:"type:uuid" json:"reply_to_id,omitempty"`
 	// Mentions 被 @ 的用户 UUID 列表（PostgreSQL uuid[]，为 nil 时不占列）。
 	// 群消息设置这里的成员会触发 conversation_members.mention_unread=true。

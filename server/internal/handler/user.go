@@ -76,6 +76,10 @@ func (h *UserHandler) Login(c *gin.Context) {
 			Unauthorized(c, "invalid account or password")
 			return
 		}
+		if errors.Is(err, service.ErrUserBanned) {
+			Error(c, http.StatusForbidden, 40301, "account banned")
+			return
+		}
 		h.logger.Error("login failed", zap.Error(err))
 		InternalError(c, "login failed")
 		return

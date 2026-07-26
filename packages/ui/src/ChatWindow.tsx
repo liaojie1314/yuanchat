@@ -33,6 +33,7 @@ import {
   formatDateDivider,
   recallMessage,
   RE_EDIT_WINDOW_MS,
+  reportMessage,
   showToast,
   toggleReaction,
   useConversationStore,
@@ -374,6 +375,16 @@ export function ChatWindow({
                               void addFavorite(msg.id)
                                 .then(() => showToast("info", t("favorites.added")))
                                 .catch(() => showToast("error", t("favorites.addFailed")));
+                            }
+                          : undefined
+                      }
+                      onReport={
+                        // 只能举报别人的已确认消息
+                        !msg.recalled && msg.kind !== "system" && !!msg.seq && !msg.isSelf
+                          ? () => {
+                              void reportMessage(msg.id)
+                                .then(() => showToast("info", t("report.submitted")))
+                                .catch(() => showToast("error", t("report.failed")));
                             }
                           : undefined
                       }

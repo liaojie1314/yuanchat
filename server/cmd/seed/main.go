@@ -32,12 +32,14 @@ import (
 type seedUser struct {
 	phone    string
 	nickname string
+	role     int16
 }
 
 var seedUsers = []seedUser{
-	{"13800000001", "Alice"},
-	{"13800000002", "Bob"},
-	{"13800000003", "Carol"},
+	{"13800000001", "Alice", model.RoleUser},
+	{"13800000002", "Bob", model.RoleUser},
+	{"13800000003", "Carol", model.RoleUser},
+	{"13800000009", "Admin", model.RoleAdmin},
 }
 
 const seedPassword = "Test@1234"
@@ -181,6 +183,7 @@ func ensureUsers(ctx context.Context, db *gorm.DB) ([]*model.User, error) {
 			ShortID:      sid,
 			Nickname:     su.nickname,
 			Status:       model.UserStatusNormal,
+			Role:         su.role,
 		}
 		if err := db.WithContext(ctx).Create(user).Error; err != nil {
 			return nil, err
