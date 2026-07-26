@@ -211,7 +211,7 @@ func TestBuildObjectKey(t *testing.T) {
 func testStorageForHandler(t *testing.T) *storage.Storage {
 	t.Helper()
 	minioCfg := config.MinIOConfig{
-		Endpoint:  "localhost:9000",
+		Endpoint:  "localhost:9002",
 		AccessKey: "yuanchat_minio",
 		SecretKey: "yuanchat_minio_dev",
 		Bucket:    "yuanchat",
@@ -228,7 +228,7 @@ func testStorageForHandler(t *testing.T) *storage.Storage {
 	if err != nil {
 		// :9000 有 MinIO 在跑但不是本项目的（如其他项目容器占用端口）：凭据/桶校验失败，
 		// 等价于「本项目 MinIO 不可用」，跳过而非失败
-		t.Skipf("minio on :9000 is not yuanchat's (credential/bucket mismatch), skip: %v", err)
+		t.Skipf("minio on :9002 is not yuanchat's (credential/bucket mismatch), skip: %v", err)
 	}
 	return st
 }
@@ -236,7 +236,7 @@ func testStorageForHandler(t *testing.T) *storage.Storage {
 // removeObject 用独立 minio 客户端清理测试对象（handler 包无法触及 storage 内部 client）。
 func removeObject(t *testing.T, key string) {
 	t.Helper()
-	client, err := minio.New("localhost:9000", &minio.Options{
+	client, err := minio.New("localhost:9002", &minio.Options{
 		Creds:  miniocreds.NewStaticV4("yuanchat_minio", "yuanchat_minio_dev", ""),
 		Secure: false,
 	})
@@ -325,7 +325,7 @@ func TestUploadURL_AvatarPublicURL(t *testing.T) {
 	if !ok || publicURL == "" {
 		t.Fatalf("avatar response missing public_url: %v", resp.Data)
 	}
-	want := fmt.Sprintf("http://localhost:9000/yuanchat/%s", objectKey)
+	want := fmt.Sprintf("http://localhost:9002/yuanchat/%s", objectKey)
 	if publicURL != want {
 		t.Fatalf("public_url = %q, want %q", publicURL, want)
 	}

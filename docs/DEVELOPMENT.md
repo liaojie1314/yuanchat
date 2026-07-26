@@ -279,7 +279,7 @@ pnpm --filter @yuanchat/desktop tauri android build
 > 一键完成下面全部步骤：`pnpm dev:web`（详见第零章）。以下为手动分步方式。
 
 ```bash
-# 1. 启动基础设施（PostgreSQL :5433 + Redis :6379）
+# 1. 启动基础设施（PostgreSQL :5434 + Redis :6380）
 docker compose -f deploy/docker-compose.yml up -d
 
 # 2. 灌入测试数据（3 个用户 + 单聊 + 群聊 + 历史消息）
@@ -316,7 +316,9 @@ docker compose -f deploy/docker-compose.yml ps        # 状态
 docker compose -f deploy/docker-compose.yml down      # 停止
 ```
 
-Compose 含三个服务：**PostgreSQL**（`:5433`→5432）、**Redis**（`:6379`）、**MinIO**（对象存储，图片/文件/头像）。
+Compose 含三个服务：**PostgreSQL**（`:5434`→5432）、**Redis**（`:6380`→6379）、**MinIO**（对象存储，图片/文件/头像）。
+
+> 宿主机端口整体避让本机 yuanai 项目占用的 5433/6379/9000/9001。
 
 ### MinIO（对象存储）
 
@@ -324,12 +326,12 @@ Compose 含三个服务：**PostgreSQL**（`:5433`→5432）、**Redis**（`:637
 
 | 端口    | 用途                                                            |
 | ------- | --------------------------------------------------------------- |
-| `:9000` | S3 API 端点（后端签发预签名 URL、前端直传/下载都走它）          |
-| `:9001` | Web 控制台（浏览器打开 `http://localhost:9001` 可视化管理对象） |
+| `:9002` | S3 API 端点（后端签发预签名 URL、前端直传/下载都走它）          |
+| `:9003` | Web 控制台（浏览器打开 `http://localhost:9003` 可视化管理对象） |
 
 - **控制台账号**（开发默认，见 `deploy/docker-compose.yml` 与 `server/config/config.yaml`）：
   用户名 `yuanchat_minio` / 密码 `yuanchat_minio_dev`，默认桶 `yuanchat`。
-- **健康检查**：`curl http://localhost:9000/minio/health/live` 返回 200 即就绪。
+- **健康检查**：`curl http://localhost:9002/minio/health/live` 返回 200 即就绪。
 - 后端首次连接时幂等创建 `yuanchat` 桶，并对 `avatars/` 前缀开放匿名公共读（头像用永久 public URL，
   免签名）；图片消息落 `images/` 前缀，文件/语音消息落 `files/` 前缀，均走一次性预签名 GET
   （详见 `docs/02_CHAT_API.md` 的 files 端点）。
@@ -337,10 +339,10 @@ Compose 含三个服务：**PostgreSQL**（`:5433`→5432）、**Redis**（`:637
   （jpeg/png/gif/webp）+ 文档（pdf/doc/docx/xlsx/pptx/txt/zip）+ 语音 `audio/webm`。
   新增可传类型时在此追加，重启后端生效；白名单外的 MIME 在 `upload-url` 阶段被 `4001` 拒绝。
 
-> **真机联调注意**：MinIO 预签名 URL 里的 host 来自 `minio.endpoint`（默认 `localhost:9000`）。
+> **真机联调注意**：MinIO 预签名 URL 里的 host 来自 `minio.endpoint`（默认 `localhost:9002`）。
 > 手机/平板真机访问宿主机的 `localhost` 会指向设备自身而非开发机，导致图片上传/下载失败。
 > 真机联调时须把 `server/config/config.yaml` 的 `minio.endpoint` 改为开发机的**局域网 IP**
-> （如 `192.168.1.100:9000`），并确保防火墙放行 9000 端口；后端据此签名，真机才能直连对象存储。
+> （如 `192.168.1.100:9002`），并确保防火墙放行 9002 端口；后端据此签名，真机才能直连对象存储。
 
 ---
 
@@ -474,13 +476,13 @@ npx tauri android build --aab --split-per-abi --target aarch64
 | ------------------ | -------------------- | ---------------------------------------------- |
 | `SERVER_ENV`       | `development`        | 运行环境                                       |
 | `DB_HOST`          | `localhost`          | PostgreSQL 主机                                |
-| `DB_PORT`          | `5432`               | PostgreSQL 端口                                |
+| `DB_PORT`          | `5434`               | PostgreSQL 端口（compose 宿主机映射）          |
 | `DB_USER`          | `yuanchat`           | 数据库用户                                     |
 | `DB_PASSWORD`      | —                    | 数据库密码                                     |
 | `DB_NAME`          | `yuanchat`           | 数据库名                                       |
-| `REDIS_ADDR`       | `localhost:6379`     | Redis 地址                                     |
+| `REDIS_ADDR`       | `localhost:6380`     | Redis 地址                                     |
 | `JWT_SECRET`       | —                    | JWT 签名密钥                                   |
-| `MINIO_ENDPOINT`   | `localhost:9000`     | MinIO S3 端点（真机联调改局域网 IP，见第五章） |
+| `MINIO_ENDPOINT`   | `localhost:9002`     | MinIO S3 端点（真机联调改局域网 IP，见第五章） |
 | `MINIO_ACCESS_KEY` | `yuanchat_minio`     | MinIO 访问密钥（对应控制台用户名）             |
 | `MINIO_SECRET_KEY` | `yuanchat_minio_dev` | MinIO 私有密钥（对应控制台密码）               |
 

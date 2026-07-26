@@ -20,7 +20,7 @@ websocket:
 
 database:
   host: localhost
-  port: 5433
+  port: 5434
   user: yuanchat
   password: yuanchat_dev
   dbname: yuanchat
@@ -32,7 +32,7 @@ database:
 
 redis:
   host: localhost
-  port: 6379
+  port: 6380
   password: ""
   db: 0
   pool_size: 100
@@ -57,7 +57,7 @@ log:
   compress: true
 
 asynq:
-  redis_addr: localhost:6379
+  redis_addr: localhost:6380
   redis_password: ""
   redis_db: 1
   concurrency: 10
@@ -83,7 +83,7 @@ upload:
     - application/vnd.openxmlformats-officedocument.presentationml.presentation
 
 minio:
-  endpoint: localhost:9000
+  endpoint: localhost:9002
   access_key: yuanchat_minio
   secret_key: yuanchat_minio_dev
   bucket: yuanchat
