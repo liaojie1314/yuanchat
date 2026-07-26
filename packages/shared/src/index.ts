@@ -17,6 +17,7 @@ export * from "./api/presence";
 export * from "./api/search";
 export * from "./api/favorites";
 export * from "./api/reports";
+export * from "./push/webPush";
 export { setNotifier, notifyIncoming, __resetNotifier } from "./notify";
 export {
   setRefreshHandler,

@@ -12,7 +12,7 @@
  *
  * 语言/主题切换即时生效；移动端退出登录点击弹行内确认态（不做全局 Dialog）。
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ChevronRight, LogOut, ShieldCheck, Palette, Info, User, ArrowLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuthStore, useThemeStore, useBreakpoint } from "@yuanchat/shared";
@@ -48,7 +48,7 @@ const NAV_GROUPS: {
   { view: "about", icon: Info, labelKey: "settings.about", descKey: "settings.aboutDesc" },
 ];
 
-export function SettingsScreen() {
+export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) {
   const { t } = useTranslation();
   const bp = useBreakpoint();
   const user = useAuthStore((s) => s.user);
@@ -92,7 +92,7 @@ export function SettingsScreen() {
       case "about":
         return (
           <MobileHeader show={isMobile} title={t("settings.about")} onBack={onBack}>
-            <AboutSection />
+            <AboutSection extra={aboutExtra} />
           </MobileHeader>
         );
       default:

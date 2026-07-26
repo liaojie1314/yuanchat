@@ -1,0 +1,16 @@
+# Prometheus 生产抓取配置：容器内部服务名寻址
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: yuanchat-server
+    static_configs:
+      - targets: ["yuanchat-server:9090"]
+        labels:
+          app: yuanchat
+          env: production
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

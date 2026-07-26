@@ -85,6 +85,7 @@ export interface ServerFrames {
   };
   "friend.removed": { friend_id: string };
   presence: { user_id: string; online: boolean };
+  pong: Record<string, never>;
   error: { code: number; message: string; client_msg_id?: string };
 }
 
@@ -103,6 +104,23 @@ const WS_BASE: string =
 
 const MAX_BACKOFF_MS = 30_000;
 
+// ---- 应用层心跳（半开连接探测）----
+// 浏览器对 WS 协议层 ping/pong 自动响应且 JS 不可见，无法探测
+// NAT 超时/网络切换造成的半开连接。客户端周期发 "ping" 帧，
+// PONG_TIMEOUT_MS 内无 "pong" 即判定链路死亡，主动断开走重连。
+// 间隔按可见性 + 电量自适应，后台/低电时省电（服务端 pong_timeout 已放宽兼容）。
+const HEARTBEAT_FG_MS = 30_000; // 前台
+const HEARTBEAT_FG_LOW_BATTERY_MS = 60_000; // 前台 + 电量 ≤20%
+const HEARTBEAT_BG_MS = 120_000; // 后台
+const HEARTBEAT_BG_LOW_BATTERY_MS = 300_000; // 后台 + 电量 ≤20%
+const PONG_TIMEOUT_MS = 10_000;
+const LOW_BATTERY_LEVEL = 0.2;
+
+interface BatteryLike {
+  level: number;
+  addEventListener?: (type: string, fn: () => void) => void;
+}
+
 type SocketState = "idle" | "connecting" | "open" | "closed";
 
 class ChatSocket {
@@ -116,6 +134,85 @@ class ChatSocket {
   private lastErrorReport = 0;
   /** 重连成功后的回调（bootstrap 用来拉增量数据） */
   onReconnect: (() => void) | null = null;
+
+  // ---- 心跳状态 ----
+  private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+  private pongTimer: ReturnType<typeof setTimeout> | null = null;
+  private battery: BatteryLike | null = null;
+  private envListenersBound = false;
+
+  /** 按可见性 + 电量决定当前心跳间隔 */
+  heartbeatInterval(): number {
+    const hidden = typeof document !== "undefined" && document.visibilityState === "hidden";
+    const lowBattery = this.battery !== null && this.battery.level <= LOW_BATTERY_LEVEL;
+    if (hidden) return lowBattery ? HEARTBEAT_BG_LOW_BATTERY_MS : HEARTBEAT_BG_MS;
+    return lowBattery ? HEARTBEAT_FG_LOW_BATTERY_MS : HEARTBEAT_FG_MS;
+  }
+
+  /** 绑定环境信号（可见性/电量/网络恢复），只绑一次 */
+  private bindEnvListeners() {
+    if (this.envListenersBound) return;
+    this.envListenersBound = true;
+
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", () => {
+        // 状态切换按新间隔重排下一次心跳；回前台立即探测一次链路
+        if (this.state === "open") {
+          this.scheduleHeartbeat(
+            document.visibilityState === "visible" ? 0 : this.heartbeatInterval(),
+          );
+        }
+      });
+    }
+    if (typeof window !== "undefined") {
+      // 网络恢复：跳过退避立即重连
+      window.addEventListener("online", () => {
+        if (this.state === "closed" || this.state === "idle") {
+          if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+          }
+          this.connect();
+        }
+      });
+    }
+    // Battery Status API：Chrome 支持；Safari/Firefox 无则永远走"电量充足"分支
+    const nav = typeof navigator !== "undefined" ? navigator : undefined;
+    const getBattery = nav && (nav as { getBattery?: () => Promise<BatteryLike> }).getBattery;
+    if (getBattery) {
+      void getBattery.call(nav).then((b) => {
+        this.battery = b;
+        b.addEventListener?.("levelchange", () => {
+          if (this.state === "open") this.scheduleHeartbeat(this.heartbeatInterval());
+        });
+      });
+    }
+  }
+
+  private scheduleHeartbeat(delay: number) {
+    if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
+    this.heartbeatTimer = setTimeout(() => {
+      this.heartbeatTimer = null;
+      if (this.state !== "open" || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+      this.ws.send(JSON.stringify({ type: "ping", payload: {} }));
+      // pong 超时未归 → 半开连接，关闭触发重连
+      this.pongTimer = setTimeout(() => {
+        this.pongTimer = null;
+        if (this.ws) this.ws.close();
+      }, PONG_TIMEOUT_MS);
+    }, delay);
+  }
+
+  private stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearTimeout(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    if (this.pongTimer) {
+      clearTimeout(this.pongTimer);
+      this.pongTimer = null;
+    }
+  }
 
   /** 注册 token 读取函数（bootstrap 时由 authStore 提供） */
   setTokenProvider(provider: () => string | null) {
@@ -176,6 +273,8 @@ class ChatSocket {
       this.state = "open";
       this.retries = 0;
       this.flushQueue();
+      this.bindEnvListeners();
+      this.scheduleHeartbeat(this.heartbeatInterval());
       if (isRetry && this.onReconnect) this.onReconnect();
     };
 
@@ -186,6 +285,7 @@ class ChatSocket {
     ws.onclose = (event?: { code?: number }) => {
       if (this.ws !== ws) return;
       this.ws = null;
+      this.stopHeartbeat();
       if (this.state === "closed") return; // 主动断开，不重连
       this.state = "closed";
       const code = event && event.code;
@@ -215,6 +315,7 @@ class ChatSocket {
   disconnect() {
     this.state = "closed";
     this.retries = 0;
+    this.stopHeartbeat();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -261,6 +362,14 @@ class ChatSocket {
       return;
     }
     if (!env.type) return;
+    // pong：链路活性确认 → 取消超时判决，排下一轮心跳
+    if (env.type === "pong") {
+      if (this.pongTimer) {
+        clearTimeout(this.pongTimer);
+        this.pongTimer = null;
+      }
+      this.scheduleHeartbeat(this.heartbeatInterval());
+    }
     const handler = this.handlers[env.type as keyof ServerFrames] as
       | ((payload: unknown) => void)
       | undefined;

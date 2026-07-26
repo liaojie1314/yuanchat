@@ -7,7 +7,7 @@
  * - AppearanceSection：主题双卡片可视化选择 + 语言分段控件（Segmented）
  * - AboutSection：品牌 hero + 版本 + 内部链接（相关信息列表）
  */
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   BadgeCheck,
   Check,
@@ -275,7 +275,7 @@ export function AppearanceSection() {
 }
 
 /** 关于：品牌 hero + 版本 + 开发者/开源链接 */
-export function AboutSection() {
+export function AboutSection({ extra }: { extra?: ReactNode } = {}) {
   const { t } = useTranslation();
   return (
     <div>
@@ -294,6 +294,9 @@ export function AboutSection() {
           {t("settings.brandTagline")}
         </p>
       </div>
+
+      {/* 平台特有区块（桌面端注入「检查更新」，web/admin 无） */}
+      {extra}
 
       {/* 链接卡片 */}
       <InfoCard>

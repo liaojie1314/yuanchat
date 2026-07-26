@@ -1,0 +1,98 @@
+# 前置 nginx：TLS 终止 + 四域名反向代理
+#
+# 由 install.sh 用 envsubst 把 ${DOMAIN_*} 替换后生成 nginx.conf。
+# 首次签发证书前 certbot 需要 HTTP-01 challenge，故 80 端口先放行
+# /.well-known/acme-challenge/ 再整体跳转 HTTPS。
+
+upstream yuanchat_api  { server yuanchat-server:8085; }
+upstream yuanchat_ws   { server yuanchat-server:8086; }
+upstream yuanchat_app  { server yuanchat-web:80; }
+upstream yuanchat_adm  { server yuanchat-admin:80; }
+
+# ---------- HTTP：ACME 校验 + 全站跳 HTTPS ----------
+server {
+    listen 80;
+    server_name ${DOMAIN_APP} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ---------- app：Web 端 ----------
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN_APP};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN_APP}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_APP}/privkey.pem;
+    include /etc/nginx/ssl-params.conf;
+
+    location / {
+        proxy_pass http://yuanchat_app;
+        include /etc/nginx/proxy-params.conf;
+    }
+}
+
+# ---------- api：REST ----------
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN_API};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN_API}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_API}/privkey.pem;
+    include /etc/nginx/ssl-params.conf;
+
+    # 文件上传走预签名直传 MinIO，此处只需容纳普通 JSON 请求
+    client_max_body_size 2m;
+
+    location / {
+        proxy_pass http://yuanchat_api;
+        include /etc/nginx/proxy-params.conf;
+    }
+}
+
+# ---------- ws：WebSocket ----------
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN_WS};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN_WS}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_WS}/privkey.pem;
+    include /etc/nginx/ssl-params.conf;
+
+    location / {
+        proxy_pass http://yuanchat_ws;
+        include /etc/nginx/proxy-params.conf;
+
+        # WebSocket 升级
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        # 客户端心跳最长 300s（后台低电档），读超时须大于它否则误断
+        proxy_read_timeout 660s;
+        proxy_send_timeout 660s;
+    }
+}
+
+# ---------- admin：管理后台 ----------
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN_ADMIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN_ADMIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_ADMIN}/privkey.pem;
+    include /etc/nginx/ssl-params.conf;
+
+    location / {
+        proxy_pass http://yuanchat_adm;
+        include /etc/nginx/proxy-params.conf;
+    }
+}

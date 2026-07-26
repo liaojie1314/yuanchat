@@ -14,7 +14,9 @@ websocket:
   read_timeout: 60s
   write_timeout: 10s
   ping_interval: 30s
-  pong_timeout: 90s
+  # 客户端心跳自适应（前台 30s ～ 后台低电 300s），且移动端后台进程可能被
+  # 系统短暂冻结（协议层 pong 也停发）。取最长心跳 ×2 + 余量，避免误踢
+  pong_timeout: 630s
   max_message_size: 65536   # 64KB
   max_connections_per_user: 5
 
@@ -96,3 +98,16 @@ moderation:
     - 诈骗
     - 传销
     - 暴恐
+
+presence:
+  # local = 单实例进程内（默认）；redis = 多实例 Redis Pub/Sub 广播
+  backend: local
+  channel: presence:events
+
+push:
+  # Web Push（VAPID）。留空则推送关闭（仅 WS 实时投递）。
+  # 生成：go run ./cmd/genvapid  或  npx web-push generate-vapid-keys
+  vapid_public_key: ""
+  vapid_private_key: ""
+  subject: "mailto:admin@yuanchat.example.com"
+  ttl: 86400

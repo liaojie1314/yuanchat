@@ -22,6 +22,7 @@ const (
 	TypeMessageSend = "message.send"
 	TypeMessageRead = "message.read"
 	TypeTyping      = "typing"
+	TypePing        = "ping" // 应用层心跳（客户端探测半开连接；间隔由客户端自适应）
 )
 
 // 服务端 → 客户端 帧类型
@@ -39,6 +40,7 @@ const (
 	TypePresence            = "presence"
 	TypeFriendRemoved       = "friend.removed"
 	TypeRoleChanged         = "conversation.role_changed"
+	TypePong                = "pong" // 应用层心跳响应
 )
 
 // FriendRemovedPayload 好友关系解除推送（删好友双向下发）。

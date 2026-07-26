@@ -74,7 +74,12 @@ async function doFetch<T>(path: string, init: RequestInit, token: string | null)
   return json.data;
 }
 
-async function request<T>(path: string, init: RequestInit): Promise<T> {
+/**
+ * 底层请求（带 token 刷新与 401 重试）。
+ * 导出供需要非常规组合的调用方使用，例如 DELETE 带 body
+ * （apiDelete 不支持 body）；常规场景请优先用 apiGet/apiPost 等。
+ */
+export async function request<T>(path: string, init: RequestInit): Promise<T> {
   // 登录/刷新等无 token 请求直接发出；刷新端点不做前置刷新（防递归）
   let token = tokenProvider();
   if (token && path !== REFRESH_PATH) {

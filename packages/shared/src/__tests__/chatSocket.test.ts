@@ -176,4 +176,86 @@ describe("chatSocket", () => {
     vi.advanceTimersByTime(60_000);
     expect(MockWebSocket.instances).toHaveLength(1);
   });
+
+  describe("adaptive heartbeat", () => {
+    const pings = (ws: MockWebSocket) =>
+      ws.sent.filter((f) => (JSON.parse(f) as { type: string }).type === "ping");
+
+    it("sends a ping after the foreground interval and reschedules on pong", () => {
+      chatSocket.connect();
+      latest().simulateOpen();
+      const ws = latest();
+
+      // 前台间隔 30s：29.999s 无 ping，30s 发出
+      vi.advanceTimersByTime(29_999);
+      expect(pings(ws)).toHaveLength(0);
+      vi.advanceTimersByTime(1);
+      expect(pings(ws)).toHaveLength(1);
+
+      // pong 归来 → 重排下一轮
+      ws.simulateMessage({ type: "pong", payload: {} });
+      vi.advanceTimersByTime(30_000);
+      expect(pings(ws)).toHaveLength(2);
+    });
+
+    it("closes the socket when pong does not arrive (half-open detection)", () => {
+      chatSocket.connect();
+      latest().simulateOpen();
+      const ws = latest();
+
+      vi.advanceTimersByTime(30_000); // ping 发出
+      expect(pings(ws)).toHaveLength(1);
+
+      // 10s 内无 pong → 主动 close → 触发退避重连
+      vi.advanceTimersByTime(10_000);
+      expect(ws.readyState).toBe(MockWebSocket.CLOSED);
+      // 1s 退避后新连接建立
+      vi.advanceTimersByTime(1_000);
+      expect(MockWebSocket.instances).toHaveLength(2);
+    });
+
+    it("stops heartbeat after explicit disconnect", () => {
+      chatSocket.connect();
+      latest().simulateOpen();
+      const ws = latest();
+      chatSocket.disconnect();
+
+      vi.advanceTimersByTime(120_000);
+      expect(pings(ws)).toHaveLength(0);
+    });
+
+    it("uses low-battery interval when battery level is low", () => {
+      // 直接注入 battery 状态（getBattery 在测试环境不可用）
+      (chatSocket as unknown as { battery: { level: number } }).battery = { level: 0.1 };
+      expect(chatSocket.heartbeatInterval()).toBe(60_000); // 前台 + 低电
+
+      (chatSocket as unknown as { battery: { level: number } }).battery = { level: 0.9 };
+      expect(chatSocket.heartbeatInterval()).toBe(30_000); // 前台 + 电量充足
+
+      (chatSocket as unknown as { battery: null }).battery = null;
+    });
+  });
+
+  describe("network online event", () => {
+    it("reconnects immediately on 'online', skipping backoff", () => {
+      // node 测试环境无 window：stub 最小事件目标，接住 chatSocket 绑定的 online 监听
+      const listeners: Record<string, Array<() => void>> = {};
+      vi.stubGlobal("window", {
+        addEventListener: (type: string, fn: () => void) => {
+          (listeners[type] ??= []).push(fn);
+        },
+      });
+      // 绕过 envListenersBound（先前用例的 simulateOpen 可能已绑过真实分支）
+      (chatSocket as unknown as { envListenersBound: boolean }).envListenersBound = false;
+
+      chatSocket.connect();
+      latest().simulateOpen(); // onopen 里绑定 env listeners
+      latest().simulateDrop();
+      expect(MockWebSocket.instances).toHaveLength(1);
+
+      // 掉线后立刻触发 online：不等 1s 退避
+      for (const fn of listeners["online"] ?? []) fn();
+      expect(MockWebSocket.instances).toHaveLength(2);
+    });
+  });
 });

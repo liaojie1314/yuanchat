@@ -15,7 +15,7 @@
  * @param image - 图片载荷（width/height 像素尺寸、可选 key / localUrl）
  * @param onOpen - 点击图片打开大图查看器的回调，参数为当前展示 URL
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImageIcon, ImageOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getDownloadUrl } from "@yuanchat/shared";
@@ -25,6 +25,8 @@ import { cn } from "@yuanchat/shared/utils";
 const MAX_DISPLAY_EDGE = 280;
 /** 尺寸缺失时的占位框（历史图正常都带宽高，仅极端兜底） */
 const FALLBACK_BOX = { width: 200, height: 150 };
+/** 懒加载预取缓冲：进入视口前此距离即开始 presign，滚动到时图基本就绪 */
+const LAZY_ROOT_MARGIN = "300px";
 
 /** 原始像素尺寸 → 展示盒尺寸：等比缩进 MAX_DISPLAY_EDGE 方框内，小图保持原尺寸 */
 function displayBox(w: number, h: number): { width: number; height: number } {
@@ -58,9 +60,37 @@ export function MessageImage({
   const [displayUrl, setDisplayUrl] = useState<string | undefined>(localUrl);
   const [state, setState] = useState<LoadState>(localUrl ? "loaded" : "loading");
 
+  // 懒加载：进入视口（含 300px 预取缓冲）才发起 presign，
+  // 大量历史图片会话不再批量签名。localUrl（乐观发送）无需等待。
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(
+    () => !!localUrl || typeof IntersectionObserver === "undefined",
+  );
+
   useEffect(() => {
-    // 有本地预览或无 key（异常）时不发下载请求；localUrl 清除后此 effect 重跑发起签名
-    if (localUrl || !key) return;
+    if (visible) return;
+    const el = boxRef.current;
+    if (!el) {
+      setVisible(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: LAZY_ROOT_MARGIN },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visible]);
+
+  useEffect(() => {
+    // 未进视口 / 有本地预览 / 无 key（异常）时不发下载请求；
+    // localUrl 清除后此 effect 重跑发起签名
+    if (!visible || localUrl || !key) return;
     let alive = true;
     getDownloadUrl(key)
       .then((url) => {
@@ -72,7 +102,7 @@ export function MessageImage({
     return () => {
       alive = false;
     };
-  }, [key, localUrl, reloadTick]);
+  }, [visible, key, localUrl, reloadTick]);
 
   useEffect(() => {
     // 预签名 URL 就绪：无旧图时直接提交（初次加载走骨架）；有旧图则预解码后再切，杜绝闪烁
@@ -117,7 +147,11 @@ export function MessageImage({
   }
 
   return (
-    <div style={box} className="bg-surface-container-high relative overflow-hidden rounded-xl">
+    <div
+      ref={boxRef}
+      style={box}
+      className="bg-surface-container-high relative overflow-hidden rounded-xl"
+    >
       {/* 加载占位骨架：与图同尺寸，防加载完成时的布局跳动 */}
       {state === "loading" && (
         <div

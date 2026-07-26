@@ -1,0 +1,26 @@
+# Promtail 采集配置：读 yuanchat 后端 JSON 日志推给 Loki
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: yuanchat-server
+    static_configs:
+      - targets: [localhost]
+        labels:
+          app: yuanchat
+          job: server
+          __path__: /var/log/yuanchat/*.log
+    pipeline_stages:
+      # 后端 zap JSON：提取 level 作为 label（低基数），其余字段留正文查询
+      - json:
+          expressions:
+            level: level
+      - labels:
+          level:

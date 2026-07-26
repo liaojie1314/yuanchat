@@ -141,7 +141,10 @@ jobs:
             echo "sign_tauri=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build Tauri app (unsigned)
+      # updater 签名（minisign 自签，免费）与 OS 代码签名（需付费证书）相互独立：
+      # 没有 Apple 证书时也必须注入 TAURI_SIGNING_PRIVATE_KEY，否则产不出
+      # latest.json 的签名，自动更新会校验失败
+      - name: Build Tauri app (OS-unsigned)
         if: steps.signing.outputs.sign_macos == 'false'
         uses: tauri-apps/tauri-action@v0
         env:
@@ -149,6 +152,8 @@ jobs:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
           SENTRY_PROJECT_DESKTOP: ${{ secrets.SENTRY_PROJECT_DESKTOP }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
@@ -157,7 +162,7 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
-      - name: Build Tauri app (signed)
+      - name: Build Tauri app (OS-signed)
         if: steps.signing.outputs.sign_macos == 'true'
         uses: tauri-apps/tauri-action@v0
         env:
