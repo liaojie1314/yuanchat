@@ -125,6 +125,40 @@ describe("formatDateDivider", () => {
     expect(formatDateDivider(key(y))).toBe("昨天");
     expect(formatDateDivider("2020-03-05")).toBe("2020/3/5");
   });
+
+  it("ja-JP 今日/昨日", async () => {
+    const { default: i18n } = await import("@yuanchat/design-system/i18n");
+    await i18n.changeLanguage("ja-JP");
+
+    const today = new Date();
+    expect(formatDateDivider(key(today))).toBe("今日");
+    const y = new Date(today.getTime() - 86400000);
+    expect(formatDateDivider(key(y))).toBe("昨日");
+
+    await i18n.changeLanguage("zh-CN");
+  });
+
+  it("ko-KR 오늘/어제", async () => {
+    const { default: i18n } = await import("@yuanchat/design-system/i18n");
+    await i18n.changeLanguage("ko-KR");
+
+    const today = new Date();
+    expect(formatDateDivider(key(today))).toBe("오늘");
+    const y = new Date(today.getTime() - 86400000);
+    expect(formatDateDivider(key(y))).toBe("어제");
+
+    await i18n.changeLanguage("zh-CN");
+  });
+
+  it("Intl.DateTimeFormat 在 ja/ko 输出正确", () => {
+    const d = new Date(2026, 2, 5);
+    expect(new Intl.DateTimeFormat("ja-JP", { month: "long", day: "numeric" }).format(d)).toBe(
+      "3月5日",
+    );
+    expect(new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric" }).format(d)).toBe(
+      "3월 5일",
+    );
+  });
 });
 
 describe("mapConversation", () => {
