@@ -14,6 +14,9 @@
 > - **未完成 2 项**：D2 iOS（需 macOS + Apple Developer 账户）、
 >   D1 的 OS 层付费签名（Apple 公证 / Windows SmartScreen，证书就绪后填
 >   secrets 即生效，workflow 门控已就绪）
+>
+> **下一阶段（2026-07-31 立项）**：通话 / 朋友圈 / 表情服务 / 聊天设置补全，
+> 见 [v0.4-v0.5 social & calls outline](superpowers/plans/2026-07-31-v0.4-v0.5-social-and-calls.md)。
 
 ## 里程碑总览
 
