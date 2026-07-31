@@ -209,7 +209,40 @@ minisign 公钥校验，签名不匹配则拒绝安装（防篡改）；下载�
 1. `.pfx` 证书 → `base64 -w0 cert.pfx` → `WINDOWS_CERTIFICATE`
 2. 证书密码 → `WINDOWS_CERTIFICATE_PASSWORD`
 
-## 五、故障排查
+## 五、手动补跑（某平台失败时）
+
+Actions 页面 → Release workflow → Run workflow：
+
+| 输入   | 说明                                                                       |
+| ------ | -------------------------------------------------------------------------- |
+| `tag`  | 必填。产物上传到该 tag 对应的 Release（如 `v0.3.0`）                       |
+| `ref`  | 选填。构建代码用的分支/commit，留空用 tag 本身的代码（改了 CI 脚本时有用） |
+| `only` | 选填。`all`/`web`/`desktop`/`android`，只补跑失败的平台，避免全量重建      |
+
+> 例：Android 打包失败修复后，`tag=v0.3.0` + `only=android` 即可只重跑 APK，
+> 桌面端/Web 已上传的产物不受影响。
+
+## 六、故障排查
+
+### 发版前本地预检（强烈建议）
+
+CI 每轮排队+构建要 20-30 分钟，能本地复现的问题先在本地跑一遍再推 tag：
+
+```bash
+pnpm --filter @yuanchat/web build                    # web 产物
+pnpm --filter @yuanchat/web exec tsc --noEmit        # 各 app 独立 typecheck（防幽灵依赖）
+pnpm --filter @yuanchat/desktop exec tsc --noEmit
+cd apps/desktop && pnpm tauri build                  # 桌面端（本机平台）
+cd apps/desktop && pnpm tauri android build --apk --target aarch64   # Android（需 NDK）
+```
+
+### Android 打包报 `Permission xxx not found`
+
+capabilities 里引用了移动端不存在的插件权限（如 `updater:default`、`process:default`
+—— updater/process 在 `Cargo.toml` 中被 `cfg(not(android/ios))` 门控，Android 编译时
+插件不存在，权限表里自然没有）。桌面专属权限必须放在带
+`"platforms": ["macOS", "windows", "linux"]` 的独立 capability 文件
+（`capabilities/desktop.json`），不能放平台无关的 `default.json`。
 
 ### Actions 里 Android 打包失败
 

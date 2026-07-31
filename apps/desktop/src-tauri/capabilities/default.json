@@ -29,8 +29,6 @@
     "dialog:default",
     "fs:default",
     "notification:default",
-    "shell:default",
-    "updater:default",
-    "process:default"
+    "shell:default"
   ]
 }

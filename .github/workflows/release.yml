@@ -8,9 +8,23 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "已存在的 tag（如 v0.1.0）"
+        description: "已存在的 tag（如 v0.1.0），产物上传到该 tag 的 Release"
         required: true
         type: string
+      ref:
+        description: "构建代码用的 ref（分支/commit），留空则用 tag 本身的代码"
+        required: false
+        type: string
+      only:
+        description: "只跑指定 job（某平台失败后单独补跑，避免全量重建）"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - web
+          - desktop
+          - android
 
 # tag 触发工作流写权限用于上传附件到 Release
 permissions:
@@ -20,11 +34,12 @@ jobs:
   # ============ Web 静态产物 ============
   web:
     name: Build Web
+    if: github.event_name == 'push' || github.event.inputs.only == 'all' || github.event.inputs.only == 'web'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref_name }}
+          ref: ${{ github.event.inputs.ref || github.event.inputs.tag || github.ref_name }}
       - uses: pnpm/action-setup@v4
         with:
           version: 10.22.0
@@ -85,6 +100,7 @@ jobs:
   # ============ Desktop（Tauri 三平台） ============
   desktop:
     name: Build Desktop (${{ matrix.platform }})
+    if: github.event_name == 'push' || github.event.inputs.only == 'all' || github.event.inputs.only == 'desktop'
     strategy:
       fail-fast: false
       matrix:
@@ -102,7 +118,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref_name }}
+          ref: ${{ github.event.inputs.ref || github.event.inputs.tag || github.ref_name }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -169,8 +185,10 @@ jobs:
 
       # updater 签名（minisign 自签，免费）与 OS 代码签名（需付费证书）相互独立：
       # 没有 Apple 证书时也必须注入 TAURI_SIGNING_PRIVATE_KEY，否则产不出
-      # latest.json 的签名，自动更新会校验失败
-      - name: Build Tauri app (OS-unsigned)
+      # latest.json 的签名，自动更新会校验失败。
+      # 下面两步二选一执行：无 Apple 证书走第一步（updater 照样签名），
+      # 配了 APPLE_CERTIFICATE 后自动切换到第二步（额外做 OS codesign + 公证）
+      - name: Build Tauri app (updater-signed, no Apple cert)
         if: steps.signing.outputs.sign_macos == 'false'
         uses: tauri-apps/tauri-action@v0
         env:
@@ -188,7 +206,7 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
-      - name: Build Tauri app (OS-signed)
+      - name: Build Tauri app (Apple codesign + notarize)
         if: steps.signing.outputs.sign_macos == 'true'
         uses: tauri-apps/tauri-action@v0
         env:
@@ -215,11 +233,12 @@ jobs:
   # ============ Android APK（自签 keystore） ============
   android:
     name: Build Android APK
+    if: github.event_name == 'push' || github.event.inputs.only == 'all' || github.event.inputs.only == 'android'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref_name }}
+          ref: ${{ github.event.inputs.ref || github.event.inputs.tag || github.ref_name }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
