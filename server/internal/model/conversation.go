@@ -41,6 +41,8 @@ type ConversationMember struct {
 	JoinedAt       time.Time `json:"joined_at"`
 	LastReadSeq    int64     `gorm:"default:0" json:"last_read_seq"`
 	IsMuted        bool      `gorm:"default:false" json:"is_muted"`
+	IsPinned       bool       `gorm:"default:false" json:"is_pinned"`
+	PinnedAt       *time.Time `json:"pinned_at,omitempty"`
 	// MentionUnread 群消息 @ 我未读标记（进入会话调 read 端点时清零）。
 	MentionUnread  bool      `gorm:"default:false" json:"mention_unread"`
 }

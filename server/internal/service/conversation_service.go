@@ -30,6 +30,8 @@ type ConversationDTO struct {
 	MemberCount   int64           `json:"member_count"`
 	UnreadCount   int64           `json:"unread_count"`
 	IsMuted       bool            `json:"is_muted"`
+	IsPinned      bool            `json:"is_pinned"`
+	PinnedAt      *time.Time      `json:"pinned_at,omitempty"`
 	LastSeq       int64           `json:"last_seq"`
 	MyLastReadSeq int64           `json:"my_last_read_seq"`
 	MentionUnread bool            `json:"mention_unread"`
@@ -92,6 +94,8 @@ func (s *ConversationService) List(ctx context.Context, userID uuid.UUID) ([]Con
 			Type:          item.Type,
 			MemberCount:   item.MemberCount,
 			IsMuted:       item.IsMuted,
+			IsPinned:      item.IsPinned,
+			PinnedAt:      item.PinnedAt,
 			MentionUnread: item.MentionUnread,
 			LastSeq:       item.LastSeq,
 			MyLastReadSeq: item.LastReadSeq,

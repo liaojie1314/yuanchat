@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/model"
@@ -12,11 +13,13 @@ import (
 // ConversationListItem 会话列表查询的投影结果（含聚合字段）。
 type ConversationListItem struct {
 	model.Conversation
-	Role          int16 `json:"role"`
-	LastReadSeq   int64 `json:"last_read_seq"`
-	IsMuted       bool  `json:"is_muted"`
-	MentionUnread bool  `json:"mention_unread"`
-	MemberCount   int64 `json:"member_count"`
+	Role          int16      `json:"role"`
+	LastReadSeq   int64      `json:"last_read_seq"`
+	IsMuted       bool       `json:"is_muted"`
+	IsPinned      bool       `json:"is_pinned"`
+	PinnedAt      *time.Time `json:"pinned_at"`
+	MentionUnread bool       `json:"mention_unread"`
+	MemberCount   int64      `json:"member_count"`
 }
 
 // ConversationRepository 处理 conversations / conversation_members 表。
@@ -38,7 +41,7 @@ func (r *ConversationRepository) ListByUserID(ctx context.Context, userID uuid.U
 	var items []ConversationListItem
 	err := r.db.WithContext(ctx).
 		Table("conversations c").
-		Select(`c.*, cm.role, cm.last_read_seq, cm.is_muted, cm.mention_unread,
+		Select(`c.*, cm.role, cm.last_read_seq, cm.is_muted, cm.mention_unread, cm.is_pinned, cm.pinned_at,
 			(SELECT count(*) FROM conversation_members m2 WHERE m2.conversation_id = c.id) AS member_count`).
 		Joins("JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = ?", userID).
 		Where("c.deleted_at IS NULL").
