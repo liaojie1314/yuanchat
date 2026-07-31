@@ -1,5 +1,19 @@
 # 更新日志
 
+# [0.3.0](https://github.com/liaojie1314/yuanchat/compare/v0.2.0...v0.3.0) (2026-07-31)
+
+### Bug Fixes
+
+- **e2e:** 强制 zh-CN locale + captcha svg locator 精确化 ([f7322f8](https://github.com/liaojie1314/yuanchat/commit/f7322f8943405eee1e6b5730fede5780ea400069))
+- **e2e:** 修复剩余 10 个 e2e 失败 — 文案对齐 + 登录校验 + 搜索快捷键竞态 ([13bd347](https://github.com/liaojie1314/yuanchat/commit/13bd3477784af734ef45ce95f96a137099f448fd))
+
+### Features
+
+- 端到端加密（E2EE 单聊）+ 文档同步 ([d319340](https://github.com/liaojie1314/yuanchat/commit/d319340fddc9612f2fd95865b0db3fb6369d9a2e))
+- **admin:** 管理后台 MVP + 内容审核 + 后端端口调整 ([5cb4cb1](https://github.com/liaojie1314/yuanchat/commit/5cb4cb1846224893bb35460757c7a6a5402def99))
+- **i18n:** 补齐 ja-JP / ko-KR 翻译 + CI 完整性校验 ([0bf14a5](https://github.com/liaojie1314/yuanchat/commit/0bf14a56506d2634f2a01634565767fd81ff6cb3))
+- v0.5 分布式 Presence + 性能收尾 + PWA + 生产部署 ([00f3edf](https://github.com/liaojie1314/yuanchat/commit/00f3edf74a82c313e2e61955d9be697ad641a6bf))
+
 # [0.2.0](https://github.com/liaojie1314/yuanchat/compare/v0.1.0...v0.2.0) (2026-07-23)
 
 ### Bug Fixes
