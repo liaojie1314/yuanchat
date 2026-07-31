@@ -18,6 +18,12 @@ export * from "./api/search";
 export * from "./api/favorites";
 export * from "./api/reports";
 export * from "./push/webPush";
+export * from "./crypto/primitives";
+export * from "./crypto/x3dh";
+export * from "./crypto/doubleRatchet";
+export * from "./crypto/e2eeManager";
+export * from "./crypto/keyBackup";
+export * from "./api/e2ee";
 export { setNotifier, notifyIncoming, __resetNotifier } from "./notify";
 export {
   setRefreshHandler,

@@ -34,12 +34,15 @@ func (Message) TableName() string {
 
 // MessageType 消息类型枚举
 const (
-	MessageTypeText  int16 = 1
-	MessageTypeImage int16 = 2
-	MessageTypeFile  int16 = 3
-	MessageTypeVoice int16 = 4
-	MessageTypeVideo int16 = 5
+	MessageTypeText   int16 = 1
+	MessageTypeImage  int16 = 2
+	MessageTypeFile   int16 = 3
+	MessageTypeVoice  int16 = 4
+	MessageTypeVideo  int16 = 5
 	MessageTypeSystem int16 = 6
+	// MessageTypeE2EE 端到端加密密文。服务端只存密文，无法解读内容，
+	// 因此全文搜索、内容审核、消息预览对此类消息天然失效。
+	MessageTypeE2EE int16 = 7
 )
 
 // MessageStatus 消息状态枚举

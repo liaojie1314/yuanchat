@@ -77,6 +77,8 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	pushSvc := service.NewPushService(pushRepo, cfg.Push, logger)
 	pushH := handler.NewPushHandler(pushSvc, logger)
 
+	e2eeH := handler.NewE2EEHandler(repository.NewE2EERepository(db), logger)
+
 	// 离线成员补推浏览器通知：WS 在线者已实时收到，不重复打扰。
 	// VAPID 未配置时 NotifyUsers 内部直接返回，等于功能关闭。
 	wsH.SetOfflinePush(func(recipients []uuid.UUID, info ws.OfflineMsgInfo) {
@@ -199,6 +201,13 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 
 		chat.POST("/push/subscribe", pushH.Subscribe)
 		chat.DELETE("/push/subscribe", pushH.Unsubscribe)
+
+		// 端到端加密：服务端只中转公钥与客户端加密的备份 blob
+		chat.POST("/e2ee/keys", e2eeH.UploadKeys)
+		chat.GET("/e2ee/prekey-bundle/:userId", e2eeH.PreKeyBundle)
+		chat.GET("/e2ee/prekey-count", e2eeH.PreKeyCount)
+		chat.POST("/e2ee/backup", e2eeH.SaveBackup)
+		chat.GET("/e2ee/backup", e2eeH.GetBackup)
 	}
 
 	// 管理后台：JWT + role=admin 双重校验，所有写操作留审计日志

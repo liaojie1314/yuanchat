@@ -316,6 +316,33 @@ func (h *Handler) buildContent(c *Client, p *SendPayload) (int16, string, bool) 
 			return 0, "", false
 		}
 		return model.MessageTypeVoice, string(raw), true
+	case "e2ee":
+		// 端到端加密：服务端不理解密文语义，只校验结构完整性后原样落库。
+		// 任何字段都不参与索引/搜索/审核——这是 E2EE 的设计前提。
+		if p.Content.RatchetKey == "" || p.Content.Nonce == "" || p.Content.Ciphertext == "" ||
+			p.Content.N == nil || p.Content.PN == nil {
+			c.sendError(400, "e2ee content requires ratchet_key/n/pn/nonce/ciphertext", p.ClientMsgID)
+			return 0, "", false
+		}
+		raw, err := json.Marshal(struct {
+			RatchetKey   string `json:"ratchet_key"`
+			N            int    `json:"n"`
+			PN           int    `json:"pn"`
+			Nonce        string `json:"nonce"`
+			Ciphertext   string `json:"ciphertext"`
+			IdentityKey  string `json:"identity_key,omitempty"`
+			EphemeralKey string `json:"ephemeral_key,omitempty"`
+			OtkID        *int   `json:"otk_id,omitempty"`
+		}{
+			p.Content.RatchetKey, *p.Content.N, *p.Content.PN,
+			p.Content.Nonce, p.Content.Ciphertext,
+			p.Content.IdentityKey, p.Content.EphemeralKey, p.Content.OtkID,
+		})
+		if err != nil {
+			c.sendError(400, "invalid e2ee content", p.ClientMsgID)
+			return 0, "", false
+		}
+		return model.MessageTypeE2EE, string(raw), true
 	default:
 		c.sendError(400, "unsupported content type", p.ClientMsgID)
 		return 0, "", false

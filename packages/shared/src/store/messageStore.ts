@@ -25,6 +25,7 @@ import {
 } from "../api/chat";
 import { compressImage, getUploadUrl, uploadToTicket } from "../api/files";
 import { chatSocket } from "../ws/chatSocket";
+import { encryptFor } from "../crypto/e2eeManager";
 import { useAuthStore } from "./authStore";
 import { showToast } from "./toastStore";
 
@@ -728,8 +729,58 @@ function dispatchSend(
   };
   if (extras?.replyToId) payload.reply_to_id = extras.replyToId;
   if (extras?.mentionIds && extras.mentionIds.length > 0) payload.mentions = extras.mentionIds;
+
+  // E2EE：单聊且双方均已开启时改发密文。加密涉及网络（首次取 prekey
+  // bundle），故走异步分支；未开启/群聊/对方未启用时原样发明文。
+  void maybeEncryptAndSend(conversationId, text, payload, clientMsgId, get);
+}
+
+/**
+ * 尝试加密后发送；任何「不适用 E2EE」的情形都回退明文。
+ *
+ * 唯一不回退的是 bundle 验签失败（可能存在中间人）——此时宁可发送
+ * 失败也不能降级成明文，故标记该条消息 failed。
+ */
+async function maybeEncryptAndSend(
+  conversationId: string,
+  text: string,
+  payload: Record<string, unknown>,
+  clientMsgId: string,
+  get: () => MessageState,
+) {
+  const selfId = getSelfId?.();
+  const peerId = getPeerId?.(conversationId);
+
+  if (selfId && peerId) {
+    try {
+      const encrypted = await encryptFor(selfId, peerId, text);
+      if (encrypted) {
+        payload.content = encrypted;
+      }
+    } catch {
+      // 验签失败等安全性错误：不降级明文，直接置失败让用户察觉
+      get().setStatus(conversationId, clientMsgId, "failed");
+      return;
+    }
+  }
+
   chatSocket.send("message.send", payload);
   armAckTimeout(conversationId, clientMsgId, get);
+}
+
+/**
+ * 会话上下文注入（避免 store 直接依赖 authStore/conversationStore 造成循环导入）。
+ * 由 useChatBootstrap 在接线时提供；未注入时 E2EE 整体不启用。
+ */
+let getSelfId: (() => string | undefined) | null = null;
+let getPeerId: ((conversationId: string) => string | undefined) | null = null;
+
+export function setE2EEContext(
+  selfIdGetter: () => string | undefined,
+  peerIdGetter: (conversationId: string) => string | undefined,
+) {
+  getSelfId = selfIdGetter;
+  getPeerId = peerIdGetter;
 }
 
 /**

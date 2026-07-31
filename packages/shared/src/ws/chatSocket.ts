@@ -39,6 +39,15 @@ export interface ServerFrames {
       size?: number;
       name?: string;
       duration?: number;
+      // e2ee 密文（服务端原样透传，不解析语义）
+      ratchet_key?: string;
+      n?: number;
+      pn?: number;
+      nonce?: string;
+      ciphertext?: string;
+      identity_key?: string;
+      ephemeral_key?: string;
+      otk_id?: number;
     };
     seq: number;
     timestamp: number;

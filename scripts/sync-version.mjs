@@ -13,6 +13,7 @@ const version = rootPkg.version;
 const targets = [
   "apps/web/package.json",
   "apps/desktop/package.json",
+  "apps/admin/package.json",
   "packages/design-system/package.json",
   "packages/shared/package.json",
   "packages/ui/package.json",

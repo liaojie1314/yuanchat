@@ -3,6 +3,17 @@
 > 从 v0.1.0（MVP）到 v1.0.0（生产就绪）的完整规划。每条批次都能独立成为一个 `feature/*` 分支 + 一次 squash commit。
 >
 > **约束**：所有批次继承 v0.1.0 已有的全局约束（GitFlow、i18n 双语无硬编码、`build.target=es2019`、`rounded-lg`、每批次末尾门禁 + squash、验证后关服务）。
+>
+> **执行状态（2026-07-27，v0.3.0 发布时）**：21 个批次中 19 个已完成。
+> 实际发布节奏与规划的版本→批次映射不同（tag 按完成时间聚合，见
+> [v0.2.0-tag 说明](#里程碑总览)）：
+>
+> - **tag v0.2.0**（已发布）：A1-A5、B1-B3、C1、C3、E1
+> - **tag v0.3.0**（本次）：E2-E4（管理后台/审核/ja-ko）、B4、B5、
+>   C2、C4、D1（updater 自签部分）、D3（PWA+Push）、D4（E2EE 单聊）、E5（部署编排）
+> - **未完成 2 项**：D2 iOS（需 macOS + Apple Developer 账户）、
+>   D1 的 OS 层付费签名（Apple 公证 / Windows SmartScreen，证书就绪后填
+>   secrets 即生效，workflow 门控已就绪）
 
 ## 里程碑总览
 

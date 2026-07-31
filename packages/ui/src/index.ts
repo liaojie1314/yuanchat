@@ -56,6 +56,9 @@ export { ProfileEditView } from "./ProfileEditView";
 // 布局组件
 export { MainLayout } from "./MainLayout";
 export { SearchModal } from "./SearchModal";
+export { E2EEIndicator } from "./E2EEIndicator";
+export { SafetyNumberDialog } from "./SafetyNumberDialog";
+export { E2EESection } from "./E2EESection";
 export { InConversationSearch } from "./InConversationSearch";
 
 // 错误边界

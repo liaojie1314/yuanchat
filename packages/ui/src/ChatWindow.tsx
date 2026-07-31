@@ -36,6 +36,7 @@ import {
   reportMessage,
   showToast,
   toggleReaction,
+  useAuthStore,
   useConversationStore,
   useMessageStore,
 } from "@yuanchat/shared";
@@ -44,6 +45,8 @@ import type { MentionRef } from "@yuanchat/shared";
 import { Avatar } from "./Avatar";
 import { Composer } from "./Composer";
 import { ForwardModal } from "./ForwardModal";
+import { E2EEIndicator } from "./E2EEIndicator";
+import { SafetyNumberDialog } from "./SafetyNumberDialog";
 import { ImageLightbox } from "./ImageLightbox";
 import { InConversationSearch } from "./InConversationSearch";
 import { MessageBubble, TypingIndicator } from "./MessageBubble";
@@ -86,6 +89,9 @@ export function ChatWindow({
   const [forwardMsgId, setForwardMsgId] = useState<string | null>(null);
   // 会话内搜索面板开关
   const [showSearch, setShowSearch] = useState(false);
+  // 安全指纹校验弹窗开关（E2EE，仅单聊）
+  const [showSafetyNumber, setShowSafetyNumber] = useState(false);
+  const selfUserId = useAuthStore((s) => s.user?.id);
 
   const items = messages ?? [];
 
@@ -223,6 +229,11 @@ export function ChatWindow({
           <h2 className="text-title-md text-on-surface truncate font-semibold">{conv.name}</h2>
           <p className="text-label-sm text-on-surface-variant truncate">{subtitle}</p>
         </div>
+        <E2EEIndicator
+          selfId={selfUserId}
+          peerId={conv.type === "private" ? conv.peerId : undefined}
+          onClick={() => setShowSafetyNumber(true)}
+        />
         <button
           className="md3-icon-btn text-on-surface-variant"
           title={t("chat.voiceCall")}
@@ -423,6 +434,17 @@ export function ChatWindow({
         sourceConversationId={activeId}
         onClose={() => setForwardMsgId(null)}
       />
+
+      {/* 安全指纹校验（E2EE 单聊，点击头部锁图标打开） */}
+      {selfUserId && conv.type === "private" && conv.peerId && (
+        <SafetyNumberDialog
+          selfId={selfUserId}
+          peerId={conv.peerId}
+          peerName={conv.name}
+          open={showSafetyNumber}
+          onClose={() => setShowSafetyNumber(false)}
+        />
+      )}
     </div>
   );
 }
