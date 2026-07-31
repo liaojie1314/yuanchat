@@ -11,8 +11,7 @@
     "release": true,
     "releaseName": "v${version}",
     "web": false,
-    "draft": true,
-    "releaseNotes": "echo \"See CHANGELOG.md for full release notes.\""
+    "draft": true
   },
   "npm": {
     "publish": false
