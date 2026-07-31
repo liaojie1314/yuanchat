@@ -52,6 +52,8 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
         "member_count": 3,
         "unread_count": 2,
         "is_muted": false,
+        "is_pinned": false,
+        "pinned_at": null,
         "mention_unread": false,
         "last_seq": 10,
         "my_last_read_seq": 8,
@@ -72,6 +74,7 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 - `unread_count` = `last_seq - my_last_read_seq`（服务端计算）。
 - `peer` 仅单聊返回；单聊 `name`/`avatar_url` 为空时前端用 `peer` 填充。
 - `mention_unread`（v0.2）：群消息 @ 我未读标记；进入会话调用 `message.read` 时后端顺带清零（配合 `last_read_seq` 推进）。前端据此在会话列表条目显示 `[@我]` 高亮前缀。
+- `is_pinned` / `pinned_at`（v0.4 A6）：本人置顶态；列表排序置顶优先、组内按 pinned_at 倒序（前端实现）。
 
 ### POST /api/v1/conversations
 
@@ -123,6 +126,23 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 | DELETE | `/api/v1/conversations/:id/members/:userId` | —                            | `{member_count}`   |
 | POST   | `/api/v1/conversations/:id/leave`           | —                            | `{}`               |
 | DELETE | `/api/v1/conversations/:id`                 | —                            | `{}`（解散，软删） |
+
+### PUT /api/v1/conversations/:id/settings
+
+更新本人在该会话的个人设置（member 维度，单聊/群聊通用）。body 至少携带一个字段：
+
+```json
+// 请求
+{ "is_pinned": true, "is_muted": false }
+
+// 响应（data 为变更后的完整设置值）
+{ "code": 0, "message": "ok", "data": { "is_pinned": true, "pinned_at": "2026-07-31T12:00:00+08:00", "is_muted": false } }
+```
+
+- 置顶语义：首次置顶落 `pinned_at`；重复置顶不刷新（置顶顺序稳定）；取消置顶清空。
+- 非成员 `403`；两字段均缺 `400`。
+- 成功后向**本人全部设备**推 `conversation.updated`（含 `is_pinned/pinned_at/is_muted`），其他成员不感知。
+- 免打扰生效面：在线设备前端不弹系统通知；服务端离线 Web Push 同样跳过（见 WS 帧表说明）。
 
 ### 群角色管理（v0.2）
 
@@ -571,7 +591,7 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 | `contact.request`           | `{request_id, requester: {id, nickname, avatar_url, short_id}, message, created_at}`                                          | 被申请方全部设备。前端置顶插入"新的朋友"列表 + 角标 +1                                                                                            |
 | `contact.accepted`          | `{request_id, friend: {id, nickname, avatar_url, short_id}, conversation_id}`                                                 | 申请方全部设备。前端翻转申请状态 + 加好友 + 拉会话列表（随后收到打招呼 `message.receive`）                                                        |
 | `conversation.created`      | `{conversation: ConversationDTO}`                                                                                             | 新建群会话的全部成员（含发起者，前端按会话 id 去重）。帧内 DTO 取成员视角（`unread_count`=1、`my_last_read_seq`=0）；被邀请入群时也推给新成员     |
-| `conversation.updated`      | `{conversation_id, name?, member_count?}`                                                                                     | 群改名/成员数变更后推给全体在群成员，前端 patch 会话列表条目                                                                                      |
+| `conversation.updated`      | `{conversation_id, name?, member_count?, is_pinned?, pinned_at?, is_muted?}`                                                  | 群改名/成员数变更后推给全体在群成员，前端 patch 会话列表条目；置顶/免打扰变更仅推本人多端（其他成员不感知）                                       |
 | `conversation.removed`      | `{conversation_id, reason}`                                                                                                   | `reason`：`kicked`（被踢者）/ `left`（退群者本人多端同步）/ `dissolved`（解散全员）。前端把会话移出列表，kicked/dissolved 弹提示                  |
 | `message.recalled`          | `{message_id, conversation_id, seq, operator_id, operator_nickname}`                                                          | 会话全部成员。前端把对应气泡翻成撤回占位（本人「你撤回了一条消息」/ 他人「X 撤回了一条消息」）；撤回最后一条时刷新列表预览                        |
 | `message.reaction`          | `{message_id, conversation_id, user_id, emoji, count, reacted}`                                                               | 会话全员（含操作者多端）。`count`=该 emoji 最新总数；`reacted`=操作者动作是加是删。前端 `user_id`=自己时按 reacted 更新 mine，他人操作保持原 mine |

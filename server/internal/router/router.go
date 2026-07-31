@@ -165,6 +165,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		chat.GET("/conversations/:id/messages", msgH.History)
 		chat.GET("/conversations/:id/members", convH.Members)
 		chat.PATCH("/conversations/:id", convH.Rename)
+		chat.PUT("/conversations/:id/settings", convH.UpdateSettings)
 		chat.POST("/conversations/:id/members", convH.Invite)
 		chat.DELETE("/conversations/:id/members/:userId", convH.Kick)
 		chat.POST("/conversations/:id/leave", convH.Leave)
