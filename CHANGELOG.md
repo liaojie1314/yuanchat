@@ -4,6 +4,7 @@
 
 ### Bug Fixes
 
+- **deps:** 声明 web/desktop 的 react-i18next 幽灵依赖，修复 CI/Release 构建 TS2307 ([f2d1e8c](https://github.com/liaojie1314/yuanchat/commit/f2d1e8cf467df020606fcba42b54a0a20feba378))
 - **e2e:** 强制 zh-CN locale + captcha svg locator 精确化 ([f7322f8](https://github.com/liaojie1314/yuanchat/commit/f7322f8943405eee1e6b5730fede5780ea400069))
 - **e2e:** 修复剩余 10 个 e2e 失败 — 文案对齐 + 登录校验 + 搜索快捷键竞态 ([13bd347](https://github.com/liaojie1314/yuanchat/commit/13bd3477784af734ef45ce95f96a137099f448fd))
 

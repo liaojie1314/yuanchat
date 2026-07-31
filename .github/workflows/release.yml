@@ -48,6 +48,29 @@ jobs:
         run: |
           cd apps/web/dist
           tar czf "../../../yuanchat-web-${REF_NAME}.tar.gz" .
+      # 从 CHANGELOG.md 提取当前版本小节作为 release 正文（含分类提交列表与链接）。
+      # 仓库无 PR 流，generate_release_notes 只会产出 compare 链接，故正文以 CHANGELOG 为主
+      - name: Extract changelog section
+        env:
+          REF_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          ver = os.environ['REF_NAME'].lstrip('v')
+          src = open('CHANGELOG.md', encoding='utf-8').read()
+          pat = re.compile(r'^#{1,3} \[?' + re.escape(ver) + r'\]?[ (]', re.M)
+          m = pat.search(src)
+          body = ''
+          if m:
+              nxt = re.compile(r'^#{1,3} \[?\d+\.\d+\.\d+\]?[ (]', re.M).search(src, m.end())
+              section = src[m.start():nxt.start() if nxt else len(src)].strip()
+              # 去掉节头行（release 标题已是版本号）
+              body = '\n'.join(section.splitlines()[1:]).strip()
+          if not body:
+              print(f'::warning::CHANGELOG.md 中未找到 {ver} 小节，release 正文将只有自动生成内容')
+          open('release-body.md', 'w', encoding='utf-8').write(body)
+          print(body[:800])
+          PY
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
@@ -55,6 +78,9 @@ jobs:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: yuanchat-web-*.tar.gz
           fail_on_unmatched_files: true
+          body_path: release-body.md
+          # 自动生成 release 描述：上个 tag 以来的提交/PR 列表
+          generate_release_notes: true
 
   # ============ Desktop（Tauri 三平台） ============
   desktop:
