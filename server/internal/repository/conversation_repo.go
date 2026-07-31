@@ -151,3 +151,35 @@ func (r *ConversationRepository) ListMembers(ctx context.Context, convID uuid.UU
 		Scan(&items).Error
 	return items, err
 }
+
+// GetMember 返回成员行；非成员返回 (nil, false, nil)。
+func (r *ConversationRepository) GetMember(ctx context.Context, convID, userID uuid.UUID) (*model.ConversationMember, bool, error) {
+	var m model.ConversationMember
+	err := r.db.WithContext(ctx).
+		Where("conversation_id = ? AND user_id = ?", convID, userID).First(&m).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return &m, true, nil
+}
+
+// UpdateMemberSettings 更新成员行的个人设置字段（is_pinned/pinned_at/is_muted）。
+func (r *ConversationRepository) UpdateMemberSettings(ctx context.Context, convID, userID uuid.UUID, updates map[string]any) error {
+	return r.db.WithContext(ctx).
+		Model(&model.ConversationMember{}).
+		Where("conversation_id = ? AND user_id = ?", convID, userID).
+		Updates(updates).Error
+}
+
+// MutedMemberIDs 返回会话中开启免打扰的成员 ID（离线推送过滤用）。
+func (r *ConversationRepository) MutedMemberIDs(ctx context.Context, convID uuid.UUID) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := r.db.WithContext(ctx).
+		Model(&model.ConversationMember{}).
+		Where("conversation_id = ? AND is_muted = TRUE", convID).
+		Pluck("user_id", &ids).Error
+	return ids, err
+}
