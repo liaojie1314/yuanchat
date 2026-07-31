@@ -17,6 +17,7 @@ type Message struct {
 	MessageType    int16          `gorm:"type:smallint;not null" json:"message_type"`
 	Content        string         `gorm:"type:jsonb;not null" json:"content"` // JSONB 灵活存储
 	Status         int16          `gorm:"type:smallint;default:1" json:"status"`
+	Flagged        bool           `gorm:"not null;default:false" json:"flagged"` // 敏感词命中，进审核队列
 	ReplyToID      *uuid.UUID     `gorm:"type:uuid" json:"reply_to_id,omitempty"`
 	// Mentions 被 @ 的用户 UUID 列表（PostgreSQL uuid[]，为 nil 时不占列）。
 	// 群消息设置这里的成员会触发 conversation_members.mention_unread=true。
@@ -33,12 +34,15 @@ func (Message) TableName() string {
 
 // MessageType 消息类型枚举
 const (
-	MessageTypeText  int16 = 1
-	MessageTypeImage int16 = 2
-	MessageTypeFile  int16 = 3
-	MessageTypeVoice int16 = 4
-	MessageTypeVideo int16 = 5
+	MessageTypeText   int16 = 1
+	MessageTypeImage  int16 = 2
+	MessageTypeFile   int16 = 3
+	MessageTypeVoice  int16 = 4
+	MessageTypeVideo  int16 = 5
 	MessageTypeSystem int16 = 6
+	// MessageTypeE2EE 端到端加密密文。服务端只存密文，无法解读内容，
+	// 因此全文搜索、内容审核、消息预览对此类消息天然失效。
+	MessageTypeE2EE int16 = 7
 )
 
 // MessageStatus 消息状态枚举

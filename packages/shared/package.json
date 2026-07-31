@@ -26,6 +26,9 @@
     "clean": "echo 'shared: clean'"
   },
   "dependencies": {
+    "@noble/ciphers": "^2.2.0",
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
     "@sentry/react": "^10.67.0",
     "@yuanchat/design-system": "workspace:*",
     "clsx": "^2.1.1",

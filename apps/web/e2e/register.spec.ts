@@ -23,7 +23,7 @@ test.describe("Register Flow", () => {
   });
 
   test("successful registration redirects to /chat", async ({ page }) => {
-    await expect(registerPage.captchaButton.locator("svg")).toBeVisible({
+    await expect(registerPage.captchaImage).toBeVisible({
       timeout: 5000,
     });
     await registerPage.register("新用户", "13800138000", "Abc1234!", "1234");
@@ -60,11 +60,11 @@ test.describe("Register Flow", () => {
   });
 
   test("captcha image loads and refreshes on click", async ({ page: _page }) => {
-    await expect(registerPage.captchaButton.locator("svg")).toBeVisible({
+    await expect(registerPage.captchaImage).toBeVisible({
       timeout: 5000,
     });
     await registerPage.captchaButton.click();
-    await expect(registerPage.captchaButton.locator("svg")).toBeVisible({
+    await expect(registerPage.captchaImage).toBeVisible({
       timeout: 5000,
     });
   });
@@ -78,7 +78,7 @@ test.describe("Register Flow", () => {
     await registerPage.nicknameInput.fill("新用户");
     await registerPage.phoneInput.fill("13800138000");
     await registerPage.passwordInput.fill("Abc1234!");
-    await expect(registerPage.captchaButton.locator("svg")).toBeVisible({
+    await expect(registerPage.captchaImage).toBeVisible({
       timeout: 5000,
     });
     await registerPage.captchaInput.fill("1234");

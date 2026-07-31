@@ -23,15 +23,19 @@ import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 import zhCN from "./locales/zh-CN.json";
 import enUS from "./locales/en-US.json";
+import jaJP from "./locales/ja-JP.json";
+import koKR from "./locales/ko-KR.json";
 
 /**
  * 获取浏览器首选语言
- * zh-CN、zh、zh-TW → zh-CN；其他 → en-US
+ * zh-CN、zh、zh-TW → zh-CN；ja → ja-JP；ko → ko-KR；其他 → en-US
  */
 function detectLocale(): string {
   if (typeof navigator === "undefined") return "zh-CN";
   const lang = navigator.language || "zh-CN";
   if (lang.startsWith("zh")) return "zh-CN";
+  if (lang.startsWith("ja")) return "ja-JP";
+  if (lang.startsWith("ko")) return "ko-KR";
   return "en-US";
 }
 
@@ -42,6 +46,8 @@ function detectLocale(): string {
 export const SUPPORTED_LOCALES = [
   { code: "zh-CN", label: "简体中文", nativeLabel: "简体中文" },
   { code: "en-US", label: "English", nativeLabel: "English" },
+  { code: "ja-JP", label: "Japanese", nativeLabel: "日本語" },
+  { code: "ko-KR", label: "Korean", nativeLabel: "한국어" },
 ] as const;
 
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number]["code"];
@@ -51,6 +57,8 @@ i18n.use(initReactI18next).init({
   resources: {
     "zh-CN": { translation: zhCN },
     "en-US": { translation: enUS },
+    "ja-JP": { translation: jaJP },
+    "ko-KR": { translation: koKR },
   },
   lng: detectLocale(),
   fallbackLng: "zh-CN",

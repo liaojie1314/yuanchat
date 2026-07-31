@@ -9,13 +9,13 @@
  *   node scripts/dev.mjs web --mock       # MSW Mock + Web（无需后端/数据库）
  *   node scripts/dev.mjs desktop          # 真实后端 + Tauri 桌面窗口
  *   node scripts/dev.mjs desktop --mock   # Mock + Tauri 桌面窗口
- *   node scripts/dev.mjs android          # 真实后端 + Tauri Android（自动 adb reverse 8080/8081）
+ *   node scripts/dev.mjs android          # 真实后端 + Tauri Android（自动 adb reverse 8085/8086）
  *   node scripts/dev.mjs android --mock   # Mock + Tauri Android
  *   node scripts/dev.mjs server           # 仅后端（docker → seed → go server）
  *   node scripts/dev.mjs stop             # 停止全部（应用进程 + go server + docker 容器）
  *
  * 真实模式流程：启动 PostgreSQL/Redis 容器（--wait 等待健康）→ 幂等 seed
- * → go run ./cmd/server（REST :8080 + WS :8081）→ 健康检查通过后再拉起前端。
+ * → go run ./cmd/server（REST :8085 + WS :8086）→ 健康检查通过后再拉起前端。
  *
  * Ctrl+C 会终止本脚本拉起的应用进程与 go server（进程组整体 kill，
  * 避免 `go run` 的子进程残留）；docker 容器保持运行以加速下次启动，
@@ -33,7 +33,7 @@ const GO_FALLBACK_DIR = "/home/liaojie1314/env/go/go/bin";
 const GOPATH_FALLBACK = "/home/liaojie1314/env/go/GOPATH";
 
 const APP_PORTS = { web: 5173, desktop: 1420, android: 1420 };
-const SERVER_PORTS = [8080, 8081];
+const SERVER_PORTS = [8085, 8086];
 
 // ========================================
 // 参数解析
@@ -170,9 +170,9 @@ function ensureBackendInfra(goEnv) {
 
 /** 拉起 go server 并等待 REST 健康检查 */
 async function startGoServer(goEnv) {
-  log("server", "启动后端（REST :8080 + WS :8081）…");
+  log("server", "启动后端（REST :8085 + WS :8086）…");
   launch("server", "go", ["run", "./cmd/server"], { cwd: join(root, "server"), env: goEnv });
-  await waitFor("http://localhost:8080/api/v1/health", "后端");
+  await waitFor("http://localhost:8085/api/v1/health", "后端");
   log("server", "后端就绪 ✔");
 }
 
@@ -198,7 +198,7 @@ function startAndroid() {
     process.exit(1);
   }
   if (!mock) {
-    // 真实模式：把设备的 localhost:8080/8081 反向转发到宿主机后端
+    // 真实模式：把设备的 localhost:8085/8086 反向转发到宿主机后端
     for (const port of SERVER_PORTS) {
       const r = spawnSync("adb", ["reverse", `tcp:${port}`, `tcp:${port}`], { stdio: "ignore" });
       log("infra", r.status === 0 ? `adb reverse tcp:${port} ✔` : `adb reverse tcp:${port} 失败（请确认设备已连接）`);

@@ -1,0 +1,26 @@
+/**
+ * 举报 API — POST /api/v1/reports
+ */
+import { apiPost } from "./client";
+
+export async function reportMessage(
+  messageId: string,
+  reason = "",
+): Promise<{ id: string; status: number }> {
+  return apiPost("/api/v1/reports", {
+    target_type: "message",
+    target_id: messageId,
+    reason,
+  });
+}
+
+export async function reportUser(
+  userId: string,
+  reason = "",
+): Promise<{ id: string; status: number }> {
+  return apiPost("/api/v1/reports", {
+    target_type: "user",
+    target_id: userId,
+    reason,
+  });
+}

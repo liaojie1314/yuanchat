@@ -73,7 +73,13 @@ type MessageService struct {
 	userRepo      *repository.UserRepository
 	reactionRepo  *repository.ReactionRepository
 	blocklistRepo *repository.BlocklistRepository
+	moderation    *ModerationService // 可为 nil（未配置词库时跳过审核）
 	logger        *zap.Logger
+}
+
+// SetModeration 注入敏感词审核服务（router 装配时调用，避免改构造函数签名破坏现有测试）。
+func (s *MessageService) SetModeration(m *ModerationService) {
+	s.moderation = m
 }
 
 func NewMessageService(
@@ -204,6 +210,17 @@ func (s *MessageService) SendContent(
 		Content:        contentJSON,
 		Status:         model.MessageStatusNormal,
 		ReplyToID:      replyTo,
+	}
+	// 敏感词审核：命中标记 flagged 进审核队列，消息正常发送（不阻塞）
+	if s.moderation != nil && messageType == model.MessageTypeText {
+		var tc model.MessageContentText
+		if err := json.Unmarshal([]byte(contentJSON), &tc); err == nil {
+			if hit := s.moderation.Check(tc.Text); hit != "" {
+				msg.Flagged = true
+				s.logger.Info("message flagged by moderation",
+					zap.String("word", hit), zap.String("sender", senderID.String()))
+			}
+		}
 	}
 	if len(validMentions) > 0 {
 		strs := make(pq.StringArray, len(validMentions))

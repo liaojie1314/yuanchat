@@ -26,6 +26,8 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
+      - name: i18n completeness
+        run: node scripts/check-i18n.mjs
       - name: Test
         run: pnpm test
       - name: Typecheck (web)

@@ -1,0 +1,10 @@
+# Grafana 数据源：Loki（日志查询）
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    isDefault: false
+    editable: false

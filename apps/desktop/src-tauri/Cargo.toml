@@ -29,3 +29,9 @@ tauri-plugin-notification = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-os = "2"
 time = ">=0.3.35, <0.3.37"
+
+# 自动更新：updater 用 minisign 密钥对签名（自签免费，与 macOS/Windows
+# OS 层代码签名相互独立）。移动端不支持 updater，故按 target 分组引入。
+[target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"

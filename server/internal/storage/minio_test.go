@@ -14,12 +14,12 @@ import (
 	"github.com/yuanchat/server/internal/config"
 )
 
-// testStorage 连接本地开发 MinIO（deploy/docker-compose.yml 的 minio :9000）。
+// testStorage 连接本地开发 MinIO（deploy/docker-compose.yml 的 minio :9002）。
 // 服务不可达时跳过集成用例（CI 无对象存储环境仍绿），模式同 service 包的 testDB。
 func testStorage(t *testing.T) *Storage {
 	t.Helper()
 	cfg := config.MinIOConfig{
-		Endpoint:  "localhost:9000",
+		Endpoint:  "localhost:9002",
 		AccessKey: "yuanchat_minio",
 		SecretKey: "yuanchat_minio_dev",
 		Bucket:    "yuanchat",
@@ -118,7 +118,7 @@ func TestPresignRoundTrip(t *testing.T) {
 func TestPublicURLShape(t *testing.T) {
 	st := testStorage(t)
 	got := st.PublicURL("avatars/u1.png")
-	want := "http://localhost:9000/yuanchat/avatars/u1.png"
+	want := "http://localhost:9002/yuanchat/avatars/u1.png"
 	if got != want {
 		t.Fatalf("PublicURL = %q, want %q", got, want)
 	}

@@ -50,7 +50,7 @@ test.describe("Login Flow", () => {
     // 使用满足客户端校验的密码（8+ 位、大小写+数字+特殊字符），
     // 但 MSW mock 将此密码视为错误凭据
     await loginPage.login("testuser", "Wrong@1234");
-    await expect(page.getByText("元聊号或密码错误")).toBeVisible();
+    await expect(page.getByText("账号或密码错误")).toBeVisible();
   });
 
   test("shows error for short 元聊号", async ({ page }) => {

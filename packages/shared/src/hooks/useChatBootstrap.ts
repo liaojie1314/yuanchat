@@ -35,7 +35,8 @@ import { useAuthStore } from "../store/authStore";
 import { useContactStore } from "../store/contactStore";
 import { useConversationStore } from "../store/conversationStore";
 import type { Conversation } from "../store/conversationStore";
-import { setMessageMockMode, useMessageStore } from "../store/messageStore";
+import { setE2EEContext, setMessageMockMode, useMessageStore } from "../store/messageStore";
+import { decryptFrom } from "../crypto/e2eeManager";
 import { usePresenceStore } from "../store/presenceStore";
 import { resetChatStores, revokeAllLocalPreviews } from "../store/resetStores";
 import { showToast } from "../store/toastStore";
@@ -62,6 +63,18 @@ function wireSocket() {
   setTokenProvider(() => useAuthStore.getState().accessToken);
   chatSocket.setTokenProvider(() => useAuthStore.getState().accessToken);
 
+  // E2EE 上下文：仅单聊有对端 id，群聊返回 undefined 即整体走明文
+  //（群聊 E2EE 需 Sender Key 方案，v1.1 再做）
+  setE2EEContext(
+    () => useAuthStore.getState().user?.id,
+    (conversationId) => {
+      const conv = useConversationStore
+        .getState()
+        .conversations.find((c) => c.id === conversationId);
+      return conv?.type === "private" ? conv.peerId : undefined;
+    },
+  );
+
   chatSocket.setHandlers({
     "message.ack": (p) => {
       useMessageStore
@@ -76,6 +89,32 @@ function wireSocket() {
       const selfId = useAuthStore.getState().user?.id ?? "";
       const isSelf = p.sender_id === selfId;
       const iso = new Date(p.timestamp).toISOString();
+
+      // E2EE 密文：就地解密后按普通文本消息渲染。
+      // 自己发的密文无需解密（本端已有明文乐观条目，且棘轮状态不含
+      // 自己发送链的解密密钥）；解密失败降级为占位提示，不丢消息。
+      if (p.content.type === "e2ee") {
+        if (isSelf) return;
+        const outcome = decryptFrom(selfId, p.sender_id, {
+          type: "e2ee",
+          ratchet_key: p.content.ratchet_key ?? "",
+          n: p.content.n ?? 0,
+          pn: p.content.pn ?? 0,
+          nonce: p.content.nonce ?? "",
+          ciphertext: p.content.ciphertext ?? "",
+          identity_key: p.content.identity_key,
+          ephemeral_key: p.content.ephemeral_key,
+          otk_id: p.content.otk_id,
+        });
+        p = {
+          ...p,
+          content: {
+            type: "text",
+            text: outcome.ok ? outcome.text : i18n.t("e2ee.undecryptable"),
+          },
+        };
+      }
+
       const isImage = p.content.type === "image";
       const isSystem = p.content.type === "system";
       const isFile = p.content.type === "file";

@@ -22,6 +22,7 @@ const (
 	TypeMessageSend = "message.send"
 	TypeMessageRead = "message.read"
 	TypeTyping      = "typing"
+	TypePing        = "ping" // 应用层心跳（客户端探测半开连接；间隔由客户端自适应）
 )
 
 // 服务端 → 客户端 帧类型
@@ -39,6 +40,7 @@ const (
 	TypePresence            = "presence"
 	TypeFriendRemoved       = "friend.removed"
 	TypeRoleChanged         = "conversation.role_changed"
+	TypePong                = "pong" // 应用层心跳响应
 )
 
 // FriendRemovedPayload 好友关系解除推送（删好友双向下发）。
@@ -135,6 +137,16 @@ type ContentPayload struct {
 	Size     int64  `json:"size,omitempty"`     // image/file/voice: 字节大小
 	Name     string `json:"name,omitempty"`     // file: 原始文件名（展示用）
 	Duration int    `json:"duration,omitempty"` // voice: 时长（秒）
+
+	// ---- e2ee：端到端加密密文（服务端不解析语义，仅原样透传落库）----
+	RatchetKey   string `json:"ratchet_key,omitempty"`   // 发送方当前棘轮公钥
+	N            *int   `json:"n,omitempty"`             // 链内序号（0 有意义，故用指针区分未传）
+	PN           *int   `json:"pn,omitempty"`            // 上一条链长度
+	Nonce        string `json:"nonce,omitempty"`         // AES-GCM nonce
+	Ciphertext   string `json:"ciphertext,omitempty"`    // 密文
+	IdentityKey  string `json:"identity_key,omitempty"`  // 首条消息：发送方身份公钥
+	EphemeralKey string `json:"ephemeral_key,omitempty"` // 首条消息：X3DH 临时公钥
+	OtkID        *int   `json:"otk_id,omitempty"`        // 首条消息：用掉的一次性预密钥 id
 }
 
 // SendPayload 客户端发送消息请求。

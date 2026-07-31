@@ -7,7 +7,7 @@
  * - AppearanceSection：主题双卡片可视化选择 + 语言分段控件（Segmented）
  * - AboutSection：品牌 hero + 版本 + 内部链接（相关信息列表）
  */
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   BadgeCheck,
   Check,
@@ -28,6 +28,7 @@ import { SUPPORTED_LOCALES } from "@yuanchat/design-system/i18n";
 import i18n from "@yuanchat/design-system/i18n";
 import { cn } from "@yuanchat/shared/utils";
 import { copyText } from "./copyText";
+import { E2EESection } from "./E2EESection";
 import { APP_VERSION, maskPhone } from "./settingsUtils";
 
 /** 分组标题 + 副标（页面级） */
@@ -110,6 +111,8 @@ export function AccountSection({
   return (
     <div>
       <SectionHeader title={t("settings.account")} desc={t("settings.accountDesc")} />
+      {/* 端到端加密：开关 + PIN 备份/恢复 */}
+      <E2EESection />
       <InfoCard>
         <InfoRow
           icon={Phone}
@@ -275,7 +278,7 @@ export function AppearanceSection() {
 }
 
 /** 关于：品牌 hero + 版本 + 开发者/开源链接 */
-export function AboutSection() {
+export function AboutSection({ extra }: { extra?: ReactNode } = {}) {
   const { t } = useTranslation();
   return (
     <div>
@@ -294,6 +297,9 @@ export function AboutSection() {
           {t("settings.brandTagline")}
         </p>
       </div>
+
+      {/* 平台特有区块（桌面端注入「检查更新」，web/admin 无） */}
+      {extra}
 
       {/* 链接卡片 */}
       <InfoCard>

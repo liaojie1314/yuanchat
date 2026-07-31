@@ -8,20 +8,52 @@
 
 在 `https://github.com/liaojie1314/yuanchat/settings/secrets/actions` 添加以下 Secrets（**只在首次配置一次**）：
 
-| Secret 名                   | 值                      | 说明                                      |
-| --------------------------- | ----------------------- | ----------------------------------------- |
-| `ANDROID_KEYSTORE_BASE64`   | 见下方"获取 base64"步骤 | Android release keystore 的 base64 编码   |
-| `ANDROID_KEYSTORE_PASSWORD` | `yuanchat_release_2026` | keystore 密码（**发版后请改为你自己的**） |
-| `ANDROID_KEY_ALIAS`         | `yuanchat`              | 密钥别名                                  |
-| `ANDROID_KEY_PASSWORD`      | `yuanchat_release_2026` | 密钥密码                                  |
+| Secret 名                            | 值                         | 说明                                      |
+| ------------------------------------ | -------------------------- | ----------------------------------------- |
+| `ANDROID_KEYSTORE_BASE64`            | 见下方"获取 base64"步骤    | Android release keystore 的 base64 编码   |
+| `ANDROID_KEYSTORE_PASSWORD`          | `yuanchat_release_2026`    | keystore 密码（**发版后请改为你自己的**） |
+| `ANDROID_KEY_ALIAS`                  | `yuanchat`                 | 密钥别名                                  |
+| `ANDROID_KEY_PASSWORD`               | `yuanchat_release_2026`    | 密钥密码                                  |
+| `TAURI_SIGNING_PRIVATE_KEY`          | 见下方"桌面自动更新签名"   | updater 包签名私钥（自签，免费）          |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 生成时设的密码（无则留空） | 私钥密码                                  |
 
 **不需要**：
 
 - `GITHUB_TOKEN` —— Actions 自动提供
-- macOS/Windows 代码签名 secrets —— 本轮先跳过，未来买证书时再补：
+- macOS/Windows **OS 层**代码签名 secrets —— 需付费证书，未配置时 CI 正常出包（仅带系统警告）：
   - `APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`
   - `APPLE_ID`、`APPLE_PASSWORD`、`APPLE_TEAM_ID`（notarize 用）
   - `WINDOWS_CERTIFICATE`、`WINDOWS_CERTIFICATE_PASSWORD`
+
+> **两种签名不要混淆**：
+>
+> | 类型                         | 用途                                             | 成本                            | 现状        |
+> | ---------------------------- | ------------------------------------------------ | ------------------------------- | ----------- |
+> | **updater 签名**（minisign） | 自动更新包完整性校验，客户端拒装未签名包         | **免费自签**                    | ✅ 已启用   |
+> | **OS 代码签名**              | 消除 macOS Gatekeeper / Windows SmartScreen 警告 | Apple $99/y、Windows OV ~$200/y | ⏳ 待购证书 |
+>
+> 二者相互独立：没有付费证书也能发布带签名校验的自动更新。
+
+### 1.1 桌面自动更新签名（自签，免费）
+
+updater 用 minisign 密钥对：私钥签包（CI 用），公钥内置在客户端校验。
+
+```bash
+# 生成密钥对（私钥务必存仓库外；本项目生成于 ~/.config/yuanchat/）
+pnpm --filter @yuanchat/desktop exec tauri signer generate -w ~/.config/yuanchat/updater.key
+
+# 私钥内容 → GitHub Secret TAURI_SIGNING_PRIVATE_KEY
+cat ~/.config/yuanchat/updater.key
+```
+
+公钥已写入 `apps/desktop/src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`（可入库，公开无风险）。
+
+- 更新源：`plugins.updater.endpoints` → GitHub Release 的 `latest.json`（tauri-action 自动生成上传）
+- 客户端入口：设置 → 关于 → 「检查更新」（`apps/desktop/src/components/UpdateChecker.tsx`）
+- ⚠️ **私钥丢失** = 已安装的旧版客户端再也无法验证新包，只能让用户手动重装
+
+> Windows 也可用自签证书（`New-SelfSignedCertificate`）走 OS 签名，但**不能**消除
+> SmartScreen 警告（需受信任 CA 签发 + 声誉积累），故本项目不做自签 OS 证书。
 
 ### 2. Android Keystore 生成与获取 base64
 
@@ -145,8 +177,11 @@ pnpm --filter @yuanchat/web build
 
 - Linux `.AppImage`：`chmod +x yuanchat*.AppImage && ./yuanchat*.AppImage`
 - Linux `.deb`：`sudo dpkg -i yuanchat*.deb`
-- Windows `.msi`：双击安装（未签名会有 SmartScreen 警告，点"仍要运行"）
-- macOS `.dmg`：拖到 Applications（未签名会有 Gatekeeper 警告，右键"打开"或系统偏好设置 → 安全性放行）
+- Windows `.msi`：双击安装（无 OS 签名会有 SmartScreen 警告，点"仍要运行"）
+- macOS `.dmg`：拖到 Applications（无 OS 签名会有 Gatekeeper 警告，右键"打开"或系统偏好设置 → 安全性放行）
+
+**自动更新**：安装后在「设置 → 关于 → 检查更新」可拉取新版本。更新包经
+minisign 公钥校验，签名不匹配则拒绝安装（防篡改）；下载完成后点「重启应用」生效。
 
 ### Android APK
 

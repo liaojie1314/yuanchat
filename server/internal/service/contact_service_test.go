@@ -17,11 +17,11 @@ import (
 	"gorm.io/gorm/schema"
 )
 
-// testDB 连接本地开发库（deploy/docker-compose.yml 的 postgres :5433）。
+// testDB 连接本地开发库（deploy/docker-compose.yml 的 postgres :5434）。
 // 数据库不可达时跳过集成用例（CI 无 DB 环境仍绿）。
 func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := "host=localhost port=5433 user=yuanchat password=yuanchat_dev dbname=yuanchat sslmode=disable"
+	dsn := "host=localhost port=5434 user=yuanchat password=yuanchat_dev dbname=yuanchat sslmode=disable"
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
 		NamingStrategy: schema.NamingStrategy{

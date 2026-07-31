@@ -60,6 +60,8 @@ func New(cfg config.LogConfig, env config.ServerConfig) (*zap.Logger, error) {
 		zap.AddCaller(),
 		zap.AddCallerSkip(1),
 		zap.AddStacktrace(zapcore.ErrorLevel),
+		// 固定字段：Loki 等聚合系统按 app 维度筛选
+		zap.Fields(zap.String("app", "yuanchat"), zap.String("env", env.Env)),
 	)
 
 	return zapLogger, nil

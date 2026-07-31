@@ -19,6 +19,9 @@ type Config struct {
 	Asynq     AsynqConfig     `mapstructure:"asynq"`
 	Upload    UploadConfig    `mapstructure:"upload"`
 	MinIO     MinIOConfig     `mapstructure:"minio"`
+	Moderation ModerationConfig `mapstructure:"moderation"`
+	Presence  PresenceConfig  `mapstructure:"presence"`
+	Push      PushConfig      `mapstructure:"push"`
 }
 
 type ServerConfig struct {
@@ -100,6 +103,25 @@ type AsynqConfig struct {
 	RedisDB       int            `mapstructure:"redis_db"`
 	Concurrency   int            `mapstructure:"concurrency"`
 	Queues        map[string]int `mapstructure:"queues"`
+}
+
+// PushConfig Web Push（VAPID）配置。密钥为空时推送功能整体关闭。
+type PushConfig struct {
+	VAPIDPublicKey  string `mapstructure:"vapid_public_key"`
+	VAPIDPrivateKey string `mapstructure:"vapid_private_key"`
+	Subject         string `mapstructure:"subject"` // mailto: 或站点 URL，规范要求
+	TTL             int    `mapstructure:"ttl"`     // 推送服务保留秒数
+}
+
+// PresenceConfig 在线状态后端配置。
+type PresenceConfig struct {
+	Backend string `mapstructure:"backend"` // local（单实例，默认）| redis（多实例 Pub/Sub）
+	Channel string `mapstructure:"channel"` // redis 模式的事件 channel，默认 presence:events
+}
+
+// ModerationConfig 内容审核配置。
+type ModerationConfig struct {
+	Words []string `mapstructure:"words"` // 敏感词库；命中的消息标记 flagged 进审核队列
 }
 
 type UploadConfig struct {

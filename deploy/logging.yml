@@ -1,0 +1,40 @@
+# yuanchat 日志聚合栈：Loki（存储/查询）+ Promtail（采集）
+#
+# 与主 compose（docker-compose.yml）分离：日志栈可选启动，
+# grafana 复用主 compose 的实例（:3001），此处只补 Loki 数据源。
+#
+# 用法：
+#   docker compose -f deploy/docker-compose.yml -f deploy/logging.yml up -d
+# 后端以 JSON 格式落盘（YUANCHAT_LOG_FORMAT=json YUANCHAT_LOG_OUTPUT=file），
+# promtail 收 logs/ 目录；生产容器化部署时改用 docker service discovery。
+
+services:
+  loki:
+    image: grafana/loki:3.1.0
+    container_name: yuanchat-loki
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3102:3100"
+    volumes:
+      - loki_data:/loki
+    networks:
+      - yuanchat-net
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.1.0
+    container_name: yuanchat-promtail
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./promtail-config.yml:/etc/promtail/config.yml:ro
+      # 采集宿主机后端日志文件（server/logs/*.log，JSON 一行一条）
+      - ../server/logs:/var/log/yuanchat:ro
+    depends_on:
+      - loki
+    networks:
+      - yuanchat-net
+    restart: unless-stopped
+
+volumes:
+  loki_data:
+    driver: local

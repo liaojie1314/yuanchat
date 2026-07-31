@@ -125,7 +125,7 @@ function apiError(code: number, message: string) {
 
 /**
  * 决定是否拦截当前请求：
- * - 后端可用时（localhost:8080 可达）→ 放行（passthrough）
+ * - 后端可用时（localhost:8085 可达）→ 放行（passthrough）
  * - 后端不可用 → Mock 接管
  *
  * 注意：MSW passthrough 在 Service Worker 层面实现，
@@ -143,7 +143,7 @@ export const handlers = [
   // POST /api/v1/users/login
   // Body: { account: string; password: string }
   // --------------------------------------------------
-  http.post("http://localhost:8080/api/v1/users/login", async ({ request }) => {
+  http.post("http://localhost:8085/api/v1/users/login", async ({ request }) => {
     await delay(600); // 模拟网络延迟
     const body = (await request.json()) as { account?: string; password?: string };
 
@@ -177,7 +177,7 @@ export const handlers = [
   // 认证 — 注册
   // POST /api/v1/users/register
   // --------------------------------------------------
-  http.post("http://localhost:8080/api/v1/users/register", async ({ request }) => {
+  http.post("http://localhost:8085/api/v1/users/register", async ({ request }) => {
     await delay(800);
     const body = (await request.json()) as {
       phone?: string;
@@ -211,7 +211,7 @@ export const handlers = [
   // 认证 — 登出
   // POST /api/v1/auth/logout
   // --------------------------------------------------
-  http.post("http://localhost:8080/api/v1/auth/logout", async () => {
+  http.post("http://localhost:8085/api/v1/auth/logout", async () => {
     await delay(300);
     return apiOk({ message: "logged out" });
   }),
@@ -220,7 +220,7 @@ export const handlers = [
   // 验证码 — 获取
   // GET /api/v1/captcha
   // --------------------------------------------------
-  http.get("http://localhost:8080/api/v1/captcha", async () => {
+  http.get("http://localhost:8085/api/v1/captcha", async () => {
     await delay(300);
 
     const svg = generateCaptchaSvg();
@@ -236,7 +236,7 @@ export const handlers = [
   // --------------------------------------------------
   // 兜底：其他未匹配的 localhost 请求放行
   // --------------------------------------------------
-  http.all("http://localhost:8080/*", () => {
+  http.all("http://localhost:8085/*", () => {
     return passthrough();
   }),
 ];

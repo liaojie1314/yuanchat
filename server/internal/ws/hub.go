@@ -24,6 +24,8 @@ type Hub struct {
 	logger         *zap.Logger
 	// presenceNotifier 用户首连上线 / 末连下线时回调（多设备去重）；在锁外调用防死锁
 	presenceNotifier func(userID uuid.UUID, online bool)
+	// backend 全局在线视图后端：本地事件外发 + 远端实例在线镜像（多实例部署）
+	backend PresenceBackend
 }
 
 // NewHub 创建 Hub。maxConnPerUser ≤ 0 表示不限制。
@@ -32,6 +34,14 @@ func NewHub(maxConnPerUser int, logger *zap.Logger) *Hub {
 		clients:        make(map[uuid.UUID]map[*Client]struct{}),
 		maxConnPerUser: maxConnPerUser,
 		logger:         logger,
+		backend:        NewLocalPresence(),
+	}
+}
+
+// SetPresenceBackend 替换在线状态后端（装配层在启动前调用一次）。
+func (h *Hub) SetPresenceBackend(b PresenceBackend) {
+	if b != nil {
+		h.backend = b
 	}
 }
 
@@ -62,8 +72,11 @@ func (h *Hub) Register(c *Client) bool {
 	metrics.WSConnectionsActive.Inc()
 
 	// 锁外回调：notifier 内可能反查 Hub（OnlineFilter），锁内调用会死锁
-	if first && h.presenceNotifier != nil {
-		h.presenceNotifier(c.userID, true)
+	if first {
+		h.backend.PublishOnline(c.userID)
+		if h.presenceNotifier != nil {
+			h.presenceNotifier(c.userID, true)
+		}
 	}
 	return true
 }
@@ -87,8 +100,11 @@ func (h *Hub) Unregister(c *Client) {
 	// Prometheus: 连接数 -1
 	metrics.WSConnectionsActive.Dec()
 
-	if last && h.presenceNotifier != nil {
-		h.presenceNotifier(c.userID, false)
+	if last {
+		h.backend.PublishOffline(c.userID)
+		if h.presenceNotifier != nil {
+			h.presenceNotifier(c.userID, false)
+		}
 	}
 }
 
@@ -118,15 +134,42 @@ func (h *Hub) OnlineCount(userID uuid.UUID) int {
 	return len(h.clients[userID])
 }
 
+// DisconnectUser 强制断开某用户的全部在线连接（管理员封禁时踢线）。
+// 关闭底层 conn 触发 readPump 退出 → Unregister 自然摘除，无需在此改 map。
+func (h *Hub) DisconnectUser(userID uuid.UUID) int {
+	h.mu.RLock()
+	conns := make([]*Client, 0, len(h.clients[userID]))
+	for c := range h.clients[userID] {
+		conns = append(conns, c)
+	}
+	h.mu.RUnlock()
+
+	for _, c := range conns {
+		_ = c.conn.Close()
+	}
+	if len(conns) > 0 {
+		h.logger.Info("user force disconnected",
+			zap.String("user_id", userID.String()), zap.Int("connections", len(conns)))
+	}
+	return len(conns)
+}
+
 // OnlineFilter 过滤出给定用户中当前在线的子集（presence 快照用）。
+// 全局在线判定：本实例在线 OR 其他实例在线（backend mirror）。
 func (h *Hub) OnlineFilter(ids []uuid.UUID) []uuid.UUID {
 	h.mu.RLock()
-	defer h.mu.RUnlock()
 	online := make([]uuid.UUID, 0, len(ids))
+	localOffline := make([]uuid.UUID, 0, len(ids))
 	for _, id := range ids {
 		if len(h.clients[id]) > 0 {
 			online = append(online, id)
+		} else {
+			localOffline = append(localOffline, id)
 		}
 	}
+	h.mu.RUnlock()
+
+	// 锁外查远端 mirror（backend 内部有自己的锁）
+	online = append(online, h.backend.FilterRemoteOnline(localOffline)...)
 	return online
 }

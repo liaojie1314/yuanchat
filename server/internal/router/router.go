@@ -68,28 +68,80 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	blocklistH := handler.NewBlocklistHandler(blocklistSvc, logger)
 	forwardH := handler.NewForwardHandler(msgSvc, hub, logger)
 
+	adminRepo := repository.NewAdminRepository(db)
+	adminSvc := service.NewAdminService(adminRepo, convRepo, logger)
+	adminH := handler.NewAdminHandler(adminSvc, hub, logger)
+	reportH := handler.NewReportHandler(adminSvc, logger)
+
+	pushRepo := repository.NewPushRepository(db)
+	pushSvc := service.NewPushService(pushRepo, cfg.Push, logger)
+	pushH := handler.NewPushHandler(pushSvc, logger)
+
+	e2eeH := handler.NewE2EEHandler(repository.NewE2EERepository(db), logger)
+
+	// 离线成员补推浏览器通知：WS 在线者已实时收到，不重复打扰。
+	// VAPID 未配置时 NotifyUsers 内部直接返回，等于功能关闭。
+	wsH.SetOfflinePush(func(recipients []uuid.UUID, info ws.OfflineMsgInfo) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		body := info.Text
+		switch info.ContentType {
+		case "image":
+			body = "[图片]"
+		case "file":
+			body = "[文件]"
+		case "voice":
+			body = "[语音]"
+		}
+		pushSvc.NotifyUsers(ctx, recipients, service.PushPayload{
+			Title:          info.SenderNickname,
+			Body:           body,
+			ConversationID: info.ConversationID.String(),
+			MessageID:      info.MessageID.String(),
+		})
+	})
+
+	// 敏感词审核：命中词库的文本消息标记 flagged 进审核队列
+	msgSvc.SetModeration(service.NewModerationService(cfg.Moderation.Words))
+
+	// 好友上下线帧广播（对本实例在线好友）
+	notifyFriends := func(userID uuid.UUID, online bool) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		friendIDs, err := contactRepo.FriendIDs(ctx, userID)
+		if err != nil {
+			logger.Warn("presence friend lookup failed", zap.Error(err))
+			return
+		}
+		frame, err := ws.Encode(ws.TypePresence, ws.PresencePayload{UserID: userID, Online: online})
+		if err != nil {
+			return
+		}
+		hub.SendToUsers(friendIDs, frame)
+	}
+
+	// Presence 后端：redis 模式下本实例事件广播到其他实例，
+	// 远端实例的上下线事件也推给连在本实例的相关好友
+	if cfg.Presence.Backend == "redis" {
+		rp := ws.NewRedisPresence(rdb, cfg.Presence.Channel, logger)
+		rp.SetRemoteHandler(func(userID uuid.UUID, online bool) {
+			go notifyFriends(userID, online)
+		})
+		hub.SetPresenceBackend(rp)
+		logger.Info("presence backend: redis", zap.String("channel", cfg.Presence.Channel))
+	}
+
 	// 好友上下线广播：独立 goroutine 通知在线好友，不阻塞连接注册路径
 	hub.SetPresenceNotifier(func(userID uuid.UUID, online bool) {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			friendIDs, err := contactRepo.FriendIDs(ctx, userID)
-			if err != nil {
-				logger.Warn("presence friend lookup failed", zap.Error(err))
-				return
-			}
-			frame, err := ws.Encode(ws.TypePresence, ws.PresencePayload{UserID: userID, Online: online})
-			if err != nil {
-				return
-			}
-			hub.SendToUsers(friendIDs, frame)
-		}()
+		go notifyFriends(userID, online)
 	})
 
 	// --- Routes ---
 	api := r.Group("/api/v1")
 	api.GET("/health", healthH.Check)
 	api.GET("/captcha", captchaH.Generate)
+	// VAPID 公钥：前端 pushManager.subscribe 前拉取，无需鉴权
+	api.GET("/push/public-key", pushH.PublicKey)
 	api.POST("/auth/refresh", middleware.LimitByIP(20, 40), userH.Refresh)
 
 	users := api.Group("/users")
@@ -144,6 +196,34 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		chat.POST("/favorites", favH.Add)
 		chat.DELETE("/favorites/:messageId", favH.Remove)
 		chat.GET("/favorites", favH.List)
+
+		chat.POST("/reports", middleware.LimitByIP(10, 20), reportH.Create)
+
+		chat.POST("/push/subscribe", pushH.Subscribe)
+		chat.DELETE("/push/subscribe", pushH.Unsubscribe)
+
+		// 端到端加密：服务端只中转公钥与客户端加密的备份 blob
+		chat.POST("/e2ee/keys", e2eeH.UploadKeys)
+		chat.GET("/e2ee/prekey-bundle/:userId", e2eeH.PreKeyBundle)
+		chat.GET("/e2ee/prekey-count", e2eeH.PreKeyCount)
+		chat.POST("/e2ee/backup", e2eeH.SaveBackup)
+		chat.GET("/e2ee/backup", e2eeH.GetBackup)
+	}
+
+	// 管理后台：JWT + role=admin 双重校验，所有写操作留审计日志
+	admin := api.Group("/admin", middleware.AuthRequired(cfg.JWT), middleware.RequireAdmin(db))
+	{
+		admin.GET("/users", adminH.ListUsers)
+		admin.POST("/users/:id/ban", adminH.BanUser)
+		admin.DELETE("/users/:id/ban", adminH.UnbanUser)
+		admin.GET("/conversations", adminH.ListConversations)
+		admin.POST("/conversations/:id/dissolve", adminH.DissolveConversation)
+		admin.GET("/messages", adminH.ListMessages)
+		admin.DELETE("/messages/:id", adminH.DeleteMessage)
+		admin.DELETE("/messages/:id/flag", adminH.ClearMessageFlag)
+		admin.GET("/reports", adminH.ListReports)
+		admin.POST("/reports/:id/handle", adminH.HandleReport)
+		admin.GET("/audit-logs", adminH.ListAuditLogs)
 	}
 
 	return r, wsH

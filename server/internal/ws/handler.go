@@ -31,6 +31,23 @@ type Handler struct {
 	isProd   bool
 	upgrader websocket.Upgrader
 	logger   *zap.Logger
+	// offlinePush 消息落库后对「无任何 WS 连接」的成员补推浏览器通知
+	//（router 注入；nil 表示未启用 Web Push）
+	offlinePush func(recipients []uuid.UUID, info OfflineMsgInfo)
+}
+
+// OfflineMsgInfo 离线推送所需的消息摘要（避免 ws 层依赖 push 层类型）。
+type OfflineMsgInfo struct {
+	SenderNickname string
+	ContentType    string // text / image / file / voice
+	Text           string // 仅 text 类型有值
+	ConversationID uuid.UUID
+	MessageID      uuid.UUID
+}
+
+// SetOfflinePush 注册离线推送回调（装配层调用）。
+func (h *Handler) SetOfflinePush(fn func(recipients []uuid.UUID, info OfflineMsgInfo)) {
+	h.offlinePush = fn
 }
 
 // NewHandler 创建 WebSocket Handler。
@@ -125,6 +142,15 @@ func (h *Handler) dispatch(c *Client, env *Envelope) {
 		h.handleRead(c, env)
 	case TypeTyping:
 		h.handleTyping(c, env)
+	case TypePing:
+		// 应用层心跳：读侧任意帧都会顺延 read deadline（readPump 逻辑），
+		// 回 pong 让客户端确认链路活性（半开连接探测）
+		if frame, err := Encode(TypePong, struct{}{}); err == nil {
+			select {
+			case c.send <- frame:
+			default:
+			}
+		}
 	default:
 		c.sendError(400, "unknown frame type: "+env.Type, "")
 	}
@@ -190,6 +216,36 @@ func (h *Handler) handleSend(c *Client, env *Envelope) {
 	})
 	if err == nil {
 		h.hub.SendToUsers(result.MemberIDs, receive)
+	}
+
+	// 离线成员补推浏览器通知：WS 在线者已实时收到，无需重复打扰。
+	// OnlineFilter 含跨实例 mirror，多实例部署下判定同样准确。
+	if h.offlinePush != nil {
+		recipients := make([]uuid.UUID, 0, len(result.MemberIDs))
+		for _, id := range result.MemberIDs {
+			if id != c.userID {
+				recipients = append(recipients, id)
+			}
+		}
+		online := make(map[uuid.UUID]struct{})
+		for _, id := range h.hub.OnlineFilter(recipients) {
+			online[id] = struct{}{}
+		}
+		offline := make([]uuid.UUID, 0, len(recipients))
+		for _, id := range recipients {
+			if _, up := online[id]; !up {
+				offline = append(offline, id)
+			}
+		}
+		if len(offline) > 0 {
+			go h.offlinePush(offline, OfflineMsgInfo{
+				SenderNickname: result.SenderNickname,
+				ContentType:    p.Content.Type,
+				Text:           p.Content.Text,
+				ConversationID: p.ConversationID,
+				MessageID:      result.Message.ID,
+			})
+		}
 	}
 }
 
@@ -260,6 +316,33 @@ func (h *Handler) buildContent(c *Client, p *SendPayload) (int16, string, bool) 
 			return 0, "", false
 		}
 		return model.MessageTypeVoice, string(raw), true
+	case "e2ee":
+		// 端到端加密：服务端不理解密文语义，只校验结构完整性后原样落库。
+		// 任何字段都不参与索引/搜索/审核——这是 E2EE 的设计前提。
+		if p.Content.RatchetKey == "" || p.Content.Nonce == "" || p.Content.Ciphertext == "" ||
+			p.Content.N == nil || p.Content.PN == nil {
+			c.sendError(400, "e2ee content requires ratchet_key/n/pn/nonce/ciphertext", p.ClientMsgID)
+			return 0, "", false
+		}
+		raw, err := json.Marshal(struct {
+			RatchetKey   string `json:"ratchet_key"`
+			N            int    `json:"n"`
+			PN           int    `json:"pn"`
+			Nonce        string `json:"nonce"`
+			Ciphertext   string `json:"ciphertext"`
+			IdentityKey  string `json:"identity_key,omitempty"`
+			EphemeralKey string `json:"ephemeral_key,omitempty"`
+			OtkID        *int   `json:"otk_id,omitempty"`
+		}{
+			p.Content.RatchetKey, *p.Content.N, *p.Content.PN,
+			p.Content.Nonce, p.Content.Ciphertext,
+			p.Content.IdentityKey, p.Content.EphemeralKey, p.Content.OtkID,
+		})
+		if err != nil {
+			c.sendError(400, "invalid e2ee content", p.ClientMsgID)
+			return 0, "", false
+		}
+		return model.MessageTypeE2EE, string(raw), true
 	default:
 		c.sendError(400, "unsupported content type", p.ClientMsgID)
 		return 0, "", false

@@ -1,6 +1,6 @@
 # 元聊 YuanChat — 开发与打包指南
 
-> **最后更新**：2026-07-23（B3：新增 E2E 覆盖范围 + CI E2E job）
+> **最后更新**：2026-07-27（v0.3.0：E2EE、PWA/Web Push、桌面自动更新、生产部署编排、管理后台）
 >
 > ⚠️ **文档维护规则**：任何 `package.json` scripts、Tauri 配置、环境变量、workflow 的变更，**必须同步更新本文档**。此规则对所有会话生效。
 
@@ -54,14 +54,14 @@ pnpm install                # 安装所有 workspace 依赖
 
 | 命令                    | 数据模式 | 自动完成的步骤                                                                                             |
 | ----------------------- | -------- | ---------------------------------------------------------------------------------------------------------- |
-| `pnpm dev:web`          | 真实后端 | docker(pg/redis, `--wait` 健康检查) → seed（幂等）→ Go 服务（REST :8080 + WS :8081，健康检查）→ Vite :5173 |
+| `pnpm dev:web`          | 真实后端 | docker(pg/redis, `--wait` 健康检查) → seed（幂等）→ Go 服务（REST :8085 + WS :8086，健康检查）→ Vite :5173 |
 | `pnpm dev:web:mock`     | Mock     | 仅 Vite :5173（MSW + demo 数据，无需后端/数据库）                                                          |
 | `pnpm dev:desktop`      | 真实后端 | 同 dev:web 的后端链 → `tauri dev`（桌面窗口，Vite :1420）                                                  |
 | `pnpm dev:desktop:mock` | Mock     | 仅 `tauri dev`                                                                                             |
-| `pnpm dev:android`      | 真实后端 | 后端链 → `adb reverse tcp:8080/8081`（设备直连宿主机后端）→ `tauri android dev`                            |
+| `pnpm dev:android`      | 真实后端 | 后端链 → `adb reverse tcp:8085/8086`（设备直连宿主机后端）→ `tauri android dev`                            |
 | `pnpm dev:android:mock` | Mock     | 仅 `tauri android dev`（需 ANDROID_HOME，见第三章）                                                        |
 | `pnpm dev:server`       | —        | 仅后端链（docker → seed → Go 服务），前端另起                                                              |
-| `pnpm dev:stop`         | —        | 停止 5173/1420/8080/8081 上的进程 + `docker compose stop`                                                  |
+| `pnpm dev:stop`         | —        | 停止 5173/1420/8085/8086 上的进程 + `docker compose stop`                                                  |
 
 行为约定：
 
@@ -94,7 +94,7 @@ pnpm install                # 安装所有 workspace 依赖
 | 命令               | `VITE_ENABLE_MOCK` | 行为                                                     |
 | ------------------ | ------------------ | -------------------------------------------------------- |
 | `dev` / `dev:mock` | 未设置（默认启用） | 浏览器 Service Worker 拦截 API，返回 mock 数据           |
-| `dev:real`         | `false`            | 所有请求直连 `http://localhost:8080`（需先启动 Go 后端） |
+| `dev:real`         | `false`            | 所有请求直连 `http://localhost:8085`（需先启动 Go 后端） |
 
 **切换方式**：
 
@@ -268,7 +268,7 @@ pnpm --filter @yuanchat/desktop tauri android build
 
 | 命令                                                             | 说明                                               |
 | ---------------------------------------------------------------- | -------------------------------------------------- |
-| `cd server && make dev`                                          | 启动服务（REST :8080 + WebSocket :8081，同一进程） |
+| `cd server && make dev`                                          | 启动服务（REST :8085 + WebSocket :8086，同一进程） |
 | `cd server && go run ./cmd/server`                               | 等价于 make dev                                    |
 | `cd server && go run ./cmd/seed`                                 | 灌入联调测试数据（幂等，可重复执行）               |
 | `cd server && make build`                                        | 编译为 `server/bin/yuanchat-server`                |
@@ -279,13 +279,13 @@ pnpm --filter @yuanchat/desktop tauri android build
 > 一键完成下面全部步骤：`pnpm dev:web`（详见第零章）。以下为手动分步方式。
 
 ```bash
-# 1. 启动基础设施（PostgreSQL :5433 + Redis :6379）
+# 1. 启动基础设施（PostgreSQL :5434 + Redis :6380）
 docker compose -f deploy/docker-compose.yml up -d
 
 # 2. 灌入测试数据（3 个用户 + 单聊 + 群聊 + 历史消息）
 cd server && go run ./cmd/seed
 
-# 3. 启动后端（REST :8080 + WS :8081）
+# 3. 启动后端（REST :8085 + WS :8086）
 go run ./cmd/server
 
 # 4. 另开终端，启动前端（真实模式，关闭 MSW）
@@ -316,7 +316,9 @@ docker compose -f deploy/docker-compose.yml ps        # 状态
 docker compose -f deploy/docker-compose.yml down      # 停止
 ```
 
-Compose 含三个服务：**PostgreSQL**（`:5433`→5432）、**Redis**（`:6379`）、**MinIO**（对象存储，图片/文件/头像）。
+Compose 含三个服务：**PostgreSQL**（`:5434`→5432）、**Redis**（`:6380`→6379）、**MinIO**（对象存储，图片/文件/头像）。
+
+> 宿主机端口整体避让本机 yuanai 项目占用的 5433/6379/9000/9001。
 
 ### MinIO（对象存储）
 
@@ -324,12 +326,12 @@ Compose 含三个服务：**PostgreSQL**（`:5433`→5432）、**Redis**（`:637
 
 | 端口    | 用途                                                            |
 | ------- | --------------------------------------------------------------- |
-| `:9000` | S3 API 端点（后端签发预签名 URL、前端直传/下载都走它）          |
-| `:9001` | Web 控制台（浏览器打开 `http://localhost:9001` 可视化管理对象） |
+| `:9002` | S3 API 端点（后端签发预签名 URL、前端直传/下载都走它）          |
+| `:9003` | Web 控制台（浏览器打开 `http://localhost:9003` 可视化管理对象） |
 
 - **控制台账号**（开发默认，见 `deploy/docker-compose.yml` 与 `server/config/config.yaml`）：
   用户名 `yuanchat_minio` / 密码 `yuanchat_minio_dev`，默认桶 `yuanchat`。
-- **健康检查**：`curl http://localhost:9000/minio/health/live` 返回 200 即就绪。
+- **健康检查**：`curl http://localhost:9002/minio/health/live` 返回 200 即就绪。
 - 后端首次连接时幂等创建 `yuanchat` 桶，并对 `avatars/` 前缀开放匿名公共读（头像用永久 public URL，
   免签名）；图片消息落 `images/` 前缀，文件/语音消息落 `files/` 前缀，均走一次性预签名 GET
   （详见 `docs/02_CHAT_API.md` 的 files 端点）。
@@ -337,10 +339,10 @@ Compose 含三个服务：**PostgreSQL**（`:5433`→5432）、**Redis**（`:637
   （jpeg/png/gif/webp）+ 文档（pdf/doc/docx/xlsx/pptx/txt/zip）+ 语音 `audio/webm`。
   新增可传类型时在此追加，重启后端生效；白名单外的 MIME 在 `upload-url` 阶段被 `4001` 拒绝。
 
-> **真机联调注意**：MinIO 预签名 URL 里的 host 来自 `minio.endpoint`（默认 `localhost:9000`）。
+> **真机联调注意**：MinIO 预签名 URL 里的 host 来自 `minio.endpoint`（默认 `localhost:9002`）。
 > 手机/平板真机访问宿主机的 `localhost` 会指向设备自身而非开发机，导致图片上传/下载失败。
 > 真机联调时须把 `server/config/config.yaml` 的 `minio.endpoint` 改为开发机的**局域网 IP**
-> （如 `192.168.1.100:9000`），并确保防火墙放行 9000 端口；后端据此签名，真机才能直连对象存储。
+> （如 `192.168.1.100:9002`），并确保防火墙放行 9002 端口；后端据此签名，真机才能直连对象存储。
 
 ---
 
@@ -474,13 +476,13 @@ npx tauri android build --aab --split-per-abi --target aarch64
 | ------------------ | -------------------- | ---------------------------------------------- |
 | `SERVER_ENV`       | `development`        | 运行环境                                       |
 | `DB_HOST`          | `localhost`          | PostgreSQL 主机                                |
-| `DB_PORT`          | `5432`               | PostgreSQL 端口                                |
+| `DB_PORT`          | `5434`               | PostgreSQL 端口（compose 宿主机映射）          |
 | `DB_USER`          | `yuanchat`           | 数据库用户                                     |
 | `DB_PASSWORD`      | —                    | 数据库密码                                     |
 | `DB_NAME`          | `yuanchat`           | 数据库名                                       |
-| `REDIS_ADDR`       | `localhost:6379`     | Redis 地址                                     |
+| `REDIS_ADDR`       | `localhost:6380`     | Redis 地址                                     |
 | `JWT_SECRET`       | —                    | JWT 签名密钥                                   |
-| `MINIO_ENDPOINT`   | `localhost:9000`     | MinIO S3 端点（真机联调改局域网 IP，见第五章） |
+| `MINIO_ENDPOINT`   | `localhost:9002`     | MinIO S3 端点（真机联调改局域网 IP，见第五章） |
 | `MINIO_ACCESS_KEY` | `yuanchat_minio`     | MinIO 访问密钥（对应控制台用户名）             |
 | `MINIO_SECRET_KEY` | `yuanchat_minio_dev` | MinIO 私有密钥（对应控制台密码）               |
 
@@ -490,7 +492,7 @@ npx tauri android build --aab --split-per-abi --target aarch64
 
 | 模式          | 配置文件                   | Mock | API 地址示例                   |
 | ------------- | -------------------------- | ---- | ------------------------------ |
-| `development` | `apps/*/\.env.development` | 开启 | `http://localhost:8080`        |
+| `development` | `apps/*/\.env.development` | 开启 | `http://localhost:8085`        |
 | `test`        | `apps/*/\.env.test`        | 关闭 | `http://test-api.yuanchat.com` |
 | `production`  | `apps/*/\.env.production`  | 关闭 | `https://api.yuanchat.com`     |
 
@@ -498,8 +500,8 @@ npx tauri android build --aab --split-per-abi --target aarch64
 
 | 变量                | 默认值                  | 说明                    |
 | ------------------- | ----------------------- | ----------------------- |
-| `VITE_API_BASE_URL` | `http://localhost:8080` | 后端 API 地址           |
-| `VITE_WS_URL`       | `ws://localhost:8081`   | WebSocket 地址          |
+| `VITE_API_BASE_URL` | `http://localhost:8085` | 后端 API 地址           |
+| `VITE_WS_URL`       | `ws://localhost:8086`   | WebSocket 地址          |
 | `VITE_ENABLE_MOCK`  | —                       | `false` 时关闭 MSW Mock |
 
 ---

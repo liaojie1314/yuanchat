@@ -126,6 +126,9 @@ func (r *MessageRepository) Search(
 		Joins("JOIN conversations c ON c.id = m.conversation_id").
 		Joins("JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = ?", userID).
 		Where("m.deleted_at IS NULL AND m.status = ?", model.MessageStatusNormal).
+		// 端到端加密消息服务端无法解读，显式排除（其 content 本就无 text 字段，
+		// 此处是防御性声明：内容结构若变化也不会意外把密文纳入检索）
+		Where("m.message_type != ?", model.MessageTypeE2EE).
 		Where("(m.content->>'text') ILIKE ?", "%"+query+"%")
 
 	if convID != nil {
