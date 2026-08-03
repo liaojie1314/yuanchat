@@ -5,7 +5,7 @@
  * 后端返回的是数据库风格的 snake_case DTO（seq、message_type、content JSON 字符串），
  * 此处统一转换为 UI 直接消费的 `Conversation` / `ChatMessage` 结构。
  */
-import { apiGet, apiPost } from "./client";
+import { apiGet, apiPost, apiPut } from "./client";
 import i18n from "@yuanchat/design-system/i18n";
 import type { Conversation } from "../store/conversationStore";
 import type { ChatMessage } from "../store/messageStore";
@@ -35,6 +35,8 @@ export interface ConversationDTO {
   member_count: number;
   unread_count: number;
   is_muted: boolean;
+  is_pinned?: boolean;
+  pinned_at?: string | null;
   mention_unread?: boolean;
   last_seq: number;
   my_last_read_seq: number;
@@ -141,6 +143,8 @@ export function mapConversation(dto: ConversationDTO): Conversation {
     lastTime: dto.last_message ? formatListTime(dto.last_message.created_at) : "",
     unreadCount: dto.unread_count,
     isMuted: dto.is_muted,
+    isPinned: dto.is_pinned ?? false,
+    pinnedAt: dto.pinned_at ?? undefined,
     mentionUnread: dto.mention_unread ?? false,
     memberCount: dto.member_count,
     lastSeq: dto.last_seq,
@@ -396,4 +400,39 @@ export async function forwardMessage(
     messageId: r.message_id,
     seq: r.seq,
   }));
+}
+
+/** 会话个人设置（置顶/免打扰）响应 */
+export interface ConversationSettingsDTO {
+  is_pinned: boolean;
+  pinned_at?: string | null;
+  is_muted: boolean;
+}
+
+/** 更新本人会话设置（置顶/免打扰，member 维度） */
+export async function updateConversationSettings(
+  convId: string,
+  body: { is_pinned?: boolean; is_muted?: boolean },
+): Promise<ConversationSettingsDTO> {
+  return apiPut<ConversationSettingsDTO>("/api/v1/conversations/" + convId + "/settings", body);
+}
+
+/** conversation.updated 帧 → store patch（纯函数，供 wireSocket 与单测复用） */
+export function conversationUpdatePatch(p: {
+  conversation_id: string;
+  name?: string;
+  member_count?: number;
+  is_pinned?: boolean;
+  pinned_at?: string | null;
+  is_muted?: boolean;
+}): Partial<Conversation> {
+  const patch: Partial<Conversation> = {};
+  if (p.name) patch.name = p.name;
+  if (p.member_count) patch.memberCount = p.member_count;
+  if (p.is_pinned !== undefined) {
+    patch.isPinned = p.is_pinned;
+    patch.pinnedAt = p.pinned_at ?? undefined;
+  }
+  if (p.is_muted !== undefined) patch.isMuted = p.is_muted;
+  return patch;
 }

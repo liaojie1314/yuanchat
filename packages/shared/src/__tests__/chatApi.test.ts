@@ -16,6 +16,7 @@ import {
   pseudoWave,
   fetchMembers,
   recallMessage,
+  conversationUpdatePatch,
 } from "../api/chat";
 import type { ConversationDTO, MessageDTO } from "../api/chat";
 
@@ -304,5 +305,63 @@ describe("fetchMembers", () => {
   it("returns empty array when members missing", async () => {
     mockFetchOnce({});
     expect(await fetchMembers("conv-1")).toEqual([]);
+  });
+});
+
+describe("mapConversation pinned fields", () => {
+  const base: ConversationDTO = {
+    id: "c1",
+    type: 1,
+    name: "张三",
+    member_count: 2,
+    unread_count: 0,
+    is_muted: false,
+    last_seq: 0,
+    my_last_read_seq: 0,
+    updated_at: "2026-07-31T10:00:00+08:00",
+  };
+
+  it("maps is_pinned and pinned_at", () => {
+    const conv = mapConversation({
+      ...base,
+      is_pinned: true,
+      pinned_at: "2026-07-31T09:00:00+08:00",
+    });
+    expect(conv.isPinned).toBe(true);
+    expect(conv.pinnedAt).toBe("2026-07-31T09:00:00+08:00");
+  });
+
+  it("defaults to unpinned when fields absent", () => {
+    const conv = mapConversation(base);
+    expect(conv.isPinned).toBe(false);
+    expect(conv.pinnedAt).toBeUndefined();
+  });
+});
+
+describe("conversationUpdatePatch", () => {
+  it("patches settings fields when present", () => {
+    expect(
+      conversationUpdatePatch({
+        conversation_id: "c1",
+        is_pinned: true,
+        pinned_at: "2026-07-31T09:00:00+08:00",
+        is_muted: true,
+      }),
+    ).toEqual({
+      isPinned: true,
+      pinnedAt: "2026-07-31T09:00:00+08:00",
+      isMuted: true,
+    });
+  });
+
+  it("clears pinnedAt on unpin and skips absent fields", () => {
+    expect(conversationUpdatePatch({ conversation_id: "c1", is_pinned: false })).toEqual({
+      isPinned: false,
+      pinnedAt: undefined,
+    });
+    // 群改名帧不携带设置字段：不误触 isPinned/isMuted
+    expect(conversationUpdatePatch({ conversation_id: "c1", name: "新群名" })).toEqual({
+      name: "新群名",
+    });
   });
 });

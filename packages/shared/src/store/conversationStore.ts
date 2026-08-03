@@ -52,6 +52,8 @@ export interface Conversation {
   isMuted: boolean;
   /** 是否置顶（置顶会话在列表中单独分组靠前显示） */
   isPinned?: boolean;
+  /** 置顶时间（ISO 字符串，服务端 pinned_at；置顶组内按此倒序） */
+  pinnedAt?: string;
   /** 单聊对方的在线状态（不设置时回退 isOnline 布尔值） */
   presence?: Presence;
   /** 未发送的草稿内容，非空时列表预览显示 [草稿] 前缀 */
