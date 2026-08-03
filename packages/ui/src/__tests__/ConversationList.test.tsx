@@ -10,6 +10,12 @@ import { MemoryRouter } from "react-router-dom";
 import { ConversationList } from "../ConversationList";
 import { useConversationStore } from "@yuanchat/shared";
 
+vi.mock("@yuanchat/shared", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@yuanchat/shared")>();
+  return { ...mod, applyConversationSetting: vi.fn() };
+});
+import { applyConversationSetting } from "@yuanchat/shared";
+
 beforeEach(() => {
   // Spy on DOM APIs instead of replacing document entirely
   // (jsdom provides a working document.body/document.head for React)
@@ -144,5 +150,75 @@ describe("ConversationList", () => {
     // 只有张三有未读
     expect(screen.getAllByText("张三").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("李四: 新版本上线了")).toBeNull();
+  });
+});
+
+describe("pinned ordering and context menu", () => {
+  beforeEach(() => {
+    vi.mocked(applyConversationSetting).mockClear();
+    useConversationStore.setState({
+      activeId: null,
+      conversations: [
+        // store 顺序故意与 pinnedAt 倒序相反，验证排序生效
+        {
+          id: "p1",
+          type: "private",
+          name: "旧置顶",
+          unreadCount: 0,
+          isMuted: false,
+          isPinned: true,
+          pinnedAt: "2026-07-30T10:00:00+08:00",
+        },
+        {
+          id: "p2",
+          type: "private",
+          name: "新置顶",
+          unreadCount: 0,
+          isMuted: false,
+          isPinned: true,
+          pinnedAt: "2026-07-31T10:00:00+08:00",
+        },
+        { id: "r1", type: "private", name: "普通会话", unreadCount: 0, isMuted: false },
+      ],
+    });
+  });
+
+  it("sorts pinned section by pinnedAt desc", () => {
+    render(
+      <MemoryRouter>
+        <ConversationList />
+      </MemoryRouter>,
+    );
+    const names = screen.getAllByRole("button").map((b) => b.textContent);
+    const iNew = names.findIndex((s) => s?.includes("新置顶"));
+    const iOld = names.findIndex((s) => s?.includes("旧置顶"));
+    expect(iNew).toBeGreaterThan(-1);
+    expect(iNew).toBeLessThan(iOld);
+  });
+
+  it("opens context menu on right click and toggles pin", () => {
+    render(
+      <MemoryRouter>
+        <ConversationList />
+      </MemoryRouter>,
+    );
+    fireEvent.contextMenu(screen.getByText("普通会话"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /pin/i }));
+    expect(applyConversationSetting).toHaveBeenCalledWith("r1", { isPinned: true });
+  });
+
+  it("shows unpin and unmute labels for pinned/muted conversations", () => {
+    useConversationStore.setState((s) => ({
+      conversations: s.conversations.map((c) => (c.id === "p2" ? { ...c, isMuted: true } : c)),
+    }));
+    render(
+      <MemoryRouter>
+        <ConversationList />
+      </MemoryRouter>,
+    );
+    fireEvent.contextMenu(screen.getByText("新置顶"));
+    expect(screen.getByRole("menuitem", { name: /unpin/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: /unmute/i }));
+    expect(applyConversationSetting).toHaveBeenCalledWith("p2", { isMuted: false });
   });
 });
