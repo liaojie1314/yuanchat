@@ -136,7 +136,7 @@ type ConversationSettingsBody struct {
 // UpdateSettings 更新本人会话设置（PUT /conversations/:id/settings，member 维度）。
 //
 // 多端同步：变更成功后向本人全部设备推 conversation.updated
-//（仅推本人，照 Leave 的 pushRemoved 模式；其他成员不感知）。
+// （仅推本人，照 Leave 的 pushRemoved 模式；其他成员不感知）。
 func (h *ConversationHandler) UpdateSettings(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
