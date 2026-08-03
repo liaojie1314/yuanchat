@@ -205,6 +205,7 @@
   "detail.roleOwner": "그룹장",
   "detail.roleAdmin": "관리자",
   "detail.mute": "알림 끄기",
+  "detail.settingsFailed": "설정에 실패했습니다. 다시 시도해 주세요",
   "detail.pinConversation": "대화 고정",
   "detail.myAlias": "이 그룹에서의 내 이름",
   "detail.notSet": "설정되지 않음",

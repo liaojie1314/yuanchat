@@ -205,6 +205,7 @@
   "detail.roleOwner": "オーナー",
   "detail.roleAdmin": "管理者",
   "detail.mute": "通知をミュート",
+  "detail.settingsFailed": "設定に失敗しました。再試行してください",
   "detail.pinConversation": "会話をピン留め",
   "detail.myAlias": "このグループでの自分の表示名",
   "detail.notSet": "未設定",

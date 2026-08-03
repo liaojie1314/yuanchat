@@ -205,6 +205,7 @@
   "detail.roleOwner": "群主",
   "detail.roleAdmin": "管理员",
   "detail.mute": "消息免打扰",
+  "detail.settingsFailed": "设置失败，请重试",
   "detail.pinConversation": "置顶会话",
   "detail.myAlias": "我在本群的昵称",
   "detail.notSet": "未设置",

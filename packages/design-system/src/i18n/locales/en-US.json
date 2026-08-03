@@ -205,6 +205,7 @@
   "detail.roleOwner": "Owner",
   "detail.roleAdmin": "Admin",
   "detail.mute": "Mute notifications",
+  "detail.settingsFailed": "Failed to update settings, please retry",
   "detail.pinConversation": "Pin conversation",
   "detail.myAlias": "My alias in group",
   "detail.notSet": "Not set",
