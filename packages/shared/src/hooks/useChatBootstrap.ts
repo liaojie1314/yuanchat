@@ -19,6 +19,7 @@ import {
   formatListTime,
   formatMessageTime,
   mapConversation,
+  conversationUpdatePatch,
   pseudoWave,
 } from "../api/chat";
 import { setTokenProvider } from "../api/client";
@@ -34,7 +35,6 @@ import {
 import { useAuthStore } from "../store/authStore";
 import { useContactStore } from "../store/contactStore";
 import { useConversationStore } from "../store/conversationStore";
-import type { Conversation } from "../store/conversationStore";
 import { setE2EEContext, setMessageMockMode, useMessageStore } from "../store/messageStore";
 import { decryptFrom } from "../crypto/e2eeManager";
 import { usePresenceStore } from "../store/presenceStore";
@@ -293,10 +293,9 @@ function wireSocket() {
     },
 
     "conversation.updated": (p) => {
-      const patch: Partial<Conversation> = {};
-      if (p.name) patch.name = p.name;
-      if (p.member_count) patch.memberCount = p.member_count;
-      useConversationStore.getState().updateConversation(p.conversation_id, patch);
+      useConversationStore
+        .getState()
+        .updateConversation(p.conversation_id, conversationUpdatePatch(p));
     },
 
     "conversation.removed": (p) => {
