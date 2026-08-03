@@ -222,6 +222,24 @@ describe("pinned ordering and context menu", () => {
     expect(applyConversationSetting).toHaveBeenCalledWith("p2", { isMuted: false });
   });
 
+  // 防秒关的豁免只针对触屏长按的合成事件；桌面右键开菜单后左键点同一条目
+  // 仍应正常关闭菜单并切换会话（豁免不得外溢到鼠标路径）。
+  it("closes the menu and selects when left-clicking the same item after right click", () => {
+    render(
+      <MemoryRouter>
+        <ConversationList />
+      </MemoryRouter>,
+    );
+    const item = screen.getByText("普通会话").closest("button") as HTMLButtonElement;
+    fireEvent.contextMenu(item);
+    expect(screen.getAllByRole("menuitem")).toHaveLength(2);
+
+    fireEvent.mouseDown(item);
+    fireEvent.click(item);
+    expect(screen.queryByRole("menuitem")).toBeNull();
+    expect(useConversationStore.getState().activeId).toBe("r1");
+  });
+
   // 乐观置顶写入 new Date().toISOString()（Z 格式），服务端回的是 +08:00 偏移格式。
   // 字符串字典序会把 "…T00:00:00.000Z" 判为小于 "…T07:00:00+08:00"，
   // 但按真实时刻前者更新——必须按时间戳数值比较。
@@ -311,7 +329,7 @@ describe("long press menu (touch)", () => {
     });
   });
 
-  it("opens menu after 500ms touch and swallows the synthetic click", () => {
+  it("opens menu after 500ms touch and survives the synthetic mousedown + click", () => {
     vi.useFakeTimers();
     try {
       render(
@@ -329,10 +347,46 @@ describe("long press menu (touch)", () => {
       // 菜单已弹出
       expect(screen.getByRole("menuitem", { name: /pin/i })).toBeInTheDocument();
 
-      // 抬手后浏览器补发的合成 click 必须被吞掉：不得切换活跃会话
+      // 抬手后浏览器补发合成 mousedown：不得触发 document 关闭监听把菜单秒关
       fireEvent.touchEnd(item);
+      fireEvent.mouseDown(item);
+      expect(screen.getAllByRole("menuitem")).toHaveLength(2);
+
+      // 紧随其后的合成 click 必须被吞掉：不得切换活跃会话
       fireEvent.click(item);
       expect(useConversationStore.getState().activeId).toBeNull();
+      // 菜单仍开着，用户可以真正点到菜单项
+      expect(screen.getAllByRole("menuitem")).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("closes the menu when tapping elsewhere after the synthetic burst settles", () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <MemoryRouter>
+          <ConversationList />
+        </MemoryRouter>,
+      );
+      const item = screen.getByText("长按会话").closest("button") as HTMLButtonElement;
+
+      fireEvent.touchStart(item);
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      fireEvent.touchEnd(item);
+      expect(screen.getAllByRole("menuitem")).toHaveLength(2);
+
+      // 合成事件序列结束后，点击列表外部仍应关闭菜单（不能因为防秒关就永不关闭）
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      act(() => {
+        fireEvent.mouseDown(document.body);
+      });
+      expect(screen.queryByRole("menuitem")).toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -356,6 +410,50 @@ describe("long press menu (touch)", () => {
       fireEvent.click(item);
 
       expect(screen.queryByRole("menuitem")).toBeNull();
+      expect(useConversationStore.getState().activeId).toBe("t1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // 长按后不一定有合成 click 跟随（手指拖走 / touchcancel / Android Chrome
+  // 长按后抑制合成事件）。若 longPressFired 只在 click 里复位，标志会残留，
+  // 把用户下一次真实点击吞掉。
+  it("does not swallow the next real tap when the long press had no synthetic click", () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <MemoryRouter>
+          <ConversationList />
+        </MemoryRouter>,
+      );
+      const item = screen.getByText("长按会话").closest("button") as HTMLButtonElement;
+
+      // 第一次：长按开菜单，随后手指移开取消（无合成 click 跟随）
+      fireEvent.touchStart(item);
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      fireEvent.touchMove(item);
+      fireEvent.touchCancel(item);
+
+      // 关掉菜单，回到干净状态
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      act(() => {
+        fireEvent.mouseDown(document.body);
+      });
+      expect(screen.queryByRole("menuitem")).toBeNull();
+
+      // 第二次：正常短按，必须正常选中（不得被残留标志吞掉）
+      fireEvent.touchStart(item);
+      act(() => {
+        vi.advanceTimersByTime(100);
+      });
+      fireEvent.touchEnd(item);
+      fireEvent.click(item);
+
       expect(useConversationStore.getState().activeId).toBe("t1");
     } finally {
       vi.useRealTimers();

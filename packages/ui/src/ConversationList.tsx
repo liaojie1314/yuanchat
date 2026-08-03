@@ -317,11 +317,22 @@ function ConversationItem({
   // 而本组件的长按目标同时是可点击的会话按钮（与 MessageBubble 的
   // 长按目标不同，后者没有 onClick），不拦截会在开菜单的同时误切会话。
   const longPressFired = useRef(false);
+  // 本条目根节点：用于判定 document 上的 mousedown 是否落在自己身上
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
-  // 点击菜单外任意处关闭（菜单根 onMouseDown 阻止冒泡自保）
+  // 点击本条目之外的任意处关闭菜单。
+  // 唯一例外是「长按刚触发」后落在本条目内的 mousedown：触屏抬手时浏览器会在
+  // 长按目标上补发一整套合成鼠标事件（mousedown → mouseup → click），
+  // 无差别关闭会让菜单在弹出的同一帧被自己的合成 mousedown 秒关（触屏上一闪而过）。
+  // 用 longPressFired 限定范围，桌面右键后左键点同一条目仍照常关闭菜单。
   useEffect(() => {
     if (!menuOpen) return;
-    const close = () => setMenuOpen(false);
+    const close = (e: MouseEvent) => {
+      const root = rootRef.current;
+      const insideSelf = root && e.target instanceof Node && root.contains(e.target);
+      if (insideSelf && longPressFired.current) return;
+      setMenuOpen(false);
+    };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [menuOpen]);
@@ -338,6 +349,9 @@ function ConversationItem({
     setMenuOpen(true);
   };
   const startLongPress = (e: { preventDefault: () => void }) => {
+    // 预复位：上一次长按若未跟随合成 click（手指拖走 / touchcancel /
+    // Android Chrome 长按后抑制合成事件），标志会残留并吞掉本次真实点击
+    longPressFired.current = false;
     longPressTimer.current = setTimeout(() => {
       longPressFired.current = true;
       openMenu(e);
@@ -359,7 +373,7 @@ function ConversationItem({
   };
 
   return (
-    <div className="relative">
+    <div className="relative" ref={rootRef}>
       <button
         onClick={handleClick}
         onContextMenu={openMenu}
