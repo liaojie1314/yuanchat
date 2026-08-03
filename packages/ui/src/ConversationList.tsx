@@ -86,8 +86,18 @@ export function ConversationList({
     return {
       pinned: visible
         .filter((c) => c.isPinned)
-        // 置顶组内按 pinned_at 倒序（ISO 字符串字典序即时间序）；rest 保持 store 序（最新消息在前）
-        .sort((a, b) => (b.pinnedAt ?? "").localeCompare(a.pinnedAt ?? "")),
+        // 置顶组内按 pinned_at 倒序；rest 保持 store 序（最新消息在前）。
+        // 必须按时间戳数值比较：乐观更新写的是 toISOString()（Z 格式），
+        // 服务端回的是 +08:00 偏移格式，同一时刻的两种写法字典序并不等价。
+        // 无效/缺失时间（NaN）统一排到有效值之后，两个都无效则视为相等。
+        .sort((a, b) => {
+          const ta = Date.parse(a.pinnedAt ?? "");
+          const tb = Date.parse(b.pinnedAt ?? "");
+          if (isNaN(ta) && isNaN(tb)) return 0;
+          if (isNaN(ta)) return 1;
+          if (isNaN(tb)) return -1;
+          return tb - ta;
+        }),
       rest: visible.filter((c) => !c.isPinned),
     };
   }, [conversations, query, filter]);
@@ -303,6 +313,10 @@ function ConversationItem({
   const hasDraft = !!conv.draft;
   const [menuOpen, setMenuOpen] = useState(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 长按已触发标记：触屏抬手后浏览器会补发一次合成 click，
+  // 而本组件的长按目标同时是可点击的会话按钮（与 MessageBubble 的
+  // 长按目标不同，后者没有 onClick），不拦截会在开菜单的同时误切会话。
+  const longPressFired = useRef(false);
 
   // 点击菜单外任意处关闭（菜单根 onMouseDown 阻止冒泡自保）
   useEffect(() => {
@@ -312,12 +326,22 @@ function ConversationItem({
     return () => document.removeEventListener("mousedown", close);
   }, [menuOpen]);
 
+  // 卸载时清掉未触发的长按定时器，避免已卸载组件上 setState
+  useEffect(() => {
+    return () => {
+      if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    };
+  }, []);
+
   const openMenu = (e: { preventDefault: () => void }) => {
     e.preventDefault();
     setMenuOpen(true);
   };
   const startLongPress = (e: { preventDefault: () => void }) => {
-    longPressTimer.current = setTimeout(() => openMenu(e), 500);
+    longPressTimer.current = setTimeout(() => {
+      longPressFired.current = true;
+      openMenu(e);
+    }, 500);
   };
   const cancelLongPress = () => {
     if (longPressTimer.current) {
@@ -325,15 +349,24 @@ function ConversationItem({
       longPressTimer.current = null;
     }
   };
+  const handleClick = () => {
+    // 吞掉长按后的合成 click，并复位标记供下次点击
+    if (longPressFired.current) {
+      longPressFired.current = false;
+      return;
+    }
+    onClick();
+  };
 
   return (
     <div className="relative">
       <button
-        onClick={onClick}
+        onClick={handleClick}
         onContextMenu={openMenu}
         onTouchStart={startLongPress}
         onTouchEnd={cancelLongPress}
         onTouchMove={cancelLongPress}
+        onTouchCancel={cancelLongPress}
         aria-current={isActive || undefined}
         className={cn(
           "relative flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors",

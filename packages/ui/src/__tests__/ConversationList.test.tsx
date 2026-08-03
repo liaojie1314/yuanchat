@@ -5,7 +5,7 @@
  * 依赖：conversationStore、MemoryRouter（Link 组件）
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ConversationList } from "../ConversationList";
 import { useConversationStore } from "@yuanchat/shared";
@@ -220,5 +220,145 @@ describe("pinned ordering and context menu", () => {
     expect(screen.getByRole("menuitem", { name: /unpin/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("menuitem", { name: /unmute/i }));
     expect(applyConversationSetting).toHaveBeenCalledWith("p2", { isMuted: false });
+  });
+
+  // 乐观置顶写入 new Date().toISOString()（Z 格式），服务端回的是 +08:00 偏移格式。
+  // 字符串字典序会把 "…T00:00:00.000Z" 判为小于 "…T07:00:00+08:00"，
+  // 但按真实时刻前者更新——必须按时间戳数值比较。
+  it("sorts pinned by real instant across mixed Z / +08:00 formats", () => {
+    useConversationStore.setState({
+      activeId: null,
+      conversations: [
+        {
+          id: "srv",
+          type: "private",
+          name: "服务端置顶",
+          unreadCount: 0,
+          isMuted: false,
+          isPinned: true,
+          // 实际时刻 2026-07-30T23:00:00Z（较早）
+          pinnedAt: "2026-07-31T07:00:00+08:00",
+        },
+        {
+          id: "opt",
+          type: "private",
+          name: "乐观新置顶",
+          unreadCount: 0,
+          isMuted: false,
+          isPinned: true,
+          // 实际时刻 2026-07-31T00:00:00Z（较晚，应排前）
+          pinnedAt: "2026-07-31T00:00:00.000Z",
+        },
+      ],
+    });
+    render(
+      <MemoryRouter>
+        <ConversationList />
+      </MemoryRouter>,
+    );
+    const names = screen.getAllByRole("button").map((b) => b.textContent);
+    const iOpt = names.findIndex((s) => s?.includes("乐观新置顶"));
+    const iSrv = names.findIndex((s) => s?.includes("服务端置顶"));
+    expect(iOpt).toBeGreaterThan(-1);
+    expect(iOpt).toBeLessThan(iSrv);
+  });
+
+  it("keeps conversations with invalid or missing pinnedAt after valid ones", () => {
+    useConversationStore.setState({
+      activeId: null,
+      conversations: [
+        {
+          id: "bad",
+          type: "private",
+          name: "无时间置顶",
+          unreadCount: 0,
+          isMuted: false,
+          isPinned: true,
+        },
+        {
+          id: "good",
+          type: "private",
+          name: "有时间置顶",
+          unreadCount: 0,
+          isMuted: false,
+          isPinned: true,
+          pinnedAt: "2026-07-31T10:00:00+08:00",
+        },
+      ],
+    });
+    render(
+      <MemoryRouter>
+        <ConversationList />
+      </MemoryRouter>,
+    );
+    const names = screen.getAllByRole("button").map((b) => b.textContent);
+    const iGood = names.findIndex((s) => s?.includes("有时间置顶"));
+    const iBad = names.findIndex((s) => s?.includes("无时间置顶"));
+    expect(iGood).toBeGreaterThan(-1);
+    expect(iBad).toBeGreaterThan(-1);
+    expect(iGood).toBeLessThan(iBad);
+  });
+});
+
+describe("long press menu (touch)", () => {
+  beforeEach(() => {
+    vi.mocked(applyConversationSetting).mockClear();
+    useConversationStore.setState({
+      activeId: null,
+      conversations: [
+        { id: "t1", type: "private", name: "长按会话", unreadCount: 0, isMuted: false },
+      ],
+    });
+  });
+
+  it("opens menu after 500ms touch and swallows the synthetic click", () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <MemoryRouter>
+          <ConversationList />
+        </MemoryRouter>,
+      );
+      const item = screen.getByText("长按会话").closest("button") as HTMLButtonElement;
+
+      fireEvent.touchStart(item);
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+
+      // 菜单已弹出
+      expect(screen.getByRole("menuitem", { name: /pin/i })).toBeInTheDocument();
+
+      // 抬手后浏览器补发的合成 click 必须被吞掉：不得切换活跃会话
+      fireEvent.touchEnd(item);
+      fireEvent.click(item);
+      expect(useConversationStore.getState().activeId).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still selects the conversation on a normal short tap", () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <MemoryRouter>
+          <ConversationList />
+        </MemoryRouter>,
+      );
+      const item = screen.getByText("长按会话").closest("button") as HTMLButtonElement;
+
+      fireEvent.touchStart(item);
+      act(() => {
+        vi.advanceTimersByTime(100); // 未达长按阈值
+      });
+      fireEvent.touchEnd(item);
+      fireEvent.click(item);
+
+      expect(screen.queryByRole("menuitem")).toBeNull();
+      expect(useConversationStore.getState().activeId).toBe("t1");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
