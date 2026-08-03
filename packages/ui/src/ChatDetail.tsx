@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
+  applyConversationSetting,
   dissolveGroup,
   fetchMembers,
   isMockEnabled,
@@ -67,7 +68,6 @@ export function ChatDetail({
   const { t } = useTranslation();
   const activeId = useConversationStore((s) => s.activeId);
   const conversations = useConversationStore((s) => s.conversations);
-  const updateConversation = useConversationStore((s) => s.updateConversation);
   const selfId = useAuthStore((s) => s.user?.id ?? "");
   const conv = conversations.find((c) => c.id === activeId);
 
@@ -248,12 +248,12 @@ export function ChatDetail({
         <SettingRow
           label={t("detail.mute")}
           checked={conv.isMuted}
-          onToggle={() => updateConversation(conv.id, { isMuted: !conv.isMuted })}
+          onToggle={() => void applyConversationSetting(conv.id, { isMuted: !conv.isMuted })}
         />
         <SettingRow
           label={t("detail.pinConversation")}
           checked={!!conv.isPinned}
-          onToggle={() => updateConversation(conv.id, { isPinned: !conv.isPinned })}
+          onToggle={() => void applyConversationSetting(conv.id, { isPinned: !conv.isPinned })}
         />
       </div>
 

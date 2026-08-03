@@ -84,6 +84,25 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	wsH.SetOfflinePush(func(recipients []uuid.UUID, info ws.OfflineMsgInfo) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		// 免打扰成员不推离线通知；查询失败时放行全部（宁多推不漏推）
+		if muted, err := convRepo.MutedMemberIDs(ctx, info.ConversationID); err != nil {
+			logger.Warn("muted filter failed, push to all", zap.Error(err))
+		} else if len(muted) > 0 {
+			mutedSet := make(map[uuid.UUID]struct{}, len(muted))
+			for _, id := range muted {
+				mutedSet[id] = struct{}{}
+			}
+			filtered := make([]uuid.UUID, 0, len(recipients))
+			for _, id := range recipients {
+				if _, m := mutedSet[id]; !m {
+					filtered = append(filtered, id)
+				}
+			}
+			recipients = filtered
+		}
+		if len(recipients) == 0 {
+			return
+		}
 		body := info.Text
 		switch info.ContentType {
 		case "image":
@@ -165,6 +184,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		chat.GET("/conversations/:id/messages", msgH.History)
 		chat.GET("/conversations/:id/members", convH.Members)
 		chat.PATCH("/conversations/:id", convH.Rename)
+		chat.PUT("/conversations/:id/settings", convH.UpdateSettings)
 		chat.POST("/conversations/:id/members", convH.Invite)
 		chat.DELETE("/conversations/:id/members/:userId", convH.Kick)
 		chat.POST("/conversations/:id/leave", convH.Leave)

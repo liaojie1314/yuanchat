@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { ChatDetail } from "../ChatDetail";
-import { useConversationStore } from "@yuanchat/shared";
+import { applyConversationSetting, useConversationStore } from "@yuanchat/shared";
 
 // 群成员头像墙由 fetchMembers 驱动，mock 为固定 3 人（2 字昵称，与 Avatar 首字母回退一致）
 const MOCK_FETCHED = [
@@ -16,12 +16,14 @@ vi.mock("@yuanchat/shared", async (importOriginal) => {
     ...mod,
     isMockEnabled: () => false,
     fetchMembers: vi.fn(async () => MOCK_FETCHED),
+    applyConversationSetting: vi.fn(),
   };
 });
 
 // jsdom 默认 locale 为 en-US，所有 t() 文案断言使用英文
 describe("ChatDetail", () => {
   beforeEach(() => {
+    vi.mocked(applyConversationSetting).mockClear();
     useConversationStore.setState({
       activeId: "1",
       conversations: [
@@ -72,18 +74,16 @@ describe("ChatDetail", () => {
     expect(screen.getByText("Mute notifications")).toBeInTheDocument();
   });
 
-  it("toggles mute status on row click", () => {
+  it("delegates mute toggle to applyConversationSetting", () => {
     render(<ChatDetail />);
     fireEvent.click(screen.getByText("Mute notifications"));
-    const conv = useConversationStore.getState().conversations.find((c) => c.id === "1");
-    expect(conv?.isMuted).toBe(true);
+    expect(applyConversationSetting).toHaveBeenCalledWith("1", { isMuted: true });
   });
 
-  it("toggles pinned status on row click", () => {
+  it("delegates pin toggle to applyConversationSetting", () => {
     render(<ChatDetail />);
     fireEvent.click(screen.getByText("Pin conversation"));
-    const conv = useConversationStore.getState().conversations.find((c) => c.id === "1");
-    expect(conv?.isPinned).toBe(true);
+    expect(applyConversationSetting).toHaveBeenCalledWith("1", { isPinned: true });
   });
 
   it("shows invite button for group chats", async () => {

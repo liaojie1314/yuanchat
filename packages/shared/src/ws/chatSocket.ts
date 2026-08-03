@@ -84,7 +84,14 @@ export interface ServerFrames {
     conversation_id: string;
   };
   "conversation.created": { conversation: ConversationDTO };
-  "conversation.updated": { conversation_id: string; name?: string; member_count?: number };
+  "conversation.updated": {
+    conversation_id: string;
+    name?: string;
+    member_count?: number;
+    is_pinned?: boolean;
+    pinned_at?: string | null;
+    is_muted?: boolean;
+  };
   "conversation.removed": { conversation_id: string; reason: "kicked" | "left" | "dissolved" };
   "conversation.role_changed": {
     conversation_id: string;

@@ -25,6 +25,7 @@ export * from "./crypto/e2eeManager";
 export * from "./crypto/keyBackup";
 export * from "./api/e2ee";
 export { setNotifier, notifyIncoming, __resetNotifier } from "./notify";
+export { applyConversationSetting } from "./conversationSettings";
 export {
   setRefreshHandler,
   ensureFreshToken,

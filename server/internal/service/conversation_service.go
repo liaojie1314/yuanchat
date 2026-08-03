@@ -30,6 +30,8 @@ type ConversationDTO struct {
 	MemberCount   int64           `json:"member_count"`
 	UnreadCount   int64           `json:"unread_count"`
 	IsMuted       bool            `json:"is_muted"`
+	IsPinned      bool            `json:"is_pinned"`
+	PinnedAt      *time.Time      `json:"pinned_at,omitempty"`
 	LastSeq       int64           `json:"last_seq"`
 	MyLastReadSeq int64           `json:"my_last_read_seq"`
 	MentionUnread bool            `json:"mention_unread"`
@@ -92,6 +94,8 @@ func (s *ConversationService) List(ctx context.Context, userID uuid.UUID) ([]Con
 			Type:          item.Type,
 			MemberCount:   item.MemberCount,
 			IsMuted:       item.IsMuted,
+			IsPinned:      item.IsPinned,
+			PinnedAt:      item.PinnedAt,
 			MentionUnread: item.MentionUnread,
 			LastSeq:       item.LastSeq,
 			MyLastReadSeq: item.LastReadSeq,
@@ -317,4 +321,63 @@ func (s *ConversationService) defaultGroupName(ctx context.Context, creatorNick 
 		name = string(r[:100])
 	}
 	return name
+}
+
+// ConversationSettingsInput 会话个人设置变更（nil 字段表示不修改）。
+type ConversationSettingsInput struct {
+	IsPinned *bool
+	IsMuted  *bool
+}
+
+// ConversationSettingsResult 变更后的最新设置值（含未变更字段的当前值）。
+type ConversationSettingsResult struct {
+	IsPinned bool
+	PinnedAt *time.Time
+	IsMuted  bool
+}
+
+// UpdateSettings 更新本人在会话中的置顶/免打扰设置（member 维度）。
+//
+// 置顶语义：false→true 时落 pinned_at=now；重复置顶不刷新（置顶顺序稳定）；
+// 取消置顶清空 pinned_at。非成员返回 ErrNotMember（handler 映射 403）。
+func (s *ConversationService) UpdateSettings(
+	ctx context.Context, userID, convID uuid.UUID, in ConversationSettingsInput,
+) (*ConversationSettingsResult, error) {
+	member, found, err := s.convRepo.GetMember(ctx, convID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("load member: %w", err)
+	}
+	if !found {
+		return nil, ErrNotMember
+	}
+
+	res := &ConversationSettingsResult{
+		IsPinned: member.IsPinned, PinnedAt: member.PinnedAt, IsMuted: member.IsMuted,
+	}
+	updates := map[string]any{}
+	if in.IsPinned != nil && *in.IsPinned != member.IsPinned {
+		updates["is_pinned"] = *in.IsPinned
+		if *in.IsPinned {
+			// 截断到微秒与 Postgres timestamptz 精度对齐：
+			// 保证本次返回的 pinned_at 与后续读回的值严格相等（前端按其排序）
+			now := time.Now().Truncate(time.Microsecond)
+			updates["pinned_at"] = now
+			res.PinnedAt = &now
+		} else {
+			updates["pinned_at"] = nil
+			res.PinnedAt = nil
+		}
+		res.IsPinned = *in.IsPinned
+	}
+	if in.IsMuted != nil && *in.IsMuted != member.IsMuted {
+		updates["is_muted"] = *in.IsMuted
+		res.IsMuted = *in.IsMuted
+	}
+	if len(updates) == 0 {
+		return res, nil // 幂等：无实际变化不写库
+	}
+	if err := s.convRepo.UpdateMemberSettings(ctx, convID, userID, updates); err != nil {
+		return nil, fmt.Errorf("update settings: %w", err)
+	}
+	return res, nil
 }

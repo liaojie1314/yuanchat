@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/model"
@@ -12,11 +13,13 @@ import (
 // ConversationListItem 会话列表查询的投影结果（含聚合字段）。
 type ConversationListItem struct {
 	model.Conversation
-	Role          int16 `json:"role"`
-	LastReadSeq   int64 `json:"last_read_seq"`
-	IsMuted       bool  `json:"is_muted"`
-	MentionUnread bool  `json:"mention_unread"`
-	MemberCount   int64 `json:"member_count"`
+	Role          int16      `json:"role"`
+	LastReadSeq   int64      `json:"last_read_seq"`
+	IsMuted       bool       `json:"is_muted"`
+	IsPinned      bool       `json:"is_pinned"`
+	PinnedAt      *time.Time `json:"pinned_at"`
+	MentionUnread bool       `json:"mention_unread"`
+	MemberCount   int64      `json:"member_count"`
 }
 
 // ConversationRepository 处理 conversations / conversation_members 表。
@@ -38,7 +41,7 @@ func (r *ConversationRepository) ListByUserID(ctx context.Context, userID uuid.U
 	var items []ConversationListItem
 	err := r.db.WithContext(ctx).
 		Table("conversations c").
-		Select(`c.*, cm.role, cm.last_read_seq, cm.is_muted, cm.mention_unread,
+		Select(`c.*, cm.role, cm.last_read_seq, cm.is_muted, cm.mention_unread, cm.is_pinned, cm.pinned_at,
 			(SELECT count(*) FROM conversation_members m2 WHERE m2.conversation_id = c.id) AS member_count`).
 		Joins("JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = ?", userID).
 		Where("c.deleted_at IS NULL").
@@ -147,4 +150,36 @@ func (r *ConversationRepository) ListMembers(ctx context.Context, convID uuid.UU
 		Order("cm.role DESC, u.nickname ASC").
 		Scan(&items).Error
 	return items, err
+}
+
+// GetMember 返回成员行；非成员返回 (nil, false, nil)。
+func (r *ConversationRepository) GetMember(ctx context.Context, convID, userID uuid.UUID) (*model.ConversationMember, bool, error) {
+	var m model.ConversationMember
+	err := r.db.WithContext(ctx).
+		Where("conversation_id = ? AND user_id = ?", convID, userID).First(&m).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return &m, true, nil
+}
+
+// UpdateMemberSettings 更新成员行的个人设置字段（is_pinned/pinned_at/is_muted）。
+func (r *ConversationRepository) UpdateMemberSettings(ctx context.Context, convID, userID uuid.UUID, updates map[string]any) error {
+	return r.db.WithContext(ctx).
+		Model(&model.ConversationMember{}).
+		Where("conversation_id = ? AND user_id = ?", convID, userID).
+		Updates(updates).Error
+}
+
+// MutedMemberIDs 返回会话中开启免打扰的成员 ID（离线推送过滤用）。
+func (r *ConversationRepository) MutedMemberIDs(ctx context.Context, convID uuid.UUID) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := r.db.WithContext(ctx).
+		Model(&model.ConversationMember{}).
+		Where("conversation_id = ? AND is_muted = TRUE", convID).
+		Pluck("user_id", &ids).Error
+	return ids, err
 }

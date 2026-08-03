@@ -19,10 +19,10 @@
  * @example
  * <ConversationList />
  */
-import { useMemo, useState } from "react";
-import { Search, Plus, BellOff, Pin, Users, UserPlus } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Search, Plus, Bell, BellOff, Pin, PinOff, Users, UserPlus } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useConversationStore } from "@yuanchat/shared";
+import { applyConversationSetting, useConversationStore } from "@yuanchat/shared";
 import type { Conversation } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
@@ -84,7 +84,20 @@ export function ConversationList({
         (!q || c.name.toLowerCase().includes(q) || c.lastMessage?.toLowerCase().includes(q)),
     );
     return {
-      pinned: visible.filter((c) => c.isPinned),
+      pinned: visible
+        .filter((c) => c.isPinned)
+        // 置顶组内按 pinned_at 倒序；rest 保持 store 序（最新消息在前）。
+        // 必须按时间戳数值比较：乐观更新写的是 toISOString()（Z 格式），
+        // 服务端回的是 +08:00 偏移格式，同一时刻的两种写法字典序并不等价。
+        // 无效/缺失时间（NaN）统一排到有效值之后，两个都无效则视为相等。
+        .sort((a, b) => {
+          const ta = Date.parse(a.pinnedAt ?? "");
+          const tb = Date.parse(b.pinnedAt ?? "");
+          if (isNaN(ta) && isNaN(tb)) return 0;
+          if (isNaN(ta)) return 1;
+          if (isNaN(tb)) return -1;
+          return tb - ta;
+        }),
       rest: visible.filter((c) => !c.isPinned),
     };
   }, [conversations, query, filter]);
@@ -285,6 +298,7 @@ function ConversationSkeleton() {
  * @description 内部私有组件，不对外导出。
  * 置顶会话左侧显示 3px 主题色竖条；当前选中项 primary-container 高亮；
  * 未读会话名称加粗，角标 99+ 截断；免打扰会话未读角标降级为灰色。
+ * 右键（桌面）/ 长按 500ms（触屏）呼出置顶、免打扰快捷菜单。
  */
 function ConversationItem({
   conv,
@@ -297,78 +311,169 @@ function ConversationItem({
 }) {
   const { t } = useTranslation();
   const hasDraft = !!conv.draft;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 长按已触发标记：触屏抬手后浏览器会补发一次合成 click，
+  // 而本组件的长按目标同时是可点击的会话按钮（与 MessageBubble 的
+  // 长按目标不同，后者没有 onClick），不拦截会在开菜单的同时误切会话。
+  const longPressFired = useRef(false);
+  // 本条目根节点：用于判定 document 上的 mousedown 是否落在自己身上
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  // 点击本条目之外的任意处关闭菜单。
+  // 唯一例外是「长按刚触发」后落在本条目内的 mousedown：触屏抬手时浏览器会在
+  // 长按目标上补发一整套合成鼠标事件（mousedown → mouseup → click），
+  // 无差别关闭会让菜单在弹出的同一帧被自己的合成 mousedown 秒关（触屏上一闪而过）。
+  // 用 longPressFired 限定范围，桌面右键后左键点同一条目仍照常关闭菜单。
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (e: MouseEvent) => {
+      const root = rootRef.current;
+      const insideSelf = root && e.target instanceof Node && root.contains(e.target);
+      if (insideSelf && longPressFired.current) return;
+      setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [menuOpen]);
+
+  // 卸载时清掉未触发的长按定时器，避免已卸载组件上 setState
+  useEffect(() => {
+    return () => {
+      if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    };
+  }, []);
+
+  const openMenu = (e: { preventDefault: () => void }) => {
+    e.preventDefault();
+    setMenuOpen(true);
+  };
+  const startLongPress = (e: { preventDefault: () => void }) => {
+    // 预复位：上一次长按若未跟随合成 click（手指拖走 / touchcancel /
+    // Android Chrome 长按后抑制合成事件），标志会残留并吞掉本次真实点击
+    longPressFired.current = false;
+    longPressTimer.current = setTimeout(() => {
+      longPressFired.current = true;
+      openMenu(e);
+    }, 500);
+  };
+  const cancelLongPress = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+  const handleClick = () => {
+    // 吞掉长按后的合成 click，并复位标记供下次点击
+    if (longPressFired.current) {
+      longPressFired.current = false;
+      return;
+    }
+    onClick();
+  };
 
   return (
-    <button
-      onClick={onClick}
-      aria-current={isActive || undefined}
-      className={cn(
-        "relative flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors",
-        isActive
-          ? "bg-primary-container"
-          : "hover:bg-surface-container-high active:bg-surface-container",
-      )}
-    >
-      {/* 置顶标记：左侧主题色短竖条 */}
-      {conv.isPinned && (
-        <span className="bg-primary absolute top-1/2 left-0.5 h-5 w-[3px] -translate-y-1/2 rounded-full" />
-      )}
+    <div className="relative" ref={rootRef}>
+      <button
+        onClick={handleClick}
+        onContextMenu={openMenu}
+        onTouchStart={startLongPress}
+        onTouchEnd={cancelLongPress}
+        onTouchMove={cancelLongPress}
+        onTouchCancel={cancelLongPress}
+        aria-current={isActive || undefined}
+        className={cn(
+          "relative flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors",
+          isActive
+            ? "bg-primary-container"
+            : "hover:bg-surface-container-high active:bg-surface-container",
+        )}
+      >
+        {/* 置顶标记：左侧主题色短竖条 */}
+        {conv.isPinned && (
+          <span className="bg-primary absolute top-1/2 left-0.5 h-5 w-[3px] -translate-y-1/2 rounded-full" />
+        )}
 
-      <Avatar
-        name={conv.name}
-        src={conv.avatarUrl}
-        presence={conv.presence}
-        online={conv.presence ? undefined : conv.isOnline}
-      />
+        <Avatar
+          name={conv.name}
+          src={conv.avatarUrl}
+          presence={conv.presence}
+          online={conv.presence ? undefined : conv.isOnline}
+        />
 
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline justify-between gap-2">
-          <span
-            className={cn(
-              "text-body-lg text-on-surface truncate",
-              conv.unreadCount > 0 ? "font-bold" : "font-medium",
-            )}
-          >
-            {conv.name}
-          </span>
-          <span className="text-label-sm text-on-surface-variant shrink-0 tabular-nums">
-            {conv.lastTime}
-          </span>
-        </div>
-        <div className="mt-0.5 flex items-center justify-between gap-2">
-          <span className="text-body-sm text-on-surface-variant truncate">
-            {hasDraft ? (
-              <>
-                <span className="text-error font-medium">{t("chat.preview.draft")} </span>
-                {conv.draft}
-              </>
-            ) : (
-              <>
-                {(conv.mentionedMe || conv.mentionUnread) && (
-                  <span className="font-semibold text-amber-600 dark:text-amber-400">
-                    {t("chat.preview.mentionYou")}{" "}
-                  </span>
-                )}
-                {conv.lastMessage || t("chat.preview.empty")}
-              </>
-            )}
-          </span>
-          {conv.unreadCount > 0 ? (
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-2">
             <span
               className={cn(
-                "text-label-sm inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full px-1.5 font-bold text-white",
-                conv.isMuted ? "bg-outline" : "bg-red-500",
+                "text-body-lg text-on-surface truncate",
+                conv.unreadCount > 0 ? "font-bold" : "font-medium",
               )}
             >
-              {conv.unreadCount > 99 ? "99+" : conv.unreadCount}
+              {conv.name}
             </span>
-          ) : conv.isMuted ? (
-            <BellOff size={14} className="text-on-surface-variant/60 shrink-0" />
-          ) : conv.isPinned ? (
-            <Pin size={12} className="text-on-surface-variant/40 shrink-0" />
-          ) : null}
+            <span className="text-label-sm text-on-surface-variant shrink-0 tabular-nums">
+              {conv.lastTime}
+            </span>
+          </div>
+          <div className="mt-0.5 flex items-center justify-between gap-2">
+            <span className="text-body-sm text-on-surface-variant truncate">
+              {hasDraft ? (
+                <>
+                  <span className="text-error font-medium">{t("chat.preview.draft")} </span>
+                  {conv.draft}
+                </>
+              ) : (
+                <>
+                  {(conv.mentionedMe || conv.mentionUnread) && (
+                    <span className="font-semibold text-amber-600 dark:text-amber-400">
+                      {t("chat.preview.mentionYou")}{" "}
+                    </span>
+                  )}
+                  {conv.lastMessage || t("chat.preview.empty")}
+                </>
+              )}
+            </span>
+            {conv.unreadCount > 0 ? (
+              <span
+                className={cn(
+                  "text-label-sm inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full px-1.5 font-bold text-white",
+                  conv.isMuted ? "bg-outline" : "bg-red-500",
+                )}
+              >
+                {conv.unreadCount > 99 ? "99+" : conv.unreadCount}
+              </span>
+            ) : conv.isMuted ? (
+              <BellOff size={14} className="text-on-surface-variant/60 shrink-0" />
+            ) : conv.isPinned ? (
+              <Pin size={12} className="text-on-surface-variant/40 shrink-0" />
+            ) : null}
+          </div>
         </div>
-      </div>
-    </button>
+      </button>
+      {menuOpen && (
+        <div
+          role="menu"
+          onMouseDown={(e) => e.stopPropagation()}
+          className="bg-surface-container-high shadow-elevation-2 animate-fade-in absolute top-full right-2 z-20 -mt-1 w-36 overflow-hidden rounded-lg py-1"
+        >
+          <MenuItem
+            icon={conv.isPinned ? <PinOff size={17} /> : <Pin size={17} />}
+            label={t(conv.isPinned ? "chat.menu.unpin" : "chat.menu.pin")}
+            onClick={() => {
+              setMenuOpen(false);
+              void applyConversationSetting(conv.id, { isPinned: !conv.isPinned });
+            }}
+          />
+          <MenuItem
+            icon={conv.isMuted ? <Bell size={17} /> : <BellOff size={17} />}
+            label={t(conv.isMuted ? "chat.menu.unmute" : "chat.menu.mute")}
+            onClick={() => {
+              setMenuOpen(false);
+              void applyConversationSetting(conv.id, { isMuted: !conv.isMuted });
+            }}
+          />
+        </div>
+      )}
+    </div>
   );
 }

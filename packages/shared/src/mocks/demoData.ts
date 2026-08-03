@@ -19,6 +19,7 @@ export const DEMO_CONVERSATIONS: Conversation[] = [
     unreadCount: 3,
     isMuted: false,
     isPinned: true,
+    pinnedAt: "2026-07-31T09:00:00+08:00",
     mentionedMe: true,
     memberCount: 28,
     onlineCount: 5,
@@ -35,6 +36,7 @@ export const DEMO_CONVERSATIONS: Conversation[] = [
     presence: "away",
     isMuted: true,
     isPinned: true,
+    pinnedAt: "2026-07-30T09:00:00+08:00",
   },
   {
     id: "3",

@@ -4,6 +4,7 @@ package ws
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -75,10 +76,14 @@ type MessageReactionPayload struct {
 }
 
 // ConversationUpdatedPayload 群资料/成员数变更推送（改名/邀请/踢人/退群后刷新列表态）。
+// 置顶/免打扰设置变更复用本帧（is_pinned/pinned_at/is_muted 指针字段，仅推本人全部设备）。
 type ConversationUpdatedPayload struct {
-	ConversationID uuid.UUID `json:"conversation_id"`
-	Name           string    `json:"name,omitempty"`
-	MemberCount    int64     `json:"member_count,omitempty"`
+	ConversationID uuid.UUID  `json:"conversation_id"`
+	Name           string     `json:"name,omitempty"`
+	MemberCount    int64      `json:"member_count,omitempty"`
+	IsPinned       *bool      `json:"is_pinned,omitempty"`
+	PinnedAt       *time.Time `json:"pinned_at,omitempty"`
+	IsMuted        *bool      `json:"is_muted,omitempty"`
 }
 
 // ConversationRemovedPayload 会话移出列表推送（被踢 / 本人退群多端同步 / 群解散）。
