@@ -71,3 +71,22 @@ func (h *ConversationHandler) UpdateMyAlias(c *gin.Context) {
 	}
 	Success(c, gin.H{"alias": body.Alias})
 }
+
+// ClearHistory DELETE /conversations/:id/messages（单侧清空，member 维度）。
+func (h *ConversationHandler) ClearHistory(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		Unauthorized(c, "unauthorized")
+		return
+	}
+	convID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid conversation id")
+		return
+	}
+	if err := h.svc.ClearHistory(c.Request.Context(), userID, convID); err != nil {
+		h.groupErr(c, err)
+		return
+	}
+	Success(c, gin.H{})
+}
