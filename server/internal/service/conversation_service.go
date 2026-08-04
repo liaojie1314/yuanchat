@@ -123,7 +123,7 @@ func (s *ConversationService) List(ctx context.Context, userID uuid.UUID) ([]Con
 			}
 		}
 
-		if last, err := s.msgRepo.GetLastMessage(ctx, item.ID); err == nil && last != nil {
+		if last, err := s.msgRepo.GetLastMessage(ctx, item.ID, item.ClearedBeforeSeq); err == nil && last != nil {
 			dto.LastMessage = &LastMessageDTO{
 				Preview:        previewOf(last),
 				SenderNickname: last.SenderNickname,

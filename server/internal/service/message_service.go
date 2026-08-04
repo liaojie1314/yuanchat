@@ -311,13 +311,14 @@ func (s *MessageService) Forward(
 
 // GetHistory 校验成员身份后按 seq 降序分页取历史消息。
 // 返回的切片仍为降序，由 handler/前端决定展示顺序。
+// 成员行的 cleared_before_seq 作为下界：单侧清空后旧消息对本人不可见（对方不受影响）。
 func (s *MessageService) GetHistory(
 	ctx context.Context,
 	userID, convID uuid.UUID,
 	beforeSeq int64,
 	limit int,
 ) ([]repository.MessageWithSender, error) {
-	ok, err := s.convRepo.IsMember(ctx, convID, userID)
+	member, ok, err := s.convRepo.GetMember(ctx, convID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("check membership: %w", err)
 	}
@@ -328,7 +329,7 @@ func (s *MessageService) GetHistory(
 	if limit <= 0 || limit > 100 {
 		limit = 30
 	}
-	messages, err := s.msgRepo.ListBefore(ctx, convID, beforeSeq, limit)
+	messages, err := s.msgRepo.ListBefore(ctx, convID, beforeSeq, member.ClearedBeforeSeq, limit)
 	if err != nil {
 		return nil, err
 	}
