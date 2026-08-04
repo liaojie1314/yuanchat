@@ -51,10 +51,10 @@ const MaxForwardTargets = 9
 
 // SendResult 消息落库后的结果，供 WS 层构造 ack / receive 推送。
 type SendResult struct {
-	Message           *model.Message
-	SenderNickname    string
-	MemberIDs         []uuid.UUID
-	MentionedMembers  []uuid.UUID // SendContent 校验后回填，供 WS 层构造帧
+	Message          *model.Message
+	SenderNickname   string
+	MemberIDs        []uuid.UUID
+	MentionedMembers []uuid.UUID // SendContent 校验后回填，供 WS 层构造帧
 }
 
 // RecallResult 撤回结果，供 handler 构造 message.recalled 推送。
@@ -248,10 +248,20 @@ func (s *MessageService) SendContent(
 	if err != nil || sender == nil {
 		return nil, fmt.Errorf("load sender: %w", err)
 	}
+	senderNickname := sender.Nickname
+
+	// 群会话署名取本人群昵称（alias 非空时覆盖本名），与历史消息 COALESCE 投影保持一致
+	if conv != nil && conv.Type == model.ConversationTypeGroup {
+		if m, ok, err := s.convRepo.GetMember(ctx, convID, senderID); err != nil {
+			s.logger.Warn("load sender alias failed", zap.Error(err))
+		} else if ok && m.Alias != nil && *m.Alias != "" {
+			senderNickname = *m.Alias
+		}
+	}
 
 	return &SendResult{
 		Message:          msg,
-		SenderNickname:   sender.Nickname,
+		SenderNickname:   senderNickname,
 		MemberIDs:        memberIDs,
 		MentionedMembers: validMentions,
 	}, nil

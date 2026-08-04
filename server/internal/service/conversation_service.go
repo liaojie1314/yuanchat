@@ -21,6 +21,9 @@ var ErrNotAllFriends = errors.New("some members are not friends")
 // ErrNoValidMembers 建群成员去重、剔除发起者后为空或超上限（参数错误）。
 var ErrNoValidMembers = errors.New("no valid members")
 
+// ErrInvalidAlias 群昵称超长（>30 rune）。空串允许（= 清除昵称）。
+var ErrInvalidAlias = errors.New("alias too long")
+
 // ConversationDTO 会话列表条目（REST 响应结构）。
 type ConversationDTO struct {
 	ID            uuid.UUID  `json:"id"`

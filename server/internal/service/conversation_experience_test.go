@@ -49,3 +49,57 @@ func TestUpdateAnnouncementByAdmin(t *testing.T) {
 		t.Fatalf("outsider should get ErrNotMember, got %v", err)
 	}
 }
+
+// TestUpdateMyAlias 任意成员可改自己的群昵称，超 30 字符 ErrInvalidAlias，成员列表署名生效。
+func TestUpdateMyAlias(t *testing.T) {
+	db := testDB(t)
+	if err := db.AutoMigrate(&model.ConversationMember{}); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
+	owner := newTestUser(t, db, "群主")
+	member := newTestUser(t, db, "普通成员本名")
+	svc := newConvSvc(db)
+	makeFriends(t, db, owner.ID, member.ID)
+	convID := newManagedGroup(t, svc, owner.ID, []uuid.UUID{member.ID})
+	ctx := context.Background()
+
+	if err := svc.UpdateMyAlias(ctx, member.ID, convID, "群里的我"); err != nil {
+		t.Fatalf("member set alias: %v", err)
+	}
+	members, err := svc.Members(ctx, owner.ID, convID)
+	if err != nil {
+		t.Fatalf("members: %v", err)
+	}
+	var found bool
+	for _, m := range members {
+		if m.UserID == member.ID {
+			found = true
+			if m.Nickname != "群里的我" {
+				t.Fatalf("alias should override nickname in member list, got %q", m.Nickname)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("member not in list")
+	}
+
+	// 超长报 ErrInvalidAlias
+	long := ""
+	for i := 0; i < 31; i++ {
+		long += "x"
+	}
+	if err := svc.UpdateMyAlias(ctx, member.ID, convID, long); !errors.Is(err, ErrInvalidAlias) {
+		t.Fatalf("31 chars should be ErrInvalidAlias, got %v", err)
+	}
+
+	// 空串 = 清除，署名回退本名
+	if err := svc.UpdateMyAlias(ctx, member.ID, convID, ""); err != nil {
+		t.Fatalf("clear alias: %v", err)
+	}
+	members2, _ := svc.Members(ctx, owner.ID, convID)
+	for _, m := range members2 {
+		if m.UserID == member.ID && m.Nickname != "普通成员本名" {
+			t.Fatalf("cleared alias should fall back to nickname, got %q", m.Nickname)
+		}
+	}
+}

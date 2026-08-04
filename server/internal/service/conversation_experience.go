@@ -84,3 +84,20 @@ func (s *ConversationService) UpdateAnnouncement(
 	}
 	return &GroupOpResult{SysMsg: sysMsg, SysText: sysText, MemberIDs: memberIDs}, announcement, &now, nil
 }
+
+// UpdateMyAlias 设置本人在群内的昵称（任意成员）。空串 = 清除（署名回退本名）。
+// 上限 30 rune。非成员 ErrNotMember。
+func (s *ConversationService) UpdateMyAlias(ctx context.Context, userID, convID uuid.UUID, alias string) error {
+	alias = strings.TrimSpace(alias)
+	if len([]rune(alias)) > 30 {
+		return ErrInvalidAlias
+	}
+	ok, err := s.convRepo.IsMember(ctx, convID, userID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrNotMember
+	}
+	return s.convRepo.UpdateMemberSettings(ctx, convID, userID, map[string]any{"alias": alias})
+}
