@@ -24,6 +24,9 @@ var ErrNoValidMembers = errors.New("no valid members")
 // ErrInvalidAlias 群昵称超长（>30 rune）。空串允许（= 清除昵称）。
 var ErrInvalidAlias = errors.New("alias too long")
 
+// ErrInvalidAnnouncement 群公告超长（>1000 rune）。空串允许（= 清除公告）。
+var ErrInvalidAnnouncement = errors.New("announcement too long")
+
 // ConversationDTO 会话列表条目（REST 响应结构）。
 type ConversationDTO struct {
 	ID            uuid.UUID  `json:"id"`

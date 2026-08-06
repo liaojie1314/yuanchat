@@ -155,9 +155,13 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 - **软清空**：不删消息行，只把本人成员行的 `cleared_before_seq` 推进到会话当前 `last_seq`；
   拉历史（`GET /conversations/:id/messages`）与会话列表预览均过滤 `seq <= cleared_before_seq` 的消息。
 - **对方无感**：其他成员的历史与预览完全不受影响；清空后新收发的消息本人正常可见。
+- 同时把本人 `last_read_seq` 推进到同一水位：否则未读数仍会计入已被过滤、再也拉不回的旧消息
+  （列表显示未读却点进去是空消息流）。清空后该会话 `unread_count` 归零、`last_message` 为空。
 - 水位只前进：重复清空幂等，不会因并发回退。
 - 非成员 `403`；会话不存在 `404`。
-- 不发系统消息、不推 WS 帧（纯本地视图操作，前端自行清空本地缓存）。
+- 不发系统消息、不推 WS 帧（纯本地视图操作）。**多端注意**：本端清空后，该用户的其他在线设备
+  不会收到任何通知，且前端 `loadHistory` 在本地缓存非空时直接 early-return，
+  因此另一设备需**重连或重启**后才看到清空效果。
 
 ### PATCH /api/v1/conversations/:id/announcement
 
@@ -175,10 +179,11 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 }
 ```
 
-- 普通成员 `403`；非成员 `403`；非群聊 `400`；正文超 1000 字符 `400`。
+- 普通成员 `403`；非成员 `403`；非群聊 `400`；正文超 1000 字符 `400 announcement too long`。
 - 空串（或纯空白）= 清除公告：库中 `announcement` 置 NULL，响应 `announcement` 为 `null`。
 - 成功后在同一事务内落系统消息（`X 更新了群公告` / `X 清空了群公告`），全体在群成员收
-  `message.receive`（`content.type="system"`）+ `conversation.updated`（含 `announcement`/`announcement_updated_at`）。
+  `message.receive`（`content.type="system"`）+ `conversation.updated`。
+  该帧中 `announcement` **恒存在**：清除时为空串 `""`（不是省略），前端据此直接覆盖本地值即可。
 
 ### PUT /api/v1/conversations/:id/my-alias
 
@@ -188,14 +193,16 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 // 请求（空串 = 清除，署名回退用户本名）
 { "alias": "群里的我" }
 
-// 响应
+// 响应（回显 trim 后的值，与库中一致）
 { "code": 0, "message": "ok", "data": { "alias": "群里的我" } }
 ```
 
 - 上限 30 字符（按 rune 计），超限 `400 alias too long`；非成员 `403`。
+- **仅群聊可设**：单聊调用返回 `400 not a group conversation`（历史署名的 COALESCE 投影
+  不区分会话类型，单聊若能设 alias 会导致同一条消息历史显示 alias、实时显示本名）。
 - 生效面：成员列表 `nickname`、历史消息 `sender_nickname`、实时 `message.receive` 的 `sender_nickname`
   统一按 `COALESCE(NULLIF(alias,''), nickname)` 取值。
-- 单聊不受影响（单聊成员 alias 恒为空 → 始终回退用户本名）。
+- 空串清除时库中写 SQL NULL（与「从未设置」同一状态）。
 - 不推 WS 帧：其他成员在下次拉成员列表/历史时看到新署名。
 
 ### 群角色管理（v0.2）
@@ -373,7 +380,7 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
         "nickname": "Alice",
         "avatar_url": null,
         "role": 2,
-        "alias": null
+        "alias": "群里的我"
       }
     ]
   }
@@ -382,7 +389,8 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 
 - `role`：0=普通成员 1=管理员 2=群主。
 - `nickname`（v0.4 A7）：**展示名**——群内设置了群昵称时为 alias 覆盖值，否则为用户本名。
-- `alias`（v0.4 A7）：该成员的原始群昵称值，未设置时不出现（`omitempty`）；供「编辑我的群昵称」回填输入框。
+- `alias`（v0.4 A7）：该成员的原始群昵称值，供「编辑我的群昵称」回填输入框。
+  未设置或已清除时库中为 NULL，该字段**整个不出现**在 JSON 中（`omitempty`），而非 `null` 或 `""`。
 - 非会话成员访问返回 `403`。
 
 ### PUT /api/v1/users/me
@@ -638,23 +646,23 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 
 ### 服务端 → 客户端
 
-| type                        | payload                                                                                                                       | 推送对象                                                                                                                                                                                                                                |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `presence`                  | `{user_id, online}`                                                                                                           | 好友上下线广播（推给上下线用户的**在线好友**）。前端 `applyPresence` 按 `peerId` 匹配单聊会话，`presence` 从 `online`→`offline` 切换                                                                                                    |
-| `message.ack`               | `{client_msg_id, message_id, conversation_id, seq, timestamp}`                                                                | 发送者的所有设备。乐观 UI 收到后：sending → sent，补服务端 seq                                                                                                                                                                          |
-| `message.receive`           | `{message_id, conversation_id, sender_id, sender_nickname, content, seq, timestamp, reply_to_id?, mentions?, client_msg_id?}` | 会话全部成员（含发送者其他设备；本设备按 `client_msg_id` 去重）。`mentions?`（v0.2）=被 @ 的用户 UUID 数组                                                                                                                              |
-| `message.read`              | `{conversation_id, user_id, seq}`                                                                                             | 会话全部成员。`user_id`=自己 → 多端未读同步清零；`user_id`=他人 → 把自己 `seq ≤` 该值的已送达消息翻为已读                                                                                                                               |
-| `typing`                    | `{conversation_id, user_id, nickname}`                                                                                        | 会话中除输入者外的成员（前端显示 4s 后自动消失）                                                                                                                                                                                        |
-| `contact.request`           | `{request_id, requester: {id, nickname, avatar_url, short_id}, message, created_at}`                                          | 被申请方全部设备。前端置顶插入"新的朋友"列表 + 角标 +1                                                                                                                                                                                  |
-| `contact.accepted`          | `{request_id, friend: {id, nickname, avatar_url, short_id}, conversation_id}`                                                 | 申请方全部设备。前端翻转申请状态 + 加好友 + 拉会话列表（随后收到打招呼 `message.receive`）                                                                                                                                              |
-| `conversation.created`      | `{conversation: ConversationDTO}`                                                                                             | 新建群会话的全部成员（含发起者，前端按会话 id 去重）。帧内 DTO 取成员视角（`unread_count`=1、`my_last_read_seq`=0）；被邀请入群时也推给新成员                                                                                           |
-| `conversation.updated`      | `{conversation_id, name?, member_count?, is_pinned?, pinned_at?, is_muted?, announcement?, announcement_updated_at?}`         | 群改名/成员数变更后推给全体在群成员，前端 patch 会话列表条目；置顶/免打扰变更仅推本人多端（其他成员不感知）；群公告变更推群内全员（`announcement` 为 `null`/缺省表示公告被清空，以 `announcement_updated_at` 判定本帧确实携带公告变更） |
-| `conversation.removed`      | `{conversation_id, reason}`                                                                                                   | `reason`：`kicked`（被踢者）/ `left`（退群者本人多端同步）/ `dissolved`（解散全员）。前端把会话移出列表，kicked/dissolved 弹提示                                                                                                        |
-| `message.recalled`          | `{message_id, conversation_id, seq, operator_id, operator_nickname}`                                                          | 会话全部成员。前端把对应气泡翻成撤回占位（本人「你撤回了一条消息」/ 他人「X 撤回了一条消息」）；撤回最后一条时刷新列表预览                                                                                                              |
-| `message.reaction`          | `{message_id, conversation_id, user_id, emoji, count, reacted}`                                                               | 会话全员（含操作者多端）。`count`=该 emoji 最新总数；`reacted`=操作者动作是加是删。前端 `user_id`=自己时按 reacted 更新 mine，他人操作保持原 mine                                                                                       |
-| `friend.removed`            | `{friend_id}`                                                                                                                 | 删好友后推给**双方**所有设备（各自视角的 `friend_id` 是对方）。前端移除好友 + 隐藏关联单聊会话（历史保留）                                                                                                                              |
-| `conversation.role_changed` | `{conversation_id, user_id, new_role, changed_by}`                                                                            | 任命/免除/转让后推给全体在群成员（转让连发两帧）。前端递增会话 memberVersion 触发成员列表重拉；`user_id`=自己且 `changed_by`≠自己时 toast 提示                                                                                          |
-| `error`                     | `{code, message, client_msg_id?}`                                                                                             | 当前连接。`client_msg_id` 非空表示对应那次发送失败。`code=403, message=BLOCKED`：单聊被拉黑拒发，前端翻 failed + toast                                                                                                                  |
+| type                        | payload                                                                                                                       | 推送对象                                                                                                                                                                                                           |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `presence`                  | `{user_id, online}`                                                                                                           | 好友上下线广播（推给上下线用户的**在线好友**）。前端 `applyPresence` 按 `peerId` 匹配单聊会话，`presence` 从 `online`→`offline` 切换                                                                               |
+| `message.ack`               | `{client_msg_id, message_id, conversation_id, seq, timestamp}`                                                                | 发送者的所有设备。乐观 UI 收到后：sending → sent，补服务端 seq                                                                                                                                                     |
+| `message.receive`           | `{message_id, conversation_id, sender_id, sender_nickname, content, seq, timestamp, reply_to_id?, mentions?, client_msg_id?}` | 会话全部成员（含发送者其他设备；本设备按 `client_msg_id` 去重）。`mentions?`（v0.2）=被 @ 的用户 UUID 数组                                                                                                         |
+| `message.read`              | `{conversation_id, user_id, seq}`                                                                                             | 会话全部成员。`user_id`=自己 → 多端未读同步清零；`user_id`=他人 → 把自己 `seq ≤` 该值的已送达消息翻为已读                                                                                                          |
+| `typing`                    | `{conversation_id, user_id, nickname}`                                                                                        | 会话中除输入者外的成员（前端显示 4s 后自动消失）                                                                                                                                                                   |
+| `contact.request`           | `{request_id, requester: {id, nickname, avatar_url, short_id}, message, created_at}`                                          | 被申请方全部设备。前端置顶插入"新的朋友"列表 + 角标 +1                                                                                                                                                             |
+| `contact.accepted`          | `{request_id, friend: {id, nickname, avatar_url, short_id}, conversation_id}`                                                 | 申请方全部设备。前端翻转申请状态 + 加好友 + 拉会话列表（随后收到打招呼 `message.receive`）                                                                                                                         |
+| `conversation.created`      | `{conversation: ConversationDTO}`                                                                                             | 新建群会话的全部成员（含发起者，前端按会话 id 去重）。帧内 DTO 取成员视角（`unread_count`=1、`my_last_read_seq`=0）；被邀请入群时也推给新成员                                                                      |
+| `conversation.updated`      | `{conversation_id, name?, member_count?, is_pinned?, pinned_at?, is_muted?, announcement?, announcement_updated_at?}`         | 群改名/成员数变更后推给全体在群成员，前端 patch 会话列表条目；置顶/免打扰变更仅推本人多端（其他成员不感知）；群公告变更推群内全员，**该帧 `announcement` 恒存在**（清除公告时为空串 `""`），前端直接覆盖本地值即可 |
+| `conversation.removed`      | `{conversation_id, reason}`                                                                                                   | `reason`：`kicked`（被踢者）/ `left`（退群者本人多端同步）/ `dissolved`（解散全员）。前端把会话移出列表，kicked/dissolved 弹提示                                                                                   |
+| `message.recalled`          | `{message_id, conversation_id, seq, operator_id, operator_nickname}`                                                          | 会话全部成员。前端把对应气泡翻成撤回占位（本人「你撤回了一条消息」/ 他人「X 撤回了一条消息」）；撤回最后一条时刷新列表预览                                                                                         |
+| `message.reaction`          | `{message_id, conversation_id, user_id, emoji, count, reacted}`                                                               | 会话全员（含操作者多端）。`count`=该 emoji 最新总数；`reacted`=操作者动作是加是删。前端 `user_id`=自己时按 reacted 更新 mine，他人操作保持原 mine                                                                  |
+| `friend.removed`            | `{friend_id}`                                                                                                                 | 删好友后推给**双方**所有设备（各自视角的 `friend_id` 是对方）。前端移除好友 + 隐藏关联单聊会话（历史保留）                                                                                                         |
+| `conversation.role_changed` | `{conversation_id, user_id, new_role, changed_by}`                                                                            | 任命/免除/转让后推给全体在群成员（转让连发两帧）。前端递增会话 memberVersion 触发成员列表重拉；`user_id`=自己且 `changed_by`≠自己时 toast 提示                                                                     |
+| `error`                     | `{code, message, client_msg_id?}`                                                                                             | 当前连接。`client_msg_id` 非空表示对应那次发送失败。`code=403, message=BLOCKED`：单聊被拉黑拒发，前端翻 failed + toast                                                                                             |
 
 > **系统消息**：群管理操作（改名/邀请/踢人/退群）产生的系统消息复用 `message.receive` 帧下发，
 > `content.type = "system"`、`content.text` 为文案（如「Alice 修改群名为「X」」）。

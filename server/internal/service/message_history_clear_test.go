@@ -53,6 +53,74 @@ func TestClearHistoryPerMember(t *testing.T) {
 	}
 }
 
+// TestClearHistoryResetsUnread 清空同时推进 last_read_seq：
+// 否则未读数仍计入已被过滤、再也拉不回的旧消息（列表显示未读但点进去是空的）。
+func TestClearHistoryResetsUnread(t *testing.T) {
+	db := testDB(t)
+	if err := db.AutoMigrate(&model.ConversationMember{}); err != nil {
+		t.Fatalf("automigrate members: %v", err)
+	}
+	a := newTestUser(t, db, "甲unread")
+	b := newTestUser(t, db, "乙unread")
+	convID := newSendConv(t, db, a, b)
+	msgSvc := newMessageSvc(db)
+	convSvc := newConvSvc(db)
+	ctx := context.Background()
+
+	// b 发 3 条，a 一条没读 → a 未读 3
+	for i := 0; i < 3; i++ {
+		if _, err := msgSvc.SendText(ctx, b.ID, convID, "unread-msg", "", nil); err != nil {
+			t.Fatalf("send: %v", err)
+		}
+	}
+	dtos, err := convSvc.List(ctx, a.ID)
+	if err != nil {
+		t.Fatalf("list before clear: %v", err)
+	}
+	for _, d := range dtos {
+		if d.ID == convID && d.UnreadCount != 3 {
+			t.Fatalf("want 3 unread before clear, got %d", d.UnreadCount)
+		}
+	}
+
+	if err := convSvc.ClearHistory(ctx, a.ID, convID); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+
+	dtos2, err := convSvc.List(ctx, a.ID)
+	if err != nil {
+		t.Fatalf("list after clear: %v", err)
+	}
+	var found bool
+	for _, d := range dtos2 {
+		if d.ID == convID {
+			found = true
+			if d.UnreadCount != 0 {
+				t.Fatalf("clear should zero unread, got %d", d.UnreadCount)
+			}
+			if d.LastMessage != nil {
+				t.Fatalf("clear should drop last_message preview, got %+v", d.LastMessage)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("conversation not in list")
+	}
+
+	// 对方未读语义不受影响：b 自己发的消息本就已读，仍为 0；且预览仍在
+	bDtos, _ := convSvc.List(ctx, b.ID)
+	for _, d := range bDtos {
+		if d.ID == convID && d.LastMessage == nil {
+			t.Fatal("peer should still see last_message preview")
+		}
+	}
+
+	// 重复清空幂等：不报错、不回退
+	if err := convSvc.ClearHistory(ctx, a.ID, convID); err != nil {
+		t.Fatalf("repeat clear should be idempotent: %v", err)
+	}
+}
+
 // TestClearHistoryNonMember 非成员清空返回 ErrNotMember。
 func TestClearHistoryNonMember(t *testing.T) {
 	db := testDB(t)

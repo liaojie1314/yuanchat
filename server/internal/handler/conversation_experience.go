@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/middleware"
@@ -35,11 +37,19 @@ func (h *ConversationHandler) UpdateAnnouncement(c *gin.Context) {
 		return
 	}
 	h.pushSystemReceive(res.MemberIDs, res.SysMsg, res.SysText)
-	h.pushUpdated(res.MemberIDs, ws.ConversationUpdatedPayload{
+	// 公告变更帧里 announcement 恒存在：清除场景下发空串而非 nil，
+	// 否则 omitempty 会让字段整个消失，接收端无法区分「本帧不涉及公告」与「公告被清空」。
+	// 其他 pushUpdated 调用点（改名/置顶等）该字段仍为 nil，帧字节不变。
+	framePayload := ws.ConversationUpdatedPayload{
 		ConversationID:        convID,
 		Announcement:          announcement,
 		AnnouncementUpdatedAt: updatedAt,
-	})
+	}
+	if framePayload.Announcement == nil {
+		empty := ""
+		framePayload.Announcement = &empty
+	}
+	h.pushUpdated(res.MemberIDs, framePayload)
 	Success(c, gin.H{"announcement": announcement, "announcement_updated_at": updatedAt})
 }
 
@@ -69,7 +79,8 @@ func (h *ConversationHandler) UpdateMyAlias(c *gin.Context) {
 		h.groupErr(c, err)
 		return
 	}
-	Success(c, gin.H{"alias": body.Alias})
+	// 回显 trim 后的值：service 存的就是 TrimSpace 结果，回显原值会与库不一致
+	Success(c, gin.H{"alias": strings.TrimSpace(body.Alias)})
 }
 
 // ClearHistory DELETE /conversations/:id/messages（单侧清空，member 维度）。

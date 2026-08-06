@@ -23,7 +23,8 @@ func (h *ConversationHandler) groupErr(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrNotGroup), errors.Is(err, service.ErrInvalidName),
 		errors.Is(err, service.ErrOwnerCannotLeave), errors.Is(err, service.ErrNoValidMembers),
 		errors.Is(err, service.ErrAlreadyAdmin), errors.Is(err, service.ErrNotAdmin),
-		errors.Is(err, service.ErrCannotTransferToSelf), errors.Is(err, service.ErrInvalidAlias):
+		errors.Is(err, service.ErrCannotTransferToSelf), errors.Is(err, service.ErrInvalidAlias),
+		errors.Is(err, service.ErrInvalidAnnouncement):
 		BadRequest(c, err.Error())
 	case errors.Is(err, service.ErrNotAllFriends):
 		Error(c, http.StatusBadRequest, 400, "all members must be your friends")

@@ -85,9 +85,10 @@ type ConversationUpdatedPayload struct {
 	IsPinned       *bool      `json:"is_pinned,omitempty"`
 	PinnedAt       *time.Time `json:"pinned_at,omitempty"`
 	IsMuted        *bool      `json:"is_muted,omitempty"`
-	// Announcement 新公告正文（清除公告时为 nil，故整字段不出现在帧里）。
+	// Announcement 新公告正文。公告变更帧里恒非 nil（清除公告时为空串），
+	// 使接收端能区分「本帧不涉及公告」（字段省略）与「公告被清空」（空串）。
 	Announcement *string `json:"announcement,omitempty"`
-	// AnnouncementUpdatedAt 公告变更时间（announcement 为 nil 的清除场景据此区分「未变更」）。
+	// AnnouncementUpdatedAt 公告变更时间。
 	AnnouncementUpdatedAt *time.Time `json:"announcement_updated_at,omitempty"`
 }
 
