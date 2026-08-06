@@ -53,8 +53,9 @@ func TestClearHistoryPerMember(t *testing.T) {
 	}
 }
 
-// TestClearHistoryResetsUnread 清空同时推进 last_read_seq：
-// 否则未读数仍计入已被过滤、再也拉不回的旧消息（列表显示未读但点进去是空的）。
+// TestClearHistoryResetsUnread 清空同时推进 last_read_seq 并清 mention_unread：
+// 否则未读数仍计入已被过滤、再也拉不回的旧消息（列表显示未读但点进去是空的），
+// 且被 @ 的那条消息已不可见却仍挂着 [@我] 高亮（清空后前端不再上报 read，无法自愈）。
 func TestClearHistoryResetsUnread(t *testing.T) {
 	db := testDB(t)
 	if err := db.AutoMigrate(&model.ConversationMember{}); err != nil {
@@ -73,13 +74,24 @@ func TestClearHistoryResetsUnread(t *testing.T) {
 			t.Fatalf("send: %v", err)
 		}
 	}
+	// a 被 @：清空前 mention_unread 为 true
+	if err := db.Model(&model.ConversationMember{}).
+		Where("conversation_id = ? AND user_id = ?", convID, a.ID).
+		Update("mention_unread", true).Error; err != nil {
+		t.Fatalf("seed mention_unread: %v", err)
+	}
 	dtos, err := convSvc.List(ctx, a.ID)
 	if err != nil {
 		t.Fatalf("list before clear: %v", err)
 	}
 	for _, d := range dtos {
-		if d.ID == convID && d.UnreadCount != 3 {
-			t.Fatalf("want 3 unread before clear, got %d", d.UnreadCount)
+		if d.ID == convID {
+			if d.UnreadCount != 3 {
+				t.Fatalf("want 3 unread before clear, got %d", d.UnreadCount)
+			}
+			if !d.MentionUnread {
+				t.Fatal("want mention_unread=true before clear")
+			}
 		}
 	}
 
@@ -98,6 +110,9 @@ func TestClearHistoryResetsUnread(t *testing.T) {
 			if d.UnreadCount != 0 {
 				t.Fatalf("clear should zero unread, got %d", d.UnreadCount)
 			}
+			if d.MentionUnread {
+				t.Fatal("clear should drop mention_unread (@ message is no longer reachable)")
+			}
 			if d.LastMessage != nil {
 				t.Fatalf("clear should drop last_message preview, got %+v", d.LastMessage)
 			}
@@ -105,6 +120,20 @@ func TestClearHistoryResetsUnread(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("conversation not in list")
+	}
+
+	// 库级复核：与 UpdateLastReadSeq 同一不变量（推进已读必清 @ 标记）
+	var member model.ConversationMember
+	if err := db.Where("conversation_id = ? AND user_id = ?", convID, a.ID).
+		First(&member).Error; err != nil {
+		t.Fatalf("reload member: %v", err)
+	}
+	if member.MentionUnread {
+		t.Fatal("db mention_unread should be false after clear")
+	}
+	if member.LastReadSeq != member.ClearedBeforeSeq {
+		t.Fatalf("last_read_seq(%d) should match cleared_before_seq(%d)",
+			member.LastReadSeq, member.ClearedBeforeSeq)
 	}
 
 	// 对方未读语义不受影响：b 自己发的消息本就已读，仍为 0；且预览仍在

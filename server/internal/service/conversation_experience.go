@@ -17,6 +17,9 @@ import (
 //
 // last_read_seq 同步推进到同一水位：否则 unread_count（last_seq - last_read_seq）
 // 仍会计入已被过滤掉、再也拉不回来的旧消息，导致列表显示未读却点进去空消息流。
+// mention_unread 一并清除：与 UpdateLastReadSeq 保持同一不变量——推进已读进度必须清 @ 标记，
+// 否则被 @ 的那条消息已被水位过滤掉，前端「[@我]」高亮将永久悬挂且无法自愈
+// （清空后 my_last_read_seq == last_seq，前端不再上报 message.read）。
 func (s *ConversationService) ClearHistory(ctx context.Context, userID, convID uuid.UUID) error {
 	conv, err := s.convRepo.FindByID(ctx, convID)
 	if err != nil {
@@ -36,7 +39,11 @@ func (s *ConversationService) ClearHistory(ctx context.Context, userID, convID u
 	return s.convRepo.DB().WithContext(ctx).
 		Model(&model.ConversationMember{}).
 		Where("conversation_id = ? AND user_id = ? AND cleared_before_seq < ?", convID, userID, conv.LastSeq).
-		Updates(map[string]any{"cleared_before_seq": conv.LastSeq, "last_read_seq": conv.LastSeq}).Error
+		Updates(map[string]any{
+			"cleared_before_seq": conv.LastSeq,
+			"last_read_seq":      conv.LastSeq,
+			"mention_unread":     false,
+		}).Error
 }
 
 // UpdateAnnouncement 更新群公告（role >= Admin）。空文案 = 清除公告。
