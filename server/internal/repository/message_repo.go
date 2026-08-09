@@ -57,16 +57,21 @@ func (r *MessageRepository) CreateWithSeq(ctx context.Context, msg *model.Messag
 	})
 }
 
-// ListBefore 取会话中 seq < beforeSeq 的最新 limit 条消息（seq 降序）。
+// ListBefore 取会话中 seq < beforeSeq 且 seq > minSeq 的最新 limit 条消息（seq 降序）。
 // beforeSeq ≤ 0 表示从最新一条开始取。
-func (r *MessageRepository) ListBefore(ctx context.Context, convID uuid.UUID, beforeSeq int64, limit int) ([]MessageWithSender, error) {
+// minSeq 为调用方的 cleared_before_seq 水位（0 表示不过滤）；群会话署名用成员 alias 覆盖 nickname。
+func (r *MessageRepository) ListBefore(ctx context.Context, convID uuid.UUID, beforeSeq, minSeq int64, limit int) ([]MessageWithSender, error) {
 	q := r.db.WithContext(ctx).
 		Table("messages m").
-		Select("m.*, u.nickname AS sender_nickname, u.avatar_url AS sender_avatar_url").
+		Select(`m.*, COALESCE(NULLIF(cm.alias, ''), u.nickname) AS sender_nickname, u.avatar_url AS sender_avatar_url`).
 		Joins("JOIN users u ON u.id = m.sender_id").
+		Joins("LEFT JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = m.sender_id").
 		Where("m.conversation_id = ? AND m.deleted_at IS NULL", convID)
 	if beforeSeq > 0 {
 		q = q.Where("m.seq < ?", beforeSeq)
+	}
+	if minSeq > 0 {
+		q = q.Where("m.seq > ?", minSeq)
 	}
 
 	var rows []MessageWithSender
@@ -93,8 +98,9 @@ func (r *MessageRepository) Recall(ctx context.Context, id uuid.UUID) (bool, err
 }
 
 // GetLastMessage 取会话最后一条消息（会话列表预览用）。
-func (r *MessageRepository) GetLastMessage(ctx context.Context, convID uuid.UUID) (*MessageWithSender, error) {
-	rows, err := r.ListBefore(ctx, convID, 0, 1)
+// minSeq 为调用方的 cleared_before_seq 水位：清空后列表预览同步失效（0 表示不过滤）。
+func (r *MessageRepository) GetLastMessage(ctx context.Context, convID uuid.UUID, minSeq int64) (*MessageWithSender, error) {
+	rows, err := r.ListBefore(ctx, convID, 0, minSeq, 1)
 	if err != nil || len(rows) == 0 {
 		return nil, err
 	}

@@ -19,7 +19,9 @@ type ConversationListItem struct {
 	IsPinned      bool       `json:"is_pinned"`
 	PinnedAt      *time.Time `json:"pinned_at"`
 	MentionUnread bool       `json:"mention_unread"`
-	MemberCount   int64      `json:"member_count"`
+	// ClearedBeforeSeq 本人的清空水位（列表预览据此过滤已清空的旧消息）。
+	ClearedBeforeSeq int64 `json:"cleared_before_seq"`
+	MemberCount      int64 `json:"member_count"`
 }
 
 // ConversationRepository 处理 conversations / conversation_members 表。
@@ -41,7 +43,8 @@ func (r *ConversationRepository) ListByUserID(ctx context.Context, userID uuid.U
 	var items []ConversationListItem
 	err := r.db.WithContext(ctx).
 		Table("conversations c").
-		Select(`c.*, cm.role, cm.last_read_seq, cm.is_muted, cm.mention_unread, cm.is_pinned, cm.pinned_at,
+		Select(`c.*, cm.role, cm.last_read_seq, cm.is_muted, cm.mention_unread,
+			cm.is_pinned, cm.pinned_at, cm.cleared_before_seq,
 			(SELECT count(*) FROM conversation_members m2 WHERE m2.conversation_id = c.id) AS member_count`).
 		Joins("JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = ?", userID).
 		Where("c.deleted_at IS NULL").
@@ -132,11 +135,13 @@ func (r *ConversationRepository) GetPeerUser(ctx context.Context, convID, userID
 }
 
 // MemberWithUser 群成员投影：成员行 + 用户资料。
+// Nickname 为展示名（群内 alias 覆盖用户本名）；Alias 为原始群昵称值，供编辑时回填。
 type MemberWithUser struct {
 	UserID    uuid.UUID `json:"user_id"`
 	Nickname  string    `json:"nickname"`
 	AvatarURL *string   `json:"avatar_url"`
 	Role      int16     `json:"role"`
+	Alias     *string   `json:"alias,omitempty"`
 }
 
 // ListMembers 查会话全部成员（owner 在前，其余按昵称升序）。
@@ -144,7 +149,7 @@ func (r *ConversationRepository) ListMembers(ctx context.Context, convID uuid.UU
 	var items []MemberWithUser
 	err := r.db.WithContext(ctx).
 		Table("conversation_members cm").
-		Select("cm.user_id, u.nickname, u.avatar_url, cm.role").
+		Select("cm.user_id, COALESCE(NULLIF(cm.alias, ''), u.nickname) AS nickname, u.avatar_url, cm.role, cm.alias").
 		Joins("JOIN users u ON u.id = cm.user_id").
 		Where("cm.conversation_id = ?", convID).
 		Order("cm.role DESC, u.nickname ASC").

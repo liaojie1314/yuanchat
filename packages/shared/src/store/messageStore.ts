@@ -213,6 +213,11 @@ interface MessageState {
    * 然后设置 highlightMsgId 触发 ChatWindow 滚动定位。
    */
   seekToMessage: (convId: string, msgId: string, seq: number) => Promise<void>;
+  /**
+   * 单侧清空聊天记录（本人清空后本地即时生效，服务端已确认无需帧驱动）。
+   * 清空后该会话置为空列表，且不再有更早历史可翻页。
+   */
+  clearConversation: (convId: string) => void;
 }
 
 // ========================================
@@ -712,6 +717,12 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       return s;
     });
   },
+
+  clearConversation: (convId) =>
+    set((s) => ({
+      messagesByConv: { ...s.messagesByConv, [convId]: [] },
+      hasMoreByConv: { ...s.hasMoreByConv, [convId]: false },
+    })),
 }));
 
 /** 经 WebSocket 发出 message.send 并挂 ack 超时（超时 → failed） */

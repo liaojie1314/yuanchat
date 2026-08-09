@@ -21,23 +21,33 @@ var ErrNotAllFriends = errors.New("some members are not friends")
 // ErrNoValidMembers 建群成员去重、剔除发起者后为空或超上限（参数错误）。
 var ErrNoValidMembers = errors.New("no valid members")
 
+// ErrInvalidAlias 群昵称超长（>30 rune）。空串允许（= 清除昵称）。
+var ErrInvalidAlias = errors.New("alias too long")
+
+// ErrInvalidAnnouncement 群公告超长（>1000 rune）。空串允许（= 清除公告）。
+var ErrInvalidAnnouncement = errors.New("announcement too long")
+
 // ConversationDTO 会话列表条目（REST 响应结构）。
 type ConversationDTO struct {
-	ID            uuid.UUID       `json:"id"`
-	Type          int16           `json:"type"`
-	Name          string          `json:"name"`
-	AvatarURL     *string         `json:"avatar_url,omitempty"`
-	MemberCount   int64           `json:"member_count"`
-	UnreadCount   int64           `json:"unread_count"`
-	IsMuted       bool            `json:"is_muted"`
-	IsPinned      bool            `json:"is_pinned"`
-	PinnedAt      *time.Time      `json:"pinned_at,omitempty"`
-	LastSeq       int64           `json:"last_seq"`
-	MyLastReadSeq int64           `json:"my_last_read_seq"`
-	MentionUnread bool            `json:"mention_unread"`
-	LastMessage   *LastMessageDTO `json:"last_message,omitempty"`
-	Peer          *PeerDTO        `json:"peer,omitempty"`
-	UpdatedAt     time.Time       `json:"updated_at"`
+	ID            uuid.UUID  `json:"id"`
+	Type          int16      `json:"type"`
+	Name          string     `json:"name"`
+	AvatarURL     *string    `json:"avatar_url,omitempty"`
+	MemberCount   int64      `json:"member_count"`
+	UnreadCount   int64      `json:"unread_count"`
+	IsMuted       bool       `json:"is_muted"`
+	IsPinned      bool       `json:"is_pinned"`
+	PinnedAt      *time.Time `json:"pinned_at,omitempty"`
+	LastSeq       int64      `json:"last_seq"`
+	MyLastReadSeq int64      `json:"my_last_read_seq"`
+	MentionUnread bool       `json:"mention_unread"`
+	// Announcement 群公告正文（无公告时不出现在 JSON 中）。
+	Announcement *string `json:"announcement,omitempty"`
+	// AnnouncementUpdatedAt 公告最近变更时间（前端判断「新公告」提示）。
+	AnnouncementUpdatedAt *time.Time      `json:"announcement_updated_at,omitempty"`
+	LastMessage           *LastMessageDTO `json:"last_message,omitempty"`
+	Peer                  *PeerDTO        `json:"peer,omitempty"`
+	UpdatedAt             time.Time       `json:"updated_at"`
 }
 
 // LastMessageDTO 会话预览用的最后一条消息摘要。
@@ -90,18 +100,20 @@ func (s *ConversationService) List(ctx context.Context, userID uuid.UUID) ([]Con
 	dtos := make([]ConversationDTO, 0, len(items))
 	for _, item := range items {
 		dto := ConversationDTO{
-			ID:            item.ID,
-			Type:          item.Type,
-			MemberCount:   item.MemberCount,
-			IsMuted:       item.IsMuted,
-			IsPinned:      item.IsPinned,
-			PinnedAt:      item.PinnedAt,
-			MentionUnread: item.MentionUnread,
-			LastSeq:       item.LastSeq,
-			MyLastReadSeq: item.LastReadSeq,
-			UnreadCount:   max(item.LastSeq-item.LastReadSeq, 0),
-			AvatarURL:     item.AvatarURL,
-			UpdatedAt:     item.UpdatedAt,
+			ID:                    item.ID,
+			Type:                  item.Type,
+			MemberCount:           item.MemberCount,
+			IsMuted:               item.IsMuted,
+			IsPinned:              item.IsPinned,
+			PinnedAt:              item.PinnedAt,
+			MentionUnread:         item.MentionUnread,
+			LastSeq:               item.LastSeq,
+			MyLastReadSeq:         item.LastReadSeq,
+			UnreadCount:           max(item.LastSeq-item.LastReadSeq, 0),
+			AvatarURL:             item.AvatarURL,
+			Announcement:          item.Announcement,
+			AnnouncementUpdatedAt: item.AnnouncementUpdatedAt,
+			UpdatedAt:             item.UpdatedAt,
 		}
 		if item.Name != nil {
 			dto.Name = *item.Name
@@ -123,7 +135,7 @@ func (s *ConversationService) List(ctx context.Context, userID uuid.UUID) ([]Con
 			}
 		}
 
-		if last, err := s.msgRepo.GetLastMessage(ctx, item.ID); err == nil && last != nil {
+		if last, err := s.msgRepo.GetLastMessage(ctx, item.ID, item.ClearedBeforeSeq); err == nil && last != nil {
 			dto.LastMessage = &LastMessageDTO{
 				Preview:        previewOf(last),
 				SenderNickname: last.SenderNickname,

@@ -234,6 +234,35 @@ export const handlers = [
   }),
 
   // --------------------------------------------------
+  // 会话 — 清空聊天记录（单侧软清空）
+  // DELETE /api/v1/conversations/:id/messages
+  // --------------------------------------------------
+  http.delete("http://localhost:8085/api/v1/conversations/:id/messages", async () => {
+    await delay(200);
+    return apiOk({});
+  }),
+
+  // --------------------------------------------------
+  // 会话 — 更新群公告（管理员，空串清除）
+  // PATCH /api/v1/conversations/:id/announcement
+  // --------------------------------------------------
+  http.patch("http://localhost:8085/api/v1/conversations/:id/announcement", async ({ request }) => {
+    await delay(200);
+    const body = (await request.json()) as { announcement?: string | null };
+    return apiOk({ announcement: body.announcement ?? null });
+  }),
+
+  // --------------------------------------------------
+  // 会话 — 设置本人群昵称（空串清除）
+  // PUT /api/v1/conversations/:id/my-alias
+  // --------------------------------------------------
+  http.put("http://localhost:8085/api/v1/conversations/:id/my-alias", async ({ request }) => {
+    await delay(200);
+    const body = (await request.json()) as { alias?: string };
+    return apiOk({ alias: body.alias ?? "" });
+  }),
+
+  // --------------------------------------------------
   // 兜底：其他未匹配的 localhost 请求放行
   // --------------------------------------------------
   http.all("http://localhost:8085/*", () => {

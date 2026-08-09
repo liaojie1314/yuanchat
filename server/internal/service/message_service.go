@@ -51,10 +51,10 @@ const MaxForwardTargets = 9
 
 // SendResult 消息落库后的结果，供 WS 层构造 ack / receive 推送。
 type SendResult struct {
-	Message           *model.Message
-	SenderNickname    string
-	MemberIDs         []uuid.UUID
-	MentionedMembers  []uuid.UUID // SendContent 校验后回填，供 WS 层构造帧
+	Message          *model.Message
+	SenderNickname   string
+	MemberIDs        []uuid.UUID
+	MentionedMembers []uuid.UUID // SendContent 校验后回填，供 WS 层构造帧
 }
 
 // RecallResult 撤回结果，供 handler 构造 message.recalled 推送。
@@ -248,10 +248,20 @@ func (s *MessageService) SendContent(
 	if err != nil || sender == nil {
 		return nil, fmt.Errorf("load sender: %w", err)
 	}
+	senderNickname := sender.Nickname
+
+	// 群会话署名取本人群昵称（alias 非空时覆盖本名），与历史消息 COALESCE 投影保持一致
+	if conv != nil && conv.Type == model.ConversationTypeGroup {
+		if m, ok, err := s.convRepo.GetMember(ctx, convID, senderID); err != nil {
+			s.logger.Warn("load sender alias failed", zap.Error(err))
+		} else if ok && m.Alias != nil && *m.Alias != "" {
+			senderNickname = *m.Alias
+		}
+	}
 
 	return &SendResult{
 		Message:          msg,
-		SenderNickname:   sender.Nickname,
+		SenderNickname:   senderNickname,
 		MemberIDs:        memberIDs,
 		MentionedMembers: validMentions,
 	}, nil
@@ -311,13 +321,14 @@ func (s *MessageService) Forward(
 
 // GetHistory 校验成员身份后按 seq 降序分页取历史消息。
 // 返回的切片仍为降序，由 handler/前端决定展示顺序。
+// 成员行的 cleared_before_seq 作为下界：单侧清空后旧消息对本人不可见（对方不受影响）。
 func (s *MessageService) GetHistory(
 	ctx context.Context,
 	userID, convID uuid.UUID,
 	beforeSeq int64,
 	limit int,
 ) ([]repository.MessageWithSender, error) {
-	ok, err := s.convRepo.IsMember(ctx, convID, userID)
+	member, ok, err := s.convRepo.GetMember(ctx, convID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("check membership: %w", err)
 	}
@@ -328,7 +339,7 @@ func (s *MessageService) GetHistory(
 	if limit <= 0 || limit > 100 {
 		limit = 30
 	}
-	messages, err := s.msgRepo.ListBefore(ctx, convID, beforeSeq, limit)
+	messages, err := s.msgRepo.ListBefore(ctx, convID, beforeSeq, member.ClearedBeforeSeq, limit)
 	if err != nil {
 		return nil, err
 	}

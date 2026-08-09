@@ -33,6 +33,7 @@ export { EmojiPicker } from "./EmojiPicker";
 export { EMOJI_CATEGORIES } from "./emojiData";
 export type { EmojiCategory } from "./emojiData";
 export { ChatDetail } from "./ChatDetail";
+export { AnnouncementDialog } from "./AnnouncementDialog";
 export { ChatScreen } from "./ChatScreen";
 export { MembersView } from "./MembersView";
 export { CreateGroupModal } from "./CreateGroupModal";

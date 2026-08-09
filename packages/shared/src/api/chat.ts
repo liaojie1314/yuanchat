@@ -43,6 +43,10 @@ export interface ConversationDTO {
   last_message?: LastMessageDTO;
   peer?: PeerDTO;
   updated_at: string;
+  /** 群公告（管理员编辑，空串/null 表示未设置或已清除） */
+  announcement?: string | null;
+  /** 公告最近一次更新时间（RFC3339），用于横幅未读态比对 */
+  announcement_updated_at?: string;
 }
 
 export interface MessageDTO {
@@ -150,6 +154,9 @@ export function mapConversation(dto: ConversationDTO): Conversation {
     lastSeq: dto.last_seq,
     myLastReadSeq: dto.my_last_read_seq,
     peerId: dto.peer ? dto.peer.id : undefined,
+    // 空串与 null 统一映射为 undefined（未设置/已清除同义），与 conversationUpdatePatch 对称
+    announcement: dto.announcement || undefined,
+    announcementUpdatedAt: dto.announcement_updated_at,
   };
 }
 
@@ -334,6 +341,8 @@ export interface ConversationMember {
   nickname: string;
   avatarUrl?: string | null;
   role: 0 | 1 | 2;
+  /** 群内昵称（未设置/已清除时字段整个消失，非 null 非空串） */
+  alias?: string;
 }
 
 interface MemberDTO {
@@ -341,6 +350,8 @@ interface MemberDTO {
   nickname: string;
   avatar_url?: string | null;
   role: number;
+  /** 群内昵称，未设置/已清除时后端不下发该字段（或为 null） */
+  alias?: string | null;
 }
 
 /** 群成员列表（ChatDetail 头像墙 / 成员全列表用） */
@@ -353,6 +364,7 @@ export async function fetchMembers(conversationId: string): Promise<Conversation
     nickname: m.nickname,
     avatarUrl: m.avatar_url,
     role: (m.role === 1 || m.role === 2 ? m.role : 0) as 0 | 1 | 2,
+    alias: m.alias ?? undefined,
   }));
 }
 
@@ -425,6 +437,9 @@ export function conversationUpdatePatch(p: {
   is_pinned?: boolean;
   pinned_at?: string | null;
   is_muted?: boolean;
+  /** 公告变更帧中恒存在（空串=清除）；群改名/邀请等其他帧完全不含该键 */
+  announcement?: string | null;
+  announcement_updated_at?: string;
 }): Partial<Conversation> {
   const patch: Partial<Conversation> = {};
   if (p.name) patch.name = p.name;
@@ -434,5 +449,10 @@ export function conversationUpdatePatch(p: {
     patch.pinnedAt = p.pinned_at ?? undefined;
   }
   if (p.is_muted !== undefined) patch.isMuted = p.is_muted;
+  if (p.announcement !== undefined) {
+    // 空串 = 清除（后端约定）：映射为本地 undefined，与"未设置"同义
+    patch.announcement = p.announcement || undefined;
+    patch.announcementUpdatedAt = p.announcement_updated_at;
+  }
   return patch;
 }

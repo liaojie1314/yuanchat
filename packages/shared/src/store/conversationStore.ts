@@ -76,6 +76,10 @@ export interface Conversation {
   memberVersion?: number;
   /** 群消息 @ 我未读标记（列表侧显示 [@我] 前缀 / 红点，进入会话调 MarkRead 清零） */
   mentionUnread?: boolean;
+  /** 群公告全文（管理员编辑，空/undefined 表示未设置或已清除；详情面板 + 顶部横幅显示） */
+  announcement?: string;
+  /** 公告最近一次更新时间（RFC3339），横幅未读态据此与 localStorage 已读标记比对 */
+  announcementUpdatedAt?: string;
 }
 
 interface ConversationState {

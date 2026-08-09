@@ -19,6 +19,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowLeft,
   Loader2,
+  Megaphone,
   MessageSquare,
   MoreHorizontal,
   Phone,
@@ -43,6 +44,7 @@ import {
 import { cn } from "@yuanchat/shared/utils";
 import type { MentionRef } from "@yuanchat/shared";
 import { Avatar } from "./Avatar";
+import { AnnouncementDialog } from "./AnnouncementDialog";
 import { Composer } from "./Composer";
 import { ForwardModal } from "./ForwardModal";
 import { E2EEIndicator } from "./E2EEIndicator";
@@ -91,6 +93,8 @@ export function ChatWindow({
   const [showSearch, setShowSearch] = useState(false);
   // 安全指纹校验弹窗开关（E2EE，仅单聊）
   const [showSafetyNumber, setShowSafetyNumber] = useState(false);
+  // 群公告全文弹层开关
+  const [showAnnouncement, setShowAnnouncement] = useState(false);
   const selfUserId = useAuthStore((s) => s.user?.id);
 
   const items = messages ?? [];
@@ -171,6 +175,21 @@ export function ChatWindow({
 
   // 防御：如果没找到会话（activeId 无效或为 null），不渲染
   if (!conv) return null;
+
+  // 群公告未读态：localStorage 记录的已读标记时间 < 公告最近更新时间即视为未读
+  // （跨设备/清缓存后会重新判定为未读，属预期行为，非 bug）。
+  // 注意：不同来源的 RFC3339 时间戳可能带不同时区偏移后缀（+08:00 vs Z），
+  // 字典序不等于时间序，须转 epoch 数值比较（同 ConversationList 对 pinnedAt 排序的处理）；
+  // localStorage 空值 Date.parse("") 为 NaN，用 || 0 兜底成最小值（即"从未读过"）。
+  const announcementReadKey = "announcement-read:" + conv.id;
+  const isAnnouncementUnread = conv.announcementUpdatedAt
+    ? (Date.parse(localStorage.getItem(announcementReadKey) ?? "") || 0) <
+      Date.parse(conv.announcementUpdatedAt)
+    : false;
+  const openAnnouncement = () => {
+    setShowAnnouncement(true);
+    localStorage.setItem(announcementReadKey, conv.announcementUpdatedAt ?? "");
+  };
 
   const subtitle =
     conv.type === "group"
@@ -271,6 +290,33 @@ export function ChatWindow({
       {/* 会话内搜索面板 */}
       {showSearch && activeId && (
         <InConversationSearch conversationId={activeId} onClose={() => setShowSearch(false)} />
+      )}
+
+      {/* 群公告横幅（群聊且公告非空时显示；未读时加粗 + 高亮点） */}
+      {conv.type === "group" && conv.announcement && (
+        <button
+          onClick={openAnnouncement}
+          className="bg-primary-container text-primary-on-container flex h-9 w-full shrink-0 items-center gap-2 px-4 text-left"
+        >
+          <Megaphone size={13} className="shrink-0" />
+          <span className={cn("text-label-md", isAnnouncementUnread && "font-bold")}>
+            {t("chat.announcementLabel")}
+          </span>
+          <span
+            className={cn(
+              "text-body-sm min-w-0 flex-1 truncate",
+              isAnnouncementUnread && "font-semibold",
+            )}
+          >
+            {conv.announcement}
+          </span>
+          {isAnnouncementUnread && (
+            <span className="bg-error h-1.5 w-1.5 shrink-0 rounded-full" aria-hidden="true" />
+          )}
+          <span className="text-label-sm shrink-0 opacity-70">
+            {t("chat.announcementViewFull")}
+          </span>
+        </button>
       )}
 
       {/* 置顶消息条 */}
@@ -445,6 +491,13 @@ export function ChatWindow({
           onClose={() => setShowSafetyNumber(false)}
         />
       )}
+
+      {/* 群公告全文弹层 */}
+      <AnnouncementDialog
+        open={showAnnouncement}
+        announcement={conv.announcement ?? ""}
+        onClose={() => setShowAnnouncement(false)}
+      />
     </div>
   );
 }
