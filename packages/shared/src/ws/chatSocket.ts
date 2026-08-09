@@ -91,6 +91,9 @@ export interface ServerFrames {
     is_pinned?: boolean;
     pinned_at?: string | null;
     is_muted?: boolean;
+    /** 公告变更帧中恒存在（空串=清除）；其他类型的更新帧不含该键 */
+    announcement?: string | null;
+    announcement_updated_at?: string;
   };
   "conversation.removed": { conversation_id: string; reason: "kicked" | "left" | "dissolved" };
   "conversation.role_changed": {

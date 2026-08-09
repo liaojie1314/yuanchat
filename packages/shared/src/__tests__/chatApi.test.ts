@@ -306,6 +306,50 @@ describe("fetchMembers", () => {
     mockFetchOnce({});
     expect(await fetchMembers("conv-1")).toEqual([]);
   });
+
+  it("passes through alias when present, omits when absent/null", async () => {
+    mockFetchOnce({
+      members: [
+        { user_id: "u1", nickname: "群主", avatar_url: null, role: 2, alias: "老板" },
+        { user_id: "u2", nickname: "管理", avatar_url: null, role: 1, alias: null },
+        { user_id: "u3", nickname: "路人", avatar_url: null, role: 0 },
+      ],
+    });
+    const members = await fetchMembers("conv-1");
+    expect(members[0].alias).toBe("老板");
+    expect(members[1].alias).toBeUndefined();
+    expect(members[2].alias).toBeUndefined();
+  });
+});
+
+describe("mapConversation announcement fields", () => {
+  const base: ConversationDTO = {
+    id: "c1",
+    type: 2,
+    name: "研发群",
+    member_count: 3,
+    unread_count: 0,
+    is_muted: false,
+    last_seq: 0,
+    my_last_read_seq: 0,
+    updated_at: "2026-07-31T10:00:00+08:00",
+  };
+
+  it("maps announcement and announcement_updated_at when present", () => {
+    const conv = mapConversation({
+      ...base,
+      announcement: "周五 15:00 发布评审",
+      announcement_updated_at: "2026-08-01T09:00:00+08:00",
+    });
+    expect(conv.announcement).toBe("周五 15:00 发布评审");
+    expect(conv.announcementUpdatedAt).toBe("2026-08-01T09:00:00+08:00");
+  });
+
+  it("leaves announcement undefined when absent", () => {
+    const conv = mapConversation(base);
+    expect(conv.announcement).toBeUndefined();
+    expect(conv.announcementUpdatedAt).toBeUndefined();
+  });
 });
 
 describe("mapConversation pinned fields", () => {
@@ -363,5 +407,37 @@ describe("conversationUpdatePatch", () => {
     expect(conversationUpdatePatch({ conversation_id: "c1", name: "新群名" })).toEqual({
       name: "新群名",
     });
+  });
+
+  it("maps non-empty announcement and updatedAt", () => {
+    expect(
+      conversationUpdatePatch({
+        conversation_id: "c1",
+        announcement: "新公告内容",
+        announcement_updated_at: "2026-08-01T09:00:00+08:00",
+      }),
+    ).toEqual({
+      announcement: "新公告内容",
+      announcementUpdatedAt: "2026-08-01T09:00:00+08:00",
+    });
+  });
+
+  it("maps empty-string announcement to undefined (cleared) but keeps updatedAt", () => {
+    expect(
+      conversationUpdatePatch({
+        conversation_id: "c1",
+        announcement: "",
+        announcement_updated_at: "2026-08-01T09:05:00+08:00",
+      }),
+    ).toEqual({
+      announcement: undefined,
+      announcementUpdatedAt: "2026-08-01T09:05:00+08:00",
+    });
+  });
+
+  it("skips announcement key entirely when absent (e.g. rename frame)", () => {
+    expect(conversationUpdatePatch({ conversation_id: "c1", name: "新群名" })).not.toHaveProperty(
+      "announcement",
+    );
   });
 });
