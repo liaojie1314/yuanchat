@@ -530,3 +530,44 @@ describe("messageStore (mock mode)", () => {
     expect(useMessageStore.getState().messagesByConv[CONV][0].id).toBe(id);
   });
 });
+
+describe("messageStore.clearConversation", () => {
+  const CONV_B = "conv-b";
+
+  it("empties messages and resets hasMore for the target conversation only", () => {
+    useMessageStore.setState({
+      messagesByConv: {
+        [CONV]: [
+          {
+            id: "a1",
+            conversationId: CONV,
+            kind: "text",
+            isSelf: false,
+            text: "hi",
+            time: "09:00",
+          },
+          { id: "a2", conversationId: CONV, kind: "text", isSelf: true, text: "yo", time: "09:01" },
+        ],
+        [CONV_B]: [
+          {
+            id: "b1",
+            conversationId: CONV_B,
+            kind: "text",
+            isSelf: false,
+            text: "hey",
+            time: "09:02",
+          },
+        ],
+      },
+      hasMoreByConv: { [CONV]: true, [CONV_B]: true },
+    });
+
+    useMessageStore.getState().clearConversation(CONV);
+
+    const state = useMessageStore.getState();
+    expect(state.messagesByConv[CONV]).toEqual([]);
+    expect(state.hasMoreByConv[CONV]).toBe(false);
+    expect(state.messagesByConv[CONV_B]).toHaveLength(1);
+    expect(state.hasMoreByConv[CONV_B]).toBe(true);
+  });
+});
