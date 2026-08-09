@@ -40,7 +40,7 @@ export function AnnouncementDialog({
           <button
             onClick={onClose}
             className="md3-icon-btn text-on-surface-variant !h-8 !w-8 shrink-0"
-            aria-label={t("detail.close")}
+            aria-label={t("common.close")}
           >
             <X size={16} />
           </button>

@@ -89,4 +89,19 @@ describe("ChatWindow announcement banner", () => {
     fireEvent.click(screen.getByText(ANNOUNCEMENT_TEXT));
     expect(localStorage.getItem("announcement-read:g1")).toBe("2026-08-01T09:00:00+08:00");
   });
+
+  it("shows the unread dot when never marked as read (Date.parse('') falls back to 0)", () => {
+    setupStores(GROUP_CONV);
+    const { container } = render(<ChatWindow />);
+    expect(container.querySelector(".bg-error")).not.toBeNull();
+  });
+
+  it("treats an equal instant with a different timezone suffix as read — not a string compare", () => {
+    // 同一时刻的两种 RFC3339 表示：Z（UTC）与 +08:00。字典序 "...T01..." < "...T09..."
+    // 会被朴素字符串比较误判为「未读」，Date.parse 数值比较才能正确判定为「已读」。
+    localStorage.setItem("announcement-read:g1", "2026-08-01T01:00:00.000Z");
+    setupStores(GROUP_CONV); // announcementUpdatedAt: "2026-08-01T09:00:00+08:00" — 同一时刻
+    const { container } = render(<ChatWindow />);
+    expect(container.querySelector(".bg-error")).toBeNull();
+  });
 });

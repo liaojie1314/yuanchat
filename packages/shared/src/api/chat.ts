@@ -154,7 +154,8 @@ export function mapConversation(dto: ConversationDTO): Conversation {
     lastSeq: dto.last_seq,
     myLastReadSeq: dto.my_last_read_seq,
     peerId: dto.peer ? dto.peer.id : undefined,
-    announcement: dto.announcement ?? undefined,
+    // 空串与 null 统一映射为 undefined（未设置/已清除同义），与 conversationUpdatePatch 对称
+    announcement: dto.announcement || undefined,
     announcementUpdatedAt: dto.announcement_updated_at,
   };
 }

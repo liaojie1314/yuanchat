@@ -177,10 +177,14 @@ export function ChatWindow({
   if (!conv) return null;
 
   // 群公告未读态：localStorage 记录的已读标记时间 < 公告最近更新时间即视为未读
-  // （跨设备/清缓存后会重新判定为未读，属预期行为，非 bug）
+  // （跨设备/清缓存后会重新判定为未读，属预期行为，非 bug）。
+  // 注意：不同来源的 RFC3339 时间戳可能带不同时区偏移后缀（+08:00 vs Z），
+  // 字典序不等于时间序，须转 epoch 数值比较（同 ConversationList 对 pinnedAt 排序的处理）；
+  // localStorage 空值 Date.parse("") 为 NaN，用 || 0 兜底成最小值（即"从未读过"）。
   const announcementReadKey = "announcement-read:" + conv.id;
   const isAnnouncementUnread = conv.announcementUpdatedAt
-    ? (localStorage.getItem(announcementReadKey) ?? "") < conv.announcementUpdatedAt
+    ? (Date.parse(localStorage.getItem(announcementReadKey) ?? "") || 0) <
+      Date.parse(conv.announcementUpdatedAt)
     : false;
   const openAnnouncement = () => {
     setShowAnnouncement(true);

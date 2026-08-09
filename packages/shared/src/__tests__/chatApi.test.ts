@@ -350,6 +350,16 @@ describe("mapConversation announcement fields", () => {
     expect(conv.announcement).toBeUndefined();
     expect(conv.announcementUpdatedAt).toBeUndefined();
   });
+
+  it("maps empty-string announcement to undefined (cleared), symmetric with conversationUpdatePatch", () => {
+    const conv = mapConversation({
+      ...base,
+      announcement: "",
+      announcement_updated_at: "2026-08-01T09:05:00+08:00",
+    });
+    expect(conv.announcement).toBeUndefined();
+    expect(conv.announcementUpdatedAt).toBe("2026-08-01T09:05:00+08:00");
+  });
 });
 
 describe("mapConversation pinned fields", () => {
