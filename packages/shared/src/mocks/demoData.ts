@@ -24,6 +24,8 @@ export const DEMO_CONVERSATIONS: Conversation[] = [
     memberCount: 28,
     onlineCount: 5,
     pinnedMessage: "周五 15:00 发布评审，请提前更新进度看板",
+    announcement: "新人入群请先自我介绍，工作日 10:00-19:00 为核心响应时间，请勿深夜 @全体成员",
+    announcementUpdatedAt: "2026-08-01T09:00:00+08:00",
   },
   {
     id: "2",
