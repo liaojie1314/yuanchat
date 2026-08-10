@@ -54,6 +54,10 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	favSvc := service.NewFavoriteService(favRepo, msgRepo, convRepo, userRepo, logger)
 	favH := handler.NewFavoriteHandler(favSvc, logger)
 
+	stickerRepo := repository.NewStickerRepository(db)
+	stickerSvc := service.NewStickerService(stickerRepo, logger)
+	stickerH := handler.NewStickerHandler(stickerSvc, logger)
+
 	healthH := handler.NewHealthHandler()
 	captchaH := handler.NewCaptchaHandler(rdb)
 	userH := handler.NewUserHandler(userSvc, captchaH, logger)
@@ -221,6 +225,11 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		chat.POST("/favorites", favH.Add)
 		chat.DELETE("/favorites/:messageId", favH.Remove)
 		chat.GET("/favorites", favH.List)
+
+		chat.GET("/stickers/mine", stickerH.ListMine)
+		chat.POST("/stickers", stickerH.Add)
+		chat.DELETE("/stickers/:id", stickerH.Remove)
+		chat.GET("/sticker-packs", stickerH.ListPacks)
 
 		chat.POST("/reports", middleware.LimitByIP(10, 20), reportH.Create)
 
