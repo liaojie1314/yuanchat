@@ -43,6 +43,10 @@ const (
 	// MessageTypeE2EE 端到端加密密文。服务端只存密文，无法解读内容，
 	// 因此全文搜索、内容审核、消息预览对此类消息天然失效。
 	MessageTypeE2EE int16 = 7
+	// MessageTypeSticker 贴纸消息（收藏表情/官方表情包），独立类型不复用 image：
+	// 渲染无气泡裸图、不进搜索索引（与 image 现状一致，靠 content 无 text 字段自然过滤）、
+	// 不进内容审核（同 image/file/voice，审核仅对 MessageTypeText 生效）。
+	MessageTypeSticker int16 = 8
 )
 
 // MessageStatus 消息状态枚举
