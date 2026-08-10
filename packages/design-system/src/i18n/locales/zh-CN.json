@@ -174,6 +174,7 @@
   "chat.message.image": "[图片]",
   "chat.message.file": "[文件]",
   "chat.message.voice": "[语音]",
+  "chat.message.sticker": "[表情]",
   "chat.message.edited": "已编辑",
   "chat.image.alt": "图片",
   "chat.image.open": "查看大图",

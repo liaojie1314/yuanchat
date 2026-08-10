@@ -33,7 +33,7 @@ export interface AdminMessage {
   conversation_id: string;
   sender_id: string;
   sender_nickname: string;
-  message_type: number; // 1=text 2=image 3=file 4=voice
+  message_type: number; // 1=text 2=image 3=file 4=voice 8=sticker
   content: string; // JSONB 原文（文本消息为 {"text":"..."}）
   seq: number;
   created_at: string;

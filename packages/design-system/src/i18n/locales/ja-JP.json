@@ -174,6 +174,7 @@
   "chat.message.image": "[画像]",
   "chat.message.file": "[ファイル]",
   "chat.message.voice": "[音声]",
+  "chat.message.sticker": "[スタンプ]",
   "chat.message.edited": "編集済み",
   "chat.image.alt": "画像",
   "chat.image.open": "画像を表示",

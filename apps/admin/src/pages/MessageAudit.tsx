@@ -12,6 +12,7 @@ const TYPE_KEY: Record<number, string> = {
   2: "chat.message.image",
   3: "chat.message.file",
   4: "chat.message.voice",
+  8: "chat.message.sticker",
 };
 
 /** content JSONB 原文 → 展示文本（text 消息取 text 字段，解析失败回退原文） */

@@ -619,6 +619,78 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 > （带 `X-Amz-*` 签名参数、有 TTL），杜绝越权直取；头像落在 `avatars/` **公共读**前缀（桶策略开放匿名
 > `s3:GetObject`），用永久 `public_url` 直接展示、免签名——头像本就随处曝光，换取零签名开销与可长期缓存。
 
+### GET /api/v1/sticker-packs（v0.4 H1）
+
+返回当前用户的**全部表情包列表**（官方 + 自己收藏的贴纸），每个包含贴纸摘要。
+官方表情包（`is_official=true`）所有用户可见；收藏表情包（`is_official=false`，name 固定 `"My Stickers"`）
+按用户隔离（`owner_id`）。每个贴纸携带 `object_key`（可换 `download-url` 预签名 GET），
+前端优先从本地缓存读取 PNG（IndexedDB/文件系统），未命中时发 download-url 请求。
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "packs": [
+      {
+        "id": "uuid",
+        "name": "YuanChat 官方表情",
+        "is_official": true,
+        "stickers": [
+          { "id": "uuid", "object_key": "stickers/official/<uuid>.png" },
+          { "id": "uuid", "object_key": "stickers/official/<uuid>.png" }
+        ]
+      },
+      {
+        "id": "uuid",
+        "name": "My Stickers",
+        "is_official": false,
+        "stickers": [{ "id": "uuid", "object_key": "stickers/2026/08/<uuid>.png" }]
+      }
+    ]
+  }
+}
+```
+
+### POST /api/v1/stickers（v0.4 H1）
+
+**收藏贴纸**：客户端先计算文件 SHA-256（浏览器 `crypto.subtle.digest`；Node 22+ 原生支持），
+调 `POST /api/v1/files/upload-url?category=stickers` 拿预签名上传，直传 MinIO 后携带 `object_key`
+与 `content_hash` 调本端点。服务端按 `(owner_id, content_hash)` 去重：已存在时返回现有贴纸（HTTP 200，
+body 含既有 `sticker_id`）；首次收藏时创建贴纸记录（HTTP 201）。
+不存在 `owner_id` 对应的收藏表情包时自动创建（`name="My Stickers"`、`is_official=false`）。
+
+```json
+// 请求
+{ "object_key": "stickers/2026/08/<uuid>.png", "content_hash": "<hex-sha256>" }
+
+// 响应（201 Created 或 200 OK）
+{
+  "code": 0,
+  "message": "created",  // 或 "ok"（去重）
+  "data": {
+    "sticker_id": "uuid",
+    "pack_id": "uuid"
+  }
+}
+```
+
+- `content_hash` 必须是 64 字符小写十六进制（sha256），否则 `400`（`invalid content hash`）。
+- `object_key` 必须匹配 `^stickers/[0-9]{4}/[0-9]{2}/[0-9a-f-]+\.png$` 或 `^stickers/official/[0-9a-f-]+\.png$`，
+  否则 `400`（`invalid object key`）。
+
+### DELETE /api/v1/stickers/:id（v0.4 H1）
+
+删除收藏的贴纸（仅 owner 可删）。官方表情包的贴纸不可删（`403 forbidden`）。
+删除后对应 MinIO 对象**不删除**（对象存储开销可忽略；避免误删后重传浪费流量）。
+
+```json
+// DELETE /api/v1/stickers/<uuid>
+// 响应（204 No Content）
+```
+
+- 非 owner 删除 → `403`；官方贴纸 → `403`；贴纸不存在 → `404`。
+
 ## 三、WebSocket 协议
 
 - 地址：`ws://<host>:8081/ws?token=<access_token>`（生产 `wss://`）。
@@ -634,15 +706,16 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 | `message.send` | `{conversation_id, content: {type:"image", key, width, height, size}, client_msg_id, reply_to_id?}` | 发送图片。`content` 走图片分支：`key`=`upload-url` 返回的 object_key，`width`/`height`=像素宽高（气泡等比占位防 CLS），`size`=字节；四者缺一或非正 → `400`（`image content requires key/width/height/size`） |
 | `message.send` | `{conversation_id, content: {type:"file", key, name, size}, client_msg_id, reply_to_id?}`           | 发送文件。`name`=原始文件名（展示用，≤255 rune），三者缺一 → `400`；MIME 须在 `upload.allowed_types` 白名单内（upload-url 阶段拦截 `4001`）                                                                  |
 | `message.send` | `{conversation_id, content: {type:"voice", key, duration, size}, client_msg_id, reply_to_id?}`      | 发送语音（webm/opus）。`duration`=秒数，**1-60s** 之外 → `400`（`voice content requires key/duration(1-60s)/size`）                                                                                          |
+| `message.send` | `{conversation_id, content: {type:"sticker", sticker_id}, client_msg_id, reply_to_id?}`             | 发送贴纸（v0.4 H1）。`sticker_id`=贴纸 UUID（须存在于 `stickers` 表且该用户曾收藏，否则 `400`）                                                                                                              |
 | `message.read` | `{conversation_id, seq}`                                                                            | 上报已读进度（已读到的最大 seq，只前进不后退）                                                                                                                                                               |
 | `typing`       | `{conversation_id}`                                                                                 | 正在输入（客户端节流 ~3s/次）                                                                                                                                                                                |
 
-> **ContentPayload（消息体传输结构）**：`{type, text?, key?, width?, height?, size?, name?, duration?}`。
+> **ContentPayload（消息体传输结构）**：`{type, text?, key?, width?, height?, size?, name?, duration?, sticker_id?}`。
 > text 帧只用 `type`/`text`；image 帧用 `key`/`width`/`height`/`size`；file 帧用 `key`/`name`/`size`；
-> voice 帧用 `key`/`duration`/`size`（均 `omitempty`，不污染文本消息）。
-> 服务端落库时按 `content.type` 分流 `message_type`（text=1、image=2、file=3、voice=4、system=6），
+> voice 帧用 `key`/`duration`/`size`；sticker 帧用 `sticker_id`（均 `omitempty`，不污染文本消息）。
+> 服务端落库时按 `content.type` 分流 `message_type`（text=1、image=2、file=3、voice=4、system=6、sticker=8），
 > `message.receive` 原样回传 `content`，接收端据 `type` 渲染对应气泡
-> （image/file/voice 均用 `key` 换 `download-url` 拉预签名 GET；voice 播放走单例 Audio）。
+> （image/file/voice 均用 `key` 换 `download-url` 拉预签名 GET；voice 播放走单例 Audio；sticker 从收藏表本地读取 PNG 缓存或发 download-url 请求）。
 
 ### 服务端 → 客户端
 
