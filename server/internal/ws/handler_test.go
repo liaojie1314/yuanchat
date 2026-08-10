@@ -139,3 +139,48 @@ func TestBuildContentUnsupportedTypeRejected(t *testing.T) {
 		t.Fatalf("unexpected error frame: %+v", e)
 	}
 }
+
+// TestBuildContentSticker 贴纸分支：字段齐全时落库为 MessageTypeSticker，
+// content JSON 含 sticker_id/key/width/height；字段缺失时报 400 且 ok=false。
+func TestBuildContentSticker(t *testing.T) {
+	c := newTestClient(uuid.Nil)
+	p := &SendPayload{
+		Content: ContentPayload{
+			Type: "sticker", StickerID: "s1", Key: "images/2026/08/abc.png", Width: 96, Height: 96,
+		},
+		ClientMsgID: "c-sticker",
+	}
+	msgType, contentJSON, ok := new(Handler).buildContent(c, p)
+	if !ok {
+		t.Fatalf("expected ok, got error frame")
+	}
+	if msgType != model.MessageTypeSticker {
+		t.Fatalf("want MessageTypeSticker(8), got %d", msgType)
+	}
+	var parsed struct {
+		StickerID string `json:"sticker_id"`
+		Key       string `json:"key"`
+		Width     int    `json:"width"`
+		Height    int    `json:"height"`
+	}
+	if err := json.Unmarshal([]byte(contentJSON), &parsed); err != nil {
+		t.Fatalf("unmarshal content: %v", err)
+	}
+	if parsed.StickerID != "s1" || parsed.Key != p.Content.Key || parsed.Width != 96 || parsed.Height != 96 {
+		t.Fatalf("content mismatch: %+v", parsed)
+	}
+	assertNoFrame(t, c)
+}
+
+// TestBuildContentStickerMissingFields 缺字段时报 400，不落库。
+func TestBuildContentStickerMissingFields(t *testing.T) {
+	c := newTestClient(uuid.Nil)
+	p := &SendPayload{Content: ContentPayload{Type: "sticker"}, ClientMsgID: "c-sticker-bad"}
+	_, _, ok := new(Handler).buildContent(c, p)
+	if ok {
+		t.Fatal("expected ok=false for missing sticker fields")
+	}
+	if e := decodeErr(t, c); e.Code != 400 {
+		t.Fatalf("unexpected error frame: %+v", e)
+	}
+}

@@ -111,6 +111,8 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 			body = "[文件]"
 		case "voice":
 			body = "[语音]"
+		case "sticker":
+			body = "[表情]"
 		}
 		pushSvc.NotifyUsers(ctx, recipients, service.PushPayload{
 			Title:          info.SenderNickname,

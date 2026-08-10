@@ -282,6 +282,22 @@ func (h *Handler) buildContent(c *Client, p *SendPayload) (int16, string, bool) 
 			return 0, "", false
 		}
 		return model.MessageTypeImage, string(raw), true
+	case "sticker":
+		if p.Content.StickerID == "" || p.Content.Key == "" || p.Content.Width <= 0 || p.Content.Height <= 0 {
+			c.sendError(400, "sticker content requires sticker_id/key/width/height", p.ClientMsgID)
+			return 0, "", false
+		}
+		raw, err := json.Marshal(struct {
+			StickerID string `json:"sticker_id"`
+			Key       string `json:"key"`
+			Width     int    `json:"width"`
+			Height    int    `json:"height"`
+		}{p.Content.StickerID, p.Content.Key, p.Content.Width, p.Content.Height})
+		if err != nil {
+			c.sendError(400, "invalid sticker content", p.ClientMsgID)
+			return 0, "", false
+		}
+		return model.MessageTypeSticker, string(raw), true
 	case "file":
 		if p.Content.Key == "" || p.Content.Name == "" || p.Content.Size <= 0 {
 			c.sendError(400, "file content requires key/name/size", p.ClientMsgID)

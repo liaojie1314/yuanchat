@@ -140,14 +140,15 @@ type ContactAcceptedPayload struct {
 //
 // 向后兼容：text 帧只用 Type/Text，其余字段带 omitempty，不会污染文本消息。
 type ContentPayload struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	Key      string `json:"key,omitempty"`      // image/file/voice: MinIO object key
-	Width    int    `json:"width,omitempty"`    // image: 像素宽
-	Height   int    `json:"height,omitempty"`   // image: 像素高
-	Size     int64  `json:"size,omitempty"`     // image/file/voice: 字节大小
-	Name     string `json:"name,omitempty"`     // file: 原始文件名（展示用）
-	Duration int    `json:"duration,omitempty"` // voice: 时长（秒）
+	Type      string `json:"type"`
+	Text      string `json:"text,omitempty"`
+	Key       string `json:"key,omitempty"`        // image/file/voice: MinIO object key
+	Width     int    `json:"width,omitempty"`      // image: 像素宽
+	Height    int    `json:"height,omitempty"`     // image: 像素高
+	Size      int64  `json:"size,omitempty"`       // image/file/voice: 字节大小
+	Name      string `json:"name,omitempty"`       // file: 原始文件名（展示用）
+	Duration  int    `json:"duration,omitempty"`   // voice: 时长（秒）
+	StickerID string `json:"sticker_id,omitempty"` // sticker: 贴纸 ID（关联 stickers 表）
 
 	// ---- e2ee：端到端加密密文（服务端不解析语义，仅原样透传落库）----
 	RatchetKey   string `json:"ratchet_key,omitempty"`   // 发送方当前棘轮公钥

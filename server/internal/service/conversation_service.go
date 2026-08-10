@@ -165,6 +165,8 @@ func previewOf(m *repository.MessageWithSender) string {
 		return "[语音]"
 	case model.MessageTypeVideo:
 		return "[视频]"
+	case model.MessageTypeSticker:
+		return "[表情]"
 	default:
 		return ""
 	}
