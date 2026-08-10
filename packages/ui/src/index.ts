@@ -27,6 +27,7 @@ export { ConversationList } from "./ConversationList";
 export { ChatWindow } from "./ChatWindow";
 export { MessageBubble, TypingIndicator } from "./MessageBubble";
 export { MessageImage } from "./MessageImage";
+export { StickerImage } from "./StickerImage";
 export { ImageLightbox } from "./ImageLightbox";
 export { Composer } from "./Composer";
 export { EmojiPicker } from "./EmojiPicker";

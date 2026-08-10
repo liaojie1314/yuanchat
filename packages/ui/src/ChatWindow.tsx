@@ -32,6 +32,8 @@ import {
   addFavorite,
   ApiError,
   formatDateDivider,
+  getDownloadUrl,
+  hashBlob,
   recallMessage,
   RE_EDIT_WINDOW_MS,
   reportMessage,
@@ -40,6 +42,7 @@ import {
   useAuthStore,
   useConversationStore,
   useMessageStore,
+  useStickerStore,
 } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import type { MentionRef } from "@yuanchat/shared";
@@ -228,6 +231,20 @@ export function ChatWindow({
         showToast("error", t("common.opFailed"));
       }
     });
+  };
+
+  // 添加图片到表情收藏：取图 blob → 计算 SHA-256 → stickerStore.add
+  const handleAddSticker = async (imageKey: string) => {
+    try {
+      const url = await getDownloadUrl(imageKey);
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      const hash = await hashBlob(blob);
+      await useStickerStore.getState().add(blob, hash);
+      showToast("info", t("stickers.added"));
+    } catch {
+      showToast("error", t("stickers.addFailed"));
+    }
   };
 
   return (
@@ -433,6 +450,12 @@ export function ChatWindow({
                                 .then(() => showToast("info", t("favorites.added")))
                                 .catch(() => showToast("error", t("favorites.addFailed")));
                             }
+                          : undefined
+                      }
+                      onAddSticker={
+                        // 只对已确认的图片消息提供"添加到表情"
+                        msg.kind === "image" && !!msg.seq && msg.image?.key
+                          ? () => void handleAddSticker(msg.image!.key!)
                           : undefined
                       }
                       onReport={

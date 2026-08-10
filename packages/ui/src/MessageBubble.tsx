@@ -35,6 +35,7 @@ import {
   Pause,
   Play,
   Reply,
+  Smile,
   Sparkles,
   Star,
   Undo2,
@@ -46,6 +47,7 @@ import type { ChatMessage } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
 import { MessageImage } from "./MessageImage";
+import { StickerImage } from "./StickerImage";
 import { copyText } from "./copyText";
 import { fileIconOf } from "./fileIcon";
 import { currentPlayingId, playVoice, subscribeVoicePlayer } from "./voicePlayer";
@@ -83,6 +85,7 @@ export function MessageBubble({
   onForward,
   onImageClick,
   onFavorite,
+  onAddSticker,
   onReport,
 }: {
   msg: ChatMessage;
@@ -95,6 +98,7 @@ export function MessageBubble({
   onForward?: () => void;
   onImageClick?: (url: string) => void;
   onFavorite?: () => void;
+  onAddSticker?: () => void;
   onReport?: () => void;
 }) {
   const { t } = useTranslation();
@@ -159,14 +163,32 @@ export function MessageBubble({
   const openMenu = (e: { preventDefault: () => void }) => {
     // 窗口判定放事件里（Date.now 不纯，不能在 render 调用）
     const withinWindow = recallEligible && Date.now() - (msg.createdAtMs ?? 0) < 120_000;
-    if (!withinWindow && !canCopy && !canReply && !onReact && !canForward && !onFavorite) return;
+    if (
+      !withinWindow &&
+      !canCopy &&
+      !canReply &&
+      !onReact &&
+      !canForward &&
+      !onFavorite &&
+      !onAddSticker
+    )
+      return;
     e.preventDefault();
     setRecallInWindow(withinWindow);
     setMenuOpen(true);
   };
 
   const startLongPress = (e: { preventDefault: () => void }) => {
-    if (!recallEligible && !canCopy && !canReply && !onReact && !canForward && !onFavorite) return;
+    if (
+      !recallEligible &&
+      !canCopy &&
+      !canReply &&
+      !onReact &&
+      !canForward &&
+      !onFavorite &&
+      !onAddSticker
+    )
+      return;
     longPressTimer.current = setTimeout(() => openMenu(e), 500);
   };
 
@@ -200,6 +222,11 @@ export function MessageBubble({
   const handleFavorite = () => {
     setMenuOpen(false);
     onFavorite?.();
+  };
+
+  const handleAddSticker = () => {
+    setMenuOpen(false);
+    onAddSticker?.();
   };
 
   const handleReport = () => {
@@ -242,9 +269,14 @@ export function MessageBubble({
 
           <div
             className={cn(
-              "relative w-fit max-w-full rounded-2xl break-words select-text",
-              msg.kind === "image" ? "p-1.5" : "px-3.5 py-2.5",
-              isSelf ? "msg-bubble-self rounded-br-md" : "msg-bubble-peer rounded-bl-md",
+              "relative w-fit max-w-full break-words select-text",
+              msg.kind === "sticker"
+                ? "" // 贴纸：无背景、无圆角、无内边距
+                : cn(
+                    "rounded-2xl",
+                    msg.kind === "image" ? "p-1.5" : "px-3.5 py-2.5",
+                    isSelf ? "msg-bubble-self rounded-br-md" : "msg-bubble-peer rounded-bl-md",
+                  ),
             )}
             onContextMenu={openMenu}
             onTouchStart={startLongPress}
@@ -282,6 +314,8 @@ export function MessageBubble({
             {msg.kind === "image" && msg.image && (
               <MessageImage image={msg.image} onOpen={onImageClick} />
             )}
+
+            {msg.kind === "sticker" && msg.sticker && <StickerImage sticker={msg.sticker} />}
 
             {msg.kind === "file" && msg.file && (
               <div className="flex min-w-[220px] items-center gap-2.5">
@@ -435,6 +469,15 @@ export function MessageBubble({
                     className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
                   >
                     <Star size={15} /> {t("chat.message.favorite")}
+                  </button>
+                )}
+                {onAddSticker && msg.kind === "image" && (
+                  <button
+                    role="menuitem"
+                    onClick={handleAddSticker}
+                    className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
+                  >
+                    <Smile size={15} /> {t("chat.message.addToStickers")}
                   </button>
                 )}
                 {onReport && (
