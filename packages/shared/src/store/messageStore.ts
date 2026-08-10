@@ -30,7 +30,7 @@ import { useAuthStore } from "./authStore";
 import { showToast } from "./toastStore";
 
 /** 消息在气泡里呈现的内容类别 */
-export type ChatMessageKind = "text" | "image" | "file" | "voice" | "system";
+export type ChatMessageKind = "text" | "image" | "file" | "voice" | "system" | "sticker";
 
 /** 发送状态机（仅自己发出的消息有意义） */
 export type ChatMessageStatus = "sending" | "sent" | "read" | "failed";
@@ -103,6 +103,12 @@ export interface ChatMessage {
   image?: { width: number; height: number; key?: string; localUrl?: string };
   file?: FilePayload;
   voice?: VoicePayload;
+  /**
+   * 贴纸消息载荷：width/height 为像素尺寸（固定小尺寸渲染）。
+   * - stickerId：贴纸 ID（关联 stickers 表）
+   * - key：对象存储 key（签下载 URL 渲染）
+   */
+  sticker?: { stickerId?: string; key?: string; width: number; height: number };
   quote?: QuoteRef;
   reactions?: Reaction[];
   /** @提及的用户 ID 列表（渲染时高亮相应昵称段） */

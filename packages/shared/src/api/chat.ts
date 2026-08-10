@@ -229,6 +229,31 @@ export function parseVoiceContent(content: string): { key?: string; duration: nu
   }
 }
 
+/** content JSON → 贴纸载荷（sticker_id + key + 宽高） */
+export function parseStickerContent(content: string): {
+  stickerId?: string;
+  key?: string;
+  width: number;
+  height: number;
+} {
+  try {
+    const parsed = JSON.parse(content) as {
+      sticker_id?: string;
+      key?: string;
+      width?: number;
+      height?: number;
+    };
+    return {
+      stickerId: typeof parsed.sticker_id === "string" ? parsed.sticker_id : undefined,
+      key: typeof parsed.key === "string" ? parsed.key : undefined,
+      width: typeof parsed.width === "number" ? parsed.width : 0,
+      height: typeof parsed.height === "number" ? parsed.height : 0,
+    };
+  } catch {
+    return { width: 0, height: 0 };
+  }
+}
+
 /** duration 为种子生成固定伪波形（12-20 根，高度 6-18px 确定性伪随机） */
 export function pseudoWave(duration: number): number[] {
   const bars = Math.min(20, Math.max(12, duration + 8));
@@ -247,6 +272,7 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     3: "file",
     4: "voice",
     6: "system",
+    8: "sticker",
   };
   // status=2 表示已撤回：气泡走灰字系统占位，忽略 kind/text
   const recalled = dto.status === 2;
@@ -263,6 +289,7 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     const parsed = parseVoiceContent(dto.content);
     voice = { seconds: parsed.duration, wave: pseudoWave(parsed.duration), key: parsed.key };
   }
+  const isSticker = dto.message_type === 8;
 
   return {
     id: dto.id,
@@ -276,6 +303,7 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     image: isImage ? parseImageContent(dto.content) : undefined,
     file,
     voice,
+    sticker: isSticker ? parseStickerContent(dto.content) : undefined,
     reactions: dto.reactions,
     seq: dto.seq,
     time: formatMessageTime(dto.created_at),

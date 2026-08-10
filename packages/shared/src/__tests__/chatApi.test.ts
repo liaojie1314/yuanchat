@@ -451,3 +451,32 @@ describe("conversationUpdatePatch", () => {
     );
   });
 });
+
+describe("mapMessage sticker", () => {
+  it("maps message_type 8 to kind sticker with parsed content", () => {
+    const dto: MessageDTO = {
+      id: "m1",
+      conversation_id: "c1",
+      sender_id: "u1",
+      seq: 1,
+      message_type: 8,
+      content: JSON.stringify({
+        sticker_id: "s1",
+        key: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      }),
+      status: 1,
+      created_at: "2026-08-09T10:00:00+08:00",
+      sender_nickname: "Alice",
+    };
+    const msg = mapMessage(dto, "u2");
+    expect(msg.kind).toBe("sticker");
+    expect(msg.sticker).toEqual({
+      stickerId: "s1",
+      key: "images/2026/08/a.png",
+      width: 96,
+      height: 96,
+    });
+  });
+});

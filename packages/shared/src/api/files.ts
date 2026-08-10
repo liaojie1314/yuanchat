@@ -299,3 +299,12 @@ export async function cropAvatar(file: Blob, edge: number = AVATAR_EDGE): Promis
   const blob = await canvasToBlob(canvas, "image/jpeg", 0.85);
   return { blob: blob ?? file, width: out, height: out };
 }
+
+/** Blob 内容 SHA-256 摘要（十六进制小写），用于贴纸收藏去重。Chrome 74+ 原生 crypto.subtle 支持。 */
+export async function hashBlob(blob: Blob): Promise<string> {
+  const buf = await blob.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
