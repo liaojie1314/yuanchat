@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/yuanchat/server/internal/config"
 )
@@ -111,6 +112,42 @@ func TestPresignRoundTrip(t *testing.T) {
 	}
 	if !bytes.Equal(got, payload) {
 		t.Fatalf("round-trip content mismatch: got %q want %q", got, payload)
+	}
+}
+
+// TestPutObjectRoundTrip 直传对象后可通过 PresignGet 换到可用下载 URL（不校验字节内容，
+// 仅验证写入不报错且对象确实可被后续读取路径感知）。
+func TestPutObjectRoundTrip(t *testing.T) {
+	st := testStorage(t)
+	ctx := context.Background()
+
+	key := "images/2026/08/" + uuid.NewString() + ".png"
+	data := []byte{0x89, 0x50, 0x4e, 0x47} // PNG magic bytes 占位，无需真实图像内容
+
+	t.Cleanup(func() {
+		_ = st.client.RemoveObject(ctx, st.bucket, key, minio.RemoveObjectOptions{})
+	})
+
+	if err := st.PutObject(ctx, key, "image/png", bytes.NewReader(data), int64(len(data))); err != nil {
+		t.Fatalf("put object: %v", err)
+	}
+
+	// 落库真实性核验：直接从 MinIO 取回字节，比对内容而非仅确认调用不报错。
+	obj, err := st.client.GetObject(ctx, st.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		t.Fatalf("get object: %v", err)
+	}
+	defer obj.Close()
+	got, err := io.ReadAll(obj)
+	if err != nil {
+		t.Fatalf("read object: %v", err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatalf("put object content mismatch: got %v want %v", got, data)
+	}
+
+	if _, err := st.PresignGet(ctx, key, time.Minute); err != nil {
+		t.Fatalf("presign get after put: %v", err)
 	}
 }
 

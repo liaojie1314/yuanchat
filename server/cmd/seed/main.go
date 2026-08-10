@@ -12,10 +12,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"log"
 	"time"
 
@@ -26,6 +32,7 @@ import (
 	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/pkg/password"
 	"github.com/yuanchat/server/internal/pkg/shortid"
+	"github.com/yuanchat/server/internal/storage"
 	"gorm.io/gorm"
 )
 
@@ -71,6 +78,15 @@ func main() {
 	users, err := ensureUsers(ctx, db)
 	if err != nil {
 		log.Fatalf("seed users: %v", err)
+	}
+
+	st, err := storage.New(cfg.MinIO)
+	if err != nil {
+		log.Printf("minio unavailable, skip sticker asset upload (rows still seeded without real objects): %v", err)
+		st = nil
+	}
+	if err := ensureOfficialStickers(ctx, db, st); err != nil {
+		log.Fatalf("seed official stickers: %v", err)
 	}
 
 	alice, bob, carol := users[0], users[1], users[2]
@@ -253,6 +269,71 @@ type seedMsg struct {
 
 // ensureFriendship 幂等写入双向好友行（已存在则置为 accepted；
 // 软删行复活——deleted_at 占住唯一索引，直接 Create 会撞约束）。
+// ensureOfficialStickers 幂等创建 1 套占位符官方表情包（8 张纯色圆形 PNG）。
+// 已存在同名官方包时跳过——真实素材就绪后可替换本函数生成逻辑，无需改调用方。
+func ensureOfficialStickers(ctx context.Context, db *gorm.DB, st *storage.Storage) error {
+	const packName = "默认表情"
+	var existing model.StickerPack
+	err := db.Where("name = ? AND is_official = ?", packName, true).First(&existing).Error
+	if err == nil {
+		log.Printf("official sticker pack %q already exists, skip", packName)
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("check existing pack: %w", err)
+	}
+
+	pack := &model.StickerPack{Name: packName, IsOfficial: true, Sort: 0}
+	if err := db.Create(pack).Error; err != nil {
+		return fmt.Errorf("create pack: %w", err)
+	}
+
+	colors := []color.RGBA{
+		{255, 205, 210, 255}, {248, 187, 208, 255}, {225, 190, 231, 255}, {197, 202, 233, 255},
+		{187, 222, 251, 255}, {178, 235, 242, 255}, {200, 230, 201, 255}, {255, 224, 178, 255},
+	}
+	const size = 96
+	for i, clr := range colors {
+		png := placeholderStickerPNG(clr, size)
+		key := "images/" + time.Now().Format("2006/01") + "/" + uuid.NewString() + ".png"
+		if st != nil {
+			if err := st.PutObject(ctx, key, "image/png", bytes.NewReader(png), int64(len(png))); err != nil {
+				return fmt.Errorf("upload sticker %d: %w", i, err)
+			}
+		}
+		hash := sha256.Sum256(png)
+		sticker := &model.Sticker{
+			PackID:      &pack.ID,
+			ObjectKey:   key,
+			Width:       size,
+			Height:      size,
+			ContentHash: hex.EncodeToString(hash[:]),
+		}
+		if err := db.Create(sticker).Error; err != nil {
+			return fmt.Errorf("create sticker %d: %w", i, err)
+		}
+	}
+	log.Printf("seeded official sticker pack %q with %d stickers", packName, len(colors))
+	return nil
+}
+
+// placeholderStickerPNG 生成一枚纯色圆形 PNG（占位符表情素材）。
+func placeholderStickerPNG(clr color.RGBA, size int) []byte {
+	img := image.NewRGBA(image.Rect(0, 0, size, size))
+	center, radius := size/2, size/2-8
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			dx, dy := x-center, y-center
+			if dx*dx+dy*dy <= radius*radius {
+				img.Set(x, y, clr)
+			}
+		}
+	}
+	var buf bytes.Buffer
+	_ = png.Encode(&buf, img) // in-memory 编码不失败
+	return buf.Bytes()
+}
+
 func ensureFriendship(ctx context.Context, db *gorm.DB, a, b uuid.UUID) error {
 	src := "seed"
 	for _, pair := range [][2]uuid.UUID{{a, b}, {b, a}} {

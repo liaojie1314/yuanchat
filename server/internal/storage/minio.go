@@ -4,6 +4,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"time"
 
@@ -102,6 +103,13 @@ func (s *Storage) PresignGet(ctx context.Context, objectKey string, expires time
 		return "", fmt.Errorf("failed to presign get %q: %w", objectKey, err)
 	}
 	return u.String(), nil
+}
+
+// PutObject 服务端直接写入对象（供内部工具如 seed 使用；
+// 业务上传路径统一走 PresignPut 预签名直传，不经服务端中转字节）。
+func (s *Storage) PutObject(ctx context.Context, objectKey, contentType string, reader io.Reader, size int64) error {
+	_, err := s.client.PutObject(ctx, s.bucket, objectKey, reader, size, minio.PutObjectOptions{ContentType: contentType})
+	return err
 }
 
 // PublicURL 拼出对象的公共访问 URL，形如 scheme://endpoint/bucket/key。
