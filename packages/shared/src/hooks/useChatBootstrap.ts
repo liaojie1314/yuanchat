@@ -119,6 +119,7 @@ function wireSocket() {
       const isSystem = p.content.type === "system";
       const isFile = p.content.type === "file";
       const isVoice = p.content.type === "voice";
+      const isSticker = p.content.type === "sticker";
 
       const kind: ChatMessage["kind"] = isSystem
         ? "system"
@@ -128,7 +129,9 @@ function wireSocket() {
             ? "file"
             : isVoice
               ? "voice"
-              : "text";
+              : isSticker
+                ? "sticker"
+                : "text";
       const msg: ChatMessage = {
         id: p.message_id,
         conversationId: p.conversation_id,
@@ -153,6 +156,14 @@ function wireSocket() {
               key: p.content.key,
             }
           : undefined,
+        sticker: isSticker
+          ? {
+              stickerId: p.content.sticker_id,
+              key: p.content.key,
+              width: p.content.width ?? 96,
+              height: p.content.height ?? 96,
+            }
+          : undefined,
         seq: p.seq,
         time: formatMessageTime(iso),
         dateKey: dateKeyOf(new Date(p.timestamp)),
@@ -166,14 +177,16 @@ function wireSocket() {
 
       const convStore = useConversationStore.getState();
       const conv = convStore.conversations.find((c) => c.id === p.conversation_id);
-      // 图片/文件/语音消息列表预览走占位文案；文本/系统消息用正文
+      // 图片/文件/语音/贴纸消息列表预览走占位文案；文本/系统消息用正文
       const body = isImage
         ? i18n.t("chat.message.image")
         : isFile
           ? i18n.t("chat.message.file")
           : isVoice
             ? i18n.t("chat.message.voice")
-            : (p.content.text ?? "");
+            : isSticker
+              ? i18n.t("chat.message.sticker")
+              : (p.content.text ?? "");
       // system 消息不加昵称前缀
       const preview =
         conv && conv.type === "group" && !isSelf && !isSystem

@@ -570,4 +570,27 @@ describe("messageStore.clearConversation", () => {
     expect(state.messagesByConv[CONV_B]).toHaveLength(1);
     expect(state.hasMoreByConv[CONV_B]).toBe(true);
   });
+
+  describe("sendSticker", () => {
+    it("optimistically inserts a sticker message with sending status", () => {
+      useMessageStore.setState({ messagesByConv: {}, hasMoreByConv: {} });
+      useMessageStore.getState().sendSticker("c1", {
+        id: "s1",
+        objectKey: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+      const msgs = useMessageStore.getState().messagesByConv["c1"];
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].kind).toBe("sticker");
+      expect(msgs[0].isSelf).toBe(true);
+      expect(msgs[0].status).toBe("sending");
+      expect(msgs[0].sticker).toEqual({
+        stickerId: "s1",
+        key: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+    });
+  });
 });

@@ -171,6 +171,11 @@ interface MessageState {
   sendFile: (conversationId: string, file: File) => Promise<void>;
   /** 发送一段语音：乐观插入（伪波形）→ 直传 webm → WS voice 帧 */
   sendVoice: (conversationId: string, blob: Blob, duration: number) => Promise<void>;
+  /** 发送贴纸消息：乐观插入 sending 状态，通过 WS 发送 */
+  sendSticker: (
+    conversationId: string,
+    sticker: { id: string; objectKey: string; width: number; height: number },
+  ) => void;
   /** 重试发送失败的消息（复用原 client_msg_id；图片则从 localUrl 重传） */
   retrySend: (conversationId: string, messageId: string) => void;
   /** WebSocket message.receive：追加新消息（自动按 clientMsgId 去重自己的回显） */
@@ -484,6 +489,46 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     }
 
     await dispatchVoiceSend(conversationId, blob, duration, clientMsgId, get);
+  },
+
+  sendSticker: (conversationId, sticker) => {
+    const clientMsgId = newClientMsgId();
+    const msg: ChatMessage = {
+      id: clientMsgId,
+      conversationId,
+      kind: "sticker",
+      isSelf: true,
+      sticker: {
+        stickerId: sticker.id,
+        key: sticker.objectKey,
+        width: sticker.width,
+        height: sticker.height,
+      },
+      time: now(),
+      dateKey: dateKeyOf(new Date()),
+      createdAtMs: Date.now(),
+      status: "sending",
+      clientMsgId,
+    };
+    set((s) => ({
+      messagesByConv: {
+        ...s.messagesByConv,
+        [conversationId]: [...(s.messagesByConv[conversationId] ?? []), msg],
+      },
+      replyingTo: null,
+    }));
+
+    if (mockMode) {
+      setTimeout(() => get().setStatus(conversationId, clientMsgId, "sent"), 500);
+      return;
+    }
+
+    chatSocket.send("message.send", {
+      conversation_id: conversationId,
+      message_type: 8,
+      content: JSON.stringify({ sticker_id: sticker.id }),
+      client_msg_id: clientMsgId,
+    });
   },
 
   retrySend: (conversationId, messageId) => {
