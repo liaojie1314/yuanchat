@@ -14,9 +14,12 @@
  * @param onClose - 关闭回调（预留给父层，如需在选后关闭）
  * @param compact - 移动端紧凑模式（收窄网格间距）
  */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { Trash2 } from "lucide-react";
 import { cn } from "@yuanchat/shared/utils";
+import { listMyStickers, listStickerPacks, removeSticker, getDownloadUrl } from "@yuanchat/shared";
+import type { StickerItem, StickerPackItem } from "@yuanchat/shared";
 import { EMOJI_CATEGORIES } from "./emojiData";
 
 /** localStorage key：最近使用 emoji（JSON string[]） */
@@ -51,19 +54,55 @@ export function EmojiPicker({
   onPick,
   onClose: _onClose,
   compact = false,
+  onPickSticker,
 }: {
   onPick: (emoji: string) => void;
   onClose: () => void;
   compact?: boolean;
+  onPickSticker?: (sticker: {
+    id: string;
+    objectKey: string;
+    width: number;
+    height: number;
+  }) => void;
 }) {
   const { t } = useTranslation();
   const [recent, setRecent] = useState<string[]>(() => readRecent());
   const [activeKey, setActiveKey] = useState<string>(EMOJI_CATEGORIES[0].key);
+  const [myStickers, setMyStickers] = useState<StickerItem[]>([]);
+  const [packs, setPacks] = useState<StickerPackItem[]>([]);
+  const [stickerMenuId, setStickerMenuId] = useState<string | null>(null);
 
   const handlePick = (emoji: string) => {
     setRecent((prev) => pushRecent(prev, emoji));
     onPick(emoji);
   };
+
+  // 懒加载收藏贴纸
+  useEffect(() => {
+    if (activeKey === "favorites" && myStickers.length === 0) {
+      listMyStickers()
+        .then(setMyStickers)
+        .catch(() => {});
+    }
+  }, [activeKey, myStickers.length]);
+
+  // 懒加载官方包
+  useEffect(() => {
+    if (activeKey === "official" && packs.length === 0) {
+      listStickerPacks()
+        .then(setPacks)
+        .catch(() => {});
+    }
+  }, [activeKey, packs.length]);
+
+  // 点击外部关闭贴纸删除菜单
+  useEffect(() => {
+    if (!stickerMenuId) return;
+    const handleClick = () => setStickerMenuId(null);
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [stickerMenuId]);
 
   const activeEmojis =
     activeKey === "recent"
@@ -82,6 +121,20 @@ export function EmojiPicker({
         role="tablist"
         className="border-outline-variant flex shrink-0 gap-0.5 overflow-x-auto border-b px-1.5 py-1.5"
       >
+        {onPickSticker && (
+          <CategoryTab
+            label={t("sticker.tab.favorites")}
+            active={activeKey === "favorites"}
+            onClick={() => setActiveKey("favorites")}
+          />
+        )}
+        {onPickSticker && (
+          <CategoryTab
+            label={t("sticker.tab.official")}
+            active={activeKey === "official"}
+            onClick={() => setActiveKey("official")}
+          />
+        )}
         {recent.length > 0 && (
           <CategoryTab
             label={t("chat.emoji.recent")}
@@ -100,24 +153,74 @@ export function EmojiPicker({
       </div>
 
       {/* emoji 网格 */}
-      <div
-        className={cn(
-          "grid flex-1 auto-rows-min grid-cols-8 overflow-y-auto p-1.5",
-          compact ? "gap-0.5" : "gap-1",
-        )}
-      >
-        {activeEmojis.map((emoji, i) => (
-          <button
-            key={`${emoji}-${i}`}
-            type="button"
-            aria-label={emoji}
-            onClick={() => handlePick(emoji)}
-            className="hover:bg-surface-container-low grid aspect-square place-items-center rounded-lg text-xl transition-colors active:scale-90"
-          >
-            {emoji}
-          </button>
-        ))}
-      </div>
+      {activeKey === "favorites" || activeKey === "official" ? (
+        <div className="grid flex-1 auto-rows-min grid-cols-4 gap-1.5 overflow-y-auto p-1.5">
+          {(activeKey === "favorites" ? myStickers : packs.flatMap((p) => p.stickers)).map((st) => (
+            <div key={st.id} className="relative">
+              <button
+                type="button"
+                onClick={() =>
+                  onPickSticker?.({
+                    id: st.id,
+                    objectKey: st.object_key,
+                    width: st.width,
+                    height: st.height,
+                  })
+                }
+                onContextMenu={(e) => {
+                  if (activeKey !== "favorites") return;
+                  e.preventDefault();
+                  setStickerMenuId(st.id);
+                }}
+                className="hover:bg-surface-container-low grid aspect-square place-items-center rounded-lg p-1 transition-colors active:scale-90"
+              >
+                <StickerThumb objectKey={st.object_key} />
+              </button>
+              {stickerMenuId === st.id && (
+                <div
+                  role="menu"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className="bg-surface-container-high border-outline-variant absolute top-full left-0 z-20 mt-1 overflow-hidden rounded-lg border py-1 shadow-lg"
+                >
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setStickerMenuId(null);
+                      void removeSticker(st.id).then(() =>
+                        listMyStickers()
+                          .then(setMyStickers)
+                          .catch(() => {}),
+                      );
+                    }}
+                    className="text-body-md text-error hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
+                  >
+                    <Trash2 size={14} /> {t("sticker.remove")}
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div
+          className={cn(
+            "grid flex-1 auto-rows-min grid-cols-8 overflow-y-auto p-1.5",
+            compact ? "gap-0.5" : "gap-1",
+          )}
+        >
+          {activeEmojis.map((emoji, i) => (
+            <button
+              key={`${emoji}-${i}`}
+              type="button"
+              aria-label={emoji}
+              onClick={() => handlePick(emoji)}
+              className="hover:bg-surface-container-low grid aspect-square place-items-center rounded-lg text-xl transition-colors active:scale-90"
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -149,4 +252,15 @@ function CategoryTab({
       {label}
     </button>
   );
+}
+
+/** 贴纸缩略图组件 */
+function StickerThumb({ objectKey }: { objectKey: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    getDownloadUrl(objectKey)
+      .then(setUrl)
+      .catch(() => {});
+  }, [objectKey]);
+  return url ? <img src={url} alt="" className="h-full w-full object-contain" /> : null;
 }

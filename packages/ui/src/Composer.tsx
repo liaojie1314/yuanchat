@@ -122,6 +122,18 @@ export function Composer({
     });
   };
 
+  /** 发送贴纸：调用 store.sendSticker，关闭面板 */
+  const sendSticker = (sticker: {
+    id: string;
+    objectKey: string;
+    width: number;
+    height: number;
+  }) => {
+    if (!activeId) return;
+    void useMessageStore.getState().sendSticker(activeId, sticker.id);
+    setShowEmoji(false);
+  };
+
   const notifyTyping = () => {
     if (!activeId || !chatSocket.isOpen()) return;
     const nowMs = Date.now();
@@ -358,7 +370,12 @@ export function Composer({
         {/* 移动端：面板行内渲染在输入行下方，推高布局（不悬浮，规避安卓键盘 fixed 定位坑） */}
         {showEmoji && (
           <div className="animate-slide-up mt-2 h-56">
-            <EmojiPicker compact onPick={insertEmoji} onClose={() => setShowEmoji(false)} />
+            <EmojiPicker
+              compact
+              onPick={insertEmoji}
+              onClose={() => setShowEmoji(false)}
+              onPickSticker={sendSticker}
+            />
           </div>
         )}
         {fileInput}
@@ -372,7 +389,11 @@ export function Composer({
       {/* 桌面：面板浮层定位于输入卡片上方 */}
       {showEmoji && (
         <div className="animate-slide-up absolute bottom-full left-3 z-10 mb-1 max-h-72 w-80">
-          <EmojiPicker onPick={insertEmoji} onClose={() => setShowEmoji(false)} />
+          <EmojiPicker
+            onPick={insertEmoji}
+            onClose={() => setShowEmoji(false)}
+            onPickSticker={sendSticker}
+          />
         </div>
       )}
       {mentionQuery && filteredMembers.length > 0 && (
