@@ -130,7 +130,7 @@ export function Composer({
     height: number;
   }) => {
     if (!activeId) return;
-    void useMessageStore.getState().sendSticker(activeId, sticker.id);
+    void useMessageStore.getState().sendSticker(activeId, sticker);
     setShowEmoji(false);
   };
 

@@ -1,63 +1,110 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { listMyStickers, addSticker, removeSticker, listStickerPacks } from "../api/stickers";
-import { hashBlob } from "../api/files";
-import { authStore } from "../store/authStore";
+/**
+ * api/stickers 单元测试
+ *
+ * 覆盖四个端点的请求拼装与响应映射：
+ * - POST   /api/v1/stickers        收藏（object_key/width/height/content_hash）
+ * - DELETE /api/v1/stickers/:id    取消收藏
+ * - GET    /api/v1/stickers/mine   我的收藏（缺字段兜底空数组）
+ * - GET    /api/v1/sticker-packs   官方表情包（缺字段兜底空数组）
+ */
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { addSticker, removeSticker, listMyStickers, listStickerPacks } from "../api/stickers";
 
-describe("Stickers API", () => {
-  beforeAll(async () => {
-    // 集成测试需要真实 token，从环境变量或跳过
-    const token = process.env.TEST_TOKEN;
-    if (!token) {
-      console.warn("No TEST_TOKEN, skipping sticker integration tests");
-      return;
-    }
-    authStore.getState().login({
-      token,
-      userId: "test-user",
-      nickname: "Test",
-      avatar: null,
+/** 桩：一次 apiGet/apiPost/apiDelete 信封响应 */
+function mockApiOnce(data: unknown) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({ json: () => Promise.resolve({ code: 0, message: "ok", data }) }),
+  );
+}
+
+/** 取本次桩 fetch 的第 n 次调用参数 */
+function callArgs(n = 0) {
+  return (fetch as ReturnType<typeof vi.fn>).mock.calls[n];
+}
+
+describe("addSticker", () => {
+  beforeEach(() => vi.unstubAllGlobals());
+
+  it("POSTs snake_case body and returns the created sticker", async () => {
+    mockApiOnce({ id: "s1", object_key: "images/2026/08/a.png", width: 96, height: 96 });
+
+    const result = await addSticker("images/2026/08/a.png", 96, 96, "hash123");
+
+    const call = callArgs();
+    expect(call[0]).toContain("/api/v1/stickers");
+    expect(call[1].method).toBe("POST");
+    expect(JSON.parse(call[1].body)).toEqual({
+      object_key: "images/2026/08/a.png",
+      width: 96,
+      height: 96,
+      content_hash: "hash123",
+    });
+    expect(result).toEqual({
+      id: "s1",
+      object_key: "images/2026/08/a.png",
+      width: 96,
+      height: 96,
     });
   });
+});
 
-  afterAll(() => {
-    if (process.env.TEST_TOKEN) {
-      authStore.getState().logout();
-    }
+describe("removeSticker", () => {
+  beforeEach(() => vi.unstubAllGlobals());
+
+  it("sends DELETE to /stickers/:id", async () => {
+    mockApiOnce({ message: "removed" });
+
+    await removeSticker("s1");
+
+    const call = callArgs();
+    expect(call[0]).toContain("/api/v1/stickers/s1");
+    expect(call[1].method).toBe("DELETE");
+  });
+});
+
+describe("listMyStickers", () => {
+  beforeEach(() => vi.unstubAllGlobals());
+
+  it("GETs /stickers/mine and unwraps the stickers array", async () => {
+    mockApiOnce({ stickers: [{ id: "s1", object_key: "images/x.png", width: 10, height: 10 }] });
+
+    const result = await listMyStickers();
+
+    expect(callArgs()[0]).toContain("/api/v1/stickers/mine");
+    expect(result).toEqual([{ id: "s1", object_key: "images/x.png", width: 10, height: 10 }]);
   });
 
-  it("should list my stickers (empty initially)", async () => {
-    if (!process.env.TEST_TOKEN) return;
-    const list = await listMyStickers();
-    expect(Array.isArray(list)).toBe(true);
+  it("falls back to an empty array when the field is absent", async () => {
+    mockApiOnce({});
+    expect(await listMyStickers()).toEqual([]);
   });
+});
 
-  it("should list official sticker packs", async () => {
-    if (!process.env.TEST_TOKEN) return;
-    const packs = await listStickerPacks();
-    expect(Array.isArray(packs)).toBe(true);
-  });
+describe("listStickerPacks", () => {
+  beforeEach(() => vi.unstubAllGlobals());
 
-  it("should add and remove a sticker", async () => {
-    if (!process.env.TEST_TOKEN) return;
-    // 创建测试用 Blob（1x1 透明 PNG）
-    const blob = new Blob(
-      [
-        new Uint8Array([
-          137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8,
-          6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 10, 73, 68, 65, 84, 120, 156, 99, 0, 1, 0, 0, 5, 0,
-          1, 13, 10, 46, 180, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
-        ]),
+  it("GETs /sticker-packs and keeps pack + stickers nesting", async () => {
+    mockApiOnce({
+      packs: [
+        {
+          pack: { id: "p1", name: "默认表情", is_official: true, sort: 0 },
+          stickers: [{ id: "s1", object_key: "images/x.png", width: 96, height: 96 }],
+        },
       ],
-      { type: "image/png" },
-    );
-    const hash = await hashBlob(blob);
-    const added = await addSticker({
-      object_key: "test-sticker.png",
-      width: 120,
-      height: 120,
-      content_hash: hash,
     });
-    expect(added.id).toBeTruthy();
-    await removeSticker(added.id);
+
+    const result = await listStickerPacks();
+
+    expect(callArgs()[0]).toContain("/api/v1/sticker-packs");
+    expect(result).toHaveLength(1);
+    expect(result[0].pack.name).toBe("默认表情");
+    expect(result[0].pack.is_official).toBe(true);
+    expect(result[0].stickers).toHaveLength(1);
+  });
+
+  it("falls back to an empty array when the field is absent", async () => {
+    mockApiOnce({});
+    expect(await listStickerPacks()).toEqual([]);
   });
 });

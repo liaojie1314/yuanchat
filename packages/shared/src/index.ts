@@ -17,6 +17,7 @@ export * from "./api/presence";
 export * from "./api/search";
 export * from "./api/favorites";
 export * from "./api/reports";
+export * from "./api/stickers";
 export * from "./push/webPush";
 export * from "./crypto/primitives";
 export * from "./crypto/x3dh";

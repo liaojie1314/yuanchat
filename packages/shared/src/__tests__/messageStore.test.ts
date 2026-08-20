@@ -592,5 +592,48 @@ describe("messageStore.clearConversation", () => {
         height: 96,
       });
     });
+
+    // 帧格式必须与服务端 buildContent 的 case "sticker" 完全对齐：
+    // content 是对象（非 JSON 字符串）、带 type、四字段齐全，否则服务端回 400 且贴纸发不出去。
+    it("emits a message.send frame matching the server sticker contract", () => {
+      useMessageStore.setState({ messagesByConv: {}, hasMoreByConv: {} });
+      useMessageStore.getState().sendSticker("c1", {
+        id: "s1",
+        objectKey: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+
+      const call = vi.mocked(chatSocket.send).mock.calls.find(([tp]) => tp === "message.send");
+      expect(call).toBeTruthy();
+      const payload = call![1] as {
+        conversation_id: string;
+        content: Record<string, unknown>;
+        client_msg_id: string;
+      };
+      expect(payload.conversation_id).toBe("c1");
+      expect(payload.content).toEqual({
+        type: "sticker",
+        sticker_id: "s1",
+        key: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+      expect(payload.client_msg_id).toBeTruthy();
+    });
+
+    it("marks the sticker failed when no ack arrives before the timeout", () => {
+      useMessageStore.setState({ messagesByConv: {}, hasMoreByConv: {} });
+      useMessageStore.getState().sendSticker("c1", {
+        id: "s1",
+        objectKey: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+
+      vi.advanceTimersByTime(20_000);
+
+      expect(useMessageStore.getState().messagesByConv["c1"][0].status).toBe("failed");
+    });
   });
 });

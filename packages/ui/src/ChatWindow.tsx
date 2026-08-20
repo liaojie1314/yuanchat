@@ -30,6 +30,7 @@ import {
 import { useTranslation } from "react-i18next";
 import {
   addFavorite,
+  addSticker,
   ApiError,
   formatDateDivider,
   getDownloadUrl,
@@ -42,7 +43,6 @@ import {
   useAuthStore,
   useConversationStore,
   useMessageStore,
-  useStickerStore,
 } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import type { MentionRef } from "@yuanchat/shared";
@@ -233,17 +233,19 @@ export function ChatWindow({
     });
   };
 
-  // 添加图片到表情收藏：取图 blob → 计算 SHA-256 → stickerStore.add
-  const handleAddSticker = async (imageKey: string) => {
+  /**
+   * 从图片消息收藏为贴纸：取图字节算 SHA-256（后端按 (owner, hash) 去重）→ POST /stickers。
+   * 图片对象已在 MinIO 的 images/ 下，故直接复用其 object_key，不重新上传。
+   */
+  const handleAddSticker = async (imageKey: string, width: number, height: number) => {
     try {
       const url = await getDownloadUrl(imageKey);
-      const resp = await fetch(url);
-      const blob = await resp.blob();
+      const blob = await fetch(url).then((r) => r.blob());
       const hash = await hashBlob(blob);
-      await useStickerStore.getState().add(blob, hash);
-      showToast("info", t("stickers.added"));
+      await addSticker(imageKey, width, height, hash);
+      showToast("info", t("sticker.added"));
     } catch {
-      showToast("error", t("stickers.addFailed"));
+      showToast("error", t("sticker.addFailed"));
     }
   };
 
@@ -454,8 +456,13 @@ export function ChatWindow({
                       }
                       onAddSticker={
                         // 只对已确认的图片消息提供"添加到表情"
-                        msg.kind === "image" && !!msg.seq && msg.image?.key
-                          ? () => void handleAddSticker(msg.image!.key!)
+                        !msg.recalled && msg.kind === "image" && !!msg.seq && msg.image?.key
+                          ? () =>
+                              void handleAddSticker(
+                                msg.image!.key!,
+                                msg.image!.width,
+                                msg.image!.height,
+                              )
                           : undefined
                       }
                       onReport={

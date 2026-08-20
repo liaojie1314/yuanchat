@@ -525,10 +525,16 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
 
     chatSocket.send("message.send", {
       conversation_id: conversationId,
-      message_type: 8,
-      content: JSON.stringify({ sticker_id: sticker.id }),
+      content: {
+        type: "sticker",
+        sticker_id: sticker.id,
+        key: sticker.objectKey,
+        width: sticker.width,
+        height: sticker.height,
+      },
       client_msg_id: clientMsgId,
     });
+    armAckTimeout(conversationId, clientMsgId, get);
   },
 
   retrySend: (conversationId, messageId) => {
