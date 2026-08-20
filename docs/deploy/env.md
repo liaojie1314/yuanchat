@@ -105,13 +105,13 @@
 
 供 `docker-compose.prod.yml` 与 `install.sh` 使用，见 [`deploy/.env.prod.example`](../../deploy/.env.prod.example)。
 
-| 变量                                                        | 说明                               |
-| ----------------------------------------------------------- | ---------------------------------- |
-| `DOMAIN_APP` / `DOMAIN_API` / `DOMAIN_WS` / `DOMAIN_ADMIN`  | 四个子域名，须已解析到本机         |
-| `ADMIN_EMAIL`                                               | Let's Encrypt 到期通知邮箱         |
-| `DB_PASSWORD` / `REDIS_PASSWORD` / `JWT_SECRET` / `MINIO_*` | 留空则 `install.sh` 自动生成随机值 |
-| `PRESENCE_BACKEND`                                          | 多实例部署改 `redis`               |
-| `APP_VERSION`                                               | 镜像 tag，默认 `latest`            |
-| `TZ`                                                        | 容器时区，默认 `Asia/Shanghai`     |
+| 变量                                                        | 说明                                                             |
+| ----------------------------------------------------------- | ---------------------------------------------------------------- |
+| `DOMAIN_APP` / `DOMAIN_API` / `DOMAIN_WS` / `DOMAIN_ADMIN`  | 四个子域名，须已解析到本机                                       |
+| `ADMIN_EMAIL`                                               | Let's Encrypt 到期通知邮箱                                       |
+| `DB_PASSWORD` / `REDIS_PASSWORD` / `JWT_SECRET` / `MINIO_*` | 留空则 `install.sh` 自动生成随机值                               |
+| `PRESENCE_BACKEND`                                          | 多实例部署改 `redis`                                             |
+| `APP_VERSION`                                               | 自建镜像 tag，**必填**（禁止 `latest`；未设置 compose 直接报错） |
+| `TZ`                                                        | 容器时区，默认 `Asia/Shanghai`                                   |
 
 > `deploy/.env` 含明文凭据，已被 `.gitignore` 排除，**切勿提交**。

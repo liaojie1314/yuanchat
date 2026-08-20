@@ -96,7 +96,8 @@ export function EmojiPicker({
     }
   }, [activeKey, packs.length]);
 
-  // 点击外部关闭贴纸删除菜单
+  // 点面板外部关闭贴纸删除菜单。注意：根节点的 onMouseDown 会 stopPropagation（连原生
+  // 事件一起停），面板内部的点击到不了 document，故内部关闭由根节点 onMouseDown 兼任。
   useEffect(() => {
     if (!stickerMenuId) return;
     const handleClick = () => setStickerMenuId(null);
@@ -109,11 +110,20 @@ export function EmojiPicker({
       ? recent
       : (EMOJI_CATEGORIES.find((c) => c.key === activeKey)?.emojis ?? []);
 
+  // 官方 tab 聚合全部包的贴纸。用 concat 而非 flatMap：项目 build.target=es2019
+  // 且不注入运行时 polyfill，禁用 es2020+ 数组 API（见 browser-compat 约束）。
+  const officialStickers = packs.reduce<StickerItem[]>((acc, p) => acc.concat(p.stickers), []);
+  const gridStickers = activeKey === "favorites" ? myStickers : officialStickers;
+
   return (
     <div
       role="dialog"
       aria-label={t("chat.input.emoji")}
-      onMouseDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => {
+        // 面板内任意处按下即收起贴纸删除菜单（菜单自身已 stopPropagation，不会自杀）
+        setStickerMenuId(null);
+        e.stopPropagation();
+      }}
       className="bg-surface-container-high border-outline-variant flex flex-col overflow-hidden rounded-lg border shadow-lg"
     >
       {/* 分类 tab 栏 */}
@@ -155,7 +165,7 @@ export function EmojiPicker({
       {/* emoji 网格 */}
       {activeKey === "favorites" || activeKey === "official" ? (
         <div className="grid flex-1 auto-rows-min grid-cols-4 gap-1.5 overflow-y-auto p-1.5">
-          {(activeKey === "favorites" ? myStickers : packs.flatMap((p) => p.stickers)).map((st) => (
+          {gridStickers.map((st) => (
             <div key={st.id} className="relative">
               <button
                 type="button"

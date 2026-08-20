@@ -46,7 +46,7 @@ services:
     networks: [yuanchat-net]
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: yuanchat-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -70,8 +70,8 @@ services:
       context: ../server
       dockerfile: Dockerfile
       args:
-        VERSION: ${APP_VERSION:-prod}
-    image: yuanchat/server:${APP_VERSION:-latest}
+        VERSION: ${APP_VERSION:?APP_VERSION required (explicit release tag, no latest)}
+    image: yuanchat/server:${APP_VERSION:?APP_VERSION required (explicit release tag, no latest)}
     container_name: yuanchat-migrate
     restart: "no"
     entrypoint: ["/app/migrate", "up"]
@@ -108,8 +108,8 @@ services:
       context: ../server
       dockerfile: Dockerfile
       args:
-        VERSION: ${APP_VERSION:-prod}
-    image: yuanchat/server:${APP_VERSION:-latest}
+        VERSION: ${APP_VERSION:?APP_VERSION required (explicit release tag, no latest)}
+    image: yuanchat/server:${APP_VERSION:?APP_VERSION required (explicit release tag, no latest)}
     container_name: yuanchat-server
     restart: unless-stopped
     environment: *server_env
@@ -131,7 +131,7 @@ services:
       args:
         VITE_API_BASE_URL: https://${DOMAIN_API}
         VITE_WS_URL: wss://${DOMAIN_WS}
-    image: yuanchat/web:${APP_VERSION:-latest}
+    image: yuanchat/web:${APP_VERSION:?APP_VERSION required (explicit release tag, no latest)}
     container_name: yuanchat-web
     restart: unless-stopped
     networks: [yuanchat-net]
@@ -142,7 +142,7 @@ services:
       dockerfile: apps/admin/Dockerfile
       args:
         VITE_API_BASE_URL: https://${DOMAIN_API}
-    image: yuanchat/admin:${APP_VERSION:-latest}
+    image: yuanchat/admin:${APP_VERSION:?APP_VERSION required (explicit release tag, no latest)}
     container_name: yuanchat-admin
     restart: unless-stopped
     networks: [yuanchat-net]
@@ -169,7 +169,7 @@ services:
 
   # 证书续期：每 12h 检查一次，到期前 30 天自动续
   certbot:
-    image: certbot/certbot:latest
+    image: certbot/certbot:v5.7.0
     container_name: yuanchat-certbot
     restart: unless-stopped
     volumes:
@@ -181,7 +181,7 @@ services:
 
   # ---------- 可观测（可选，profile 启用）----------
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.54.1
     container_name: yuanchat-prometheus
     restart: unless-stopped
     profiles: [observability]

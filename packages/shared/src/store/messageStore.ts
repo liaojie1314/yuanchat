@@ -523,18 +523,17 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       return;
     }
 
-    chatSocket.send("message.send", {
-      conversation_id: conversationId,
-      content: {
-        type: "sticker",
-        sticker_id: sticker.id,
+    dispatchStickerSend(
+      conversationId,
+      {
+        stickerId: sticker.id,
         key: sticker.objectKey,
         width: sticker.width,
         height: sticker.height,
       },
-      client_msg_id: clientMsgId,
-    });
-    armAckTimeout(conversationId, clientMsgId, get);
+      clientMsgId,
+      get,
+    );
   },
 
   retrySend: (conversationId, messageId) => {
@@ -600,6 +599,25 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
         .then((r) => r.blob())
         .then((blob) => dispatchVoiceSend(conversationId, blob, duration, clientMsgId, get))
         .catch(() => get().setStatus(conversationId, messageId, "failed"));
+      return;
+    }
+
+    // 贴纸：对象已在存储里，重试只需按原 client_msg_id 重发同一帧（无需重传字节）
+    if (msg.kind === "sticker") {
+      const st = msg.sticker;
+      if (!st?.stickerId || !st.key) return;
+      get().setStatus(conversationId, messageId, "sending");
+      if (mockMode) {
+        setTimeout(() => get().setStatus(conversationId, messageId, "sent"), 700);
+        return;
+      }
+      const clientMsgId = msg.clientMsgId ?? messageId;
+      dispatchStickerSend(
+        conversationId,
+        { stickerId: st.stickerId, key: st.key, width: st.width, height: st.height },
+        clientMsgId,
+        get,
+      );
       return;
     }
 
@@ -1016,6 +1034,33 @@ async function dispatchVoiceSend(
   chatSocket.send("message.send", {
     conversation_id: conversationId,
     content: { type: "voice", key, duration, size: blob.size },
+    client_msg_id: clientMsgId,
+  });
+  armAckTimeout(conversationId, clientMsgId, get);
+}
+
+/**
+ * 贴纸发送：发 WS sticker 帧（sticker_id + key + 宽高）。
+ *
+ * @remarks 帧字段必须与服务端 `ws/handler.go` 的 `buildContent` case "sticker" 完全一致
+ *   （四项缺一或宽高 ≤ 0 服务端即回 400）。首发与重试共用本函数，避免两处各写一份漂移。
+ *   与 image/file/voice 不同，贴纸对象已在存储里，无需上传字节，故为同步函数。
+ */
+function dispatchStickerSend(
+  conversationId: string,
+  sticker: { stickerId: string; key: string; width: number; height: number },
+  clientMsgId: string,
+  get: () => MessageState,
+) {
+  chatSocket.send("message.send", {
+    conversation_id: conversationId,
+    content: {
+      type: "sticker",
+      sticker_id: sticker.stickerId,
+      key: sticker.key,
+      width: sticker.width,
+      height: sticker.height,
+    },
     client_msg_id: clientMsgId,
   });
   armAckTimeout(conversationId, clientMsgId, get);
