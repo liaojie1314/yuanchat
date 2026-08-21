@@ -134,10 +134,31 @@ H1 贴纸功能在实现过程中连续出现三次同类缺陷（`retrySend` �
   - 21：`armAckTimeout` 移到 `await encryptFor()` 之前，消除 E2EE 首发时的永久 sending 窗口
   - 顺带：贴纸按钮补 `aria-label`（原先按钮内只有 `alt=""` 的 img，无可访问名）
   - 顺带：改掉 `StickerImage.test` 中把「静默留白」写成契约的两条断言
-- [ ] 批 B｜后端校验与健壮性（第 22–31 项）
+- [x] **批 B｜后端校验与健壮性**（第 22–31 项 + 第 36 项注释纠正）
+  - 22：4 条路由挂 `LimitByIP`（写 10/20、读 20/40，照 `/reports` 档位）；
+    `ListMine` 改游标分页（页大小 == 收藏上限 500，即一页装得下全部，
+    前端无需翻页也不会静默少几张）；单用户收藏上限 500
+  - 23：WS 贴纸帧改为查库校验——`sticker_id` 必须是合法 UUID（原来只判非空，
+    可塞满 64KB 帧上限落进 JSONB 向全群扇出）、必须属于发送者或属于某个表情包，
+    且落库的 `key`/宽高**一律取库中权威值**，客户端传值不采信
+  - 24：`content_hash` 改 `^[0-9a-f]{64}$` 正则（原来只比长度，64 个大写字母也入库）；
+    补一条"长度对但非十六进制"的用例（原用例只喂了 `"too-short"`）
+  - 25：新增 `storage.ObjectExists`，`Add` 前置校验对象真实存在 → 不存在回 `404`
+  - 26：`AddOwned` 改 `ON CONFLICT DO NOTHING` + 回查，并发重复收藏返回既有行而非 500
+  - 27：`object_key` 改锚定正则 + 长度 ≤ 255（正则的 `[0-9a-f-]+` 无界，
+    单靠形态仍能过 300 字符 key 撞列宽变可控 500）；宽高须为正且 ≤ 4096
+  - 28：新增 `RemoveOwned`，`owner_id` 进 `WHERE` 并检查 `RowsAffected`，
+    并发双删第二次回 404 而非虚假 200
+  - 29：`model.Sticker` 补 `uniqueIndex:idx_stickers_owner_hash` tag，
+    使测试的 `AutoMigrate` 也建出唯一约束（此前去重用例从未验证真实 DB 约束）
+  - 30：新增迁移 `012_sticker_constraints.sql`，补
+    `CHECK ((pack_id IS NULL) <> (owner_id IS NULL))`；已验证 Up/Down 可逆
+  - 31：`ListPacks` 改两次查询 + 内存分组，消除逐包 N+1；超软上限只告警不静默截断
+  - 36：纠正 `sticker_service.go` 关于 `images/` 前缀作用的错位注释
+  - 连带：`docs/02_CHAT_API.md` 更新四端点的校验规则、状态码、分页与 WS 帧语义
 - [ ] 批 C｜功能级 bug（第 8–13 项）
 - [ ] 批 D｜Task 10 收口（第 2、3、4、5、6、7 项）
-- [ ] 批 E｜结构性根治（第 20、34、35、36 项）
+- [ ] 批 E｜结构性根治（第 20、34、35 项）
 
 ## 备注
 

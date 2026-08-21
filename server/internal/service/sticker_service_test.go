@@ -3,7 +3,12 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/repository"
@@ -53,7 +58,7 @@ func TestStickerAddDedup(t *testing.T) {
 		t.Fatalf("want exactly 1 row in DB after dedup, got %d", count)
 	}
 
-	mine, err := svc.ListMine(ctx, alice.ID)
+	mine, _, err := svc.ListMine(ctx, alice.ID, "", 0)
 	if err != nil || len(mine) != 1 {
 		t.Fatalf("want 1 sticker after dedup, got %d err=%v", len(mine), err)
 	}
@@ -62,7 +67,7 @@ func TestStickerAddDedup(t *testing.T) {
 	if _, err := svc.Add(ctx, bob.ID, "images/2026/08/a.png", 96, 96, hashAbc); err != nil {
 		t.Fatalf("bob add same hash: %v", err)
 	}
-	bobMine, err := svc.ListMine(ctx, bob.ID)
+	bobMine, _, err := svc.ListMine(ctx, bob.ID, "", 0)
 	if err != nil || len(bobMine) != 1 {
 		t.Fatalf("bob should have 1 sticker independent of alice, got %d err=%v", len(bobMine), err)
 	}
@@ -87,7 +92,12 @@ func TestStickerAddInvalidContentHash(t *testing.T) {
 	alice := newTestUser(t, db, "甲hash")
 	svc := newStickerSvc(db)
 	if _, err := svc.Add(context.Background(), alice.ID, "images/2026/08/a.png", 10, 10, "too-short"); !errors.Is(err, ErrInvalidContentHash) {
-		t.Fatalf("want ErrInvalidContentHash, got %v", err)
+		t.Fatalf("want ErrInvalidContentHash for short hash, got %v", err)
+	}
+	// 长度对但不是十六进制：原实现只比长度，64 个中文/大写字母也会入库
+	notHex := strings.Repeat("Z", 64)
+	if _, err := svc.Add(context.Background(), alice.ID, "images/2026/08/a.png", 10, 10, notHex); !errors.Is(err, ErrInvalidContentHash) {
+		t.Fatalf("want ErrInvalidContentHash for non-hex hash, got %v", err)
 	}
 }
 
@@ -116,7 +126,7 @@ func TestStickerRemoveOnlyOwner(t *testing.T) {
 	if err := svc.Remove(ctx, alice.ID, s.ID); err != nil {
 		t.Fatalf("alice remove own sticker: %v", err)
 	}
-	mine, _ := svc.ListMine(ctx, alice.ID)
+	mine, _, _ := svc.ListMine(ctx, alice.ID, "", 0)
 	if len(mine) != 0 {
 		t.Fatalf("want 0 after remove, got %d", len(mine))
 	}
@@ -152,5 +162,215 @@ func TestStickerListPacks(t *testing.T) {
 		if !p.Pack.IsOfficial {
 			t.Fatalf("all seeded packs should be official, got %+v", p.Pack)
 		}
+	}
+}
+
+// fakeObjectChecker 可控的对象存在性检查桩。
+type fakeObjectChecker struct {
+	exists bool
+	err    error
+	seen   []string
+}
+
+func (f *fakeObjectChecker) ObjectExists(_ context.Context, key string) (bool, error) {
+	f.seen = append(f.seen, key)
+	return f.exists, f.err
+}
+
+// TestStickerAddObjectKeyMustBeCanonical object_key 必须是服务端签发的规范形态。
+// 原实现只做 strings.HasPrefix(key, "images/")，会放过 images/ + 任意 300 字符，
+// 撞 varchar(255) 后变成可控 500（叠加无限流可低成本刷错误日志）。
+func TestStickerAddObjectKeyMustBeCanonical(t *testing.T) {
+	db := testDB(t)
+	db.AutoMigrate(&model.StickerPack{}, &model.Sticker{})
+	alice := newTestUser(t, db, "甲keyfmt")
+	svc := newStickerSvc(db)
+	ctx := context.Background()
+	const hash = "5b6642cf4331eb911b475ea8fb19d09cbc073c73b55a10134928984daee7fc41"
+
+	bad := []string{
+		"images/2026/08/" + strings.Repeat("a", 300) + ".png", // 形态合法但超 varchar(255)
+		"images/2026/08/../../files/secret.pdf",               // 路径穿越形态
+		"images/abc.png",                                      // 缺年月分区
+		"images/2026/08/abc.PNG",                              // 扩展名大写
+		"files/2026/08/abc.pdf",                               // 非 images 前缀
+	}
+	for _, key := range bad {
+		if _, err := svc.Add(ctx, alice.ID, key, 96, 96, hash); !errors.Is(err, ErrInvalidObjectKey) {
+			t.Fatalf("key %q should be rejected, got %v", key, err)
+		}
+	}
+}
+
+// TestStickerAddRejectsBadDimensions gin 的 binding:"required" 只拒零值，
+// -1 会通过；而 WS 发送路径要求 > 0，负尺寸行入库后永远发不出去。
+func TestStickerAddRejectsBadDimensions(t *testing.T) {
+	db := testDB(t)
+	db.AutoMigrate(&model.StickerPack{}, &model.Sticker{})
+	alice := newTestUser(t, db, "甲size")
+	svc := newStickerSvc(db)
+	ctx := context.Background()
+	const hash = "5b6642cf4331eb911b475ea8fb19d09cbc073c73b55a10134928984daee7fc41"
+
+	for _, d := range [][2]int{{-1, 96}, {96, -1}, {0, 96}, {99999, 96}} {
+		if _, err := svc.Add(ctx, alice.ID, "images/2026/08/a.png", d[0], d[1], hash); !errors.Is(err, ErrInvalidStickerSize) {
+			t.Fatalf("dimensions %v should be rejected, got %v", d, err)
+		}
+	}
+}
+
+// TestStickerAddRequiresExistingObject 对象不存在时拒绝登记。
+// PresignGet 只签名不校验存在性，少了这一步会把指向空对象的行写进库，
+// 前端拿到合法 URL 但渲染 404，且坏数据长期存活。
+func TestStickerAddRequiresExistingObject(t *testing.T) {
+	db := testDB(t)
+	db.AutoMigrate(&model.StickerPack{}, &model.Sticker{})
+	alice := newTestUser(t, db, "甲stat")
+	svc := newStickerSvc(db)
+	const hash = "5b6642cf4331eb911b475ea8fb19d09cbc073c73b55a10134928984daee7fc41"
+
+	missing := &fakeObjectChecker{exists: false}
+	svc.SetObjectChecker(missing)
+	if _, err := svc.Add(context.Background(), alice.ID, "images/2026/08/a.png", 96, 96, hash); !errors.Is(err, ErrStickerObjectMissing) {
+		t.Fatalf("want ErrStickerObjectMissing, got %v", err)
+	}
+	if len(missing.seen) != 1 || missing.seen[0] != "images/2026/08/a.png" {
+		t.Fatalf("checker should be called with the object key, got %v", missing.seen)
+	}
+
+	svc.SetObjectChecker(&fakeObjectChecker{exists: true})
+	if _, err := svc.Add(context.Background(), alice.ID, "images/2026/08/a.png", 96, 96, hash); err != nil {
+		t.Fatalf("existing object should be accepted: %v", err)
+	}
+}
+
+// TestStickerAddEnforcesCapButStaysIdempotent 达上限后拒绝新增，
+// 但「重复收藏已有内容」仍走幂等成功——那不新增行，拒掉会让满仓用户
+// 连自己已收藏的图都提示失败。
+func TestStickerAddEnforcesCapButStaysIdempotent(t *testing.T) {
+	db := testDB(t)
+	db.AutoMigrate(&model.StickerPack{}, &model.Sticker{})
+	alice := newTestUser(t, db, "甲cap")
+	svc := newStickerSvc(db)
+	ctx := context.Background()
+
+	// 直接写库造出 maxStickerFavorites 行，避开逐条走 Add 的开销
+	rows := make([]model.Sticker, 0, maxStickerFavorites)
+	for i := 0; i < maxStickerFavorites; i++ {
+		owner := alice.ID
+		rows = append(rows, model.Sticker{
+			OwnerID:     &owner,
+			ObjectKey:   "images/2026/08/a.png",
+			Width:       96,
+			Height:      96,
+			ContentHash: fmt.Sprintf("%064x", i),
+		})
+	}
+	if err := db.CreateInBatches(rows, 100).Error; err != nil {
+		t.Fatalf("seed rows: %v", err)
+	}
+
+	newHash := fmt.Sprintf("%064x", maxStickerFavorites+1)
+	if _, err := svc.Add(ctx, alice.ID, "images/2026/08/a.png", 96, 96, newHash); !errors.Is(err, ErrTooManyStickers) {
+		t.Fatalf("want ErrTooManyStickers, got %v", err)
+	}
+	// 已存在的 hash 仍可"再收藏"（幂等返回既有行）
+	existingHash := fmt.Sprintf("%064x", 0)
+	got, err := svc.Add(ctx, alice.ID, "images/2026/08/a.png", 96, 96, existingHash)
+	if err != nil {
+		t.Fatalf("re-adding an existing sticker at cap should be idempotent, got %v", err)
+	}
+	if got.ContentHash != existingHash {
+		t.Fatalf("want the existing row back, got %+v", got)
+	}
+}
+
+// TestStickerResolveSendable 本人收藏可发；官方包贴纸全员可发；
+// 他人的私人收藏不可发（此前 WS 路径完全不查库，可填别人的 sticker_id）。
+func TestStickerResolveSendable(t *testing.T) {
+	db := testDB(t)
+	db.AutoMigrate(&model.StickerPack{}, &model.Sticker{})
+	alice := newTestUser(t, db, "甲resolve")
+	bob := newTestUser(t, db, "乙resolve")
+	svc := newStickerSvc(db)
+	ctx := context.Background()
+	const hash = "41e63399bacaae3dafdf677291f0a7621fc58a681fa89daba700a678d18e7e78"
+
+	own, err := svc.Add(ctx, alice.ID, "images/2026/08/0a1b2c3d.png", 96, 96, hash)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if got, err := svc.ResolveSendable(ctx, alice.ID, own.ID); err != nil || got.ObjectKey != "images/2026/08/0a1b2c3d.png" {
+		t.Fatalf("owner should be able to send own sticker: %+v err=%v", got, err)
+	}
+	if _, err := svc.ResolveSendable(ctx, bob.ID, own.ID); !errors.Is(err, ErrStickerNotFound) {
+		t.Fatalf("bob must not be able to send alice's private sticker, got %v", err)
+	}
+
+	// 官方包贴纸：pack_id 非空、owner_id 为空，任何人可发
+	pack := model.StickerPack{Name: "官方测试包", IsOfficial: true}
+	if err := db.Create(&pack).Error; err != nil {
+		t.Fatalf("create pack: %v", err)
+	}
+	packSticker := model.Sticker{
+		PackID:      &pack.ID,
+		ObjectKey:   "images/2026/08/0f1e2d3c4b5a.png",
+		Width:       96,
+		Height:      96,
+		ContentHash: "aa63399bacaae3dafdf677291f0a7621fc58a681fa89daba700a678d18e7e778",
+	}
+	if err := db.Create(&packSticker).Error; err != nil {
+		t.Fatalf("create pack sticker: %v", err)
+	}
+	for _, uid := range []uuid.UUID{alice.ID, bob.ID} {
+		got, err := svc.ResolveSendable(ctx, uid, packSticker.ID)
+		if err != nil || got.ObjectKey != "images/2026/08/0f1e2d3c4b5a.png" {
+			t.Fatalf("official sticker should be sendable by %s: %+v err=%v", uid, got, err)
+		}
+	}
+}
+
+// TestStickerListMinePagination 游标分页：limit 生效、hasMore 正确、非法游标报错。
+func TestStickerListMinePagination(t *testing.T) {
+	db := testDB(t)
+	db.AutoMigrate(&model.StickerPack{}, &model.Sticker{})
+	alice := newTestUser(t, db, "甲page")
+	svc := newStickerSvc(db)
+	ctx := context.Background()
+
+	base := time.Now().Add(-time.Hour)
+	for i := 0; i < 5; i++ {
+		owner := alice.ID
+		row := model.Sticker{
+			OwnerID:     &owner,
+			ObjectKey:   "images/2026/08/a.png",
+			Width:       96,
+			Height:      96,
+			ContentHash: fmt.Sprintf("%064x", i),
+			CreatedAt:   base.Add(time.Duration(i) * time.Minute),
+		}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	first, hasMore, err := svc.ListMine(ctx, alice.ID, "", 2)
+	if err != nil {
+		t.Fatalf("page 1: %v", err)
+	}
+	if len(first) != 2 || !hasMore {
+		t.Fatalf("want 2 rows + hasMore, got %d hasMore=%v", len(first), hasMore)
+	}
+	cursor := first[len(first)-1].CreatedAt.Format(time.RFC3339Nano)
+	second, _, err := svc.ListMine(ctx, alice.ID, cursor, 2)
+	if err != nil {
+		t.Fatalf("page 2: %v", err)
+	}
+	if len(second) != 2 || second[0].CreatedAt.After(first[len(first)-1].CreatedAt) {
+		t.Fatalf("cursor should move strictly backwards in time, got %+v", second)
+	}
+
+	if _, _, err := svc.ListMine(ctx, alice.ID, "not-a-time", 2); !errors.Is(err, ErrInvalidCursor) {
+		t.Fatalf("want ErrInvalidCursor, got %v", err)
 	}
 }

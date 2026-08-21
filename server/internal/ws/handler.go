@@ -34,6 +34,17 @@ type Handler struct {
 	// offlinePush 消息落库后对「无任何 WS 连接」的成员补推浏览器通知
 	//（router 注入；nil 表示未启用 Web Push）
 	offlinePush func(recipients []uuid.UUID, info OfflineMsgInfo)
+	// resolveSticker 校验发送者对该贴纸的可发送权限，并返回服务端权威的对象元数据
+	//（router 注入）。nil 时贴纸帧退化为仅字段非空校验——生产装配必然非 nil，
+	// 仅 buildContent 的纯单测会留空。
+	resolveSticker func(ctx context.Context, senderID, stickerID uuid.UUID) (objectKey string, width, height int, err error)
+}
+
+// SetStickerResolver 注入贴纸可发送性校验（router 装配时调用）。
+func (h *Handler) SetStickerResolver(
+	fn func(ctx context.Context, senderID, stickerID uuid.UUID) (string, int, int, error),
+) {
+	h.resolveSticker = fn
 }
 
 // OfflineMsgInfo 离线推送所需的消息摘要（避免 ws 层依赖 push 层类型）。
@@ -283,7 +294,26 @@ func (h *Handler) buildContent(c *Client, p *SendPayload) (int16, string, bool) 
 		}
 		return model.MessageTypeImage, string(raw), true
 	case "sticker":
-		if p.Content.StickerID == "" || p.Content.Key == "" || p.Content.Width <= 0 || p.Content.Height <= 0 {
+		// sticker_id 必须是合法 UUID：原实现只判非空，可塞满帧上限（64KB）的垃圾
+		// 落进 messages.content JSONB 并向全会话扇出，绕过文本路径的 4000 字限制。
+		stickerID, err := uuid.Parse(p.Content.StickerID)
+		if err != nil {
+			c.sendError(400, "sticker content requires a valid sticker_id", p.ClientMsgID)
+			return 0, "", false
+		}
+		// 查库校验归属并取回权威元数据：客户端传来的 key/width/height 一律不采信。
+		// 原实现完全不查库，可以填别人的 sticker_id、不存在的 id，或把任意
+		// files/ 下的 key 当贴纸发出去（Add 的 images/ 前缀检查在此路径上不生效）。
+		objectKey, width, height := p.Content.Key, p.Content.Width, p.Content.Height
+		if h.resolveSticker != nil {
+			rctx, rcancel := context.WithTimeout(context.Background(), opTimeout)
+			objectKey, width, height, err = h.resolveSticker(rctx, c.userID, stickerID)
+			rcancel()
+			if err != nil {
+				c.sendError(403, "sticker not available to sender", p.ClientMsgID)
+				return 0, "", false
+			}
+		} else if objectKey == "" || width <= 0 || height <= 0 {
 			c.sendError(400, "sticker content requires sticker_id/key/width/height", p.ClientMsgID)
 			return 0, "", false
 		}
@@ -292,7 +322,7 @@ func (h *Handler) buildContent(c *Client, p *SendPayload) (int16, string, bool) 
 			Key       string `json:"key"`
 			Width     int    `json:"width"`
 			Height    int    `json:"height"`
-		}{p.Content.StickerID, p.Content.Key, p.Content.Width, p.Content.Height})
+		}{stickerID.String(), objectKey, width, height})
 		if err != nil {
 			c.sendError(400, "invalid sticker content", p.ClientMsgID)
 			return 0, "", false

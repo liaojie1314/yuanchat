@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -53,6 +54,13 @@ func (h *StickerHandler) Add(c *gin.Context) {
 			BadRequest(c, "invalid object key")
 		case errors.Is(err, service.ErrInvalidContentHash):
 			BadRequest(c, "invalid content hash")
+		case errors.Is(err, service.ErrInvalidStickerSize):
+			BadRequest(c, "invalid sticker dimensions")
+		case errors.Is(err, service.ErrStickerObjectMissing):
+			// 对象不在存储里：重试无意义，与网络/服务端故障区分开，前端据此提示"图片已失效"
+			NotFound(c, "sticker object does not exist")
+		case errors.Is(err, service.ErrTooManyStickers):
+			Error(c, 409, 409, "too many favorited stickers")
 		default:
 			h.logger.Error("add sticker failed", zap.Error(err))
 			InternalError(c, "add sticker failed")
@@ -103,6 +111,8 @@ func (h *StickerHandler) Remove(c *gin.Context) {
 //	@Summary		List my favorited stickers
 //	@Tags			stickers
 //	@Security		BearerAuth
+//	@Param			before	query	string	false	"cursor (RFC3339)"
+//	@Param			limit	query	int		false	"page size (default 100, max 200)"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/stickers/mine [get]
 func (h *StickerHandler) ListMine(c *gin.Context) {
@@ -111,13 +121,18 @@ func (h *StickerHandler) ListMine(c *gin.Context) {
 		Unauthorized(c, "unauthorized")
 		return
 	}
-	rows, err := h.svc.ListMine(c.Request.Context(), userID)
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "0"))
+	rows, hasMore, err := h.svc.ListMine(c.Request.Context(), userID, c.Query("before"), limit)
 	if err != nil {
+		if errors.Is(err, service.ErrInvalidCursor) {
+			BadRequest(c, "invalid before cursor")
+			return
+		}
 		h.logger.Error("list my stickers failed", zap.Error(err))
 		InternalError(c, "list stickers failed")
 		return
 	}
-	Success(c, gin.H{"stickers": rows})
+	Success(c, gin.H{"stickers": rows, "has_more": hasMore})
 }
 
 // ListPacks 列出表情包及各自贴纸（GET /sticker-packs）。

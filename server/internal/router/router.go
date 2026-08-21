@@ -56,6 +56,11 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 
 	stickerRepo := repository.NewStickerRepository(db)
 	stickerSvc := service.NewStickerService(stickerRepo, logger)
+	// 收藏前校验对象真实存在（st 为 nil 时——MinIO 不可达——降级跳过该校验，
+	// 与 fileH 的 503 降级策略一致，不因存储不可达而整条链路 500）
+	if st != nil {
+		stickerSvc.SetObjectChecker(st)
+	}
 	stickerH := handler.NewStickerHandler(stickerSvc, logger)
 
 	healthH := handler.NewHealthHandler()
@@ -82,6 +87,16 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	pushH := handler.NewPushHandler(pushSvc, logger)
 
 	e2eeH := handler.NewE2EEHandler(repository.NewE2EERepository(db), logger)
+
+	// 贴纸发送校验：WS 帧里的 sticker_id 必须属于发送者（或属于某个官方包），
+	// 且落库的 key/宽高一律取服务端权威值，不采信客户端传参。
+	wsH.SetStickerResolver(func(ctx context.Context, senderID, stickerID uuid.UUID) (string, int, int, error) {
+		st, err := stickerSvc.ResolveSendable(ctx, senderID, stickerID)
+		if err != nil {
+			return "", 0, 0, err
+		}
+		return st.ObjectKey, st.Width, st.Height, nil
+	})
 
 	// 离线成员补推浏览器通知：WS 在线者已实时收到，不重复打扰。
 	// VAPID 未配置时 NotifyUsers 内部直接返回，等于功能关闭。
@@ -226,10 +241,12 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		chat.DELETE("/favorites/:messageId", favH.Remove)
 		chat.GET("/favorites", favH.List)
 
-		chat.GET("/stickers/mine", stickerH.ListMine)
-		chat.POST("/stickers", stickerH.Add)
-		chat.DELETE("/stickers/:id", stickerH.Remove)
-		chat.GET("/sticker-packs", stickerH.ListPacks)
+		// 写操作限流照 /reports 的既定档位；读操作也挂（收藏列表虽已分页，
+		// 仍是可被高频拉取的鉴权端点）
+		chat.GET("/stickers/mine", middleware.LimitByIP(20, 40), stickerH.ListMine)
+		chat.POST("/stickers", middleware.LimitByIP(10, 20), stickerH.Add)
+		chat.DELETE("/stickers/:id", middleware.LimitByIP(10, 20), stickerH.Remove)
+		chat.GET("/sticker-packs", middleware.LimitByIP(20, 40), stickerH.ListPacks)
 
 		chat.POST("/reports", middleware.LimitByIP(10, 20), reportH.Create)
 

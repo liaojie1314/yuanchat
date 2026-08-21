@@ -43,9 +43,20 @@ export async function removeSticker(id: string): Promise<void> {
   await apiDelete<{ message: string }>("/api/v1/stickers/" + id);
 }
 
-/** 列出本人收藏的全部贴纸。 */
+/**
+ * 列出本人收藏的贴纸。
+ *
+ * 服务端一页即可返回一个用户可能拥有的全部收藏（页大小 == 收藏上限），
+ * 故这里不翻页。`has_more` 为真意味着服务端放宽了收藏上限而前端未跟上——
+ * 那会静默少显示几张，因此显式告警而不是无声吞掉。
+ */
 export async function listMyStickers(): Promise<StickerItem[]> {
-  const data = await apiGet<{ stickers: StickerItem[] }>("/api/v1/stickers/mine");
+  const data = await apiGet<{ stickers: StickerItem[]; has_more?: boolean }>(
+    "/api/v1/stickers/mine",
+  );
+  if (data.has_more) {
+    console.warn("[stickers] /stickers/mine 返回 has_more=true，收藏列表可能不完整");
+  }
   return data.stickers || [];
 }
 

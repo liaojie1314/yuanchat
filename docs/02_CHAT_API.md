@@ -667,6 +667,11 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 返回当前用户的**个人收藏贴纸**（`owner_id = 自己`），最新在前（`created_at DESC`）。
 无收藏时 `stickers` 为空数组。
 
+支持游标分页：`?before=<RFC3339>&limit=<n>`。页大小默认与上限均为 500，
+即**一页足以装下一个用户可能拥有的全部收藏**（收藏上限亦为 500），
+故前端单次请求即可拿全、无需翻页；`has_more` 恒为 `false`，
+除非将来放宽收藏上限。`before` 非法 → `400`（`invalid before cursor`）。
+
 ```json
 {
   "code": 0,
@@ -682,7 +687,8 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
         "content_hash": "<hex-sha256>",
         "created_at": "2026-08-09T10:00:00+08:00"
       }
-    ]
+    ],
+    "has_more": false
   }
 }
 ```
@@ -720,9 +726,18 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 ```
 
 - 缺任一字段（`width`/`height` 传 `0` 亦视为缺失，gin `binding:"required"` 语义）→ `400`。
-- `object_key` 必须以 `images/` 开头，否则 `400`（`invalid object key`）——防止把 `files/` 下的
-  私有文档伪造成贴纸，绕过下载权限模型。
-- `content_hash` 必须为 64 字符（SHA-256 十六进制），否则 `400`（`invalid content hash`）。
+- `object_key` 必须匹配 `^images/[0-9]{4}/[0-9]{2}/[0-9a-f-]+\.[a-z0-9]+$` 且长度 ≤ 255，
+  否则 `400`（`invalid object key`）。这是数据卫生 + 列宽约束；真正拦截路径穿越的是
+  `POST /files/download-url` 的同类锚定正则（贴纸表不是预签名的信任来源）。
+- `content_hash` 必须匹配 `^[0-9a-f]{64}$`（小写十六进制 SHA-256），
+  否则 `400`（`invalid content hash`）。
+- `width`/`height` 须为正且 ≤ 4096，否则 `400`（`invalid sticker dimensions`）。
+- `object_key` 指向的对象必须真实存在于存储中，否则 `404`
+  （`sticker object does not exist`）——重试无意义，前端据此提示"图片已失效"。
+  MinIO 不可达时该校验降级跳过。
+- 单用户收藏上限 500，超限 `409`（`too many favorited stickers`）。
+  已达上限时**重复收藏已有内容**仍返回 `200`（幂等，不新增行）。
+- 并发重复收藏（同 `owner_id` + `content_hash`）返回 `200` 与既有行，不再是 `500`。
 
 ### DELETE /api/v1/stickers/:id（v0.4 H1）
 
@@ -747,15 +762,15 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 
 ### 客户端 → 服务端
 
-| type           | payload                                                                                                     | 说明                                                                                                                                                                                                         |
-| -------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `message.send` | `{conversation_id, content: {type:"text", text}, client_msg_id, reply_to_id?, mentions?}`                   | 发送文本（≤4000 字符）。`client_msg_id` 客户端生成，幂等/回执匹配用。`mentions[]`（v0.2）=被 @ 的用户 UUID 列表：仅群聊有效，全部须为群成员且不含自己，命中的成员 `mention_unread` 置 true                   |
-| `message.send` | `{conversation_id, content: {type:"image", key, width, height, size}, client_msg_id, reply_to_id?}`         | 发送图片。`content` 走图片分支：`key`=`upload-url` 返回的 object_key，`width`/`height`=像素宽高（气泡等比占位防 CLS），`size`=字节；四者缺一或非正 → `400`（`image content requires key/width/height/size`） |
-| `message.send` | `{conversation_id, content: {type:"file", key, name, size}, client_msg_id, reply_to_id?}`                   | 发送文件。`name`=原始文件名（展示用，≤255 rune），三者缺一 → `400`；MIME 须在 `upload.allowed_types` 白名单内（upload-url 阶段拦截 `4001`）                                                                  |
-| `message.send` | `{conversation_id, content: {type:"voice", key, duration, size}, client_msg_id, reply_to_id?}`              | 发送语音（webm/opus）。`duration`=秒数，**1-60s** 之外 → `400`（`voice content requires key/duration(1-60s)/size`）                                                                                          |
-| `message.send` | `{conversation_id, content: {type:"sticker", sticker_id, key, width, height}, client_msg_id, reply_to_id?}` | 发送贴纸（v0.4 H1）。四个字段缺一或 `width`/`height` ≤ 0 → `400`；`key` 为贴纸对象的 `object_key`（服务端原样落库供接收端签下载，不反查 `stickers` 表）                                                      |
-| `message.read` | `{conversation_id, seq}`                                                                                    | 上报已读进度（已读到的最大 seq，只前进不后退）                                                                                                                                                               |
-| `typing`       | `{conversation_id}`                                                                                         | 正在输入（客户端节流 ~3s/次）                                                                                                                                                                                |
+| type           | payload                                                                                                     | 说明                                                                                                                                                                                                                                                                                           |
+| -------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `message.send` | `{conversation_id, content: {type:"text", text}, client_msg_id, reply_to_id?, mentions?}`                   | 发送文本（≤4000 字符）。`client_msg_id` 客户端生成，幂等/回执匹配用。`mentions[]`（v0.2）=被 @ 的用户 UUID 列表：仅群聊有效，全部须为群成员且不含自己，命中的成员 `mention_unread` 置 true                                                                                                     |
+| `message.send` | `{conversation_id, content: {type:"image", key, width, height, size}, client_msg_id, reply_to_id?}`         | 发送图片。`content` 走图片分支：`key`=`upload-url` 返回的 object_key，`width`/`height`=像素宽高（气泡等比占位防 CLS），`size`=字节；四者缺一或非正 → `400`（`image content requires key/width/height/size`）                                                                                   |
+| `message.send` | `{conversation_id, content: {type:"file", key, name, size}, client_msg_id, reply_to_id?}`                   | 发送文件。`name`=原始文件名（展示用，≤255 rune），三者缺一 → `400`；MIME 须在 `upload.allowed_types` 白名单内（upload-url 阶段拦截 `4001`）                                                                                                                                                    |
+| `message.send` | `{conversation_id, content: {type:"voice", key, duration, size}, client_msg_id, reply_to_id?}`              | 发送语音（webm/opus）。`duration`=秒数，**1-60s** 之外 → `400`（`voice content requires key/duration(1-60s)/size`）                                                                                                                                                                            |
+| `message.send` | `{conversation_id, content: {type:"sticker", sticker_id, key, width, height}, client_msg_id, reply_to_id?}` | 发送贴纸（v0.4 H1）。`sticker_id` 须为合法 UUID 且**属于发送者或属于某个表情包**（官方包全员可发），否则 `403`（`sticker not available to sender`）；非 UUID → `400`。服务端按 `sticker_id` 查库并用库中的 `object_key`/`width`/`height` **覆盖**客户端传值，客户端传来的 `key`/宽高一律不采信 |
+| `message.read` | `{conversation_id, seq}`                                                                                    | 上报已读进度（已读到的最大 seq，只前进不后退）                                                                                                                                                                                                                                                 |
+| `typing`       | `{conversation_id}`                                                                                         | 正在输入（客户端节流 ~3s/次）                                                                                                                                                                                                                                                                  |
 
 > **ContentPayload（消息体传输结构）**：`{type, text?, key?, width?, height?, size?, name?, duration?, sticker_id?}`。
 > text 帧只用 `type`/`text`；image 帧用 `key`/`width`/`height`/`size`；file 帧用 `key`/`name`/`size`；

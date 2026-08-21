@@ -112,6 +112,22 @@ func (s *Storage) PutObject(ctx context.Context, objectKey, contentType string, 
 	return err
 }
 
+// ObjectExists 判断对象是否真实存在。
+//
+// 用于「登记引用前先确认对象在」的场景（如贴纸收藏）：PresignGet 只做 URL 签名、
+// 不校验对象存在性，因此没有这一步就会把指向空对象的记录写进库，前端拿到合法 URL
+// 但渲染 404，且该坏数据会长期存活。找不到对象返回 (false, nil)，其余错误照原样返回。
+func (s *Storage) ObjectExists(ctx context.Context, objectKey string) (bool, error) {
+	_, err := s.client.StatObject(ctx, s.bucket, objectKey, minio.StatObjectOptions{})
+	if err == nil {
+		return true, nil
+	}
+	if minio.ToErrorResponse(err).Code == "NoSuchKey" {
+		return false, nil
+	}
+	return false, fmt.Errorf("failed to stat %q: %w", objectKey, err)
+}
+
 // PublicURL 拼出对象的公共访问 URL，形如 scheme://endpoint/bucket/key。
 // 仅对已开放匿名读的前缀（avatars/）有效。
 func (s *Storage) PublicURL(objectKey string) string {
