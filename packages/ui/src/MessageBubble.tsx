@@ -477,7 +477,7 @@ export function MessageBubble({
                     onClick={handleAddSticker}
                     className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
                   >
-                    <Smile size={15} /> {t("chat.message.addToStickers")}
+                    <Smile size={15} /> {t("sticker.addToStickers")}
                   </button>
                 )}
                 {onReport && (

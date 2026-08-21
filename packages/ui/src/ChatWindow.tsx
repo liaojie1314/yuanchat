@@ -236,14 +236,26 @@ export function ChatWindow({
   /**
    * 从图片消息收藏为贴纸：取图字节算 SHA-256（后端按 (owner, hash) 去重）→ POST /stickers。
    * 图片对象已在 MinIO 的 images/ 下，故直接复用其 object_key，不重新上传。
+   *
+   * @remarks fetch 对 4xx/5xx 不 reject，必须显式查 r.ok：否则预签名过期 / 对象已清理 /
+   *   反代 502 时会把错误页正文当图片字节算 hash 收藏成功，用户看到"已添加"，
+   *   而收藏项是永久空白格；更糟的是错误页 hash ≠ 真实图片 hash，后端 (owner, hash)
+   *   去重被打穿——网络恢复后收藏同一张图会插入第二行。
    */
   const handleAddSticker = async (imageKey: string, width: number, height: number) => {
     try {
       const url = await getDownloadUrl(imageKey);
-      const blob = await fetch(url).then((r) => r.blob());
+      const res = await fetch(url);
+      if (!res.ok) {
+        // 404/403 = 对象已不存在或签名失效，重试无意义；与网络故障分开提示
+        const expired = res.status === 403 || res.status === 404;
+        showToast("error", t(expired ? "sticker.addFailedExpired" : "sticker.addFailed"));
+        return;
+      }
+      const blob = await res.blob();
       const hash = await hashBlob(blob);
       await addSticker(imageKey, width, height, hash);
-      showToast("info", t("sticker.added"));
+      showToast("info", t("sticker.addSuccess"));
     } catch {
       showToast("error", t("sticker.addFailed"));
     }

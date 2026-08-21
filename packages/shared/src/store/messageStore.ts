@@ -834,6 +834,12 @@ async function maybeEncryptAndSend(
   clientMsgId: string,
   get: () => MessageState,
 ) {
+  // ack 超时必须在 await 之前挂：encryptFor 首次给某对端发消息会去拉 prekey
+  // bundle（走 fetch，无超时），网络挂死时若等它 settle 才计时，消息会永久停在
+  // sending——既不 failed 也不出现重试按钮。提前挂表也安全：定时器回调只对仍是
+  // sending 的消息生效，下面 catch 分支置 failed 后它就是空操作。
+  armAckTimeout(conversationId, clientMsgId, get);
+
   const selfId = getSelfId?.();
   const peerId = getPeerId?.(conversationId);
 
@@ -851,7 +857,6 @@ async function maybeEncryptAndSend(
   }
 
   chatSocket.send("message.send", payload);
-  armAckTimeout(conversationId, clientMsgId, get);
 }
 
 /**

@@ -7,7 +7,7 @@
  * - 签名未返回/失败时只留占位盒，不渲染 <img> 也不抛错
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { StickerImage } from "../StickerImage";
 import * as shared from "@yuanchat/shared";
 
@@ -66,22 +66,53 @@ describe("StickerImage", () => {
     expect(container.firstChild).toHaveStyle({ width: "112px", height: "112px" });
   });
 
-  it("renders only the placeholder box when signing fails", async () => {
+  // 下面三条断言的是「失败可见」：贴纸是这条消息的全部内容，且气泡对 sticker
+  // 去掉了背景与内边距，静默留白等于用户完全看不出这里本该有东西。
+  it("shows a retryable placeholder when signing fails", async () => {
     vi.mocked(shared.getDownloadUrl).mockRejectedValue(new Error("sign failed"));
 
-    const { container } = render(
-      <StickerImage sticker={{ key: "images/broken.png", width: 96, height: 96 }} />,
-    );
+    render(<StickerImage sticker={{ key: "images/broken.png", width: 96, height: 96 }} />);
 
-    await waitFor(() => expect(shared.getDownloadUrl).toHaveBeenCalled());
-    expect(container.querySelector("img")).toBeNull();
-    expect(container.firstChild).toHaveStyle({ width: "96px", height: "96px" });
+    const placeholder = await screen.findByRole("button", { name: "Failed to load" });
+    expect(placeholder).toHaveStyle({ width: "96px", height: "96px" });
   });
 
-  it("does not sign anything when the key is absent", () => {
-    const { container } = render(<StickerImage sticker={{ width: 96, height: 96 }} />);
+  it("shows the placeholder when the image itself fails to load", async () => {
+    vi.mocked(shared.getDownloadUrl).mockResolvedValue("https://cdn.example.com/gone.png");
+
+    const { container } = render(
+      <StickerImage sticker={{ key: "images/gone.png", width: 96, height: 96 }} />,
+    );
+
+    // 签名成功但对象不存在（如 seed 未真正上传）：<img> 触发 onError
+    const img = await waitFor(() => {
+      const el = container.querySelector("img");
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    fireEvent.error(img);
+
+    expect(await screen.findByRole("button", { name: "Failed to load" })).toBeInTheDocument();
+  });
+
+  it("retrying after a failure re-signs the object key", async () => {
+    vi.mocked(shared.getDownloadUrl).mockRejectedValueOnce(new Error("sign failed"));
+
+    render(<StickerImage sticker={{ key: "images/flaky.png", width: 96, height: 96 }} />);
+    const placeholder = await screen.findByRole("button", { name: "Failed to load" });
+
+    vi.mocked(shared.getDownloadUrl).mockResolvedValue("https://cdn.example.com/ok.png");
+    fireEvent.click(placeholder);
+
+    const img = await screen.findByRole("presentation");
+    expect(img).toHaveAttribute("src", "https://cdn.example.com/ok.png");
+    expect(shared.getDownloadUrl).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows the placeholder without signing when the key is absent", async () => {
+    render(<StickerImage sticker={{ width: 96, height: 96 }} />);
 
     expect(shared.getDownloadUrl).not.toHaveBeenCalled();
-    expect(container.querySelector("img")).toBeNull();
+    expect(await screen.findByRole("button", { name: "Failed to load" })).toBeInTheDocument();
   });
 });
