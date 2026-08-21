@@ -45,3 +45,7 @@ export { useChatBootstrap, isMockEnabled } from "./hooks/useChatBootstrap";
 export { useVoiceRecorder } from "./hooks/useVoiceRecorder";
 export type { VoiceRecorderState } from "./hooks/useVoiceRecorder";
 export { initSentry, captureException } from "./observability/sentry";
+export { previewBodyOf, quoteExcerptOf } from "./utils/messagePreview";
+export { isServerConfirmed } from "./utils/messageActions";
+export type { ActionableMessage } from "./utils/messageActions";
+export type { MessagePreviewKind } from "./utils/messagePreview";

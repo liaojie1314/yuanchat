@@ -61,6 +61,7 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
         "announcement_updated_at": "2026-08-04T10:00:00+08:00",
         "last_message": {
           "preview": "发布评审改到明早 9 点",
+          "preview_kind": "text",
           "sender_nickname": "陈曦",
           "created_at": "2026-07-16T09:00:00+08:00"
         },
@@ -79,6 +80,11 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 - `is_pinned` / `pinned_at`（v0.4 A6）：本人置顶态；列表排序置顶优先、组内按 pinned_at 倒序（前端实现）。
 - `announcement` / `announcement_updated_at`（v0.4 A7）：群公告正文与最近变更时间；仅群聊有意义，无公告时两字段均不出现（`omitempty`）。
 - `last_message`（v0.4 A7）：受本人「清空聊天记录」水位影响——清空后水位内的旧消息不再作为预览返回（对方列表不受影响）。
+- `last_message.preview_kind`（v0.4 H1）：消息类型标记，取值 `text` / `system` / `image` / `file` / `voice` / `video` / `sticker` / `encrypted` / `unknown`。
+  **非文本类型的 `preview` 为空串，占位文案由前端按当前语言产出**（`previewBodyOf`）：服务端不再返回
+  `[图片]`/`[表情]` 等中文硬编码，否则英/日/韩界面下「实时收到」与「刷新后」文案会不一致。
+  `text` / `system` 两类的正文仍在 `preview` 里。
+  客户端须容忍字段缺失（旧服务端）：无 `preview_kind` 时直接用 `preview` 原文。
 
 ### POST /api/v1/conversations
 
@@ -326,9 +332,14 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 ```
 
 - 源消息不存在或已撤回 → `404 message not found`；系统消息不可转发（同报 404）。
+- 端到端加密消息不可转发 → `400 encrypted messages cannot be forwarded`（v0.4 H1）。密文是针对
+  「本会话、本棘轮状态」加密的，复制到另一个会话后那边任何人（含转发者自己）都拿不到对应链密钥，
+  只会渲染成一条永久「无法解密」；因此在服务层入口直接拒绝，不落任何行。
 - `conversation_ids` 缺失/为空 → `400 no forward target`；超过 9 个 → `400 too many forward targets`。
 - 操作者不在源会话 → `403 not a source conversation member`；不在某个目标会话 → `403 one or more target conversations are inaccessible`。
-- 语义：新消息复制源 `message_type` + `content`（text/image/file/voice 都保留原字段），无 `client_msg_id`、无 `reply_to_id`、无 `mentions`。转发感由前端"从右键菜单进入"的交互隐式表达。
+- 语义：新消息复制源 `message_type` + `content`（text/image/file/voice/sticker 都保留原字段），无 `client_msg_id`、无 `reply_to_id`、无 `mentions`。转发感由前端"从右键菜单进入"的交互隐式表达。
+- 实时推送与落库解耦：服务端重建 WS `content` 载荷失败的类型（未来新增而忘补分支者）**跳过实时推送并告警**，
+  不再退化成 `{"type":"text"}` 空气泡——落库仍是完整 content，对端刷新后可正常看到。
 - 部分成功不做回滚：任一目标会话失败即立刻回错，已成功的目标已产生独立消息（转发本身是"广播"语义）。
 
 ### GET /api/v1/presence

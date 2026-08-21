@@ -156,7 +156,32 @@ H1 贴纸功能在实现过程中连续出现三次同类缺陷（`retrySend` �
   - 31：`ListPacks` 改两次查询 + 内存分组，消除逐包 N+1；超软上限只告警不静默截断
   - 36：纠正 `sticker_service.go` 关于 `images/` 前缀作用的错位注释
   - 连带：`docs/02_CHAT_API.md` 更新四端点的校验规则、状态码、分页与 WS 帧语义
-- [ ] 批 C｜功能级 bug（第 8–13 项）
+- [x] **批 C｜功能级 bug**（第 8–13 项）
+  - 8：`contentPayloadFromMessage` 补 sticker 分支；签名改 `(payload, ok bool)`，
+    `json.Unmarshal` 全部查错，`default` 回 `ok=false` → 推送循环**跳过并告警**，
+    不再退化成 `{Type:"text"}` 空气泡（落库始终完整，刷新可见）。
+    连带：`Forward` 入口拒绝 E2EE（新哨兵 `ErrForwardEncrypted` → `400`）——
+    密文绑定源会话棘轮状态，转到别处是一条永久"无法解密"，且校验前置于落库
+  - 9：`mapMessage` 对 `message_type=7` 给本地化占位 `e2ee.historyNotStored`
+    （原先 `text` 恒 `undefined` → 刷新后 E2EE 历史全是空气泡）。
+    不尝试解密：`messageStore` 无本地明文持久化，且 `decryptFrom` 有副作用
+    （消耗 OTK、推进链），重放历史会污染在线会话状态
+  - 10：抽出 `isServerConfirmed(msg)`（`packages/shared/src/utils/messageActions.ts`），
+    ChatWindow 里 5 处手抄断言 + `onAddSticker` 全部改为调用它；
+    `onReply` 由此获得 seq 闸门（原先双击气泡即可对未 ack 消息引用 → 整帧 400）
+  - 11：收藏列表补 `KIND_BY_TYPE` 映射与 type 4/8 图标，`parseExcerpt` 走
+    `previewBodyOf` → 去掉硬编码英文 `"[media]"`，文件优先显示文件名
+  - 12：新增 `quoteExcerptOf`，气泡内 quote 块与输入框引用条共用；
+    贴纸/图片/语音不再是空串（原先 Composer 对三者一律显示 `[图片]`）
+  - 13：服务端只返回类型标记 `last_message.preview_kind`，`preview` 对非文本类为空串，
+    文案一律由前端 `previewBodyOf` 按当前语言产出 → WS 与 REST 两条路径同源。
+    新增 `TestPreviewOfNeverEmitsLocalizedText` 防止有人把中文文案写回服务端；
+    顺带修既有 bug：系统消息原先落 `default` → 建群后列表预览空白
+  - 客户端向后兼容：`preview_kind` 缺失时回退用 `preview` 原文（旧服务端可用）
+  - 连带：`docs/02_CHAT_API.md` 补 `preview_kind` 字段语义与转发新增的 `400`
+  - **刻意延后**：`server/internal/router/router.go:126-135` 离线推送通知体仍硬编码
+    中文 `[图片]/[文件]/[语音]/[表情]`。该文案由 OS 渲染、服务端无 per-user locale 字段，
+    要做需先加用户语言偏好（建表字段 + 登录/设置写入），属独立缺口，不并入第 13 项
 - [ ] 批 D｜Task 10 收口（第 2、3、4、5、6、7 项）
 - [ ] 批 E｜结构性根治（第 20、34、35 项）
 
@@ -168,5 +193,9 @@ H1 贴纸功能在实现过程中连续出现三次同类缺陷（`retrySend` �
   （批 A 已改）、`stickers.test` 的两条「字段缺失回退空数组」（待批 D）。
 - 批 A 未纳入的一个判断：400 类错误是**确定性失败**，重试同一帧必然再失败，
   理想做法是让重试按钮对这类消息失效。这需要给 `ChatMessage` 加 `nonRetryable` 标记
-  并改 `MessageBubble` 的重试按钮渲染条件，属新增 UI 状态，留待与批 C 一并评估。
-  当前行为：重试仍可点，但每次都会立即收到明确的失败提示（原先是转 5 秒圈后静默失败）。
+  并改 `MessageBubble` 的重试按钮渲染条件，属新增 UI 状态。
+  **批 C 评估结论：不做，且不进批 D/E。** 理由：第 10 项修完后，最主要的"重试必然再失败"
+  来源（`reply_to_id` 填 clientMsgId → 整帧 400）已从入口消失；剩余 400 多为内容超限，
+  改内容后重发是合理路径，禁用重试反而堵死用户唯一的自救动作。
+  当前行为：重试可点，每次都立即给出明确失败提示（原先是转 5 秒圈后静默失败）。
+  若仍想做，需先定义"哪些 code 算不可重试"，属产品决策，请另开一项。

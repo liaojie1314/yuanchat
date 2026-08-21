@@ -20,6 +20,7 @@ import {
   chatSocket,
   fetchMembers,
   isMockEnabled,
+  quoteExcerptOf,
   useConversationStore,
   useMessageStore,
 } from "@yuanchat/shared";
@@ -275,7 +276,8 @@ export function Composer({
         <span className="text-primary text-label-sm font-medium">
           {t("chat.reply.label", { name: replyingTo.senderName ?? "" })}
         </span>{" "}
-        {replyingTo.text ?? replyingTo.file?.name ?? t("chat.message.image")}
+        {/* 语音/贴纸引用此前一律显示"[图片]"，摘要口径与发送出去的 quote.excerpt 统一 */}
+        {quoteExcerptOf(replyingTo)}
       </span>
       <button
         onClick={() => setReplyingTo(null)}

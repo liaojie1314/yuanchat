@@ -7,6 +7,7 @@
  */
 import { apiGet, apiPost, apiPut } from "./client";
 import i18n from "@yuanchat/design-system/i18n";
+import { previewBodyOf } from "../utils/messagePreview";
 import type { Conversation } from "../store/conversationStore";
 import type { ChatMessage } from "../store/messageStore";
 
@@ -21,7 +22,10 @@ interface PeerDTO {
 }
 
 interface LastMessageDTO {
+  /** 正文：仅文本/系统消息有值，其余类型为空串（文案由 preview_kind 在前端本地化） */
   preview: string;
+  /** 消息类型标记：text/system/image/file/voice/video/sticker/encrypted/unknown */
+  preview_kind?: string;
   sender_nickname: string;
   created_at: string;
 }
@@ -132,11 +136,16 @@ export function formatDateDivider(dateKey: string): string {
 // ========================================
 
 export function mapConversation(dto: ConversationDTO): Conversation {
-  const preview = dto.last_message
-    ? dto.type === 2
-      ? dto.last_message.sender_nickname + ": " + dto.last_message.preview
-      : dto.last_message.preview
+  // 非文本类消息的占位文案由前端按当前语言产出，与 WS 实时路径同源（见 previewBodyOf）
+  const body = dto.last_message
+    ? previewBodyOf(dto.last_message.preview_kind, dto.last_message.preview)
     : undefined;
+  const preview =
+    dto.last_message && body !== undefined
+      ? dto.type === 2 && dto.last_message.preview_kind !== "system"
+        ? dto.last_message.sender_nickname + ": " + body
+        : body
+      : undefined;
 
   return {
     id: dto.id,
@@ -274,6 +283,7 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     6: "system",
     8: "sticker",
   };
+
   // status=2 表示已撤回：气泡走灰字系统占位，忽略 kind/text
   const recalled = dto.status === 2;
   const isImage = dto.message_type === 2;
@@ -290,6 +300,11 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     voice = { seconds: parsed.duration, wave: pseudoWave(parsed.duration), key: parsed.key };
   }
   const isSticker = dto.message_type === 8;
+  // E2EE 密文（type 7）：本设备不保存历史明文，且双棘轮状态早已推进，
+  // 拿到旧密文也无法就地重新解密（强行调 decryptFrom 还会污染当前会话棘轮状态）。
+  // 原实现 kindMap 缺 7 → kind 回退 "text"，而 text 只在 type 1|6 赋值 →
+  // 加密单聊刷新后整段历史变空气泡，连"这是加密消息"都看不出来。
+  const isEncrypted = dto.message_type === 7;
 
   return {
     id: dto.id,
@@ -297,8 +312,11 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     kind: kindMap[dto.message_type] || "text",
     isSelf,
     senderName: dto.sender_nickname,
-    text:
-      dto.message_type === 1 || dto.message_type === 6 ? parseTextContent(dto.content) : undefined,
+    text: isEncrypted
+      ? i18n.t("e2ee.historyNotStored")
+      : dto.message_type === 1 || dto.message_type === 6
+        ? parseTextContent(dto.content)
+        : undefined,
     // 历史图片：解析 key + 宽高，渲染时按 key 签下载 URL（无 localUrl）
     image: isImage ? parseImageContent(dto.content) : undefined,
     file,

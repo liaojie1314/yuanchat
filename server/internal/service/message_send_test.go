@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/google/uuid"
@@ -443,5 +444,74 @@ func TestForward_TooMany(t *testing.T) {
 	_, err = svc.Forward(context.Background(), a.ID, sent.Message.ID, ids)
 	if !errors.Is(err, ErrForwardTooMany) {
 		t.Fatalf("want ErrForwardTooMany, got %v", err)
+	}
+}
+
+// TestForward_Sticker 贴纸可转发，且 message_type 与 content 原样复制。
+//
+// 类型保持不变是前端正确渲染的前提：曾经 handler 侧重建 content 时漏了 sticker
+// 分支，导致目标会话实时收到空文本气泡（落库的行其实是对的，刷新即恢复）。
+func TestForward_Sticker(t *testing.T) {
+	db := testDB(t)
+	svc := newMessageSvc(db)
+	a := newTestUser(t, db, "fwst-a")
+	b := newTestUser(t, db, "fwst-b")
+	c := newTestUser(t, db, "fwst-c")
+	src := newSendConv(t, db, a, b)
+	dst := newSendConv(t, db, a, c)
+
+	content := `{"sticker_id":"` + uuid.New().String() + `","key":"images/2026/08/s.png","width":96,"height":96}`
+	sent, err := svc.SendContent(context.Background(), a.ID, src, model.MessageTypeSticker, content, "c-fwst-1", nil, nil)
+	if err != nil {
+		t.Fatalf("seed sticker: %v", err)
+	}
+
+	results, err := svc.Forward(context.Background(), a.ID, sent.Message.ID, []uuid.UUID{dst})
+	if err != nil {
+		t.Fatalf("forward sticker: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results len: %d", len(results))
+	}
+	if results[0].Message.MessageType != model.MessageTypeSticker {
+		t.Fatalf("forwarded type should stay sticker, got %d", results[0].Message.MessageType)
+	}
+	// jsonb 列会重排键序与空白，故按语义比对而非字符串相等
+	var want, got map[string]any
+	if err := json.Unmarshal([]byte(content), &want); err != nil {
+		t.Fatalf("unmarshal want: %v", err)
+	}
+	if err := json.Unmarshal([]byte(results[0].Message.Content), &got); err != nil {
+		t.Fatalf("unmarshal got: %v", err)
+	}
+	if !reflect.DeepEqual(want, got) {
+		t.Fatalf("forwarded content should be copied verbatim, want %v got %v", want, got)
+	}
+}
+
+// TestForward_RejectsE2EE 端到端加密消息拒绝转发：密文换会话后无人能解，
+// 转发成功只会在目标会话留下一条永久"无法解密"。
+func TestForward_RejectsE2EE(t *testing.T) {
+	db := testDB(t)
+	svc := newMessageSvc(db)
+	a := newTestUser(t, db, "fwe-a")
+	b := newTestUser(t, db, "fwe-b")
+	c := newTestUser(t, db, "fwe-c")
+	src := newSendConv(t, db, a, b)
+	dst := newSendConv(t, db, a, c)
+
+	content := `{"ratchet_key":"rk","n":0,"pn":0,"nonce":"nn","ciphertext":"cc"}`
+	sent, err := svc.SendContent(context.Background(), a.ID, src, model.MessageTypeE2EE, content, "c-fwe-1", nil, nil)
+	if err != nil {
+		t.Fatalf("seed e2ee: %v", err)
+	}
+	if _, err := svc.Forward(context.Background(), a.ID, sent.Message.ID, []uuid.UUID{dst}); !errors.Is(err, ErrForwardEncrypted) {
+		t.Fatalf("want ErrForwardEncrypted, got %v", err)
+	}
+	// 未落任何行到目标会话
+	var n int64
+	db.Model(&model.Message{}).Where("conversation_id = ?", dst).Count(&n)
+	if n != 0 {
+		t.Fatalf("target conversation should stay empty, got %d rows", n)
 	}
 }

@@ -35,6 +35,8 @@ import {
   formatDateDivider,
   getDownloadUrl,
   hashBlob,
+  isServerConfirmed,
+  quoteExcerptOf,
   recallMessage,
   RE_EDIT_WINDOW_MS,
   reportMessage,
@@ -214,7 +216,8 @@ export function ChatWindow({
         ? {
             messageId: replyingTo.id,
             senderName: replyingTo.senderName ?? "我",
-            excerpt: (replyingTo.text ?? replyingTo.file?.name ?? "").slice(0, 40),
+            // 图片/语音/贴纸此前恒为空串，引用条只剩昵称加一行空白
+            excerpt: quoteExcerptOf(replyingTo),
           }
         : undefined,
     });
@@ -421,7 +424,12 @@ export function ChatWindow({
                           ? () => retrySend(activeId, msg.id)
                           : undefined
                       }
-                      onReply={() => setReplyingTo(msg)}
+                      onReply={
+                        // 引用回复会把 reply_to_id 一起发给服务端，未 ack 的消息 id
+                        // 还是 clientMsgId → 整帧 400 且无法定位（见 isServerConfirmed）。
+                        // 此前这里是唯一没有闸门的菜单项，且双击气泡就能触发。
+                        isServerConfirmed(msg) ? () => setReplyingTo(msg) : undefined
+                      }
                       onImageClick={setLightboxUrl}
                       onRecall={
                         // 仅自己且已送达（sent/read）的消息可撤回：sending/failed 只有本地
@@ -442,23 +450,17 @@ export function ChatWindow({
                           : undefined
                       }
                       onReact={
-                        // 排除撤回/系统消息/未 ack 乐观消息（其 id 还是 client id，服务端 404）
-                        msg.recalled || msg.kind === "system" || !msg.seq
-                          ? undefined
-                          : (emoji) => {
+                        isServerConfirmed(msg)
+                          ? (emoji) => {
                               void toggleReaction(msg.id, emoji).catch(() =>
                                 showToast("error", t("common.opFailed")),
                               );
                             }
+                          : undefined
                       }
-                      onForward={
-                        msg.recalled || msg.kind === "system" || !msg.seq
-                          ? undefined
-                          : () => handleForward(msg.id)
-                      }
+                      onForward={isServerConfirmed(msg) ? () => handleForward(msg.id) : undefined}
                       onFavorite={
-                        // 只对服务端已确认消息（有 seq）且非撤回/系统消息提供收藏
-                        !msg.recalled && msg.kind !== "system" && !!msg.seq
+                        isServerConfirmed(msg)
                           ? () => {
                               void addFavorite(msg.id)
                                 .then(() => showToast("info", t("favorites.added")))
@@ -467,8 +469,8 @@ export function ChatWindow({
                           : undefined
                       }
                       onAddSticker={
-                        // 只对已确认的图片消息提供"添加到表情"
-                        !msg.recalled && msg.kind === "image" && !!msg.seq && msg.image?.key
+                        // 只对已确认的图片消息提供"添加到表情"（收藏走 REST，需服务端 id）
+                        isServerConfirmed(msg) && msg.kind === "image" && msg.image?.key
                           ? () =>
                               void handleAddSticker(
                                 msg.image!.key!,
@@ -479,7 +481,7 @@ export function ChatWindow({
                       }
                       onReport={
                         // 只能举报别人的已确认消息
-                        !msg.recalled && msg.kind !== "system" && !!msg.seq && !msg.isSelf
+                        isServerConfirmed(msg) && !msg.isSelf
                           ? () => {
                               void reportMessage(msg.id)
                                 .then(() => showToast("info", t("report.submitted")))

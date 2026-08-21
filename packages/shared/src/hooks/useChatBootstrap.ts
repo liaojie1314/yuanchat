@@ -41,6 +41,7 @@ import { captureException } from "../observability/sentry";
 import { usePresenceStore } from "../store/presenceStore";
 import { resetChatStores, revokeAllLocalPreviews } from "../store/resetStores";
 import { showToast } from "../store/toastStore";
+import { previewBodyOf } from "../utils/messagePreview";
 import type { ChatMessage } from "../store/messageStore";
 import { chatSocket } from "../ws/chatSocket";
 
@@ -205,16 +206,9 @@ function wireSocket() {
 
       const convStore = useConversationStore.getState();
       const conv = convStore.conversations.find((c) => c.id === p.conversation_id);
-      // 图片/文件/语音/贴纸消息列表预览走占位文案；文本/系统消息用正文
-      const body = isImage
-        ? i18n.t("chat.message.image")
-        : isFile
-          ? i18n.t("chat.message.file")
-          : isVoice
-            ? i18n.t("chat.message.voice")
-            : isSticker
-              ? i18n.t("chat.message.sticker")
-              : (p.content.text ?? "");
+      // 列表预览与 REST 路径（mapConversation）同源：非文本类走本地化占位、文本用正文。
+      // 两条路径各自写一遍占位文案是"实时英文、刷新中文"的成因，见 previewBodyOf。
+      const body = previewBodyOf(kind, p.content.text);
       // system 消息不加昵称前缀
       const preview =
         conv && conv.type === "group" && !isSelf && !isSystem

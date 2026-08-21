@@ -480,3 +480,26 @@ describe("mapMessage sticker", () => {
     });
   });
 });
+
+describe("mapMessage e2ee history", () => {
+  const dto: MessageDTO = {
+    id: "m-e2ee",
+    conversation_id: "c1",
+    sender_id: "u2",
+    seq: 9,
+    message_type: 7,
+    content: JSON.stringify({ ratchet_key: "rk", n: 0, pn: 0, nonce: "nn", ciphertext: "cc" }),
+    status: 1,
+    created_at: "2026-08-21T10:00:00+08:00",
+    sender_nickname: "Alice",
+  };
+
+  it("加密历史消息给出可读占位，而不是空气泡", () => {
+    const msg = mapMessage(dto, "u1");
+    // kindMap 没有 7，kind 回退 text；关键是 text 必须有内容
+    expect(msg.kind).toBe("text");
+    expect(msg.text).toBeTruthy();
+    // 必须是真有翻译的文案，而不是原始 key
+    expect(msg.text).not.toMatch(/^e2ee\./);
+  });
+});
