@@ -267,13 +267,14 @@ pnpm --filter @yuanchat/desktop tauri android build
 
 > Go 工具链位置：`/home/liaojie1314/env/go/go/bin`（若 `go` 不在 PATH：`export PATH=/home/liaojie1314/env/go/go/bin:$PATH`）
 
-| 命令                                                             | 说明                                               |
-| ---------------------------------------------------------------- | -------------------------------------------------- |
-| `cd server && make dev`                                          | 启动服务（REST :8085 + WebSocket :8086，同一进程） |
-| `cd server && go run ./cmd/server`                               | 等价于 make dev                                    |
-| `cd server && go run ./cmd/seed`                                 | 灌入联调测试数据（幂等，可重复执行）               |
-| `cd server && make build`                                        | 编译为 `server/bin/yuanchat-server`                |
-| `cd server && go test -v -race -coverprofile=coverage.out ./...` | 运行测试                                           |
+| 命令                                                             | 说明                                                |
+| ---------------------------------------------------------------- | --------------------------------------------------- |
+| `cd server && make dev`                                          | 启动服务（REST :8085 + WebSocket :8086，同一进程）  |
+| `cd server && go run ./cmd/server`                               | 等价于 make dev                                     |
+| `cd server && go run ./cmd/seed`                                 | 灌入联调测试数据（幂等，可重复执行）                |
+| `cd server && go run ./cmd/gc`                                   | 对象存储 GC 试运行（只报告；见下方「对象存储 GC」） |
+| `cd server && make build`                                        | 编译为 `server/bin/yuanchat-server`                 |
+| `cd server && go test -v -race -coverprofile=coverage.out ./...` | 运行测试                                            |
 
 ### 聊天功能联调（前端 + 后端全链路）
 
@@ -306,6 +307,30 @@ pnpm --filter @yuanchat/web dev:real
 通讯录联调：登录 Alice → 通讯录「新的朋友」有 Carol 的待处理申请（同意后自动建单聊 + 打招呼消息）；「+」添加联系人支持手机号 / 元聊号 / 邮箱精确搜索。
 
 > 聊天 REST 端点与 WebSocket 协议详见 [`docs/02_CHAT_API.md`](./02_CHAT_API.md)。
+
+### 对象存储 GC（`cmd/gc`）
+
+业务路径**从不删对象**：撤回只把 `messages.content` 置 `{}`、清空聊天记录只推进本人水位、
+删贴纸只删表行。于是三类字节会永久留在 MinIO 里——被撤回消息的媒体、被删收藏贴纸的对象、
+以及「上传成功但消息没发出去」的孤儿。回收由离线作业负责，**不在撤回时同步删**：
+同一个 `object_key` 可被多方引用（转发逐字复制 content 含 key、不同用户可各自收藏同一对象），
+同步删会打断别人的副本且需要引用计数。
+
+```bash
+cd server
+go run ./cmd/gc                       # 默认 dry-run：只报告将被回收的对象
+go run ./cmd/gc -delete               # 实际删除
+go run ./cmd/gc -grace 720h -delete   # 宽限期 30 天（默认 7 天）
+go run ./cmd/gc -prefix images/       # 只扫某前缀
+go run ./cmd/gc -batch 200            # 引用判定的分批大小（默认 500）
+```
+
+判定规则：对象 `LastModified` 早于宽限期，且 key 不被 `messages.content->>'key'` /
+`stickers.object_key` / `users.avatar_url` / `conversations.avatar_url` 任何一处引用 → 可回收。
+宽限期是必需的——前端先传字节、后发 WS 帧，刚上传的对象可能"消息还在路上"。
+
+> **调度是独立的运维决策**：本仓不预置 cron/定时任务（改 `deploy/` 生产配置需单独评审）。
+> 首次在生产执行务必先跑 dry-run 核对清单。
 
 ---
 

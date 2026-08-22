@@ -73,6 +73,9 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	contactH := handler.NewContactHandler(contactSvc, hub, logger)
 	convH := handler.NewConversationHandler(convSvc, hub, logger)
 	fileH := handler.NewFileHandler(st, cfg.Upload, logger)
+	// 对象级读授权（download-url）：key 必须被请求者可见的消息或其可用贴纸引用。
+	// 未注入时 handler 对私有对象一律拒绝（fail closed），故这里必须接上。
+	fileH.SetObjectACL(repository.NewObjectACLRepository(db))
 	presenceH := handler.NewPresenceHandler(contactRepo, hub, logger)
 	blocklistH := handler.NewBlocklistHandler(blocklistSvc, logger)
 	forwardH := handler.NewForwardHandler(msgSvc, hub, logger)

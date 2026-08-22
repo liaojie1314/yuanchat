@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	miniocreds "github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/yuanchat/server/internal/config"
@@ -37,10 +39,35 @@ func testUploadCfg() config.UploadConfig {
 	}
 }
 
+// stubACL 对象授权桩：allow 决定判定结果，err 非空则模拟查库失败。
+type stubACL struct {
+	allow bool
+	err   error
+	calls []string
+}
+
+func (s *stubACL) CanRead(_ context.Context, _ uuid.UUID, objectKey string) (bool, error) {
+	s.calls = append(s.calls, objectKey)
+	return s.allow, s.err
+}
+
+// testUserID 挂在 gin.Context 上的测试用户（真实链路由 AuthRequired 中间件写入）。
+var testUserID = uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+
 // newFileEngine 挂载文件端点到独立 gin 引擎，st 传 nil 可验证降级 503。
-func newFileEngine(st *storage.Storage) *gin.Engine {
+//
+// acl 为 nil 时不注入授权判定，用于验证 fail-closed（漏接线 → 私有对象一律拒绝）。
+func newFileEngine(st *storage.Storage, acl ObjectACL) *gin.Engine {
 	h := NewFileHandler(st, testUploadCfg(), zap.NewNop())
+	if acl != nil {
+		h.SetObjectACL(acl)
+	}
 	r := gin.New()
+	// 模拟 AuthRequired：把 user_id 放进上下文，供 DownloadURL 取用
+	r.Use(func(c *gin.Context) {
+		c.Set("user_id", testUserID)
+		c.Next()
+	})
 	r.POST("/files/upload-url", h.UploadURL)
 	r.GET("/files/download-url", h.DownloadURL)
 	return r
@@ -80,7 +107,7 @@ func doJSON(t *testing.T, r *gin.Engine, method, target string, body any) (*http
 
 // TestUploadURL_UnsupportedType 非白名单 content_type → 400 code=4001。
 func TestUploadURL_UnsupportedType(t *testing.T) {
-	r := newFileEngine(nil)
+	r := newFileEngine(nil, &stubACL{allow: true})
 	w, resp := doJSON(t, r, http.MethodPost, "/files/upload-url", gin.H{
 		"filename": "clip.mp4", "content_type": "video/mp4", "size": 1024,
 	})
@@ -94,7 +121,7 @@ func TestUploadURL_UnsupportedType(t *testing.T) {
 
 // TestUploadURL_FileTooLarge 白名单类型但超上限 → 400 code=4002。
 func TestUploadURL_FileTooLarge(t *testing.T) {
-	r := newFileEngine(nil)
+	r := newFileEngine(nil, &stubACL{allow: true})
 	w, resp := doJSON(t, r, http.MethodPost, "/files/upload-url", gin.H{
 		"filename": "big.png", "content_type": "image/png", "size": 104857601,
 	})
@@ -108,7 +135,7 @@ func TestUploadURL_FileTooLarge(t *testing.T) {
 
 // TestUploadURL_NilStorage503 校验通过但 storage 为 nil → 503。
 func TestUploadURL_NilStorage503(t *testing.T) {
-	r := newFileEngine(nil)
+	r := newFileEngine(nil, &stubACL{allow: true})
 	w, _ := doJSON(t, r, http.MethodPost, "/files/upload-url", gin.H{
 		"filename": "ok.png", "content_type": "image/png", "size": 2048,
 	})
@@ -120,7 +147,7 @@ func TestUploadURL_NilStorage503(t *testing.T) {
 // TestUploadURL_DirtyExtension 文件名扩展名脏 → 生成的键无法通过 download 正则 → 提前拦成 400 code=4001，
 // 避免对象上传后永久取不回。覆盖无扩展名、尾随空格、尾随点、非字母数字扩展名。
 func TestUploadURL_DirtyExtension(t *testing.T) {
-	r := newFileEngine(nil)
+	r := newFileEngine(nil, &stubACL{allow: true})
 	for _, filename := range []string{
 		"README",     // 无扩展名 → ext ""
 		"photo.png ", // 尾随空格 → ext ".png "
@@ -141,7 +168,7 @@ func TestUploadURL_DirtyExtension(t *testing.T) {
 
 // TestDownloadURL_InvalidKey 非法 key（任意路径探测）→ 400。
 func TestDownloadURL_InvalidKey(t *testing.T) {
-	r := newFileEngine(nil)
+	r := newFileEngine(nil, &stubACL{allow: true})
 	for _, key := range []string{
 		"",
 		"../../etc/passwd",
@@ -160,7 +187,7 @@ func TestDownloadURL_InvalidKey(t *testing.T) {
 
 // TestDownloadURL_NilStorage503 合法 key 但 storage 为 nil → 503。
 func TestDownloadURL_NilStorage503(t *testing.T) {
-	r := newFileEngine(nil)
+	r := newFileEngine(nil, &stubACL{allow: true})
 	w, _ := doJSON(t, r, http.MethodGet,
 		"/files/download-url?key=images/2026/07/550e8400-e29b-41d4-a716-446655440000.png", nil)
 	if w.Code != http.StatusServiceUnavailable {
@@ -250,7 +277,7 @@ func removeObject(t *testing.T, key string) {
 // TestUploadURL_RealPresignRoundTrip 走真实 MinIO：签发上传 URL → PUT 直传 → download-url → GET 拉回校验。
 func TestUploadURL_RealPresignRoundTrip(t *testing.T) {
 	st := testStorageForHandler(t)
-	r := newFileEngine(st)
+	r := newFileEngine(st, &stubACL{allow: true})
 
 	// 1. 普通图片：无 public_url，object_key 匹配下载正则，expires_in=900。
 	w, resp := doJSON(t, r, http.MethodPost, "/files/upload-url", gin.H{
@@ -286,13 +313,13 @@ func TestUploadURL_RealPresignRoundTrip(t *testing.T) {
 		t.Fatalf("put status = %d, want 200", putResp.StatusCode)
 	}
 
-	// 3. download-url 校验并签发 GET，实际拉回内容需一致，expires_in=86400。
+	// 3. download-url 校验并签发 GET，实际拉回内容需一致，expires_in=7200（TTL 2h）。
 	wg, dresp := doJSON(t, r, http.MethodGet, "/files/download-url?key="+objectKey, nil)
 	if wg.Code != http.StatusOK {
 		t.Fatalf("download-url status = %d body=%s", wg.Code, wg.Body.String())
 	}
-	if got := int(dresp.Data["expires_in"].(float64)); got != 86400 {
-		t.Fatalf("download expires_in = %d, want 86400", got)
+	if got := int(dresp.Data["expires_in"].(float64)); got != 7200 {
+		t.Fatalf("download expires_in = %d, want 7200", got)
 	}
 	getURL, _ := dresp.Data["url"].(string)
 	getResp, err := http.Get(getURL)
@@ -309,7 +336,7 @@ func TestUploadURL_RealPresignRoundTrip(t *testing.T) {
 // TestUploadURL_AvatarPublicURL 头像类别（?category=avatars）响应须带 public_url 且形如公共 URL。
 func TestUploadURL_AvatarPublicURL(t *testing.T) {
 	st := testStorageForHandler(t)
-	r := newFileEngine(st)
+	r := newFileEngine(st, &stubACL{allow: true})
 
 	w, resp := doJSON(t, r, http.MethodPost, "/files/upload-url?category=avatars", gin.H{
 		"filename": "me.png", "content_type": "image/png", "size": 2048,
@@ -328,5 +355,71 @@ func TestUploadURL_AvatarPublicURL(t *testing.T) {
 	want := fmt.Sprintf("http://localhost:9002/yuanchat/%s", objectKey)
 	if publicURL != want {
 		t.Fatalf("public_url = %q, want %q", publicURL, want)
+	}
+}
+
+// TestDownloadURL_DeniesUnauthorizedObject 无权读取的 key → 403，且不签发任何 URL。
+//
+// 第 33 项：此前本端点只校验 key 格式，任何登录用户都能为任意合法格式的 key
+// 换到预签名 GET（撤回/退群对已泄漏的 key 也毫无约束力）。
+func TestDownloadURL_DeniesUnauthorizedObject(t *testing.T) {
+	st := testStorageForHandler(t)
+	acl := &stubACL{allow: false}
+	r := newFileEngine(st, acl)
+
+	key := "images/2026/07/550e8400-e29b-41d4-a716-446655440000.png"
+	w, resp := doJSON(t, r, http.MethodGet, "/files/download-url?key="+key, nil)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 body=%s", w.Code, w.Body.String())
+	}
+	if _, ok := resp.Data["url"]; ok {
+		t.Fatalf("拒绝时不应返回任何 URL: %v", resp.Data)
+	}
+	if len(acl.calls) != 1 || acl.calls[0] != key {
+		t.Fatalf("ACL 应按原始 key 判定一次，got %v", acl.calls)
+	}
+}
+
+// TestDownloadURL_AvatarsBypassACL 头像前缀是桶级公共读，跳过对象授权。
+func TestDownloadURL_AvatarsBypassACL(t *testing.T) {
+	st := testStorageForHandler(t)
+	// allow=false：若头像也走 ACL，这里会 403
+	acl := &stubACL{allow: false}
+	r := newFileEngine(st, acl)
+
+	w, _ := doJSON(t, r, http.MethodGet,
+		"/files/download-url?key=avatars/2026/07/550e8400-e29b-41d4-a716-446655440000.png", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", w.Code, w.Body.String())
+	}
+	if len(acl.calls) != 0 {
+		t.Fatalf("头像不应触发 ACL 查询，got %v", acl.calls)
+	}
+}
+
+// TestDownloadURL_FailsClosedWithoutACL 未注入 ACL（漏接线）→ 500，绝不放行。
+func TestDownloadURL_FailsClosedWithoutACL(t *testing.T) {
+	st := testStorageForHandler(t)
+	r := newFileEngine(st, nil)
+
+	w, resp := doJSON(t, r, http.MethodGet,
+		"/files/download-url?key=images/2026/07/550e8400-e29b-41d4-a716-446655440000.png", nil)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 body=%s", w.Code, w.Body.String())
+	}
+	if _, ok := resp.Data["url"]; ok {
+		t.Fatalf("漏接线时不应签发 URL: %v", resp.Data)
+	}
+}
+
+// TestDownloadURL_ACLErrorIs500 授权查库失败 → 500（不能静默放行也不能假装 403）。
+func TestDownloadURL_ACLErrorIs500(t *testing.T) {
+	st := testStorageForHandler(t)
+	r := newFileEngine(st, &stubACL{err: errors.New("db down")})
+
+	w, _ := doJSON(t, r, http.MethodGet,
+		"/files/download-url?key=images/2026/07/550e8400-e29b-41d4-a716-446655440000.png", nil)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 body=%s", w.Code, w.Body.String())
 	}
 }

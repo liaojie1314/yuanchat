@@ -124,7 +124,7 @@ describe("getDownloadUrl (in-memory cache)", () => {
         Promise.resolve({
           code: 0,
           message: "ok",
-          data: { url: "https://get?sig", expires_in: 86400 },
+          data: { url: "https://get?sig", expires_in: 7200 },
         }),
     });
     vi.stubGlobal("fetch", f);

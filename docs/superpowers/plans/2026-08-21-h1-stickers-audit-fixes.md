@@ -249,14 +249,42 @@ H1 贴纸功能在实现过程中连续出现三次同类缺陷（`retrySend` �
   - `docs/DEVELOPMENT.md` 的 E2E 覆盖表补上此前漏记的
     `chat-experience.spec.ts` 与 `conversation-settings.spec.ts`
 
-- [ ] **待架构决策（不属于任何批，需用户定调）**
-  - 32：MinIO 对象生命周期——撤回/清空聊天记录对贴纸对象完全无效（贴纸把对象 key 从
-    "跟随一条可撤回消息"提升为"独立表里的永久条目 + 可无限重放"）。两条候选路径：
-    撤回时清对象，或收藏时服务端复制成新 key。不是权限提升，但隐私面有增量风险
-  - 33：`/files/download-url` 无对象级 ACL——任何登录用户可为任意合法格式 key 换到
-    24h 预签名 GET。当前机密性靠"key 不可猜"（122 bit 熵），非本批引入
-  - 另：dev 与 prod 的 grafana 版本漂移（11.2.0 vs 10.2.0）与任何 `deploy/` 生产配置改动，
-    同样等用户点头再动
+- [x] **批 F｜对象存储的授权与生命周期**（第 32、33 项，用户 2026-08-22 定调）
+  - 33（对象级读授权）：**按现有数据推导授权，不加归属表**。`avatars/` 前缀直接放行
+    （桶策略本就是匿名公共读，校验只会制造"看起来安全"的假象）；其余 key 须满足
+    「出现在某条**未撤回**消息的 `content.key` 里 + 请求者是该会话成员 + 未被本人清空水位过滤」
+    或「属于本人收藏贴纸 / 属于某个表情包」，否则 `403 object not accessible`。
+    新增 `repository.ObjectACLRepository`（两条 EXISTS 查询）、迁移 013 建
+    `messages((content->>'key'))` 与 `stickers(object_key)` 索引（已验证 Up/Down 可逆、
+    `enable_seqscan=off` 下确认走 Index Scan）。
+    由此得到的语义：**撤回即撤销**（content 置 `{}` → key 从判定消失）、
+    **清空即对本人撤销**、**退群/被踢即失效**。已签发的 URL 无法追回，故
+    `downloadURLTTL` 从 24h 收到 **2h**（TTL 就是撤销的最坏延迟）。
+    未注入 ACL 时对私有对象一律 `500` 而非放行（fail closed）——漏接线不能静默把授权关掉。
+    客户端零改动：所有 presign 都发生在消息已落库之后（发送中用本地 blob 预览）；
+    admin 后台从不签 URL，不受影响
+  - 32（对象生命周期）：**离线 GC，不在撤回时同步删**。同一 `object_key` 可被多方引用
+    （转发逐字复制 content 含 key、不同用户可各自收藏同一对象），同步删会打断别人的副本
+    且需要引用计数与竞态处理；「收藏时服务端 CopyObject」也不做——有了 GC 就不必要，
+    且额外占存储。新增 `cmd/gc`：扫桶 → 分批查引用 →（可选）删除。
+    默认 dry-run（真删要 `-delete`）、宽限期默认 7 天（避开"字节已传、WS 帧还在路上"的窗口）、
+    引用来源为 `messages.content->>'key'` / `stickers.object_key` / `users`+`conversations.avatar_url`。
+    顺带回收了此前完全没人管的一类垃圾：上传成功但消息没发出去的孤儿对象。
+    `storage` 补 `ListObjects`（回调式，不把全桶装内存）与 `RemoveObject`；
+    `make gc-dry` / `make gc` 两个入口
+  - **调度未纳入本批**：不预置 cron（改 `deploy/` 生产配置需单独评审），
+    首次生产执行须先 dry-run 核对清单——已写进 `docs/DEVELOPMENT.md`
+  - 测试：repository 5 例（成员可读/非成员拒/撤回后拒/本人清空后拒而他人不受影响/
+    收藏与表情包归属、以及 GC 的引用判定三类来源 + 孤儿）、handler 4 例
+    （403 不签发任何 URL、头像跳过 ACL、漏接线 fail closed、查库出错 500）、
+    `cmd/gc` 4 例（只回收宽限期外的孤儿 / dry-run 不删 / 引用判定分批含收尾批 /
+    单个删除失败不中断整轮）
+  - 连带：`docs/02_CHAT_API.md` 新增「对象级读授权」小节与 TTL 改动；
+    `docs/DEVELOPMENT.md` 新增「对象存储 GC」小节
+
+- [ ] **仍待决策（与代码无关，纯运维）**
+  - dev 与 prod 的 grafana 版本漂移（11.2.0 vs 10.2.0）、以及 GC 作业的生产调度方式，
+    都要改 `deploy/` 生产配置，等用户点头再动
 
 ## 备注
 

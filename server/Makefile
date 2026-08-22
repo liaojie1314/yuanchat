@@ -1,4 +1,4 @@
-.PHONY: help dev build run lint test clean docker-up docker-down
+.PHONY: help dev build run lint test clean docker-up docker-down gc gc-dry
 
 APP_NAME    := yuanchat-server
 BUILD_DIR   := ./bin
@@ -30,6 +30,12 @@ test: ## 运行测试
 
 test-short: ## 快速测试（跳过集成测试）
 	go test -short ./...
+
+gc-dry: ## 对象存储 GC 试运行（只报告无人引用的对象，不删除）
+	go run ./cmd/gc
+
+gc: ## 对象存储 GC 实际删除（先跑 gc-dry 核对清单）
+	go run ./cmd/gc -delete
 
 tidy: ## 整理依赖
 	go mod tidy

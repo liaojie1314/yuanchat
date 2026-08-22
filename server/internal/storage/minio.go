@@ -137,3 +137,40 @@ func (s *Storage) PublicURL(objectKey string) string {
 	}
 	return fmt.Sprintf("%s://%s/%s/%s", scheme, s.endpoint, s.bucket, objectKey)
 }
+
+// ObjectInfo 对象清单条目（GC 用：判定引用要 key，判定宽限期要 LastModified）。
+type ObjectInfo struct {
+	Key          string
+	Size         int64
+	LastModified time.Time
+}
+
+// ListObjects 递归遍历 prefix 下的全部对象，逐条回调。
+//
+// 回调式而非返回切片：桶内对象数随消息量线性增长，全量装载会把内存压成 O(N)
+// ——同 ListMine 当初无 LIMIT 的问题形态。回调返回错误即中止遍历。
+func (s *Storage) ListObjects(ctx context.Context, prefix string, fn func(ObjectInfo) error) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel() // 提前 return 时关闭 minio 内部的 goroutine 与 channel
+
+	for obj := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: true,
+	}) {
+		if obj.Err != nil {
+			return fmt.Errorf("list objects %q: %w", prefix, obj.Err)
+		}
+		if err := fn(ObjectInfo{Key: obj.Key, Size: obj.Size, LastModified: obj.LastModified}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RemoveObject 删除单个对象（供 cmd/gc 回收无人引用的对象；业务路径不删对象）。
+func (s *Storage) RemoveObject(ctx context.Context, objectKey string) error {
+	if err := s.client.RemoveObject(ctx, s.bucket, objectKey, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("failed to remove %q: %w", objectKey, err)
+	}
+	return nil
+}
