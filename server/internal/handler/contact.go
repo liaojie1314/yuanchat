@@ -36,7 +36,7 @@ func userBriefOf(u *model.User) ws.UserBrief {
 
 // Search 精确搜索用户（手机号 / 元聊号 / 邮箱全匹配）。
 //
-//	@Summary	Search user by phone / short_id / email
+//	@Summary	按手机号 / 元聊号 / 邮箱搜索用户
 //	@Tags		contacts
 //	@Security	BearerAuth
 //	@Router		/api/v1/users/search [get]
@@ -71,7 +71,7 @@ func (h *ContactHandler) Search(c *gin.Context) {
 
 // SendRequest 发起好友申请，成功后实时推送给目标用户。
 //
-//	@Summary	Send friend request
+//	@Summary	发送好友申请
 //	@Tags		contacts
 //	@Security	BearerAuth
 //	@Router		/api/v1/contacts/requests [post]
@@ -123,7 +123,7 @@ func (h *ContactHandler) SendRequest(c *gin.Context) {
 
 // ListRequests 查申请列表（收到的 + 发出的）。
 //
-//	@Summary	List friend requests
+//	@Summary	好友申请列表
 //	@Tags		contacts
 //	@Security	BearerAuth
 //	@Router		/api/v1/contacts/requests [get]
@@ -177,7 +177,7 @@ func directionOf(it repository.RequestWithUsers, userID uuid.UUID) string {
 // Accept 同意好友申请：建双向好友 + get-or-create 单聊 + 打招呼消息，
 // 事务提交后推送 contact.accepted（申请方）与打招呼 message.receive（双方）。
 //
-//	@Summary	Accept friend request
+//	@Summary	同意好友申请
 //	@Tags		contacts
 //	@Security	BearerAuth
 //	@Router		/api/v1/contacts/requests/{id}/accept [post]
@@ -248,7 +248,7 @@ func greetingTextOf(m *model.Message) string {
 
 // Reject 拒绝好友申请（申请方无感知）。
 //
-//	@Summary	Reject friend request
+//	@Summary	拒绝好友申请
 //	@Tags		contacts
 //	@Security	BearerAuth
 //	@Router		/api/v1/contacts/requests/{id}/reject [post]
@@ -283,7 +283,7 @@ func (h *ContactHandler) Reject(c *gin.Context) {
 
 // ListFriends 查好友列表（含单聊会话 ID）。
 //
-//	@Summary	List friends
+//	@Summary	好友列表
 //	@Tags		contacts
 //	@Security	BearerAuth
 //	@Router		/api/v1/contacts [get]
@@ -305,7 +305,7 @@ func (h *ContactHandler) ListFriends(c *gin.Context) {
 
 // DeleteFriend 双向删除好友关系；成功后向双方在线设备下发 friend.removed。
 //
-//	@Summary	Delete a friend
+//	@Summary	删除好友
 //	@Tags		contacts
 //	@Security	BearerAuth
 //	@Router		/api/v1/contacts/{id} [delete]
@@ -340,7 +340,7 @@ func (h *ContactHandler) DeleteFriend(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// --- Request types ---
+// --- 请求结构 ---
 
 type SendFriendRequestBody struct {
 	TargetID uuid.UUID `json:"target_id" binding:"required"`

@@ -27,7 +27,7 @@ type CreateReportBody struct {
 
 // Create 提交举报。
 //
-//	@Summary		Report a message or user
+//	@Summary		举报消息或用户
 //	@Tags			reports
 //	@Security		BearerAuth
 //	@Success		200	{object}	Response

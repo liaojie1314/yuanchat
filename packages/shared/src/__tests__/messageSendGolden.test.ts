@@ -8,7 +8,7 @@
  * `ws.SendPayload` 并跑 `buildContent`，因此任一侧改字段名/类型/嵌套层级都会双红。
  *
  * @remarks 此前两端各写一份"同构但独立"的断言（前端断 JS 对象、Go 断 Go 结构体），
- *   从未跑过同一份 JSON——贴纸帧只是碰巧写对了，改字段名照样双绿（审计第 35 项）。
+ *   从未跑过同一份 JSON——贴纸帧只是碰巧写对了，改字段名照样双绿。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";

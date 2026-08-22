@@ -20,8 +20,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// Setup wires all dependencies and returns the Gin engine plus the
-// WebSocket handler (served by a dedicated listener in main).
+// Setup 接线全部依赖，返回 Gin 引擎与 WebSocket handler
+// （后者在 main 里由独立监听器提供服务）。
 // st 为对象存储句柄，可能为 nil（MinIO 不可达时），文件相关端点据此降级为 503。
 func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Config, logger *zap.Logger) (*gin.Engine, *ws.Handler) {
 	if cfg.Server.IsProduction() {
@@ -35,7 +35,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	r.Use(middleware.CORS())
 	r.Use(middleware.Prometheus())
 
-	// --- Dependency wiring ---
+	// --- 依赖接线 ---
 	jwtGen := jwt.NewGenerator(cfg.JWT.Secret, cfg.JWT.AccessTokenTTL, cfg.JWT.RefreshTokenTTL)
 	userRepo := repository.NewUserRepository(db)
 	convRepo := repository.NewConversationRepository(db)
@@ -179,7 +179,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		go notifyFriends(userID, online)
 	})
 
-	// --- Routes ---
+	// --- 路由 ---
 	api := r.Group("/api/v1")
 	api.GET("/health", healthH.Check)
 	api.GET("/captcha", captchaH.Generate)

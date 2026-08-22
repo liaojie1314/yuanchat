@@ -8,19 +8,19 @@ import (
 
 // Response 统一 API 响应结构
 type Response struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    any         `json:"data,omitempty"`
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
 }
 
 // PaginatedResponse 分页响应
 type PaginatedResponse struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    any         `json:"data"`
-	Total   int64       `json:"total"`
-	Page    int         `json:"page"`
-	Size    int         `json:"size"`
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data"`
+	Total   int64  `json:"total"`
+	Page    int    `json:"page"`
+	Size    int    `json:"size"`
 }
 
 // Success 成功响应

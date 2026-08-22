@@ -79,7 +79,7 @@ func newContactSvc(db *gorm.DB) *ContactService {
 }
 
 // ========================================
-// SendRequest
+// SendRequest 相关
 // ========================================
 
 func TestSendRequestRejectsSelf(t *testing.T) {
@@ -289,19 +289,19 @@ func TestSearchRelations(t *testing.T) {
 	b := newTestUser(t, db, "rel-b")
 	ctx := context.Background()
 
-	// self
+	// 自己
 	r, err := svc.Search(ctx, a.ID, *a.Phone)
 	if err != nil || r.Relation != "self" {
 		t.Fatalf("expected self, got %v / %v", r, err)
 	}
 
-	// none
+	// 无关系
 	r, err = svc.Search(ctx, a.ID, *b.Phone)
 	if err != nil || r.Relation != "none" {
 		t.Fatalf("expected none, got %v / %v", r, err)
 	}
 
-	// pending_out / pending_in
+	// 我发出的 / 我收到的待处理申请
 	req, _, _ := svc.SendRequest(ctx, a.ID, b.ID, "")
 	r, _ = svc.Search(ctx, a.ID, *b.Phone)
 	if r.Relation != "pending_out" {
@@ -312,7 +312,7 @@ func TestSearchRelations(t *testing.T) {
 		t.Fatalf("expected pending_in, got %s", r.Relation)
 	}
 
-	// friend
+	// 已是好友
 	if _, err := svc.Accept(ctx, b.ID, req.ID); err != nil {
 		t.Fatalf("accept: %v", err)
 	}

@@ -7,7 +7,7 @@
  * 2. **代码 → locale**：源码里 `t("some.key")` 的静态 key 必须在基准里存在 → fail
  * 3. **locale → 代码**：基准里的 key 若在源码中完全找不到字面量 → fail（死键）
  *
- * 第 2、3 层是 H1 审计第 2 项的补齐：原实现只做第 1 层，于是
+ * 第 2、3 层是后补的：原实现只做第 1 层，于是
  * `t("sticker.added")`（locale 里叫 `sticker.addSuccess`）这类错位能通过门禁，
  * UI 直接显示原始 key，而四个 locale 全都"完整"。
  *

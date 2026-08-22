@@ -14,7 +14,7 @@ const ThrowingChild = () => {
 describe("AppErrorBoundary", () => {
   beforeEach(() => {
     mockCaptureException.mockClear();
-    // Suppress console.error from React for expected boundary errors
+    // 屏蔽 React 对预期内边界错误打出的 console.error
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 

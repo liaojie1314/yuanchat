@@ -323,7 +323,7 @@ func TestMarkRead_ClearsMentionUnread(t *testing.T) {
 	if !before.MentionUnread {
 		t.Fatal("mention_unread not set after mention")
 	}
-	// B MarkRead
+	// B 侧标记已读
 	if _, err := svc.MarkRead(context.Background(), b.ID, convID, res.Message.Seq); err != nil {
 		t.Fatalf("mark read: %v", err)
 	}

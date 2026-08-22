@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// We test indirectly by checking captureException is called
+// 间接验证：断言 captureException 被调用
 describe("API 5xx Sentry reporting", () => {
   beforeEach(() => {
     vi.resetModules();

@@ -1,6 +1,6 @@
 -- +goose Up
 -- +goose StatementBegin
--- 对象级授权（H1 审计第 33 项）与对象 GC（第 32 项）共用的两个索引。
+-- 对象级读授权（download-url）与对象回收（cmd/gc）共用的两个索引。
 --
 -- /files/download-url 此前只校验 key 的格式，任何登录用户都能为任意合法格式的 key
 -- 换到 24h 预签名 GET：机密性全靠"key 不可猜"，且撤回/清空聊天记录对已泄漏的 key

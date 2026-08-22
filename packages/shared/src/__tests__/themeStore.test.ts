@@ -16,7 +16,7 @@ beforeEach(() => {
   cssVars = {};
   darkClass = false;
 
-  // Mock document.documentElement
+  // 打桩 document.documentElement
   vi.stubGlobal("document", {
     documentElement: {
       style: {
@@ -32,15 +32,15 @@ beforeEach(() => {
     },
   });
 
-  // Mock window.matchMedia for prefersDark
+  // 打桩 window.matchMedia 以驱动 prefersDark
   vi.stubGlobal("window", {
     matchMedia: () => ({ matches: false }),
   });
 
-  // Mock navigator for locale detection
+  // 打桩 navigator 以驱动语言探测
   vi.stubGlobal("navigator", { language: "zh-CN" });
 
-  // Reset store to defaults
+  // 把 store 重置为默认值
   const store = useThemeStore;
   store.setState({
     skinId: "yuan-light",
@@ -64,7 +64,7 @@ describe("themeStore", () => {
       const state = useThemeStore.getState();
       expect(state.skinId).toBe("ocean-light");
       expect(state.mode).toBe("light");
-      // applyTheme should have written CSS variables
+      // applyTheme 应已写入 CSS 变量
       expect(cssVars["--md-sys-color-primary"]).toBeDefined();
     });
 

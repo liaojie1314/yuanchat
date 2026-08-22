@@ -44,7 +44,7 @@ type UploadKeysBody struct {
 
 // UploadKeys 上传本机公钥材料。
 //
-//	@Summary		Upload E2EE public keys
+//	@Summary		上传端到端加密公钥
 //	@Tags			e2ee
 //	@Security		BearerAuth
 //	@Success		200	{object}	Response
@@ -99,10 +99,10 @@ func (h *E2EEHandler) UploadKeys(c *gin.Context) {
 
 // PreKeyBundle 分发给发起方的公钥 bundle。
 //
-//	@Summary		Fetch a peer's prekey bundle
+//	@Summary		获取对端的预密钥包
 //	@Tags			e2ee
 //	@Security		BearerAuth
-//	@Param			userId	path	string	true	"peer user id"
+//	@Param			userId	path	string	true	"对端用户 id"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/e2ee/prekey-bundle/{userId} [get]
 func (h *E2EEHandler) PreKeyBundle(c *gin.Context) {
@@ -151,7 +151,7 @@ func (h *E2EEHandler) PreKeyBundle(c *gin.Context) {
 
 // PreKeyCount 查询自己剩余的一次性预密钥数量（低于阈值时客户端补充）。
 //
-//	@Summary		Remaining one-time prekeys
+//	@Summary		剩余一次性预密钥数量
 //	@Tags			e2ee
 //	@Security		BearerAuth
 //	@Success		200	{object}	Response
@@ -180,7 +180,7 @@ type SaveBackupBody struct {
 
 // SaveBackup 保存密钥备份 blob。
 //
-//	@Summary		Save encrypted key backup
+//	@Summary		保存加密密钥备份
 //	@Tags			e2ee
 //	@Security		BearerAuth
 //	@Success		200	{object}	Response
@@ -213,7 +213,7 @@ func (h *E2EEHandler) SaveBackup(c *gin.Context) {
 
 // GetBackup 取回密钥备份 blob（换设备恢复）。
 //
-//	@Summary		Fetch encrypted key backup
+//	@Summary		获取加密密钥备份
 //	@Tags			e2ee
 //	@Security		BearerAuth
 //	@Success		200	{object}	Response

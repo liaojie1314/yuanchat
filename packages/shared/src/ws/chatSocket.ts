@@ -48,7 +48,7 @@ export type ClientContent =
  * `SendPayload` / `ReadPayload` / `TypingPayload`。
  *
  * @remarks 原签名是 `send(type: string, payload: unknown)`——帧契约漂移在编译期
- * 完全无人拦截，正是本轮审计第 10 项（`reply_to_id` 误填 clientMsgId 导致整帧 400）
+ * 完全无人拦截，正是「`reply_to_id` 误填 clientMsgId 导致整帧 400」那类缺陷
  * 能一路发到线上的直接原因。`reply_to_id` 用 branded 类型 {@link ServerMessageId}
  * 标出"必须是服务端 UUID"，本地 clientMsgId 传进去即编译不过。
  */

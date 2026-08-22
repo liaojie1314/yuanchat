@@ -5,10 +5,10 @@
  * 全程跑在仓库既有的 mock 模式（MSW + demo 数据）下，与其他 spec 一致：
  * `setAuth` 写认证态、`waitForMSW` 等 Service Worker 激活，不依赖真实后端/seed。
  *
- * @remarks 原实现有四类问题（H1 审计第 5 项），此处逐条修掉：
+ * @remarks 原实现有四类问题，此处逐条修掉：
  * 1. 走真实登录表单 + 真实后端（CI 无后端，必挂）→ 改用仓库夹具
  * 2. 用了应用里不存在的选择器（`[data-kind]` / `[data-testid="conversation-item"]`）
- *    → 改用真实存在的 `[data-kind]`（本批为气泡补上）、`[data-sticker-id]`、
+ *    → 改用真实存在的 `[data-kind]`（气泡本体上的属性）、`[data-sticker-id]`、
  *    role=tab/menuitem + 实际文案
  * 3. 6 个用例里 4 个带 `test.skip(...)` 兜底 → 前置条件不满足时静默通过，
  *    等于没测；现在 mock 数据保证前置条件成立，断言直接失败暴露问题

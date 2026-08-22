@@ -28,7 +28,7 @@ function lastToast(): string {
  * 断言最近一条 toast 用的是指定 i18n key。
  *
  * 不硬编码某语言的字面量（shared 测试环境是 zh-CN、ui 是 en-US），同时校验译文
- * 存在——`t()` 对缺失 key 会原样返回 key 本身，那正是本批次第 1 项 bug 的形态。
+ * 存在——`t()` 对缺失 key 会原样返回 key 本身，UI 便直接显示原始 key。
  */
 function expectToastKey(key: string) {
   const text = lastToast();

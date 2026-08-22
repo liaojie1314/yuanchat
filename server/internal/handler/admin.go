@@ -40,12 +40,12 @@ func pageParams(c *gin.Context) (int, int) {
 
 // ListUsers 分页检索用户。
 //
-//	@Summary		Admin: list/search users
+//	@Summary		管理端：用户列表 / 搜索
 //	@Tags			admin
 //	@Security		BearerAuth
-//	@Param			q		query	string	false	"nickname/phone/email fuzzy"
-//	@Param			page	query	int		false	"page (1-based)"
-//	@Param			size	query	int		false	"page size (max 100)"
+//	@Param			q		query	string	false	"昵称 / 手机号 / 邮箱模糊匹配"
+//	@Param			page	query	int		false	"页码（从 1 开始）"
+//	@Param			size	query	int		false	"每页条数（上限 100）"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/admin/users [get]
 func (h *AdminHandler) ListUsers(c *gin.Context) {
@@ -61,10 +61,10 @@ func (h *AdminHandler) ListUsers(c *gin.Context) {
 
 // BanUser 封禁用户并踢下线。
 //
-//	@Summary		Admin: ban a user
+//	@Summary		管理端：封禁用户
 //	@Tags			admin
 //	@Security		BearerAuth
-//	@Param			id	path	string	true	"user id"
+//	@Param			id	path	string	true	"用户 id"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/admin/users/{id}/ban [post]
 func (h *AdminHandler) BanUser(c *gin.Context) {
@@ -92,10 +92,10 @@ func (h *AdminHandler) BanUser(c *gin.Context) {
 
 // UnbanUser 解封用户。
 //
-//	@Summary		Admin: unban a user
+//	@Summary		管理端：解封用户
 //	@Tags			admin
 //	@Security		BearerAuth
-//	@Param			id	path	string	true	"user id"
+//	@Param			id	path	string	true	"用户 id"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/admin/users/{id}/ban [delete]
 func (h *AdminHandler) UnbanUser(c *gin.Context) {
@@ -119,11 +119,11 @@ func (h *AdminHandler) UnbanUser(c *gin.Context) {
 
 // ListConversations 分页检索会话。
 //
-//	@Summary		Admin: list/search conversations
+//	@Summary		管理端：会话列表 / 搜索
 //	@Tags			admin
 //	@Security		BearerAuth
-//	@Param			q		query	string	false	"name fuzzy"
-//	@Param			type	query	int		false	"1=private 2=group (0=all)"
+//	@Param			q		query	string	false	"群名模糊匹配"
+//	@Param			type	query	int		false	"1=单聊 2=群聊（0=全部）"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/admin/conversations [get]
 func (h *AdminHandler) ListConversations(c *gin.Context) {
@@ -140,10 +140,10 @@ func (h *AdminHandler) ListConversations(c *gin.Context) {
 
 // DissolveConversation 管理员强制解散会话。
 //
-//	@Summary		Admin: dissolve a conversation
+//	@Summary		管理端：解散会话
 //	@Tags			admin
 //	@Security		BearerAuth
-//	@Param			id	path	string	true	"conversation id"
+//	@Param			id	path	string	true	"会话 id"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/admin/conversations/{id}/dissolve [post]
 func (h *AdminHandler) DissolveConversation(c *gin.Context) {
@@ -174,11 +174,11 @@ func (h *AdminHandler) DissolveConversation(c *gin.Context) {
 
 // ListMessages 分页检索消息（flagged=true 只看审核队列）。
 //
-//	@Summary		Admin: list/search messages
+//	@Summary		管理端：消息列表 / 搜索
 //	@Tags			admin
 //	@Security		BearerAuth
-//	@Param			q		query	string	false	"text content fuzzy"
-//	@Param			flagged	query	bool	false	"only flagged messages"
+//	@Param			q		query	string	false	"正文模糊匹配"
+//	@Param			flagged	query	bool	false	"仅被标记的消息"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/admin/messages [get]
 func (h *AdminHandler) ListMessages(c *gin.Context) {
@@ -195,10 +195,10 @@ func (h *AdminHandler) ListMessages(c *gin.Context) {
 
 // DeleteMessage 管理员删除一条消息。
 //
-//	@Summary		Admin: delete a message
+//	@Summary		管理端：删除消息
 //	@Tags			admin
 //	@Security		BearerAuth
-//	@Param			id	path	string	true	"message id"
+//	@Param			id	path	string	true	"消息 id"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/admin/messages/{id} [delete]
 func (h *AdminHandler) DeleteMessage(c *gin.Context) {
@@ -222,11 +222,11 @@ func (h *AdminHandler) DeleteMessage(c *gin.Context) {
 
 // ListAuditLogs 分页列出审计日志。
 //
-//	@Summary		Admin: list audit logs
+//	@Summary		管理端：审计日志列表
 //	@Tags			admin
 //	@Security		BearerAuth
-//	@Param			actor	query	string	false	"actor user id"
-//	@Param			action	query	string	false	"action filter"
+//	@Param			actor	query	string	false	"操作者用户 id"
+//	@Param			action	query	string	false	"按动作过滤"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/admin/audit-logs [get]
 func (h *AdminHandler) ListAuditLogs(c *gin.Context) {
@@ -251,10 +251,10 @@ func (h *AdminHandler) ListAuditLogs(c *gin.Context) {
 
 // ClearMessageFlag 审核通过：清除消息 flagged 标记。
 //
-//	@Summary		Admin: clear message flag (approve)
+//	@Summary		管理端：清除消息标记（判定通过）
 //	@Tags			admin
 //	@Security		BearerAuth
-//	@Param			id	path	string	true	"message id"
+//	@Param			id	path	string	true	"消息 id"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/admin/messages/{id}/flag [delete]
 func (h *AdminHandler) ClearMessageFlag(c *gin.Context) {
@@ -278,10 +278,10 @@ func (h *AdminHandler) ClearMessageFlag(c *gin.Context) {
 
 // ListReports 分页列出举报。
 //
-//	@Summary		Admin: list reports
+//	@Summary		管理端：举报列表
 //	@Tags			admin
 //	@Security		BearerAuth
-//	@Param			status	query	int	false	"-1=all 0=pending 1=kept 2=deleted (default 0)"
+//	@Param			status	query	int	false	"-1=全部 0=待处理 1=保留 2=已删除（默认 0）"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/admin/reports [get]
 func (h *AdminHandler) ListReports(c *gin.Context) {
@@ -308,10 +308,10 @@ type HandleReportBody struct {
 
 // HandleReport 处理一条举报。
 //
-//	@Summary		Admin: handle a report
+//	@Summary		管理端：处理举报
 //	@Tags			admin
 //	@Security		BearerAuth
-//	@Param			id	path	string	true	"report id"
+//	@Param			id	path	string	true	"举报 id"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/admin/reports/{id}/handle [post]
 func (h *AdminHandler) HandleReport(c *gin.Context) {

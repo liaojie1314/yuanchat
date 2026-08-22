@@ -360,7 +360,7 @@ func TestUploadURL_AvatarPublicURL(t *testing.T) {
 
 // TestDownloadURL_DeniesUnauthorizedObject 无权读取的 key → 403，且不签发任何 URL。
 //
-// 第 33 项：此前本端点只校验 key 格式，任何登录用户都能为任意合法格式的 key
+// 此前本端点只校验 key 格式，任何登录用户都能为任意合法格式的 key
 // 换到预签名 GET（撤回/退群对已泄漏的 key 也毫无约束力）。
 func TestDownloadURL_DeniesUnauthorizedObject(t *testing.T) {
 	st := testStorageForHandler(t)

@@ -1,4 +1,4 @@
-// Prevents additional console window on Windows in release, DO NOT REMOVE!!
+// 阻止 release 构建在 Windows 上弹出额外的控制台窗口，请勿删除！
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {

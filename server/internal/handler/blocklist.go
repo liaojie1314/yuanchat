@@ -24,7 +24,7 @@ func NewBlocklistHandler(svc *service.BlocklistService, logger *zap.Logger) *Blo
 
 // List 查当前用户的黑名单条目（含目标用户资料）。
 //
-//	@Summary	List blocked users
+//	@Summary	黑名单列表
 //	@Tags		blocklist
 //	@Security	BearerAuth
 //	@Router		/api/v1/blocks [get]
@@ -45,7 +45,7 @@ func (h *BlocklistHandler) List(c *gin.Context) {
 
 // Block 拉黑目标用户。幂等。
 //
-//	@Summary	Block a user
+//	@Summary	拉黑用户
 //	@Tags		blocklist
 //	@Security	BearerAuth
 //	@Router		/api/v1/blocks [post]
@@ -77,7 +77,7 @@ func (h *BlocklistHandler) Block(c *gin.Context) {
 
 // Unblock 解除拉黑（:targetId 为被拉黑用户 UUID）。幂等。
 //
-//	@Summary	Unblock a user
+//	@Summary	取消拉黑
 //	@Tags		blocklist
 //	@Security	BearerAuth
 //	@Router		/api/v1/blocks/{targetId} [delete]

@@ -48,7 +48,7 @@ export function RegisterPage() {
       setCaptchaImg(await res.text());
       setCaptchaID(res.headers.get("X-Captcha-ID") || "");
     } catch {
-      /* backend not running */
+      /* 后端未启动 */
     }
   };
 

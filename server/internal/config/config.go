@@ -10,18 +10,18 @@ import (
 
 // Config 应用配置根结构
 type Config struct {
-	Server    ServerConfig    `mapstructure:"server"`
-	WebSocket WebSocketConfig `mapstructure:"websocket"`
-	Database  DatabaseConfig  `mapstructure:"database"`
-	Redis     RedisConfig     `mapstructure:"redis"`
-	JWT       JWTConfig       `mapstructure:"jwt"`
-	Log       LogConfig       `mapstructure:"log"`
-	Asynq     AsynqConfig     `mapstructure:"asynq"`
-	Upload    UploadConfig    `mapstructure:"upload"`
-	MinIO     MinIOConfig     `mapstructure:"minio"`
+	Server     ServerConfig     `mapstructure:"server"`
+	WebSocket  WebSocketConfig  `mapstructure:"websocket"`
+	Database   DatabaseConfig   `mapstructure:"database"`
+	Redis      RedisConfig      `mapstructure:"redis"`
+	JWT        JWTConfig        `mapstructure:"jwt"`
+	Log        LogConfig        `mapstructure:"log"`
+	Asynq      AsynqConfig      `mapstructure:"asynq"`
+	Upload     UploadConfig     `mapstructure:"upload"`
+	MinIO      MinIOConfig      `mapstructure:"minio"`
 	Moderation ModerationConfig `mapstructure:"moderation"`
-	Presence  PresenceConfig  `mapstructure:"presence"`
-	Push      PushConfig      `mapstructure:"push"`
+	Presence   PresenceConfig   `mapstructure:"presence"`
+	Push       PushConfig       `mapstructure:"push"`
 }
 
 type ServerConfig struct {

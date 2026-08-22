@@ -31,7 +31,7 @@ func New(cfg config.DatabaseConfig, zapLogger *zap.Logger) (*gorm.DB, error) {
 	db, err := gorm.Open(postgres.Open(cfg.DSN()), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormLogLevel),
 		NamingStrategy: schema.NamingStrategy{
-			SingularTable: true, // 使用单数表名
+			SingularTable: true,  // 使用单数表名
 			NoLowerCase:   false, // 驼峰转下划线 (DeletedAt → deleted_at)
 		},
 		PrepareStmt:            true, // 启用预编译语句缓存

@@ -39,10 +39,10 @@ type ForwardResultItem struct {
 
 // Forward 将消息转发到多个会话。
 //
-//	@Summary		Forward a message to multiple conversations
+//	@Summary		转发消息到多个会话
 //	@Tags			chat
 //	@Security		BearerAuth
-//	@Param			id	path	string	true	"source message id"
+//	@Param			id	path	string	true	"源消息 id"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/messages/{id}/forward [post]
 func (h *ForwardHandler) Forward(c *gin.Context) {

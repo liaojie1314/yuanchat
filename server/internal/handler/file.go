@@ -22,7 +22,7 @@ const (
 	uploadURLTTL = 15 * time.Minute
 	// downloadURLTTL 预签名下载 URL 有效期。
 	//
-	// 从 24h 收到 2h（H1 审计第 33 项）：已签发的 URL 无法追回，撤回/退群只能阻止
+	// 从 24h 收到 2h：已签发的 URL 无法追回，撤回/退群只能阻止
 	// **后续**签名，因此 TTL 就是撤销的最坏延迟。2h 仍远大于一次浏览会话，
 	// 且客户端对同一 key 有进程内缓存（提前 5 分钟过期重取），不会带来额外签名风暴。
 	downloadURLTTL = 2 * time.Hour
@@ -77,13 +77,13 @@ type uploadURLRequest struct {
 
 // UploadURL 校验文件类型/大小后签发预签名上传 URL，客户端凭此 PUT 直传对象存储。
 //
-//	@Summary		Presign an upload URL
+//	@Summary		签发预签名上传 URL
 //	@Tags			files
 //	@Security		BearerAuth
 //	@Param			category	query	string	false	"目标类别，显式指定 avatars 走公共读；默认按 content_type 推断"
 //	@Success		200	{object}	Response
-//	@Failure		400	{object}	Response	"4001 unsupported file type / 4002 file too large"
-//	@Failure		503	{object}	Response	"object storage unavailable"
+//	@Failure		400	{object}	Response	"4001 文件类型不支持 / 4002 文件过大"
+//	@Failure		503	{object}	Response	"对象存储不可用"
 //	@Router			/api/v1/files/upload-url [post]
 func (h *FileHandler) UploadURL(c *gin.Context) {
 	var req uploadURLRequest
@@ -139,19 +139,19 @@ func (h *FileHandler) UploadURL(c *gin.Context) {
 
 // DownloadURL 校验对象键与**读取权限**后签发预签名下载 URL，用于私有对象（图片消息等）的受控读取。
 //
-// 授权模型（H1 审计第 33 项）：`avatars/` 前缀是桶级公共读，直接放行；其余前缀须经
+// 授权模型：`avatars/` 前缀是桶级公共读，直接放行；其余前缀须经
 // ObjectACL 判定——key 必须出现在请求者可见的某条未撤回消息里，或属于请求者的收藏贴纸
 // / 某个表情包。此前本端点只校验 key 格式，任何登录用户都能为任意合法格式的 key
 // 换到预签名 GET（机密性全靠 key 不可猜，且撤回对已泄漏的 key 无约束力）。
 //
-//	@Summary		Presign a download URL
+//	@Summary		签发预签名下载 URL
 //	@Tags			files
 //	@Security		BearerAuth
 //	@Param			key	query	string	true	"对象键，须匹配 {category}/{yyyy}/{mm}/{uuid}.{ext}"
 //	@Success		200	{object}	Response
-//	@Failure		400	{object}	Response	"invalid object key"
-//	@Failure		403	{object}	Response	"object not accessible"
-//	@Failure		503	{object}	Response	"object storage unavailable"
+//	@Failure		400	{object}	Response	"对象键格式非法"
+//	@Failure		403	{object}	Response	"无权读取该对象"
+//	@Failure		503	{object}	Response	"对象存储不可用"
 //	@Router			/api/v1/files/download-url [get]
 func (h *FileHandler) DownloadURL(c *gin.Context) {
 	key := c.Query("key")

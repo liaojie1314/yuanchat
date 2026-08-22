@@ -44,7 +44,7 @@ func aclFixture(t *testing.T, db *gorm.DB, key string, members ...uuid.UUID) (*m
 
 // TestObjectACLCanRead_ViaMessage 会话成员可读、非成员不可读。
 //
-// 这是第 33 项的核心：此前任何登录用户都能为任意合法格式的 key 换到预签名 GET。
+// 这是对象级授权的核心：此前任何登录用户都能为任意合法格式的 key 换到预签名 GET。
 func TestObjectACLCanRead_ViaMessage(t *testing.T) {
 	db := testDB(t)
 	repo := NewObjectACLRepository(db)

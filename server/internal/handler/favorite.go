@@ -29,7 +29,7 @@ type AddFavoriteBody struct {
 
 // Add 收藏一条消息。
 //
-//	@Summary		Add a favorite
+//	@Summary		添加收藏
 //	@Tags			favorites
 //	@Security		BearerAuth
 //	@Success		200	{object}	Response
@@ -63,10 +63,10 @@ func (h *FavoriteHandler) Add(c *gin.Context) {
 
 // Remove 取消收藏（按 message_id）。
 //
-//	@Summary		Remove a favorite
+//	@Summary		取消收藏
 //	@Tags			favorites
 //	@Security		BearerAuth
-//	@Param			messageId	path	string	true	"message id"
+//	@Param			messageId	path	string	true	"消息 id"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/favorites/{messageId} [delete]
 func (h *FavoriteHandler) Remove(c *gin.Context) {
@@ -90,12 +90,12 @@ func (h *FavoriteHandler) Remove(c *gin.Context) {
 
 // List 分页列出当前用户的收藏。
 //
-//	@Summary		List favorites
+//	@Summary		收藏列表
 //	@Tags			favorites
 //	@Security		BearerAuth
-//	@Param			before	query	string	false	"cursor (RFC3339)"
-//	@Param			limit	query	int		false	"page size (default 20)"
-//	@Param			type	query	int		false	"message type filter (1=text 2=image 3=file)"
+//	@Param			before	query	string	false	"游标（RFC3339）"
+//	@Param			limit	query	int		false	"每页条数（默认 20）"
+//	@Param			type	query	int		false	"按消息类型过滤（1=文字 2=图片 3=文件）"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/favorites [get]
 func (h *FavoriteHandler) List(c *gin.Context) {

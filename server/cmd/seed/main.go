@@ -389,7 +389,7 @@ func ensurePendingRequest(ctx context.Context, db *gorm.DB, requester, target uu
 
 // ensureMessages 仅在会话还没有消息时插入历史消息。
 // 消息时间从 2 小时前开始每条 +7 分钟；所有成员 last_read_seq 设为最新
-//（历史消息视为已读，联调从新消息开始验证未读/回执）。
+// （历史消息视为已读，联调从新消息开始验证未读/回执）。
 func ensureMessages(ctx context.Context, db *gorm.DB, conv *model.Conversation, msgs []seedMsg) error {
 	var count int64
 	if err := db.WithContext(ctx).Model(&model.Message{}).

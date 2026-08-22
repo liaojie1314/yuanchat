@@ -17,8 +17,8 @@ vi.mock("@yuanchat/shared", async (importOriginal) => {
 import { applyConversationSetting } from "@yuanchat/shared";
 
 beforeEach(() => {
-  // Spy on DOM APIs instead of replacing document entirely
-  // (jsdom provides a working document.body/document.head for React)
+  // 只对 DOM API 打 spy，不整体替换 document
+  //（jsdom 已提供可用的 document.body / document.head 供 React 使用）
   vi.spyOn(document.documentElement.style, "setProperty").mockImplementation(() => {});
   vi.spyOn(document.documentElement.classList, "toggle").mockImplementation(() => false);
 

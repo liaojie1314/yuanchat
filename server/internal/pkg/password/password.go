@@ -1,11 +1,11 @@
-// Package password provides bcrypt password hashing and verification.
+// Package password 提供基于 bcrypt 的密码哈希与校验。
 package password
 
 import "golang.org/x/crypto/bcrypt"
 
 const cost = 12 // bcrypt cost factor (2^12 iterations)
 
-// Hash returns a bcrypt hash of the password.
+// Hash 返回密码的 bcrypt 哈希。
 func Hash(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), cost)
 	if err != nil {
@@ -14,7 +14,7 @@ func Hash(password string) (string, error) {
 	return string(bytes), nil
 }
 
-// Verify compares a bcrypt hash with a plain text password.
+// Verify 比对 bcrypt 哈希与明文密码是否匹配。
 func Verify(hash, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }

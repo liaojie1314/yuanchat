@@ -9,14 +9,14 @@ import (
 
 // Contact 联系人关系模型
 type Contact struct {
-	ID            uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	UserID        uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_user_contact" json:"user_id"`
-	ContactUserID uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_user_contact" json:"contact_user_id"`
-	Remark        *string   `gorm:"type:varchar(50)" json:"remark,omitempty"`
-	Status        int16     `gorm:"type:smallint;default:0" json:"status"`
-	Source        *string   `gorm:"type:varchar(50)" json:"source,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	UserID        uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex:idx_user_contact" json:"user_id"`
+	ContactUserID uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex:idx_user_contact" json:"contact_user_id"`
+	Remark        *string        `gorm:"type:varchar(50)" json:"remark,omitempty"`
+	Status        int16          `gorm:"type:smallint;default:0" json:"status"`
+	Source        *string        `gorm:"type:varchar(50)" json:"source,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
 	DeletedAt     gorm.DeletedAt `gorm:"index" json:"-"`
 }
 

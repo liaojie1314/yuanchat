@@ -12,7 +12,7 @@ import type { ChatMessage } from "@yuanchat/shared";
  *
  * @remarks 原实现用 `/add.*sticker|添加到表情/i` 定位——该正则恰好也匹配**原始 key**
  *   `sticker.addToStickers`（"add" + "Sticker"），于是 i18n key 写错、UI 显示原始 key
- *   时测试照样通过（H1 审计第 6 项：假绿）。这里额外断言译文 ≠ key 本身，
+ *   时测试照样通过（假绿）。这里额外断言译文 ≠ key 本身，
  *   locale 缺该 key 时 i18next 回落成 key，正好被这条断言抓住。
  */
 function label(key: string): string {
@@ -21,7 +21,7 @@ function label(key: string): string {
   return text;
 }
 
-// Mock shared module
+// 打桩 shared 模块
 vi.mock("@yuanchat/shared", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@yuanchat/shared")>();
   return {
@@ -62,7 +62,7 @@ describe("sticker rendering and add-to-favorites menu item", () => {
     const onAddSticker = vi.fn();
     const { container } = render(<MessageBubble msg={msg} onAddSticker={onAddSticker} />);
 
-    // Find the bubble container with image bubble styling (p-1.5 + rounded-lg)
+    // 定位图片气泡容器（p-1.5 + rounded-lg 的那层）
     const bubble = container.querySelector(".msg-bubble-peer");
     expect(bubble).toBeTruthy();
     fireEvent.contextMenu(bubble!);

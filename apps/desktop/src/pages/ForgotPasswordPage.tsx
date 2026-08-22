@@ -43,7 +43,7 @@ export function ForgotPasswordPage() {
     setPhoneError("");
     setLoading(true);
     try {
-      // TODO: call API
+      // TODO: 接入后端找回密码接口（当前仅走本地表单流程）
       await new Promise<void>((r) => setTimeout(r, 500));
       startCountdown();
       setStep(2);
@@ -62,7 +62,7 @@ export function ForgotPasswordPage() {
     setOtpError("");
     setLoading(true);
     try {
-      // TODO: call API
+      // TODO: 接入后端找回密码接口（当前仅走本地表单流程）
       await new Promise<void>((r) => setTimeout(r, 500));
       setStep(3);
     } catch {
@@ -87,7 +87,7 @@ export function ForgotPasswordPage() {
 
     setLoading(true);
     try {
-      // TODO: call API
+      // TODO: 接入后端找回密码接口（当前仅走本地表单流程）
       await new Promise<void>((r) => setTimeout(r, 500));
       await goBack();
     } catch {
@@ -110,7 +110,7 @@ export function ForgotPasswordPage() {
         await getCurrentWindow().close();
         return;
       } catch {
-        /* fallthrough */
+        /* 继续向下走 */
       }
     }
     navigate("/login", { replace: true });

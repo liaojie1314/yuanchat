@@ -31,7 +31,7 @@ type AddStickerBody struct {
 
 // Add 收藏一张贴纸（POST /stickers）。
 //
-//	@Summary		Add a sticker to favorites
+//	@Summary		收藏一张贴纸
 //	@Tags			stickers
 //	@Security		BearerAuth
 //	@Success		200	{object}	Response
@@ -74,10 +74,10 @@ func (h *StickerHandler) Add(c *gin.Context) {
 
 // Remove 取消收藏（DELETE /stickers/:id）。
 //
-//	@Summary		Remove a favorited sticker
+//	@Summary		取消收藏贴纸
 //	@Tags			stickers
 //	@Security		BearerAuth
-//	@Param			id	path	string	true	"sticker id"
+//	@Param			id	path	string	true	"贴纸 id"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/stickers/{id} [delete]
 func (h *StickerHandler) Remove(c *gin.Context) {
@@ -108,11 +108,11 @@ func (h *StickerHandler) Remove(c *gin.Context) {
 
 // ListMine 列出本人收藏（GET /stickers/mine）。
 //
-//	@Summary		List my favorited stickers
+//	@Summary		本人收藏的贴纸列表
 //	@Tags			stickers
 //	@Security		BearerAuth
-//	@Param			before	query	string	false	"cursor (RFC3339)"
-//	@Param			limit	query	int		false	"page size (default 100, max 200)"
+//	@Param			before	query	string	false	"游标（RFC3339）"
+//	@Param			limit	query	int		false	"每页条数（默认 100，上限 200）"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/stickers/mine [get]
 func (h *StickerHandler) ListMine(c *gin.Context) {
@@ -137,7 +137,7 @@ func (h *StickerHandler) ListMine(c *gin.Context) {
 
 // ListPacks 列出表情包及各自贴纸（GET /sticker-packs）。
 //
-//	@Summary		List sticker packs
+//	@Summary		表情包列表
 //	@Tags			stickers
 //	@Security		BearerAuth
 //	@Success		200	{object}	Response

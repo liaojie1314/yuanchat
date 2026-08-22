@@ -1,5 +1,5 @@
-// Package ws implements the WebSocket gateway: connection lifecycle,
-// message envelope protocol, and in-process fan-out to online devices.
+// Package ws 实现 WebSocket 网关：连接生命周期、消息信封协议，
+// 以及进程内向在线设备的扇出投递。
 package ws
 
 import (

@@ -21,7 +21,7 @@ func NewPresenceHandler(contactRepo *repository.ContactRepository, hub *ws.Hub, 
 
 // Snapshot 返回我的好友中当前在线的用户 ID（登录/重连时拉一次，此后靠 presence 帧增量）。
 //
-//	@Summary		Online friends snapshot
+//	@Summary		在线好友快照
 //	@Tags			chat
 //	@Security		BearerAuth
 //	@Success		200	{object}	Response

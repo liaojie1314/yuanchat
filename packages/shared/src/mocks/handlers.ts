@@ -112,7 +112,7 @@ function generateCaptchaSvg(): string {
 }
 
 // ========================================
-// Helper
+// 辅助函数
 // ========================================
 
 function apiOk<T>(data: T) {
@@ -199,14 +199,14 @@ function toStickerDTO(s: MockSticker) {
 }
 
 // ========================================
-// Handlers
+// 处理器
 // ========================================
 
 export const handlers = [
   // --------------------------------------------------
   // 认证 — 登录
   // POST /api/v1/users/login
-  // Body: { account: string; password: string }
+  // 请求体：{ account: string; password: string }
   // --------------------------------------------------
   http.post("http://localhost:8085/api/v1/users/login", async ({ request }) => {
     await delay(600); // 模拟网络延迟

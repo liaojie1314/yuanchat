@@ -1,6 +1,6 @@
 // genvapid 生成 Web Push 所需的 VAPID 密钥对。
 //
-// Usage:
+// 用法：
 //
 //	go run ./cmd/genvapid
 //

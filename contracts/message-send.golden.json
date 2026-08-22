@@ -6,7 +6,7 @@
     "Go 侧（server/internal/ws/golden_contract_test.go）把同一份 payload 反序列化进 ws.SendPayload，",
     "跑 buildContent 并断言 ok=true 且 message_type 与 expected_message_type 一致。",
     "任一侧改字段名/类型/嵌套层级 → 两侧同时变红。",
-    "此前两端各写一份'同构但独立'的断言，从未跑过同一份 JSON，改字段名照样双绿（审计第 35 项）。",
+    "此前两端各写一份'同构但独立'的断言，从未跑过同一份 JSON，改字段名照样双绿。",
     "约定：client_msg_id 是客户端随机生成的，故统一写成占位符 <client_msg_id>，",
     "前端比较前把实际值换成该占位符；Go 侧不校验其内容。",
     "conversation_id / reply_to_id / mentions / sticker_id 必须是合法 UUID（Go 侧按 uuid.UUID 解析）。"

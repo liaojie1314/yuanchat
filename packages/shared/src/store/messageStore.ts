@@ -810,7 +810,7 @@ function dispatchSend(
   extras?: { replyToId?: string; mentionIds?: string[] },
 ) {
   // 帧结构由 ClientFrames["message.send"] 约束（原先是 Record<string, unknown>，
-  // 字段名写错/漏字段编译期无人管——第 10 项 reply_to_id 事故正是这么漏出去的）。
+  // 字段名写错/漏字段编译期无人管——reply_to_id 误填 clientMsgId 就是这么漏出去的）。
   const payload: ClientFrames["message.send"] = {
     conversation_id: conversationId,
     content: { type: "text", text },

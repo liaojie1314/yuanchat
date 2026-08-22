@@ -31,27 +31,27 @@ export const yuanchatPreset: Partial<Config> = {
           variant: "rgb(var(--md-sys-color-surface-variant-rgb) / <alpha-value>)",
           "on-variant": "rgb(var(--md-sys-color-on-surface-variant-rgb) / <alpha-value>)",
         },
-        // On-surface text
+        // 表面之上的文字色
         "on-surface": "rgb(var(--md-sys-color-on-surface-rgb) / <alpha-value>)",
         "on-background": "rgb(var(--md-sys-color-on-background-rgb) / <alpha-value>)",
-        // M3 Secondary
+        // M3 次要色
         secondary: {
           DEFAULT: "rgb(var(--md-sys-color-secondary-rgb) / <alpha-value>)",
           container: "rgb(var(--md-sys-color-secondary-container-rgb) / <alpha-value>)",
         },
-        // M3 Tertiary
+        // M3 第三色
         tertiary: "rgb(var(--md-sys-color-tertiary-rgb) / <alpha-value>)",
-        // M3 Error
+        // M3 错误色
         error: {
           DEFAULT: "rgb(var(--md-sys-color-error-rgb) / <alpha-value>)",
           container: "rgb(var(--md-sys-color-error-container-rgb) / <alpha-value>)",
         },
-        // M3 Outline
+        // M3 描边色
         outline: {
           DEFAULT: "rgb(var(--md-sys-color-outline-rgb) / <alpha-value>)",
           variant: "rgb(var(--md-sys-color-outline-variant-rgb) / <alpha-value>)",
         },
-        // Background
+        // 背景色
         background: "rgb(var(--md-sys-color-background-rgb) / <alpha-value>)",
       },
       fontSize: {
