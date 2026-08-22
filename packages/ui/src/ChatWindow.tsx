@@ -596,7 +596,7 @@ function MessageSkeleton() {
           <span className="bg-surface-container-high h-10 w-10 shrink-0 rounded-full" />
           <span
             className={cn(
-              "bg-surface-container-high h-10 rounded-2xl",
+              "bg-surface-container-high h-10 rounded-lg",
               i % 2 === 0 ? "w-48" : "w-32",
             )}
           />

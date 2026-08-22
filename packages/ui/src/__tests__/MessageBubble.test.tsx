@@ -62,7 +62,7 @@ describe("sticker rendering and add-to-favorites menu item", () => {
     const onAddSticker = vi.fn();
     const { container } = render(<MessageBubble msg={msg} onAddSticker={onAddSticker} />);
 
-    // Find the bubble container with image bubble styling (p-1.5 + rounded-2xl)
+    // Find the bubble container with image bubble styling (p-1.5 + rounded-lg)
     const bubble = container.querySelector(".msg-bubble-peer");
     expect(bubble).toBeTruthy();
     fireEvent.contextMenu(bubble!);

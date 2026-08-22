@@ -793,6 +793,16 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 > （image/file/voice/sticker 均用 `key` 换 `download-url` 拉预签名 GET；voice 播放走单例 Audio；
 > sticker 渲染为无气泡裸图、不进大图查看器，见 `StickerImage`）。
 
+> **帧契约的唯一来源**：`contracts/message-send.golden.json`（v0.4 H1）为每种
+> `content.type` 存一个完整 `message.send` 样本帧。前端
+> `packages/shared/src/__tests__/messageSendGolden.test.ts` 驱动 `messageStore` 真的发帧、
+> 与样本深比较；Go 侧 `server/internal/ws/golden_contract_test.go` 把**同一份 JSON**
+> 以 `DisallowUnknownFields` 解进 `SendPayload` 再跑 `buildContent` 断言通过与落库类型。
+> **改任何一侧的字段名/类型/嵌套都会两端同时变红**，新增 content type 若不补样本，
+> Go 侧的覆盖度用例也会失败。改帧结构的正确顺序是：先改 golden，再让两侧变绿。
+> 客户端类型侧另有 `ClientFrames`（`ws/chatSocket.ts`）把 `send()` 的 payload 钉死，
+> `reply_to_id` 是 branded 类型 `ServerMessageId`，本地 clientMsgId 传进去编译不过。
+
 ### 服务端 → 客户端
 
 | type                        | payload                                                                                                                       | 推送对象                                                                                                                                                                                                           |

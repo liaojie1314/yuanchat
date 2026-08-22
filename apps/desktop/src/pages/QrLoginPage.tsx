@@ -114,7 +114,7 @@ export function QrLoginPage() {
         <div className="text-center">
           {/* 标题 */}
           <div className="mb-8">
-            <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl text-white">
+            <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-lg text-white">
               <Smartphone size={28} />
             </div>
             <h1 className="text-2xl font-bold text-on-surface">扫码登录</h1>
@@ -122,18 +122,18 @@ export function QrLoginPage() {
           </div>
 
           {/* 二维码区域 */}
-          <div className="relative mx-auto mb-5 inline-block rounded-2xl bg-white p-3 shadow-[0_4px_24px_rgba(0,0,0,0.10)]">
+          <div className="relative mx-auto mb-5 inline-block rounded-lg bg-white p-3 shadow-[0_4px_24px_rgba(0,0,0,0.10)]">
             <QrCodeCanvas key={qrKey} size={180} dimmed={status === "expired"} />
 
             {status === "expired" && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center rounded-2xl bg-black/40">
+              <div className="absolute inset-0 flex flex-col items-center justify-center rounded-lg bg-black/40">
                 <Clock size={28} className="mb-2 text-white" />
                 <p className="text-sm font-medium text-white">二维码已过期</p>
               </div>
             )}
 
             {status === "scanning" && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center rounded-2xl bg-primary/85">
+              <div className="absolute inset-0 flex flex-col items-center justify-center rounded-lg bg-primary/85">
                 <CheckCircle size={36} className="mb-2 text-white" />
                 <p className="text-sm font-medium text-white">已扫描</p>
                 <p className="mt-0.5 text-xs text-white/80">请在手机上确认登录</p>

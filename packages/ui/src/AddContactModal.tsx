@@ -101,7 +101,7 @@ export function AddContactModal({ open, onClose }: AddContactModalProps) {
       onClick={handleClose}
     >
       <div
-        className="bg-surface-container-low w-full max-w-sm rounded-xl shadow-xl"
+        className="bg-surface-container-low w-full max-w-sm rounded-lg shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 头部 */}
@@ -162,7 +162,7 @@ export function AddContactModal({ open, onClose }: AddContactModalProps) {
 
             {/* 结果卡片 */}
             {phase === "result" && result && (
-              <div className="bg-surface-container mt-4 rounded-xl p-4">
+              <div className="bg-surface-container mt-4 rounded-lg p-4">
                 <div className="flex items-center gap-3">
                   <Avatar name={result.user.nickname} src={result.user.avatarUrl} size="lg" />
                   <div className="min-w-0 flex-1">

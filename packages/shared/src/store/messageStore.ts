@@ -24,7 +24,8 @@ import {
   pseudoWave,
 } from "../api/chat";
 import { compressImage, getUploadUrl, uploadToTicket } from "../api/files";
-import { chatSocket } from "../ws/chatSocket";
+import { asServerMessageId, chatSocket } from "../ws/chatSocket";
+import type { ClientFrames } from "../ws/chatSocket";
 import { encryptFor } from "../crypto/e2eeManager";
 import { useAuthStore } from "./authStore";
 import { showToast } from "./toastStore";
@@ -808,12 +809,16 @@ function dispatchSend(
   get: () => MessageState,
   extras?: { replyToId?: string; mentionIds?: string[] },
 ) {
-  const payload: Record<string, unknown> = {
+  // 帧结构由 ClientFrames["message.send"] 约束（原先是 Record<string, unknown>，
+  // 字段名写错/漏字段编译期无人管——第 10 项 reply_to_id 事故正是这么漏出去的）。
+  const payload: ClientFrames["message.send"] = {
     conversation_id: conversationId,
     content: { type: "text", text },
     client_msg_id: clientMsgId,
   };
-  if (extras?.replyToId) payload.reply_to_id = extras.replyToId;
+  // replyToId 来自被引用消息，而调用方（ChatWindow）已用 isServerConfirmed 闸门
+  // 保证它是服务端 id；此处的断言就是那份保证的落点。
+  if (extras?.replyToId) payload.reply_to_id = asServerMessageId(extras.replyToId);
   if (extras?.mentionIds && extras.mentionIds.length > 0) payload.mentions = extras.mentionIds;
 
   // E2EE：单聊且双方均已开启时改发密文。加密涉及网络（首次取 prekey
@@ -830,7 +835,7 @@ function dispatchSend(
 async function maybeEncryptAndSend(
   conversationId: string,
   text: string,
-  payload: Record<string, unknown>,
+  payload: ClientFrames["message.send"],
   clientMsgId: string,
   get: () => MessageState,
 ) {

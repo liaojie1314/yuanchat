@@ -116,7 +116,7 @@ export function ContactsPanel({
               requestsActive ? "bg-primary-container/60" : "hover:bg-surface-container",
             )}
           >
-            <span className="bg-primary/90 flex h-10 w-10 items-center justify-center rounded-xl text-white">
+            <span className="bg-primary/90 flex h-10 w-10 items-center justify-center rounded-lg text-white">
               <UserPlus size={20} />
             </span>
             <span className="text-body-lg text-on-surface flex-1 font-semibold">
@@ -139,7 +139,7 @@ export function ContactsPanel({
               blocklistActive ? "bg-primary-container/60" : "hover:bg-surface-container",
             )}
           >
-            <span className="bg-surface-container-high text-on-surface-variant flex h-10 w-10 items-center justify-center rounded-xl">
+            <span className="bg-surface-container-high text-on-surface-variant flex h-10 w-10 items-center justify-center rounded-lg">
               <Ban size={20} />
             </span>
             <span className="text-body-lg text-on-surface flex-1 font-semibold">

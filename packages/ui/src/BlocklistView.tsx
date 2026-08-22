@@ -61,7 +61,7 @@ export function BlocklistView({ onBack }: BlocklistViewProps) {
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
         {!loading && items.length === 0 && (
           <div className="flex flex-col items-center gap-3 py-16">
-            <span className="bg-surface-container-high text-on-surface-variant flex h-14 w-14 items-center justify-center rounded-2xl">
+            <span className="bg-surface-container-high text-on-surface-variant flex h-14 w-14 items-center justify-center rounded-lg">
               <Ban size={24} />
             </span>
             <p className="text-body-md text-on-surface-variant">{t("contacts.blockedEmpty")}</p>

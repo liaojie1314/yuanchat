@@ -103,10 +103,10 @@ export function ForgotPasswordPage() {
 
       <div className="relative m-auto w-full max-w-md px-5 py-8">
         {/* 磨砂玻璃卡片 */}
-        <div className="rounded-3xl border border-white/60 bg-white/70 px-10 py-12 shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl">
+        <div className="rounded-lg border border-white/60 bg-white/70 px-10 py-12 shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl">
           {/* Logo */}
           <div className="mb-6 text-center">
-            <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl text-white shadow-lg">
+            <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-lg text-white shadow-lg">
               <KeyRound size={28} />
             </div>
             <h1 className="text-2xl font-bold text-on-surface">重置密码</h1>
@@ -123,7 +123,7 @@ export function ForgotPasswordPage() {
               <Link
                 to="/login"
                 replace
-                className="text-on-primary mt-6 block w-full rounded-xl bg-primary py-3 text-center text-sm font-semibold transition-opacity hover:opacity-90"
+                className="text-on-primary mt-6 block w-full rounded-lg bg-primary py-3 text-center text-sm font-semibold transition-opacity hover:opacity-90"
               >
                 立即登录
               </Link>

@@ -34,8 +34,14 @@ export {
   needsRefresh,
 } from "./api/tokenManager";
 export type { RefreshHandler } from "./api/tokenManager";
-export { chatSocket } from "./ws/chatSocket";
-export type { FrameHandler, ServerFrames } from "./ws/chatSocket";
+export { chatSocket, asServerMessageId } from "./ws/chatSocket";
+export type {
+  FrameHandler,
+  ServerFrames,
+  ClientFrames,
+  ClientContent,
+  ServerMessageId,
+} from "./ws/chatSocket";
 export { useIsDesktop } from "./hooks/useIsDesktop";
 export { useResizable } from "./hooks/useResizable";
 export { useKeyboardAwareViewport } from "./hooks/useKeyboardAwareViewport";

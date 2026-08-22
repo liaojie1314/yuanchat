@@ -95,10 +95,10 @@ export function RegisterPage() {
 
       <div className="relative m-auto w-full max-w-md px-5 py-8">
         {/* 磨砂玻璃卡片 */}
-        <div className="rounded-3xl border border-white/60 bg-white/70 px-10 py-12 shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl">
+        <div className="rounded-lg border border-white/60 bg-white/70 px-10 py-12 shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl">
           {/* Logo */}
           <div className="mb-7 text-center">
-            <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl text-white shadow-lg">
+            <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-lg text-white shadow-lg">
               <UserPlus size={30} />
             </div>
             <h1 className="text-2xl font-bold text-on-surface">创建账号</h1>
@@ -155,7 +155,7 @@ export function RegisterPage() {
               <button
                 type="button"
                 onClick={fetchCaptcha}
-                className="group relative mt-[1px] h-12 w-[120px] shrink-0 overflow-hidden rounded-xl border border-outline-variant bg-surface-container-low"
+                className="group relative mt-[1px] h-12 w-[120px] shrink-0 overflow-hidden rounded-lg border border-outline-variant bg-surface-container-low"
                 title="点击刷新验证码"
               >
                 <span

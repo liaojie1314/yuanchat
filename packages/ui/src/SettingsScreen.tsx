@@ -105,7 +105,7 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
     <button
       onClick={() => setView("profile")}
       className={cn(
-        "group relative flex w-full items-center gap-4 overflow-hidden rounded-xl p-4 text-left transition-all",
+        "group relative flex w-full items-center gap-4 overflow-hidden rounded-lg p-4 text-left transition-all",
         !isMobile && view === "profile"
           ? "bg-primary-container/40"
           : "bg-surface-container hover:bg-surface-container-high",
@@ -303,7 +303,7 @@ function MobileNavRow({
   return (
     <button
       onClick={onClick}
-      className="bg-surface-container hover:bg-surface-container-high flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors"
+      className="bg-surface-container hover:bg-surface-container-high flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors"
     >
       <span className="bg-primary-container/60 text-primary-on-container grid h-9 w-9 shrink-0 place-items-center rounded-lg">
         <Icon size={18} />

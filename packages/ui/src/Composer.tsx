@@ -341,7 +341,7 @@ export function Composer({
             onPaste={handlePaste}
             placeholder={t("chat.input.placeholder")}
             aria-label={t("chat.input.placeholder")}
-            className="bg-surface-container-high text-body-lg text-on-surface placeholder:text-on-surface-variant/70 max-h-28 min-w-0 flex-1 resize-none rounded-3xl px-4 py-2.5 focus:outline-none"
+            className="bg-surface-container-high text-body-lg text-on-surface placeholder:text-on-surface-variant/70 max-h-28 min-w-0 flex-1 resize-none rounded-lg px-4 py-2.5 focus:outline-none"
           />
           <button
             className="md3-icon-btn text-on-surface-variant"
@@ -407,7 +407,7 @@ export function Composer({
       {recording ? (
         voiceBar
       ) : (
-        <div className="border-outline-variant focus-within:border-primary focus-within:ring-primary/15 bg-surface-bright dark:bg-surface-container group rounded-2xl border transition-shadow focus-within:ring-[3px]">
+        <div className="border-outline-variant focus-within:border-primary focus-within:ring-primary/15 bg-surface-bright dark:bg-surface-container group rounded-lg border transition-shadow focus-within:ring-[3px]">
           <textarea
             ref={textareaRef}
             rows={1}

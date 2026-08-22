@@ -220,7 +220,43 @@ H1 贴纸功能在实现过程中连续出现三次同类缺陷（`retrySend` �
     并区分"真的空"与"结构坏"两个用例；服务端 `ListMine` 同步保证空结果是 `[]` 而非
     `nil`（否则 `null` 会撞进新的报错路径），新增 Go 用例锁死 JSON 形态
   - 连带：`docs/02_CHAT_API.md` 记录 `stickers`/`packs` 恒为数组的约定
-- [ ] 批 E｜结构性根治（第 20、34、35 项）
+- [x] **批 E｜结构性根治**（第 20、34、35 项）
+  - 20：`hashBlob` 从 `crypto.subtle` 换到 `@noble/hashes`（shared 既有依赖，零新增）。
+    局域网 IP 直连（`http://192.168.x.x`，本项目的现实部署形态）不是安全上下文，
+    `crypto.subtle` 为 `undefined` → TypeError 被裸 `catch` 吞成"添加失败"，
+    重试一百次同样失败。新增用例：删掉整个 `globalThis.crypto` 后摘要仍算得出且值不变
+  - 34：`chatSocket.send(type: string, payload: unknown)` 改为
+    `send<K extends keyof ClientFrames>(type: K, payload: ClientFrames[K])`，
+    新增与 `protocol.go` 对齐的 `ClientFrames` 与可辨识联合 `ClientContent`
+    （`{type:"sticker"}` 少带 key 这类组合现在编译不过）。
+    `reply_to_id` 用 branded 类型 `ServerMessageId` + `asServerMessageId()` 断言点，
+    普通 string（可能是 clientMsgId）传进去编译失败——第 10 项那类事故被搬到编译期。
+    双向验证过：给 `typing` 多塞一个字段、把 `reply_to_id` 换成裸 string，`tsc` 分别报 TS2353 / TS2322
+  - 35：新增 `contracts/message-send.golden.json`（8 个样本帧，覆盖 buildContent 全部
+    6 种 content type，含 e2ee 首条/后续两态）。前端
+    `messageSendGolden.test.ts` 驱动 store 真的发帧后与样本深比较（随机 client_msg_id
+    归一成占位符）；Go 侧 `golden_contract_test.go` 以 `DisallowUnknownFields` 解进
+    `SendPayload` 再跑 `buildContent`，断言 ok 与落库 message_type，另有一条
+    "样本必须覆盖每种 content type"的用例。反向验证过：把样本里的 `sticker_id`
+    改成 `stickerId`，前端与 Go **同时**变红
+  - 连带：`docs/02_CHAT_API.md` 与 `docs/DEVELOPMENT.md` 记录契约位置与
+    "先改 golden 再让两侧变绿"的改动顺序
+- [x] **顺带清理（用户要求一并收掉）**
+  - 圆角：全仓 45 处 `rounded-xl` / `rounded-2xl` / `rounded-3xl` 统一降到 `rounded-lg`
+    （8px 上限约束），气泡尾角由 `rounded-b*-md` 改 `rounded-b*-sm` 以保留"尖角"观感；
+    `docs/design/00_DESIGN_LANGUAGE.md` 的圆角表同步改写（原表把 12px/16px 写成规范，
+    与项目约束直接冲突，是复发源头）
+  - `docs/DEVELOPMENT.md` 的 E2E 覆盖表补上此前漏记的
+    `chat-experience.spec.ts` 与 `conversation-settings.spec.ts`
+
+- [ ] **待架构决策（不属于任何批，需用户定调）**
+  - 32：MinIO 对象生命周期——撤回/清空聊天记录对贴纸对象完全无效（贴纸把对象 key 从
+    "跟随一条可撤回消息"提升为"独立表里的永久条目 + 可无限重放"）。两条候选路径：
+    撤回时清对象，或收藏时服务端复制成新 key。不是权限提升，但隐私面有增量风险
+  - 33：`/files/download-url` 无对象级 ACL——任何登录用户可为任意合法格式 key 换到
+    24h 预签名 GET。当前机密性靠"key 不可猜"（122 bit 熵），非本批引入
+  - 另：dev 与 prod 的 grafana 版本漂移（11.2.0 vs 10.2.0）与任何 `deploy/` 生产配置改动，
+    同样等用户点头再动
 
 ## 备注
 

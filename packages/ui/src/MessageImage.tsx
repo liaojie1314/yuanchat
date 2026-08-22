@@ -138,7 +138,7 @@ export function MessageImage({
         onClick={retry}
         aria-label={t("chat.image.loadError")}
         style={box}
-        className="bg-surface-container-high text-on-surface-variant flex flex-col items-center justify-center gap-1.5 rounded-xl transition-opacity hover:opacity-80"
+        className="bg-surface-container-high text-on-surface-variant flex flex-col items-center justify-center gap-1.5 rounded-lg transition-opacity hover:opacity-80"
       >
         <ImageOff size={28} strokeWidth={1.25} />
         <span className="text-label-sm px-2 text-center">{t("chat.image.loadError")}</span>
@@ -150,7 +150,7 @@ export function MessageImage({
     <div
       ref={boxRef}
       style={box}
-      className="bg-surface-container-high relative overflow-hidden rounded-xl"
+      className="bg-surface-container-high relative overflow-hidden rounded-lg"
     >
       {/* 加载占位骨架：与图同尺寸，防加载完成时的布局跳动 */}
       {state === "loading" && (

@@ -94,7 +94,7 @@
 @layer components {
   /* 消息气泡 — 发送 (品牌渐变蓝) */
   .msg-bubble {
-    @apply relative max-w-[70%] select-text rounded-2xl px-4 py-2.5;
+    @apply relative max-w-[70%] select-text rounded-lg px-4 py-2.5;
 
     word-break: break-word;
     transition: transform 0.15s var(--md-easing-standard);
@@ -185,7 +185,7 @@
 
   /* 输入框 */
   .input-base {
-    @apply border-outline-variant w-full rounded-xl border px-4 py-3;
+    @apply border-outline-variant w-full rounded-lg border px-4 py-3;
 
     /* 亮色：surfaceContainerLowest = #FFFFFF，比原来的 #EBF2FC 更浅更干净 */
     background: rgb(var(--md-sys-color-surface-container-lowest-rgb));

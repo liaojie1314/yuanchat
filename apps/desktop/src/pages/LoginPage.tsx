@@ -105,7 +105,7 @@ export function LoginPage() {
       <div className="relative flex flex-1 flex-col overflow-y-auto">
         <div className="relative m-auto w-full max-w-md p-8">
           <div className="mb-8 text-center">
-            <div className="brand-gradient glow-brand mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl text-white">
+            <div className="brand-gradient glow-brand mb-4 inline-flex h-16 w-16 items-center justify-center rounded-lg text-white">
               <MessageCircle size={30} />
             </div>
             <h1 className="text-2xl font-bold text-on-surface">元聊</h1>

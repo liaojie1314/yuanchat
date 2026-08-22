@@ -21,6 +21,7 @@ yuanchat/
 │   ├── ui/               # 共享 UI 组件（Button, Input, MainLayout 等）
 │   └── design-system/    # Material 3 设计 Tokens、i18n、全局样式
 ├── server/               # Go 后端
+├── contracts/            # 前后端共用的黄金契约样本（见下方「跨端契约」）
 ├── deploy/               # Docker Compose 部署配置
 ├── docs/                 # 项目文档
 ├── pnpm-workspace.yaml   # pnpm monorepo 配置
@@ -574,15 +575,29 @@ packages/shared/coverage/
 
 #### 已有测试覆盖
 
-| 包                      | 测试文件               | 内容                                          |
-| ----------------------- | ---------------------- | --------------------------------------------- |
-| `internal/pkg/jwt`      | `jwt_test.go`          | Token 生成/验证/过期/无效                     |
-| `internal/pkg/password` | `password_test.go`     | bcrypt 哈希/验证/盐值                         |
-| `internal/service`      | `user_service_test.go` | 密码哈希、strPtr、错误常量                    |
-| `internal/ws`           | `hub_test.go`          | Hub 注册/注销、多设备投递、连接上限、并发安全 |
-| `internal/ws`           | `protocol_test.go`     | WS 信封编解码                                 |
+| 包                      | 测试文件                  | 内容                                          |
+| ----------------------- | ------------------------- | --------------------------------------------- |
+| `internal/pkg/jwt`      | `jwt_test.go`             | Token 生成/验证/过期/无效                     |
+| `internal/pkg/password` | `password_test.go`        | bcrypt 哈希/验证/盐值                         |
+| `internal/service`      | `user_service_test.go`    | 密码哈希、strPtr、错误常量                    |
+| `internal/ws`           | `hub_test.go`             | Hub 注册/注销、多设备投递、连接上限、并发安全 |
+| `internal/ws`           | `protocol_test.go`        | WS 信封编解码                                 |
+| `internal/ws`           | `golden_contract_test.go` | 黄金契约（见下方「跨端契约」）                |
 
 > **注意**：`UserService` 依赖具体的 `*repository.UserRepository` 而非接口，完整的 Register/Login/Profile 集成测试需要连接测试数据库或重构为接口注入。
+
+### 跨端契约（contracts/）
+
+`contracts/message-send.golden.json` 为每种 `content.type` 存一个完整的 `message.send`
+样本帧，**前后端跑同一份 JSON**：
+
+| 侧   | 测试文件                                                  | 做什么                                                                              |
+| ---- | --------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| 前端 | `packages/shared/src/__tests__/messageSendGolden.test.ts` | 驱动 `messageStore` 真的发帧，把 `chatSocket.send` 的 payload 与样本深比较          |
+| Go   | `server/internal/ws/golden_contract_test.go`              | 以 `DisallowUnknownFields` 解进 `SendPayload`，跑 `buildContent` 断言通过与落库类型 |
+
+改帧结构的**正确顺序**：先改 golden 样本 → 再让两侧变绿。任一侧擅自改字段名/类型/嵌套
+都会两端同时变红；新增 content type 忘了补样本，Go 侧的覆盖度用例会失败。
 
 ### E2E 端到端测试
 
@@ -602,17 +617,19 @@ packages/shared/coverage/
 
 #### 覆盖范围
 
-| 测试文件                        | 覆盖内容                                                                        |
-| ------------------------------- | ------------------------------------------------------------------------------- |
-| `e2e/login.spec.ts`             | 登录成功/失败、表单校验错误、API 错误、Enter 快捷键                             |
-| `e2e/register.spec.ts`          | 注册成功/失败、表单校验、验证码加载/刷新、Enter 快捷键                          |
-| `e2e/logout.spec.ts`            | 登出跳转、localStorage 清除、登出后路由守卫                                     |
-| `e2e/route-guards.spec.ts`      | 未登录重定向（/ → /login）、已登录重定向（/login → /chat）                      |
-| `e2e/navigation.spec.ts`        | 登录/注册页间跳转、表单状态独立                                                 |
-| `e2e/authenticated-nav.spec.ts` | 已登录状态下聊天/通讯录/收藏/设置四大区域可访问、侧边栏导航链接                 |
-| `e2e/search.spec.ts`            | Ctrl/Meta+K 打开搜索弹窗、输入框自动聚焦、Escape/关闭按钮关闭                   |
-| `e2e/favorites.spec.ts`         | 收藏页可访问、四个分类 Tab 按钮可见且可点击                                     |
-| `e2e/stickers.spec.ts`          | 贴纸两 tab 渲染、官方/收藏列表数量、发贴纸、图片→收藏、删除收藏、缩略图真实出图 |
+| 测试文件                            | 覆盖内容                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------- |
+| `e2e/login.spec.ts`                 | 登录成功/失败、表单校验错误、API 错误、Enter 快捷键                             |
+| `e2e/register.spec.ts`              | 注册成功/失败、表单校验、验证码加载/刷新、Enter 快捷键                          |
+| `e2e/logout.spec.ts`                | 登出跳转、localStorage 清除、登出后路由守卫                                     |
+| `e2e/route-guards.spec.ts`          | 未登录重定向（/ → /login）、已登录重定向（/login → /chat）                      |
+| `e2e/navigation.spec.ts`            | 登录/注册页间跳转、表单状态独立                                                 |
+| `e2e/authenticated-nav.spec.ts`     | 已登录状态下聊天/通讯录/收藏/设置四大区域可访问、侧边栏导航链接                 |
+| `e2e/search.spec.ts`                | Ctrl/Meta+K 打开搜索弹窗、输入框自动聚焦、Escape/关闭按钮关闭                   |
+| `e2e/favorites.spec.ts`             | 收藏页可访问、四个分类 Tab 按钮可见且可点击                                     |
+| `e2e/stickers.spec.ts`              | 贴纸两 tab 渲染、官方/收藏列表数量、发贴纸、图片→收藏、删除收藏、缩略图真实出图 |
+| `e2e/chat-experience.spec.ts`       | 清空聊天记录（确认后消息流清空）、群公告横幅点开全文、群内昵称编辑并保存        |
+| `e2e/conversation-settings.spec.ts` | 右键会话菜单置顶/取消置顶、免打扰开关的状态翻转                                 |
 
 #### 测试文件结构
 

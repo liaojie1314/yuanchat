@@ -124,7 +124,7 @@ export function ContactsScreen() {
       <div className="bg-surface min-w-0 flex-1">
         {view.kind === "empty" ? (
           <div className="flex h-full flex-col items-center justify-center gap-3">
-            <span className="bg-surface-container-high text-on-surface-variant flex h-16 w-16 items-center justify-center rounded-2xl">
+            <span className="bg-surface-container-high text-on-surface-variant flex h-16 w-16 items-center justify-center rounded-lg">
               <UsersRound size={28} />
             </span>
             <p className="text-body-lg text-on-surface-variant">{t("contacts.selectHint")}</p>

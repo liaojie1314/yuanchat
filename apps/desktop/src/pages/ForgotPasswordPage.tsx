@@ -134,7 +134,7 @@ export function ForgotPasswordPage() {
         <div className="relative m-auto w-full max-w-md px-8 py-10">
           {/* Logo */}
           <div className="mb-6 text-center">
-            <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl text-white">
+            <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-lg text-white">
               <KeyRound size={28} />
             </div>
             <h1 className="text-2xl font-bold text-on-surface">重置密码</h1>

@@ -162,7 +162,7 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
               key={to}
               to={to}
               className={cn(
-                "text-label-sm relative flex w-14 flex-col items-center gap-1 rounded-2xl py-2 transition-all duration-200",
+                "text-label-sm relative flex w-14 flex-col items-center gap-1 rounded-lg py-2 transition-all duration-200",
                 active
                   ? "shadow-elevation-1 bg-white/25 text-white backdrop-blur-sm"
                   : "text-white/70 hover:bg-white/15 hover:text-white",

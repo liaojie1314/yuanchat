@@ -44,7 +44,7 @@ function SectionHeader({ title, desc }: { title: string; desc?: string }) {
 /** 信息卡片：合并多行为一张卡，行间加分隔线 */
 function InfoCard({ children }: { children: React.ReactNode }) {
   return (
-    <div className="bg-surface-container divide-outline-variant divide-y overflow-hidden rounded-xl">
+    <div className="bg-surface-container divide-outline-variant divide-y overflow-hidden rounded-lg">
       {children}
     </div>
   );
@@ -157,7 +157,7 @@ function ThemeCards() {
       <button
         onClick={() => !isDark || toggleMode()}
         className={cn(
-          "group relative overflow-hidden rounded-xl border-2 p-3 text-left transition-all",
+          "group relative overflow-hidden rounded-lg border-2 p-3 text-left transition-all",
           !isDark
             ? "border-primary shadow-elevation-1"
             : "border-outline-variant hover:border-primary/50",
@@ -190,7 +190,7 @@ function ThemeCards() {
       <button
         onClick={() => isDark || toggleMode()}
         className={cn(
-          "group relative overflow-hidden rounded-xl border-2 p-3 text-left transition-all",
+          "group relative overflow-hidden rounded-lg border-2 p-3 text-left transition-all",
           isDark
             ? "border-primary shadow-elevation-1"
             : "border-outline-variant hover:border-primary/50",
@@ -286,7 +286,7 @@ export function AboutSection({ extra }: { extra?: ReactNode } = {}) {
 
       {/* 品牌 hero */}
       <div className="mb-6 flex flex-col items-center gap-3 py-6">
-        <div className="brand-gradient shadow-elevation-2 text-headline-md grid h-20 w-20 place-items-center rounded-2xl font-bold text-white">
+        <div className="brand-gradient shadow-elevation-2 text-headline-md grid h-20 w-20 place-items-center rounded-lg font-bold text-white">
           元
         </div>
         <p className="text-title-lg text-on-surface font-semibold">YuanChat</p>

@@ -13,6 +13,7 @@
  * 兼容性：产物经 es2019 转译；createImageBitmap 在 Chrome 74 WebView 可用，
  * 不可用时回退 new Image() + objectURL。
  */
+import { sha256 } from "@noble/hashes/sha2.js";
 import { apiGet, apiPost } from "./client";
 
 /** 预签名上传票据：客户端凭 uploadUrl PUT 直传，objectKey 用于后续 message.send / 下载 */
@@ -300,11 +301,24 @@ export async function cropAvatar(file: Blob, edge: number = AVATAR_EDGE): Promis
   return { blob: blob ?? file, width: out, height: out };
 }
 
-/** Blob 内容 SHA-256 摘要（十六进制小写），用于贴纸收藏去重。Chrome 74+ 原生 crypto.subtle 支持。 */
+/**
+ * Blob 内容 SHA-256 摘要（十六进制小写），用于贴纸收藏去重。
+ *
+ * @remarks 实现用 `@noble/hashes` 而非 `crypto.subtle`：后者只在**安全上下文**
+ *   （https / localhost）下存在，而"局域网 IP 直连自建 IM"是本项目的现实部署形态
+ *   （`http://192.168.x.x`）——那里 `crypto.subtle` 是 `undefined`，
+ *   调用直接 TypeError，被上层裸 `catch` 吞成"添加失败"，且重试一百次都一样。
+ *   同一原因，整个 E2EE 栈也是纯 TS 的 `@noble`（见 `crypto/primitives.ts`），
+ *   `@noble/hashes` 早已是 shared 的既有依赖，换过来零新增依赖。
+ */
 export async function hashBlob(blob: Blob): Promise<string> {
   const buf = await blob.arrayBuffer();
-  const digest = await crypto.subtle.digest("SHA-256", buf);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+  const digest = sha256(new Uint8Array(buf));
+  let hex = "";
+  // 不用 Array.from(...).map(...).join("")：热路径上逐字节拼接更省一次数组分配，
+  // 且避免 es2019 目标下对 TypedArray 的 Array.from 转译开销。
+  for (let i = 0; i < digest.length; i++) {
+    hex += digest[i].toString(16).padStart(2, "0");
+  }
+  return hex;
 }

@@ -276,9 +276,9 @@ export function MessageBubble({
               msg.kind === "sticker"
                 ? "" // 贴纸：无背景、无圆角、无内边距
                 : cn(
-                    "rounded-2xl",
+                    "rounded-lg",
                     msg.kind === "image" ? "p-1.5" : "px-3.5 py-2.5",
-                    isSelf ? "msg-bubble-self rounded-br-md" : "msg-bubble-peer rounded-bl-md",
+                    isSelf ? "msg-bubble-self rounded-br-sm" : "msg-bubble-peer rounded-bl-sm",
                   ),
             )}
             onContextMenu={openMenu}
@@ -568,7 +568,7 @@ export function TypingIndicator({ name }: { name: string }) {
     <div className="mt-2 flex items-end gap-2">
       <Avatar name={name} size="md" />
       <div className="flex flex-col">
-        <div className="msg-bubble-peer w-fit rounded-2xl rounded-bl-md px-3 py-2">
+        <div className="msg-bubble-peer w-fit rounded-lg rounded-bl-sm px-3 py-2">
           <span className="flex items-center gap-1" aria-hidden>
             <i className="typing-dot" />
             <i className="typing-dot [animation-delay:0.2s]" />

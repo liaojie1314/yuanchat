@@ -15,6 +15,71 @@ import { ensureFreshToken, needsRefresh } from "../api/tokenManager";
 import type { ConversationDTO } from "../api/chat";
 import { captureException } from "../observability/sentry";
 
+/**
+ * 客户端 → 服务端的 `content` 载荷，与 `server/internal/ws/protocol.go` 的
+ * `ContentPayload` + `buildContent` 的各 case 一一对应。
+ *
+ * @remarks 用可辨识联合而非"一个全 optional 的大对象"：后者允许
+ * `{type:"sticker"}` 少带 key 之类的组合通过编译，而服务端 `buildContent`
+ * 会回 400，前端却要到运行时才知道。字段名一律 snake_case（就是线上 JSON 本身，
+ * 不做 camel 转换），这样与 Go 的 json tag 逐字对照即可核对。
+ */
+export type ClientContent =
+  | { type: "text"; text: string }
+  | { type: "image"; key: string; width: number; height: number; size: number }
+  | { type: "file"; key: string; name: string; size: number }
+  | { type: "voice"; key: string; duration: number; size: number }
+  | { type: "sticker"; sticker_id: string; key: string; width: number; height: number }
+  | {
+      type: "e2ee";
+      ratchet_key: string;
+      n: number;
+      pn: number;
+      nonce: string;
+      ciphertext: string;
+      /** 仅首条消息携带（接收方据此完成 X3DH） */
+      identity_key?: string;
+      ephemeral_key?: string;
+      otk_id?: number;
+    };
+
+/**
+ * 客户端可发送的帧契约（type → payload），对齐 `ws/protocol.go` 的
+ * `SendPayload` / `ReadPayload` / `TypingPayload`。
+ *
+ * @remarks 原签名是 `send(type: string, payload: unknown)`——帧契约漂移在编译期
+ * 完全无人拦截，正是本轮审计第 10 项（`reply_to_id` 误填 clientMsgId 导致整帧 400）
+ * 能一路发到线上的直接原因。`reply_to_id` 用 branded 类型 {@link ServerMessageId}
+ * 标出"必须是服务端 UUID"，本地 clientMsgId 传进去即编译不过。
+ */
+export interface ClientFrames {
+  "message.send": {
+    conversation_id: string;
+    content: ClientContent;
+    client_msg_id: string;
+    /** 被引用消息的**服务端** id；未 ack 的乐观消息没有它，故需 branded 类型把关 */
+    reply_to_id?: ServerMessageId;
+    mentions?: string[];
+  };
+  "message.read": { conversation_id: string; seq: number };
+  typing: { conversation_id: string };
+  ping: Record<string, never>;
+}
+
+/**
+ * "服务端已确认的消息 id"标记类型。
+ *
+ * 运行期就是 string，只在类型层面区分：普通 string（可能是 clientMsgId）无法直接
+ * 赋给它，必须经 {@link asServerMessageId} 显式断言——那一行就是"我确认这是服务端
+ * id"的可审查点（调用处应先过 `isServerConfirmed`）。
+ */
+export type ServerMessageId = string & { readonly __serverMessageId: unique symbol };
+
+/** 把已确认（有 seq）的消息 id 标记为服务端 id。 */
+export function asServerMessageId(id: string): ServerMessageId {
+  return id as ServerMessageId;
+}
+
 export interface ServerFrames {
   "message.ack": {
     client_msg_id: string;
@@ -350,8 +415,13 @@ class ChatSocket {
     this.state = "idle";
   }
 
-  /** 发送一帧；未连接时入队，连接建立后按序发出 */
-  send(type: string, payload: unknown) {
+  /**
+   * 发送一帧；未连接时入队，连接建立后按序发出。
+   *
+   * 泛型把 payload 钉在 {@link ClientFrames} 上：帧名写错、字段缺失/多余、
+   * content 与 type 不匹配都在编译期报错，不再等服务端回 400。
+   */
+  send<K extends keyof ClientFrames>(type: K, payload: ClientFrames[K]) {
     const frame = JSON.stringify({ type, payload });
     if (this.state === "open" && this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(frame);
