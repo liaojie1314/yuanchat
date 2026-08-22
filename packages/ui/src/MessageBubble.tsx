@@ -268,6 +268,9 @@ export function MessageBubble({
           )}
 
           <div
+            // data-kind 挂在气泡本体（右键菜单的宿主元素）上：E2E 既能按形态计数，
+            // 也能直接右键定位到会弹菜单的那个节点。原 E2E 用的选择器应用里不存在。
+            data-kind={msg.kind}
             className={cn(
               "relative w-fit max-w-full break-words select-text",
               msg.kind === "sticker"

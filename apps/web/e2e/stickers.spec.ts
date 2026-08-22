@@ -1,146 +1,138 @@
 /**
  * 贴纸功能 E2E 测试
  *
- * 前置条件：
- * - 后端运行在 localhost:8080
- * - 测试账号已创建（通过 setup）
- * - 至少一个官方表情包已存在（需 seed 数据）
+ * @description
+ * 全程跑在仓库既有的 mock 模式（MSW + demo 数据）下，与其他 spec 一致：
+ * `setAuth` 写认证态、`waitForMSW` 等 Service Worker 激活，不依赖真实后端/seed。
+ *
+ * @remarks 原实现有四类问题（H1 审计第 5 项），此处逐条修掉：
+ * 1. 走真实登录表单 + 真实后端（CI 无后端，必挂）→ 改用仓库夹具
+ * 2. 用了应用里不存在的选择器（`[data-kind]` / `[data-testid="conversation-item"]`）
+ *    → 改用真实存在的 `[data-kind]`（本批为气泡补上）、`[data-sticker-id]`、
+ *    role=tab/menuitem + 实际文案
+ * 3. 6 个用例里 4 个带 `test.skip(...)` 兜底 → 前置条件不满足时静默通过，
+ *    等于没测；现在 mock 数据保证前置条件成立，断言直接失败暴露问题
+ * 4. 末条断言拿 `newCount < firstSticker.count()`（后者恒为 0/1）→ 改为
+ *    删除前后的真实数量对比
  */
 import { test, expect } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { setAuth } from "./fixtures/auth.fixture";
+import { waitForMSW } from "./utils/msw";
 
-const TEST_USER = {
-  username: process.env.E2E_USERNAME || "testuser_sticker",
-  password: process.env.E2E_PASSWORD || "Test123456!",
+/** locale 固定为 zh-CN（见 playwright.config.ts），故直接用中文文案定位。 */
+const TXT = {
+  emojiBtn: "表情",
+  tabFavorites: "收藏",
+  tabOfficial: "官方",
+  addToStickers: "添加到表情",
+  removeSticker: "删除",
+  addSuccess: "已添加",
+  sendSticker: "发送表情",
 };
 
-test.describe("Sticker Functionality", () => {
+/** 打开第一个会话（demo 数据的「产品研发群」，内含图片消息）。 */
+async function openFirstConversation(page: Page) {
+  await page.goto("/chat");
+  const conv = page.getByText("产品研发群").first();
+  await conv.click();
+  // 图片气泡出现即说明消息流已渲染
+  await expect(page.locator('[data-kind="image"]').first()).toBeVisible();
+}
+
+/** 打开表情面板并切到指定贴纸 tab。 */
+async function openStickerTab(page: Page, tab: "收藏" | "官方") {
+  await page.getByRole("button", { name: TXT.emojiBtn }).first().click();
+  const picker = page.getByRole("dialog", { name: TXT.emojiBtn });
+  await expect(picker).toBeVisible();
+  await picker.getByRole("tab", { name: tab }).click();
+  return picker;
+}
+
+test.describe("贴纸功能", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/login");
-    await page.fill('input[type="text"]', TEST_USER.username);
-    await page.fill('input[type="password"]', TEST_USER.password);
-    await page.click('button[type="submit"]');
-    await page.waitForURL("/chat");
+    await setAuth(page);
+    await waitForMSW(page);
+    await openFirstConversation(page);
   });
 
-  test("should open emoji picker and show sticker tabs", async ({ page }) => {
-    // 点击表情按钮打开面板
-    await page.click('[aria-label*="表情"], [aria-label*="Emoji"]');
-
-    // 验证贴纸 tab 存在（收藏 + 官方）
-    await expect(page.getByRole("tab", { name: /收藏|Favorites/i })).toBeVisible();
-    await expect(page.getByRole("tab", { name: /官方|Official/i })).toBeVisible();
+  test("表情面板同时提供收藏与官方两个贴纸 tab", async ({ page }) => {
+    await page.getByRole("button", { name: TXT.emojiBtn }).first().click();
+    const picker = page.getByRole("dialog", { name: TXT.emojiBtn });
+    await expect(picker.getByRole("tab", { name: TXT.tabFavorites })).toBeVisible();
+    await expect(picker.getByRole("tab", { name: TXT.tabOfficial })).toBeVisible();
   });
 
-  test("should switch between emoji and sticker tabs", async ({ page }) => {
-    await page.click('[aria-label*="表情"], [aria-label*="Emoji"]');
-
-    // 切换到官方贴纸 tab
-    await page.getByRole("tab", { name: /官方|Official/i }).click();
-
-    // 验证显示贴纸网格（4 列）
-    const stickerGrid = page.locator(".grid-cols-4").first();
-    await expect(stickerGrid).toBeVisible();
-
-    // 切换回 emoji tab
-    const emojiTab = page.getByRole("tab", { name: /笑脸|Smileys/i }).first();
-    await emojiTab.click();
-
-    // 验证显示 emoji 网格（8 列）
-    const emojiGrid = page.locator(".grid-cols-8").first();
-    await expect(emojiGrid).toBeVisible();
+  test("官方 tab 列出 mock 表情包的全部贴纸", async ({ page }) => {
+    const picker = await openStickerTab(page, "官方");
+    // MSW 的官方包固定 8 张；数量断言能同时抓住「一张没出」和「聚合逻辑漏包」
+    await expect(picker.locator("[data-sticker-id]")).toHaveCount(8);
   });
 
-  test("should add image to sticker favorites via context menu", async ({ page }) => {
-    // 进入有图片消息的会话（需预先存在）
-    const firstConv = page.locator('[data-testid="conversation-item"]').first();
-    await firstConv.click();
-
-    // 等待消息加载
-    await page.waitForTimeout(500);
-
-    // 查找图片消息
-    const imageMsg = page.locator('[data-kind="image"]').first();
-    if ((await imageMsg.count()) === 0) {
-      test.skip(true, "No image message found in conversation");
-    }
-
-    // 右键图片消息
-    await imageMsg.click({ button: "right" });
-
-    // 点击"添加到表情"菜单项
-    const addMenuItem = page.getByRole("menuitem", { name: /添加到表情|Add to stickers/i });
-    await expect(addMenuItem).toBeVisible();
-    await addMenuItem.click();
-
-    // 等待 toast 提示
-    await expect(page.locator("text=/已添加|Added/i")).toBeVisible({ timeout: 2000 });
+  test("收藏 tab 列出本人收藏（mock 预置 2 张）", async ({ page }) => {
+    const picker = await openStickerTab(page, "收藏");
+    await expect(picker.locator("[data-sticker-id]")).toHaveCount(2);
   });
 
-  test("should show added sticker in favorites tab", async ({ page }) => {
-    await page.click('[aria-label*="表情"], [aria-label*="Emoji"]');
+  test("贴纸与 emoji tab 之间可来回切换", async ({ page }) => {
+    const picker = await openStickerTab(page, "官方");
+    await expect(picker.locator("[data-sticker-id]").first()).toBeVisible();
 
-    // 切换到收藏 tab
-    await page.getByRole("tab", { name: /收藏|Favorites/i }).click();
-
-    // 验证至少有一个收藏贴纸（如果之前添加成功）
-    const favGrid = page.locator(".grid-cols-4").first();
-    const stickerButtons = favGrid.locator("button");
-    const count = await stickerButtons.count();
-
-    if (count === 0) {
-      test.skip(true, "No stickers in favorites (run add test first)");
-    }
-
-    await expect(stickerButtons.first()).toBeVisible();
+    // 切回 emoji 分类（第一个 emoji 分类 tab 在贴纸两个 tab 之后）
+    await picker.getByRole("tab", { name: "笑脸" }).click();
+    await expect(picker.locator("[data-sticker-id]")).toHaveCount(0);
+    await expect(picker.getByRole("button", { name: "😀" })).toBeVisible();
   });
 
-  test("should send sticker by clicking in picker", async ({ page }) => {
-    await page.click('[aria-label*="表情"], [aria-label*="Emoji"]');
+  test("点击官方贴纸后面板关闭且消息流出现贴纸气泡", async ({ page }) => {
+    const picker = await openStickerTab(page, "官方");
+    const before = await page.locator('[data-kind="sticker"]').count();
 
-    // 切换到官方贴纸
-    await page.getByRole("tab", { name: /官方|Official/i }).click();
+    await picker.locator("[data-sticker-id]").first().click();
 
-    const stickerGrid = page.locator(".grid-cols-4").first();
-    const firstSticker = stickerGrid.locator("button").first();
-
-    if ((await firstSticker.count()) === 0) {
-      test.skip(true, "No official stickers available (seed required)");
-    }
-
-    await firstSticker.click();
-
-    // 验证面板关闭
-    await expect(page.getByRole("dialog", { name: /表情|Emoji/i })).not.toBeVisible({
-      timeout: 1000,
-    });
-
-    // 验证贴纸消息出现在聊天流
-    const stickerMsg = page.locator('[data-kind="sticker"]').last();
-    await expect(stickerMsg).toBeVisible({ timeout: 2000 });
+    await expect(picker).toBeHidden();
+    await expect(page.locator('[data-kind="sticker"]')).toHaveCount(before + 1);
   });
 
-  test("should remove sticker from favorites via context menu", async ({ page }) => {
-    await page.click('[aria-label*="表情"], [aria-label*="Emoji"]');
-    await page.getByRole("tab", { name: /收藏|Favorites/i }).click();
+  test("右键图片消息可添加到表情，且新贴纸出现在收藏 tab", async ({ page }) => {
+    const imageBubble = page.locator('[data-kind="image"]').first();
+    await imageBubble.click({ button: "right" });
 
-    const favGrid = page.locator(".grid-cols-4").first();
-    const firstSticker = favGrid.locator("button").first();
+    await page.getByRole("menuitem", { name: TXT.addToStickers }).click();
+    await expect(page.getByText(TXT.addSuccess)).toBeVisible();
 
-    if ((await firstSticker.count()) === 0) {
-      test.skip(true, "No stickers to remove");
-    }
+    // 收藏 tab 从 2 张变 3 张（MSW 按 content_hash 幂等，此图未收藏过）
+    const picker = await openStickerTab(page, "收藏");
+    await expect(picker.locator("[data-sticker-id]")).toHaveCount(3);
+  });
 
-    // 右键收藏贴纸
-    await firstSticker.click({ button: "right" });
+  test("未被服务端确认的消息不提供添加到表情入口", async ({ page }) => {
+    // demo 数据里 status=failed 的那条文本消息没有 seq，右键菜单不应出现贴纸入口
+    const failed = page.getByText("没问题，我改一下日程。").first();
+    await failed.click({ button: "right" });
+    await expect(page.getByRole("menuitem", { name: TXT.addToStickers })).toHaveCount(0);
+  });
 
-    // 点击删除菜单项
-    const removeMenuItem = page.getByRole("menuitem", { name: /移除|Remove/i });
-    await expect(removeMenuItem).toBeVisible();
-    await removeMenuItem.click();
+  test("右键收藏贴纸可删除，列表实际少一张", async ({ page }) => {
+    const picker = await openStickerTab(page, "收藏");
+    const stickers = picker.locator("[data-sticker-id]");
+    await expect(stickers).toHaveCount(2);
 
-    // 验证贴纸从列表消失
-    await page.waitForTimeout(300);
-    const newCount = await favGrid.locator("button").count();
-    expect(newCount).toBeLessThan(await firstSticker.count());
+    await stickers.first().click({ button: "right" });
+    await picker.getByRole("menuitem", { name: TXT.removeSticker }).click();
+
+    await expect(stickers).toHaveCount(1);
+  });
+
+  test("贴纸缩略图真实出图（不是破图占位）", async ({ page }) => {
+    const picker = await openStickerTab(page, "官方");
+    const firstThumb = picker.locator("[data-sticker-id] img").first();
+    await expect(firstThumb).toBeVisible();
+    // MSW 的 /files/download-url 回 data URL，naturalWidth > 0 才算真的解码成功
+    await expect
+      .poll(async () => firstThumb.evaluate((el: HTMLImageElement) => el.naturalWidth))
+      .toBeGreaterThan(0);
+    // 破图占位是 aria-label="加载失败" 的按钮，不应出现
+    await expect(picker.getByRole("button", { name: "加载失败" })).toHaveCount(0);
   });
 });

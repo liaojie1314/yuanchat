@@ -4,8 +4,8 @@
  * 覆盖四个端点的请求拼装与响应映射：
  * - POST   /api/v1/stickers        收藏（object_key/width/height/content_hash）
  * - DELETE /api/v1/stickers/:id    取消收藏
- * - GET    /api/v1/stickers/mine   我的收藏（缺字段兜底空数组）
- * - GET    /api/v1/sticker-packs   官方表情包（缺字段兜底空数组）
+ * - GET    /api/v1/stickers/mine   我的收藏（空数组 vs 结构损坏须区分）
+ * - GET    /api/v1/sticker-packs   官方表情包（同上）
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { addSticker, removeSticker, listMyStickers, listStickerPacks } from "../api/stickers";
@@ -75,9 +75,19 @@ describe("listMyStickers", () => {
     expect(result).toEqual([{ id: "s1", object_key: "images/x.png", width: 10, height: 10 }]);
   });
 
-  it("falls back to an empty array when the field is absent", async () => {
-    mockApiOnce({});
+  it("returns an empty array when the user genuinely has no favorites", async () => {
+    mockApiOnce({ stickers: [], has_more: false });
     expect(await listMyStickers()).toEqual([]);
+  });
+
+  it("rejects a malformed response instead of pretending the list is empty", async () => {
+    // 原用例把「字段缺失 → 空数组」写成契约：响应结构损坏时 UI 显示"你没有收藏"，
+    // 与真实空列表无从区分（本仓已修的静默失败模式）。现在必须抛错，让面板走错误态+重试。
+    mockApiOnce({});
+    await expect(listMyStickers()).rejects.toThrow(/not an array/);
+
+    mockApiOnce({ stickers: null });
+    await expect(listMyStickers()).rejects.toThrow(/not an array/);
   });
 });
 
@@ -103,8 +113,13 @@ describe("listStickerPacks", () => {
     expect(result[0].stickers).toHaveLength(1);
   });
 
-  it("falls back to an empty array when the field is absent", async () => {
-    mockApiOnce({});
+  it("returns an empty array when no pack is seeded", async () => {
+    mockApiOnce({ packs: [] });
     expect(await listStickerPacks()).toEqual([]);
+  });
+
+  it("rejects a malformed response instead of pretending no pack exists", async () => {
+    mockApiOnce({});
+    await expect(listStickerPacks()).rejects.toThrow(/not an array/);
   });
 });

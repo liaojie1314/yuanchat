@@ -134,6 +134,71 @@ function apiError(code: number, message: string) {
  */
 
 // ========================================
+// 贴纸 Mock 状态（进程内可变，模拟"收藏/删除立即生效"）
+// ========================================
+
+/** 贴纸 mock 数据形状（与 api/stickers.ts 的 StickerItem 对齐）。 */
+interface MockSticker {
+  id: string;
+  object_key: string;
+  width: number;
+  height: number;
+  /** 去重键，仅 mock 内部使用（真实接口不返回） */
+  content_hash?: string;
+}
+
+/**
+ * 生成一张可直接渲染的内联 SVG 贴纸。
+ *
+ * @remarks mock 模式下没有 MinIO，`/files/download-url` 返回 data URL 即可让
+ *   `<img>` 真的出图——否则 StickerThumb/StickerImage 一律走 error 分支显示破图，
+ *   E2E 也就没法验证"贴纸网格里有可点的贴纸"。
+ */
+function stickerDataUrl(key: string): string {
+  // 由 key 派生色相，让不同贴纸在演示与截图里看起来不同
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) % 360;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><rect width="96" height="96" rx="12" fill="hsl(${hash}, 70%, 88%)"/><circle cx="36" cy="40" r="6" fill="hsl(${hash}, 60%, 30%)"/><circle cx="60" cy="40" r="6" fill="hsl(${hash}, 60%, 30%)"/><path d="M32 60 Q48 74 64 60" stroke="hsl(${hash}, 60%, 30%)" stroke-width="5" fill="none" stroke-linecap="round"/></svg>`;
+  return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+}
+
+/** 官方表情包（唯一一个，8 张，与后端 seed 的规模一致）。 */
+const MOCK_PACK_STICKERS: MockSticker[] = Array.from({ length: 8 }, (_, i) => ({
+  id: "pack_sticker_" + (i + 1),
+  object_key: "images/2026/08/0f5a1c00-000" + (i + 1) + ".svg",
+  width: 96,
+  height: 96,
+}));
+
+/**
+ * 本人收藏（可被 POST/DELETE 改动；预置 2 张让"收藏 tab 非空"可测）。
+ *
+ * @remarks MSW browser 模式下 handler 在页面上下文求值，故这份状态随页面重载复位——
+ *   E2E 各用例天然隔离，无需显式 reset 钩子。
+ */
+let mockMyStickers: MockSticker[] = [
+  {
+    id: "fav_sticker_1",
+    object_key: "images/2026/08/beef0001-0001.svg",
+    width: 96,
+    height: 96,
+    content_hash: "a".repeat(64),
+  },
+  {
+    id: "fav_sticker_2",
+    object_key: "images/2026/08/beef0001-0002.svg",
+    width: 96,
+    height: 96,
+    content_hash: "b".repeat(64),
+  },
+];
+
+/** 测试辅助：剥掉仅 mock 内部使用的 content_hash，保持响应形状与真实接口一致。 */
+function toStickerDTO(s: MockSticker) {
+  return { id: s.id, object_key: s.object_key, width: s.width, height: s.height };
+}
+
+// ========================================
 // Handlers
 // ========================================
 
@@ -260,6 +325,97 @@ export const handlers = [
     await delay(200);
     const body = (await request.json()) as { alias?: string };
     return apiOk({ alias: body.alias ?? "" });
+  }),
+
+  // --------------------------------------------------
+  // 文件 — 换取下载 URL（mock 模式无 MinIO，直接给 data URL）
+  // GET /api/v1/files/download-url?key=...
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/files/download-url", ({ request }) => {
+    const key = new URL(request.url).searchParams.get("key") ?? "";
+    if (!key) return apiError(40010, "key required");
+    return apiOk({ url: stickerDataUrl(key), expires_in: 3600 });
+  }),
+
+  // --------------------------------------------------
+  // 贴纸 — 本人收藏列表
+  // GET /api/v1/stickers/mine
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/stickers/mine", async () => {
+    await delay(150);
+    return apiOk({ stickers: mockMyStickers.map(toStickerDTO), has_more: false });
+  }),
+
+  // --------------------------------------------------
+  // 贴纸 — 收藏一张（按 content_hash 幂等，与后端 ON CONFLICT 语义一致）
+  // POST /api/v1/stickers
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/stickers", async ({ request }) => {
+    await delay(200);
+    const body = (await request.json()) as {
+      object_key?: string;
+      width?: number;
+      height?: number;
+      content_hash?: string;
+    };
+    // 与服务端同口径的形态校验：key 锚定正则、hash 必须是 64 位小写十六进制、宽高为正
+    // 与服务端 handler/file.go 的锚定正则同形（贴纸只收 images/ 前缀）
+    const KEY_RE = /^images\/[0-9]{4}\/[0-9]{2}\/[0-9a-f-]+\.[a-z0-9]+$/;
+    if (!body.object_key || !KEY_RE.test(body.object_key)) {
+      return apiError(40011, "invalid object key");
+    }
+    if (!body.content_hash || !/^[0-9a-f]{64}$/.test(body.content_hash)) {
+      return apiError(40012, "invalid content hash");
+    }
+    if (!body.width || !body.height || body.width <= 0 || body.height <= 0) {
+      return apiError(40013, "invalid size");
+    }
+    const existing = mockMyStickers.find((s) => s.content_hash === body.content_hash);
+    if (existing) return apiOk(toStickerDTO(existing));
+
+    const created: MockSticker = {
+      id: "fav_sticker_" + (mockMyStickers.length + 1) + "_" + Date.now(),
+      object_key: body.object_key,
+      width: body.width,
+      height: body.height,
+      content_hash: body.content_hash,
+    };
+    mockMyStickers = [created].concat(mockMyStickers);
+    return apiOk(toStickerDTO(created));
+  }),
+
+  // --------------------------------------------------
+  // 贴纸 — 取消收藏（不存在回 404，与服务端 RowsAffected==0 的口径一致）
+  // DELETE /api/v1/stickers/:id
+  // --------------------------------------------------
+  http.delete("http://localhost:8085/api/v1/stickers/:id", async ({ params }) => {
+    await delay(150);
+    const id = String(params.id);
+    if (!mockMyStickers.some((s) => s.id === id)) return apiError(40401, "sticker not found");
+    mockMyStickers = mockMyStickers.filter((s) => s.id !== id);
+    return apiOk({ message: "removed" });
+  }),
+
+  // --------------------------------------------------
+  // 贴纸 — 表情包列表（仅官方包）
+  // GET /api/v1/sticker-packs
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/sticker-packs", async () => {
+    await delay(150);
+    return apiOk({
+      packs: [
+        {
+          pack: {
+            id: "pack_official_1",
+            name: "元聊小黄脸",
+            cover_url: null,
+            is_official: true,
+            sort: 0,
+          },
+          stickers: MOCK_PACK_STICKERS.map(toStickerDTO),
+        },
+      ],
+    });
   }),
 
   // --------------------------------------------------

@@ -94,6 +94,7 @@ export const DEMO_MESSAGES: Record<string, ChatMessage[]> = {
       isSelf: false,
       text: "会话加密已开启 🔒",
       time: "09:00",
+      seq: 1,
     },
     {
       id: "m1",
@@ -104,6 +105,7 @@ export const DEMO_MESSAGES: Record<string, ChatMessage[]> = {
       text: "早上好各位，今天的 @全体成员 同步一下发布准备情况",
       mentions: ["@全体成员"],
       time: "09:02",
+      seq: 2,
     },
     {
       id: "m2",
@@ -111,8 +113,12 @@ export const DEMO_MESSAGES: Record<string, ChatMessage[]> = {
       kind: "image",
       isSelf: false,
       senderName: "李四",
-      image: { width: 220, height: 140 },
+      // key 是「添加到表情」的前置条件（气泡菜单项要求 image.key 存在），
+      // seq 是「服务端已确认」的标志（isServerConfirmed）——两者缺一，mock 模式下
+      // 收藏入口恒不出现，E2E 也就永远测不到这条路径。
+      image: { width: 220, height: 140, key: "images/2026/08/deadbeef-0002.png" },
       time: "09:15",
+      seq: 3,
     },
     {
       id: "m3",
@@ -122,6 +128,7 @@ export const DEMO_MESSAGES: Record<string, ChatMessage[]> = {
       text: "看起来不错！发布看板我已经更新到最新，大家可以对照检查各自模块。",
       time: "09:18",
       status: "read",
+      seq: 4,
     },
     {
       id: "m4",
@@ -131,6 +138,7 @@ export const DEMO_MESSAGES: Record<string, ChatMessage[]> = {
       senderName: "王芳",
       voice: { seconds: 12, wave: [6, 12, 18, 9, 14, 20, 8, 12, 16, 6] },
       time: "09:24",
+      seq: 5,
     },
     {
       id: "m5",
@@ -140,6 +148,7 @@ export const DEMO_MESSAGES: Record<string, ChatMessage[]> = {
       file: { name: "发布评审_v3.pdf", size: "3.2 MB", ext: "PDF" },
       time: "09:26",
       status: "sent",
+      seq: 6,
     },
     {
       id: "m6",
@@ -156,6 +165,7 @@ export const DEMO_MESSAGES: Record<string, ChatMessage[]> = {
       ],
       time: "14:32",
       edited: true,
+      seq: 7,
     },
     {
       id: "m7",
@@ -164,6 +174,8 @@ export const DEMO_MESSAGES: Record<string, ChatMessage[]> = {
       isSelf: true,
       text: "没问题，我改一下日程。",
       time: "14:33",
+      // 刻意不给 seq：failed 意味着服务端从未确认，正好作为「引用/转发/收藏入口
+      // 应当禁用」的反例样本
       status: "failed",
     },
     {
@@ -173,6 +185,7 @@ export const DEMO_MESSAGES: Record<string, ChatMessage[]> = {
       isSelf: false,
       text: "陈曦 撤回了一条消息",
       time: "14:34",
+      seq: 8,
     },
   ],
   "3": [
@@ -184,6 +197,7 @@ export const DEMO_MESSAGES: Record<string, ChatMessage[]> = {
       senderName: "张伟",
       text: "你好，明天的会议准备得怎么样了？",
       time: "12:40",
+      seq: 1,
     },
     {
       id: "m31",
@@ -193,6 +207,7 @@ export const DEMO_MESSAGES: Record<string, ChatMessage[]> = {
       text: "已经准备差不多了，PPT 还在完善",
       time: "12:44",
       status: "read",
+      seq: 2,
     },
     {
       id: "m32",
@@ -202,6 +217,7 @@ export const DEMO_MESSAGES: Record<string, ChatMessage[]> = {
       senderName: "张伟",
       text: "好的，那就这么定了，辛苦！",
       time: "12:48",
+      seq: 3,
     },
   ],
 };

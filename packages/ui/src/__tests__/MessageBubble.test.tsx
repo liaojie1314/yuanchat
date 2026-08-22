@@ -3,8 +3,23 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import i18n from "@yuanchat/design-system/i18n";
 import { MessageBubble } from "../MessageBubble";
 import type { ChatMessage } from "@yuanchat/shared";
+
+/**
+ * 菜单项文案取当前语言的实际译文，而非正则匹配。
+ *
+ * @remarks 原实现用 `/add.*sticker|添加到表情/i` 定位——该正则恰好也匹配**原始 key**
+ *   `sticker.addToStickers`（"add" + "Sticker"），于是 i18n key 写错、UI 显示原始 key
+ *   时测试照样通过（H1 审计第 6 项：假绿）。这里额外断言译文 ≠ key 本身，
+ *   locale 缺该 key 时 i18next 回落成 key，正好被这条断言抓住。
+ */
+function label(key: string): string {
+  const text = i18n.t(key);
+  expect(text).not.toBe(key);
+  return text;
+}
 
 // Mock shared module
 vi.mock("@yuanchat/shared", async (importOriginal) => {
@@ -52,15 +67,31 @@ describe("sticker rendering and add-to-favorites menu item", () => {
     expect(bubble).toBeTruthy();
     fireEvent.contextMenu(bubble!);
 
-    const item = screen.queryByRole("menuitem", { name: /add.*sticker|添加到表情/i });
-    expect(item).toBeTruthy();
-    if (item) {
-      fireEvent.click(item);
-      expect(onAddSticker).toHaveBeenCalled();
-    }
+    const item = screen.getByRole("menuitem", { name: label("sticker.addToStickers") });
+    fireEvent.click(item);
+    expect(onAddSticker).toHaveBeenCalledTimes(1);
   });
 
-  it("sticker messages have no onClick lightbox handler (excluded from image viewer flow)", () => {
+  it("hides add-to-sticker menu item when onAddSticker is not provided", () => {
+    const msg: ChatMessage = {
+      id: "m1",
+      conversationId: "c1",
+      kind: "image",
+      isSelf: false,
+      senderName: "Bob",
+      image: { key: "images/x.png", width: 200, height: 200 },
+      time: "10:00",
+      seq: 1,
+    };
+    const { container } = render(<MessageBubble msg={msg} />);
+    fireEvent.contextMenu(container.querySelector(".msg-bubble-peer")!);
+
+    expect(
+      screen.queryByRole("menuitem", { name: label("sticker.addToStickers") }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("sticker messages have no onClick lightbox handler (excluded from image viewer flow)", async () => {
     const msg: ChatMessage = {
       id: "m1",
       conversationId: "c1",
@@ -71,10 +102,14 @@ describe("sticker rendering and add-to-favorites menu item", () => {
       seq: 1,
     };
     const onImageClick = vi.fn();
-    render(<MessageBubble msg={msg} onImageClick={onImageClick} />);
+    const { container } = render(<MessageBubble msg={msg} onImageClick={onImageClick} />);
 
-    const img = screen.queryByRole("img");
-    if (img) fireEvent.click(img);
+    // 必须等签名 URL 落地后再点：原实现用 `if (img) click` 兜底，而 <img> 只在
+    // getDownloadUrl resolve 后才渲染，同步查询恒为 null → 断言从未真正点到过东西
+    await vi.waitFor(() => {
+      expect(container.querySelector("img")).not.toBeNull();
+    });
+    fireEvent.click(container.querySelector("img")!);
     expect(onImageClick).not.toHaveBeenCalled();
   });
 });

@@ -602,16 +602,17 @@ packages/shared/coverage/
 
 #### 覆盖范围
 
-| 测试文件                        | 覆盖内容                                                        |
-| ------------------------------- | --------------------------------------------------------------- |
-| `e2e/login.spec.ts`             | 登录成功/失败、表单校验错误、API 错误、Enter 快捷键             |
-| `e2e/register.spec.ts`          | 注册成功/失败、表单校验、验证码加载/刷新、Enter 快捷键          |
-| `e2e/logout.spec.ts`            | 登出跳转、localStorage 清除、登出后路由守卫                     |
-| `e2e/route-guards.spec.ts`      | 未登录重定向（/ → /login）、已登录重定向（/login → /chat）      |
-| `e2e/navigation.spec.ts`        | 登录/注册页间跳转、表单状态独立                                 |
-| `e2e/authenticated-nav.spec.ts` | 已登录状态下聊天/通讯录/收藏/设置四大区域可访问、侧边栏导航链接 |
-| `e2e/search.spec.ts`            | Ctrl/Meta+K 打开搜索弹窗、输入框自动聚焦、Escape/关闭按钮关闭   |
-| `e2e/favorites.spec.ts`         | 收藏页可访问、四个分类 Tab 按钮可见且可点击                     |
+| 测试文件                        | 覆盖内容                                                                        |
+| ------------------------------- | ------------------------------------------------------------------------------- |
+| `e2e/login.spec.ts`             | 登录成功/失败、表单校验错误、API 错误、Enter 快捷键                             |
+| `e2e/register.spec.ts`          | 注册成功/失败、表单校验、验证码加载/刷新、Enter 快捷键                          |
+| `e2e/logout.spec.ts`            | 登出跳转、localStorage 清除、登出后路由守卫                                     |
+| `e2e/route-guards.spec.ts`      | 未登录重定向（/ → /login）、已登录重定向（/login → /chat）                      |
+| `e2e/navigation.spec.ts`        | 登录/注册页间跳转、表单状态独立                                                 |
+| `e2e/authenticated-nav.spec.ts` | 已登录状态下聊天/通讯录/收藏/设置四大区域可访问、侧边栏导航链接                 |
+| `e2e/search.spec.ts`            | Ctrl/Meta+K 打开搜索弹窗、输入框自动聚焦、Escape/关闭按钮关闭                   |
+| `e2e/favorites.spec.ts`         | 收藏页可访问、四个分类 Tab 按钮可见且可点击                                     |
+| `e2e/stickers.spec.ts`          | 贴纸两 tab 渲染、官方/收藏列表数量、发贴纸、图片→收藏、删除收藏、缩略图真实出图 |
 
 #### 测试文件结构
 

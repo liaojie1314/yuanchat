@@ -220,6 +220,12 @@ func (s *StickerService) ListMine(ctx context.Context, userID uuid.UUID, beforeS
 	if hasMore {
 		rows = rows[:limit]
 	}
+	// 无收藏时保证是空数组而非 nil：nil 会 marshal 成 `"stickers": null`，
+	// 而客户端把「字段不是数组」视为响应损坏并报错重试（原先客户端静默兜底成
+	// 空数组，于是"服务端返回了坏结构"和"我确实没有收藏"在 UI 上无法区分）。
+	if rows == nil {
+		rows = []model.Sticker{}
+	}
 	return rows, hasMore, nil
 }
 

@@ -182,7 +182,44 @@ H1 贴纸功能在实现过程中连续出现三次同类缺陷（`retrySend` �
   - **刻意延后**：`server/internal/router/router.go:126-135` 离线推送通知体仍硬编码
     中文 `[图片]/[文件]/[语音]/[表情]`。该文案由 OS 渲染、服务端无 per-user locale 字段，
     要做需先加用户语言偏好（建表字段 + 登录/设置写入），属独立缺口，不并入第 13 项
-- [ ] 批 D｜Task 10 收口（第 2、3、4、5、6、7 项）
+- [x] **批 D｜Task 10 收口**（第 2、3、4、5、6、7 项）
+  - 2：`check-i18n.mjs` 从「只做 locale 互相对账」扩到三层——新增
+    **代码 → locale**（源码里 `t("x.y")` 的静态 key 必须存在，358 个）与
+    **locale → 代码**（基准 key 必须在源码中出现过，否则判死键）。
+    动态调用（`t(labelKey)` / `t(cond ? "a" : "b")` / `t(MAP[x])`）无法静态解析，
+    故死键判定放宽到"任意形如 key 的字符串字面量"，上述写法仍能被认出。
+    自查过：往任意源文件塞 `t("sticker.added")` 会被第 2 层精确指出文件:行号
+  - 2 连带：门禁点出 **11 个真实死键**并已从四 locale 删除（452 → 441）——
+    `settings.profileHint`/`accountHint`、`chat.encrypted`、`detail.media`/`files`、
+    `search.jumpTo`、`admin.moderation.empty`、`report.title`/`reasonPlaceholder`/`submit`、
+    `push.unsupported`。其中 report 三键与 detail 两键像是没落地的举报弹窗/详情分页，
+    真要做时再按当时文案重新加（git 历史留有译文）
+  - 3：MSW 补齐 4 个贴纸端点（`GET /stickers/mine`、`POST /stickers`、
+    `DELETE /stickers/:id`、`GET /sticker-packs`）+ `GET /files/download-url`。
+    收藏为进程内可变状态（预置 2 张、按 `content_hash` 幂等、删不存在回 404），
+    校验规则与服务端同口径（key 锚定正则 / 64 位小写十六进制 hash / 宽高为正）；
+    download-url 回内联 SVG 的 data URL，贴纸在 mock 模式下**真的出图**，
+    不再全部落进破图占位
+  - 4：demo 消息补 `seq`（失败那条**刻意不给**，作为"入口应禁用"的反例样本）、
+    图片消息补 `image.key` → mock 模式下「添加到表情」门槛不再恒假
+  - 5：`stickers.spec.ts` 重写为 9 例，全部走仓库既有 `setAuth` + `waitForMSW` 夹具
+    （原实现走真实登录表单 + 真实后端，CI 无后端必挂）；选择器改用真实存在的
+    `[data-kind]`（本批为气泡本体补上）、`[data-sticker-id]`、role=tab/menuitem + 实际文案；
+    **删掉全部 4 处 `test.skip` 兜底**（前置条件不满足时静默通过 = 没测）；
+    末例的数量断言改为删除前后真实对比（原先拿 `.first().count()` 恒为 0/1 比较）。
+    反向验证过：把 MSW 的 `/sticker-packs` 改名后「官方 tab 列出 8 张」立刻失败
+  - 6：`MessageBubble.test` 的 `/add.*sticker|添加到表情/i` 换成按当前语言的实际译文
+    定位，并断言译文 ≠ key 本身（原正则恰好也匹配原始 key `sticker.addToStickers`，
+    i18n 写错照样绿）；顺带把 `if (item)` / `if (img)` 两处软断言改硬，
+    贴纸那条改为等 `<img>` 真的挂上再点（此前同步查询恒为 null，等于从未点到）
+  - 7：EmojiPicker 删除路径覆盖已由批 A 的第 17 项连带补齐（现 8 例，含删除成功、
+    失败回滚 + toast、官方 tab 不提供删除），本批复核确认，无需新增
+  - 连带（备注遗留）：`stickers.test` 的两条「字段缺失回退空数组」是把缺陷写成契约——
+    响应结构损坏会被兜底成"你没有收藏"，与真实空列表无从区分。现改为
+    `listMyStickers`/`listStickerPacks` 对非数组响应**抛错**（UI 走错误态 + 重试），
+    并区分"真的空"与"结构坏"两个用例；服务端 `ListMine` 同步保证空结果是 `[]` 而非
+    `nil`（否则 `null` 会撞进新的报错路径），新增 Go 用例锁死 JSON 形态
+  - 连带：`docs/02_CHAT_API.md` 记录 `stickers`/`packs` 恒为数组的约定
 - [ ] 批 E｜结构性根治（第 20、34、35 项）
 
 ## 备注
@@ -190,7 +227,8 @@ H1 贴纸功能在实现过程中连续出现三次同类缺陷（`retrySend` �
 - 合并 dev 前须完成本清单，并按记忆 `local-build-before-push-ci` 做四端真机 E2E
   （单元测试结构上测不出本清单中的大部分问题——36 项里有 5 项是被测试主动固化成"契约"的）。
 - 三条把缺陷写成规格的测试需一并改断言：`StickerImage.test` 的「签名失败只留占位」
-  （批 A 已改）、`stickers.test` 的两条「字段缺失回退空数组」（待批 D）。
+  （批 A 已改）、`stickers.test` 的两条「字段缺失回退空数组」（批 D 已改为对非数组
+  响应抛错，并新增 Go 侧空结果必为 `[]` 的用例）。
 - 批 A 未纳入的一个判断：400 类错误是**确定性失败**，重试同一帧必然再失败，
   理想做法是让重试按钮对这类消息失效。这需要给 `ChatMessage` 加 `nonRetryable` 标记
   并改 `MessageBubble` 的重试按钮渲染条件，属新增 UI 状态。

@@ -676,7 +676,9 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 ### GET /api/v1/stickers/mine（v0.4 H1）
 
 返回当前用户的**个人收藏贴纸**（`owner_id = 自己`），最新在前（`created_at DESC`）。
-无收藏时 `stickers` 为空数组。
+无收藏时 `stickers` 为空数组 `[]`（**不是 `null`**，服务端显式保证）：客户端把
+「该字段不是数组」视为响应损坏并抛错走错误态 + 重试，真实空列表不能撞进那条路径。
+`GET /api/v1/sticker-packs` 的 `packs` 同此约定。
 
 支持游标分页：`?before=<RFC3339>&limit=<n>`。页大小默认与上限均为 500，
 即**一页足以装下一个用户可能拥有的全部收藏**（收藏上限亦为 500），

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -372,5 +373,39 @@ func TestStickerListMinePagination(t *testing.T) {
 
 	if _, _, err := svc.ListMine(ctx, alice.ID, "not-a-time", 2); !errors.Is(err, ErrInvalidCursor) {
 		t.Fatalf("want ErrInvalidCursor, got %v", err)
+	}
+}
+
+// TestStickerListMineEmptyIsNonNilSlice 无收藏时必须返回空切片而非 nil。
+//
+// nil 会被 json 编成 `"stickers": null`，而客户端把「该字段不是数组」当成响应损坏
+// 直接报错重试（见 api/stickers.ts）——真实的"我还没收藏过"绝不能撞进那条错误路径。
+func TestStickerListMineEmptyIsNonNilSlice(t *testing.T) {
+	db := testDB(t)
+	db.AutoMigrate(&model.StickerPack{}, &model.Sticker{})
+	alice := newTestUser(t, db, "甲empty")
+	svc := newStickerSvc(db)
+
+	rows, hasMore, err := svc.ListMine(context.Background(), alice.ID, "", 20)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if hasMore {
+		t.Fatalf("empty list should not report hasMore")
+	}
+	if rows == nil {
+		t.Fatalf("want non-nil empty slice (marshals to []), got nil (marshals to null)")
+	}
+	if len(rows) != 0 {
+		t.Fatalf("want 0 rows, got %d", len(rows))
+	}
+
+	// 直接验 JSON 形态，避免有人日后把 nil 又放回来
+	blob, err := json.Marshal(map[string]any{"stickers": rows})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(blob) != `{"stickers":[]}` {
+		t.Fatalf("want {\"stickers\":[]}, got %s", blob)
 	}
 }
