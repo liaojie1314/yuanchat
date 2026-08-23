@@ -3,63 +3,60 @@
  *
  * @description
  * 用户在输入框敲 `@` 后 Composer 弹出的浮层：按当前 query 过滤群成员列表，
- * 键盘上下键选中 + Enter 提交，或直接点击行。选中后由 Composer 把光标处
- * 的 `@query` 段替换成 `@昵称 `，并把 userId+昵称收集到 pickedMentions。
+ * 高亮项与键盘导航一律由 Composer 掌管（受控组件），本组件只负责渲染与鼠标交互。
+ *
+ * 键盘不在这里监听是刻意的：早先版本自己在 document 上挂捕获阶段 keydown，
+ * 和 Composer 的 onKeyDown 分属两个监听器，Composer 那侧读到的是上一次渲染的
+ * 闭包状态，Enter 于是既选人又把消息发了出去。选中态上提到 Composer 后，
+ * Enter 只走一条代码路径，不再有先后顺序之争。
  *
  * @param members - 已过滤的候选成员（Composer 侧根据 query 剪枝）
+ * @param activeIndex - 当前高亮下标（由 Composer 持有）
+ * @param onActiveChange - 鼠标移入时上报高亮下标
  * @param onPick - 选中回调（Composer 内完成文本替换与 mentions 累加）
  */
-import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { ConversationMember } from "@yuanchat/shared";
 import { Avatar } from "./Avatar";
 
 export function MentionPicker({
   members,
+  activeIndex,
+  onActiveChange,
   onPick,
 }: {
   members: ConversationMember[];
+  activeIndex: number;
+  onActiveChange: (index: number) => void;
   onPick: (member: ConversationMember) => void;
 }) {
-  const [active, setActive] = useState(0);
-
-  useEffect(() => {
-    setActive(0);
-  }, [members]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (members.length === 0) return;
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setActive((i) => (i + 1) % members.length);
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setActive((i) => (i - 1 + members.length) % members.length);
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        onPick(members[active]);
-      }
-    };
-    document.addEventListener("keydown", onKey, true);
-    return () => document.removeEventListener("keydown", onKey, true);
-  }, [members, active, onPick]);
+  const { t } = useTranslation();
 
   if (members.length === 0) return null;
 
   return (
-    <div className="border-outline-variant bg-surface-container shadow-elevation-3 max-h-64 overflow-y-auto rounded-lg border p-1">
+    <div
+      role="listbox"
+      aria-label={t("chat.mention.trigger")}
+      className="border-outline-variant bg-surface-container shadow-elevation-3 max-h-64 overflow-y-auto rounded-lg border p-1"
+    >
       {members.map((m, i) => (
         <button
           key={m.userId}
-          onMouseEnter={() => setActive(i)}
+          role="option"
+          aria-selected={i === activeIndex}
+          onMouseEnter={() => onActiveChange(i)}
           onMouseDown={(e) => {
             e.preventDefault();
             onPick(m);
           }}
           className={
-            "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors " +
-            (i === active
-              ? "bg-primary-container/60 text-primary-on-container"
+            // 行圆角取面板圆角(16px)减去内边距(4px)=12px，同心才不显得方
+            "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors " +
+            // 高亮项是 Enter 的作用对象：主色浅底 + 主色描边 + 主色文字，
+            // 既一眼看得出选中，又不像实心色块那样压住头像
+            (i === activeIndex
+              ? "bg-primary/10 ring-primary/30 text-primary font-medium ring-1 ring-inset"
               : "hover:bg-surface-container-high")
           }
         >

@@ -71,14 +71,14 @@ export function TitleBar({ showMaximize = true, onClose }: TitleBarProps) {
       data-tauri-drag-region
       className="flex h-8 shrink-0 select-none items-center justify-between bg-surface-container px-2"
     >
-      <span className="text-on-surface-variant pl-2 text-label-sm font-medium">元聊 YuanChat</span>
+      <span className="pl-2 text-label-sm font-medium text-on-surface-variant">元聊 YuanChat</span>
 
       <div className="flex items-center">
         {/* 最小化 */}
         <button
           type="button"
           onClick={handleMinimize}
-          className="text-on-surface-variant inline-flex h-7 w-10 items-center justify-center rounded-md transition-colors hover:bg-surface-container-high hover:text-on-surface"
+          className="inline-flex h-7 w-10 items-center justify-center rounded-md text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
           title="最小化"
         >
           <Minus size={16} />
@@ -89,7 +89,7 @@ export function TitleBar({ showMaximize = true, onClose }: TitleBarProps) {
           <button
             type="button"
             onClick={handleToggleMaximize}
-            className="text-on-surface-variant inline-flex h-7 w-10 items-center justify-center rounded-md transition-colors hover:bg-surface-container-high hover:text-on-surface"
+            className="inline-flex h-7 w-10 items-center justify-center rounded-md text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
             title={isMaximized ? "还原" : "最大化"}
           >
             {isMaximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
@@ -100,7 +100,7 @@ export function TitleBar({ showMaximize = true, onClose }: TitleBarProps) {
         <button
           type="button"
           onClick={handleClose}
-          className="text-on-surface-variant inline-flex h-7 w-10 items-center justify-center rounded-md transition-colors hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+          className="inline-flex h-7 w-10 items-center justify-center rounded-md text-on-surface-variant transition-colors hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400"
           title="关闭"
         >
           <X size={16} />

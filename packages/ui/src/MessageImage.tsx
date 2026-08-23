@@ -25,6 +25,8 @@ import { cn } from "@yuanchat/shared/utils";
 const MAX_DISPLAY_EDGE = 280;
 /** 尺寸缺失时的占位框（历史图正常都带宽高，仅极端兜底） */
 const FALLBACK_BOX = { width: 200, height: 150 };
+/** 失败占位框的最小尺寸：要同时放下图标与一行文案，小图按原尺寸会挤烂 */
+const ERROR_BOX_MIN = { width: 132, height: 96 };
 /** 懒加载预取缓冲：进入视口前此距离即开始 presign，滚动到时图基本就绪 */
 const LAZY_ROOT_MARGIN = "300px";
 
@@ -137,11 +139,21 @@ export function MessageImage({
         type="button"
         onClick={retry}
         aria-label={t("chat.image.loadError")}
-        style={box}
-        className="bg-surface-container-high text-on-surface-variant flex flex-col items-center justify-center gap-1.5 rounded-xl transition-opacity hover:opacity-80"
+        // 失败占位不跟随原图尺寸：小图（几十像素）放不下图标与文案，
+        // 撑到最小尺寸再居中，文案限死一行，避免逐字换行的破碎版式
+        style={{
+          width: Math.max(box.width, ERROR_BOX_MIN.width),
+          height: Math.max(box.height, ERROR_BOX_MIN.height),
+        }}
+        className="bg-surface-container-high text-on-surface-variant flex flex-col items-center justify-center gap-1.5 overflow-hidden rounded-lg px-2 transition-opacity hover:opacity-80"
       >
-        <ImageOff size={28} strokeWidth={1.25} />
-        <span className="text-label-sm px-2 text-center">{t("chat.image.loadError")}</span>
+        <ImageOff size={26} strokeWidth={1.25} />
+        {/* 占位框只有 132px 宽，放不下整句提示，显示短文案（完整提示在 aria-label）。
+            w-full 是截断生效的前提：竖排 flex 下 align-items:center 让文案按内容宽度撑开，
+            单靠 truncate 只会横向溢出占位框（文案跑到气泡外面） */}
+        <span className="text-label-sm w-full truncate text-center">
+          {t("chat.image.loadErrorShort")}
+        </span>
       </button>
     );
   }
@@ -150,7 +162,7 @@ export function MessageImage({
     <div
       ref={boxRef}
       style={box}
-      className="bg-surface-container-high relative overflow-hidden rounded-xl"
+      className="bg-surface-container-high relative overflow-hidden rounded-lg"
     >
       {/* 加载占位骨架：与图同尺寸，防加载完成时的布局跳动 */}
       {state === "loading" && (

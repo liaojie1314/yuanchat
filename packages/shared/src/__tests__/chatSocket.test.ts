@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { chatSocket } from "../ws/chatSocket";
 
 // ========================================
-// Mock WebSocket
+// WebSocket 打桩
 // ========================================
 
 class MockWebSocket {

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Button, Input } from "@yuanchat/ui";
 import { validatePassword, validatePhone } from "@yuanchat/shared/utils";
 import { KeyRound, ArrowLeft, Check } from "lucide-react";
@@ -7,6 +8,7 @@ import { KeyRound, ArrowLeft, Check } from "lucide-react";
 type Step = 1 | 2 | 3;
 
 export function ForgotPasswordPage() {
+  const { t } = useTranslation();
   const [step, setStep] = useState<Step>(1);
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
@@ -31,7 +33,8 @@ export function ForgotPasswordPage() {
   const handleSendOtp = async () => {
     const result = validatePhone(phone);
     if (!result.valid) {
-      setPhoneError(result.errors[0]);
+      // 校验工具返回 i18n key，落地文案在这里翻译
+      setPhoneError(t(result.errors[0]));
       return;
     }
     setPhoneError("");
@@ -41,7 +44,7 @@ export function ForgotPasswordPage() {
       startCountdown();
       setStep(2);
     } catch {
-      setPhoneError("发送失败，请重试");
+      setPhoneError(t("auth.sendFailed"));
     } finally {
       setLoading(false);
     }
@@ -49,7 +52,7 @@ export function ForgotPasswordPage() {
 
   const handleVerifyOtp = async () => {
     if (otp.length < 4) {
-      setOtpError("请输入验证码");
+      setOtpError(t("auth.captchaRequired"));
       return;
     }
     setOtpError("");
@@ -58,7 +61,7 @@ export function ForgotPasswordPage() {
       await new Promise<void>((r) => setTimeout(r, 500));
       setStep(3);
     } catch {
-      setOtpError("验证码错误，请重试");
+      setOtpError(t("auth.otpWrong"));
     } finally {
       setLoading(false);
     }
@@ -68,11 +71,11 @@ export function ForgotPasswordPage() {
     let valid = true;
     const result = validatePassword(newPassword);
     if (!result.valid) {
-      setPasswordError(result.errors[0]);
+      setPasswordError(t(result.errors[0]));
       valid = false;
     }
     if (newPassword !== confirmPassword) {
-      setConfirmError("两次密码不一致");
+      setConfirmError(t("auth.passwordMismatch"));
       valid = false;
     }
     if (!valid) return;
@@ -82,14 +85,14 @@ export function ForgotPasswordPage() {
       await new Promise<void>((r) => setTimeout(r, 500));
       setDone(true);
     } catch {
-      setPasswordError("重置失败，请重试");
+      setPasswordError(t("auth.resetFailed"));
     } finally {
       setLoading(false);
     }
   };
 
   const steps: Step[] = [1, 2, 3];
-  const stepLabels = ["手机号", "验证码", "新密码"];
+  const stepLabels = [t("auth.phone"), t("auth.verificationCode"), t("auth.newPassword")];
 
   return (
     <div className="surface-gradient relative flex min-h-[var(--app-height,100vh)] flex-col overflow-y-auto">
@@ -103,13 +106,13 @@ export function ForgotPasswordPage() {
 
       <div className="relative m-auto w-full max-w-md px-5 py-8">
         {/* 磨砂玻璃卡片 */}
-        <div className="rounded-3xl border border-white/60 bg-white/70 px-10 py-12 shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl">
+        <div className="rounded-lg border border-white/60 bg-white/70 px-10 py-12 shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl">
           {/* Logo */}
           <div className="mb-6 text-center">
-            <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl text-white shadow-lg">
+            <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-lg text-white shadow-lg">
               <KeyRound size={28} />
             </div>
-            <h1 className="text-2xl font-bold text-on-surface">重置密码</h1>
+            <h1 className="text-2xl font-bold text-on-surface">{t("auth.resetPassword")}</h1>
           </div>
 
           {done ? (
@@ -118,14 +121,14 @@ export function ForgotPasswordPage() {
               <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
                 <Check size={28} className="text-green-600" />
               </div>
-              <p className="font-medium text-on-surface">密码重置成功</p>
-              <p className="text-on-surface-variant mt-1 text-sm">请使用新密码登录</p>
+              <p className="font-medium text-on-surface">{t("auth.resetSuccess")}</p>
+              <p className="mt-1 text-sm text-on-surface-variant">{t("auth.resetSuccessHint")}</p>
               <Link
                 to="/login"
                 replace
-                className="text-on-primary mt-6 block w-full rounded-xl bg-primary py-3 text-center text-sm font-semibold transition-opacity hover:opacity-90"
+                className="mt-6 block w-full rounded-lg bg-primary py-3 text-center text-sm font-semibold text-on-primary transition-opacity hover:opacity-90"
               >
-                立即登录
+                {t("auth.loginNow")}
               </Link>
             </div>
           ) : (
@@ -139,13 +142,13 @@ export function ForgotPasswordPage() {
                         className={[
                           "flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold transition-colors",
                           step >= s
-                            ? "text-on-primary bg-primary"
-                            : "text-on-surface-variant bg-surface-container",
+                            ? "bg-primary text-on-primary"
+                            : "bg-surface-container text-on-surface-variant",
                         ].join(" ")}
                       >
                         {step > s ? <Check size={14} /> : s}
                       </div>
-                      <span className="text-on-surface-variant text-[10px]">{stepLabels[idx]}</span>
+                      <span className="text-[10px] text-on-surface-variant">{stepLabels[idx]}</span>
                     </div>
                     {idx < steps.length - 1 && (
                       <div
@@ -162,11 +165,11 @@ export function ForgotPasswordPage() {
               {/* Step 1: Phone */}
               {step === 1 && (
                 <div className="space-y-1">
-                  <p className="text-on-surface-variant mb-4 text-center text-sm">
-                    输入绑定的手机号，发送验证码
+                  <p className="mb-4 text-center text-sm text-on-surface-variant">
+                    {t("auth.resetStepPhoneHint")}
                   </p>
                   <Input
-                    placeholder="手机号"
+                    placeholder={t("auth.phone")}
                     type="tel"
                     value={phone}
                     onChange={(e) => {
@@ -177,7 +180,7 @@ export function ForgotPasswordPage() {
                     error={phoneError}
                   />
                   <Button className="mt-1 w-full" onClick={handleSendOtp} disabled={loading}>
-                    {loading ? "发送中…" : "发送验证码"}
+                    {loading ? t("auth.sending") : t("auth.sendCode")}
                   </Button>
                 </div>
               )}
@@ -185,11 +188,11 @@ export function ForgotPasswordPage() {
               {/* Step 2: OTP */}
               {step === 2 && (
                 <div className="space-y-1">
-                  <p className="text-on-surface-variant mb-4 text-center text-sm">
-                    验证码已发送至 {phone}
+                  <p className="mb-4 text-center text-sm text-on-surface-variant">
+                    {t("auth.otpSentTo", { phone })}
                   </p>
                   <Input
-                    placeholder="6 位验证码"
+                    placeholder={t("auth.otpPlaceholder")}
                     type="text"
                     maxLength={6}
                     value={otp}
@@ -205,13 +208,15 @@ export function ForgotPasswordPage() {
                       type="button"
                       disabled={countdown > 0}
                       onClick={startCountdown}
-                      className="text-on-surface-variant text-xs hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                      className="text-xs text-on-surface-variant hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {countdown > 0 ? `重新发送 (${countdown}s)` : "重新发送"}
+                      {countdown > 0
+                        ? t("auth.resendIn", { seconds: countdown })
+                        : t("auth.resend")}
                     </button>
                   </div>
                   <Button className="mt-1 w-full" onClick={handleVerifyOtp} disabled={loading}>
-                    {loading ? "验证中…" : "下一步"}
+                    {loading ? t("auth.verifying") : t("auth.next")}
                   </Button>
                 </div>
               )}
@@ -219,11 +224,11 @@ export function ForgotPasswordPage() {
               {/* Step 3: New password */}
               {step === 3 && (
                 <div className="space-y-1">
-                  <p className="text-on-surface-variant mb-4 text-center text-sm">
-                    设置新密码（至少 8 位）
+                  <p className="mb-4 text-center text-sm text-on-surface-variant">
+                    {t("auth.resetStepPasswordHint")}
                   </p>
                   <Input
-                    placeholder="新密码"
+                    placeholder={t("auth.newPassword")}
                     type="password"
                     value={newPassword}
                     onChange={(e) => {
@@ -233,7 +238,7 @@ export function ForgotPasswordPage() {
                     error={passwordError}
                   />
                   <Input
-                    placeholder="确认新密码"
+                    placeholder={t("auth.confirmNewPassword")}
                     type="password"
                     value={confirmPassword}
                     onChange={(e) => {
@@ -244,7 +249,7 @@ export function ForgotPasswordPage() {
                     error={confirmError}
                   />
                   <Button className="mt-1 w-full" onClick={handleResetPassword} disabled={loading}>
-                    {loading ? "提交中…" : "确认修改"}
+                    {loading ? t("auth.submitting") : t("auth.confirmChange")}
                   </Button>
                 </div>
               )}
@@ -253,10 +258,10 @@ export function ForgotPasswordPage() {
                 <Link
                   to="/login"
                   replace
-                  className="text-on-surface-variant inline-flex items-center gap-1.5 hover:text-primary hover:opacity-80"
+                  className="inline-flex items-center gap-1.5 text-on-surface-variant hover:text-primary hover:opacity-80"
                 >
                   <ArrowLeft size={14} />
-                  返回登录
+                  {t("auth.backToLogin")}
                 </Link>
               </p>
             </>

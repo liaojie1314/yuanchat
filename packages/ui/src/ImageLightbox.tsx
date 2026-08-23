@@ -45,7 +45,7 @@ export function ImageLightbox({ url, onClose }: { url: string; onClose: () => vo
       <button
         onClick={onClose}
         aria-label={t("chat.lightbox.close")}
-        className="absolute top-4 right-4 grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+        className="absolute top-4 right-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
       >
         <X size={22} />
       </button>

@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// UserRepository handles database operations for the users table.
+// UserRepository 负责 users 表的数据库读写。
 type UserRepository struct {
 	db *gorm.DB
 }
@@ -18,12 +18,12 @@ func NewUserRepository(db *gorm.DB) *UserRepository {
 	return &UserRepository{db: db}
 }
 
-// Create inserts a new user record.
+// Create 插入一条用户记录。
 func (r *UserRepository) Create(ctx context.Context, user *model.User) error {
 	return r.db.WithContext(ctx).Create(user).Error
 }
 
-// FindByID looks up a user by UUID.
+// FindByID 按 UUID 查用户。
 func (r *UserRepository) FindByID(ctx context.Context, id uuid.UUID) (*model.User, error) {
 	var user model.User
 	err := r.db.WithContext(ctx).First(&user, "id = ?", id).Error
@@ -44,7 +44,7 @@ func (r *UserRepository) FindByIDs(ctx context.Context, ids []uuid.UUID) ([]mode
 	return users, err
 }
 
-// FindByPhone looks up a user by phone number.
+// FindByPhone 按手机号查用户。
 func (r *UserRepository) FindByPhone(ctx context.Context, phone string) (*model.User, error) {
 	var user model.User
 	err := r.db.WithContext(ctx).First(&user, "phone = ?", phone).Error
@@ -54,7 +54,7 @@ func (r *UserRepository) FindByPhone(ctx context.Context, phone string) (*model.
 	return &user, err
 }
 
-// FindByEmail looks up a user by email.
+// FindByEmail 按邮箱查用户。
 func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*model.User, error) {
 	var user model.User
 	err := r.db.WithContext(ctx).First(&user, "email = ?", email).Error
@@ -74,7 +74,7 @@ func (r *UserRepository) FindByShortID(ctx context.Context, shortID int64) (*mod
 	return &user, err
 }
 
-// ExistsByPhoneOrEmail checks whether a phone or email is already registered.
+// ExistsByPhoneOrEmail 判断手机号或邮箱是否已被注册。
 func (r *UserRepository) ExistsByPhoneOrEmail(ctx context.Context, phone, email string) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&model.User{}).
@@ -83,7 +83,7 @@ func (r *UserRepository) ExistsByPhoneOrEmail(ctx context.Context, phone, email 
 	return count > 0, err
 }
 
-// Update modifies an existing user's fields.
+// Update 更新已有用户的字段。
 func (r *UserRepository) Update(ctx context.Context, user *model.User) error {
 	return r.db.WithContext(ctx).Save(user).Error
 }

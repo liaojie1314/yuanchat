@@ -3,7 +3,7 @@
  *
  * @description
  * 从好友列表多选成员创建群聊，视觉沿用 AddContactModal 模式
- * （fixed 遮罩 bg-black/40 + bg-surface-container-low rounded-2xl 卡片）：
+ * （fixed 遮罩 bg-black/40 + bg-surface-container-low rounded-lg 卡片）：
  * - 可选群名输入（maxLength 100，留空由后端按成员昵称拼默认名）
  * - 顶部已选头像横排（点击移除）
  * - 好友字母分组多选列表（复用 groupFriends），行内 checkbox 选中态高亮
@@ -107,7 +107,7 @@ export function CreateGroupModal({ open, onClose }: CreateGroupModalProps) {
       onClick={handleClose}
     >
       <div
-        className="bg-surface-container-low flex max-h-[80vh] w-full max-w-sm flex-col rounded-xl shadow-xl"
+        className="bg-surface-container-low flex max-h-[80vh] w-full max-w-sm flex-col rounded-lg shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 头部 */}
@@ -144,7 +144,7 @@ export function CreateGroupModal({ open, onClose }: CreateGroupModalProps) {
                   aria-label={t("chat.group.removeMember")}
                 >
                   <Avatar name={f.nickname} src={f.avatarUrl} size="md" />
-                  <span className="bg-error absolute -top-0.5 -right-0.5 grid h-4 w-4 place-items-center rounded-full text-white">
+                  <span className="bg-error absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full text-white">
                     <X size={11} />
                   </span>
                 </button>
@@ -185,7 +185,7 @@ export function CreateGroupModal({ open, onClose }: CreateGroupModalProps) {
                         </span>
                         <span
                           className={cn(
-                            "grid h-5 w-5 shrink-0 place-items-center rounded-full border transition-colors",
+                            "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors",
                             checked
                               ? "border-primary bg-primary text-primary-on"
                               : "border-outline",

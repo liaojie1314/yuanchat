@@ -20,11 +20,19 @@ import {
   chatSocket,
   fetchMembers,
   isMockEnabled,
+  quoteExcerptOf,
   useConversationStore,
   useMessageStore,
 } from "@yuanchat/shared";
 import type { ConversationMember, MentionRef } from "@yuanchat/shared";
-import { cn } from "@yuanchat/shared/utils";
+import {
+  cn,
+  mentionSpanAfter,
+  mentionSpanBefore,
+  mentionTokenAfter,
+  mentionTokenBefore,
+  repairMentionDeletion,
+} from "@yuanchat/shared/utils";
 import { EmojiPicker } from "./EmojiPicker";
 import { MentionPicker } from "./MentionPicker";
 import { VoiceRecorderBar } from "./VoiceRecorderBar";
@@ -79,11 +87,25 @@ export function Composer({
   const [pickedMentions, setPickedMentions] = useState<MentionRef[]>([]);
   // @ 触发：光标前的 @ 与其后未空白段为 query
   const [mentionQuery, setMentionQuery] = useState<{ start: number; query: string } | null>(null);
+  // 选择器高亮下标：由 Composer 持有，键盘导航与 Enter 选中都在 handleKeyDown 里完成
+  const [mentionActive, setMentionActive] = useState(0);
   const filteredMembers = useMemo(() => {
     if (!mentionQuery) return [];
     const q = mentionQuery.query.toLowerCase();
     return members.filter((m) => !q || m.nickname.toLowerCase().includes(q));
   }, [members, mentionQuery]);
+  // 候选集变化后高亮回到首项（过滤后原下标可能已越界）
+  useEffect(() => {
+    setMentionActive(0);
+  }, [filteredMembers]);
+  // 可整体删除的提及昵称：已选提及 + 全体成员（手打的 @昵称 也当提及处理）
+  const mentionNames = useMemo(() => {
+    const names = pickedMentions.map((m) => m.name);
+    members.forEach((m) => {
+      if (names.indexOf(m.nickname) < 0) names.push(m.nickname);
+    });
+    return names;
+  }, [members, pickedMentions]);
 
   const canSend = value.trim().length > 0;
 
@@ -104,6 +126,18 @@ export function Composer({
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, [showEmoji]);
 
+  /**
+   * 开合表情面板。
+   *
+   * 开面板前先收键盘：安卓上表情面板与软键盘会同时占屏（面板是行内渲染的，
+   * 键盘再顶起来就把输入行挤没了），二者必须互斥。
+   */
+  const toggleEmoji = () => {
+    const next = !showEmoji;
+    if (next) textareaRef.current?.blur();
+    setShowEmoji(next);
+  };
+
   /** 在光标处插入 emoji，并在下一帧恢复焦点与光标位置 */
   const insertEmoji = (emoji: string) => {
     const el = textareaRef.current;
@@ -116,10 +150,23 @@ export function Composer({
     const next = value.slice(0, start) + emoji + value.slice(end);
     setValue(next);
     requestAnimationFrame(() => {
-      el.focus();
+      // 移动端不抢焦点：面板还开着，聚焦会把软键盘一起顶上来
+      if (!compact) el.focus();
       const pos = start + emoji.length;
       el.setSelectionRange(pos, pos);
     });
+  };
+
+  /** 发送贴纸：调用 store.sendSticker，关闭面板 */
+  const sendSticker = (sticker: {
+    id: string;
+    objectKey: string;
+    width: number;
+    height: number;
+  }) => {
+    if (!activeId) return;
+    void useMessageStore.getState().sendSticker(activeId, sticker);
+    setShowEmoji(false);
   };
 
   const notifyTyping = () => {
@@ -144,9 +191,25 @@ export function Composer({
 
   /** 处理 textarea 输入：检测 @ 触发点 */
   const handleValueChange = (next: string) => {
+    const el = textareaRef.current;
+    // 安卓输入法的退格拦不下来（keydown 无按键信息、beforeinput 不可取消），
+    // 删除已经发生，这里把被啃掉一角的 @提及残片补删干净
+    if (isGroup && el) {
+      const caretAfter = el.selectionStart ?? next.length;
+      const repaired = repairMentionDeletion(value, next, caretAfter, mentionNames);
+      if (repaired) {
+        setValue(repaired.value);
+        setMentionQuery(null);
+        requestAnimationFrame(() => {
+          el.focus();
+          el.setSelectionRange(repaired.caret, repaired.caret);
+          autoGrow(el);
+        });
+        return;
+      }
+    }
     setValue(next);
     if (!isGroup) return;
-    const el = textareaRef.current;
     const caret = el?.selectionStart ?? next.length;
     // 光标位置往前找最近的 @，空白截断
     let i = caret - 1;
@@ -237,11 +300,95 @@ export function Composer({
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // MentionPicker 打开时 ArrowUp/Down/Enter 归它消费；避免 Enter 同时发送消息
+    // 选择器打开时上下键/Enter/Esc 归它消费：全部在这一个监听器里处理，
+    // Enter 选人后必须 return，绝不能穿到下面的发送分支
     if (mentionQuery && filteredMembers.length > 0) {
-      if (e.key === "Enter" || e.key === "ArrowUp" || e.key === "ArrowDown") return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionActive((i) => (i + 1) % filteredMembers.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionActive((i) => (i - 1 + filteredMembers.length) % filteredMembers.length);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        handlePickMention(filteredMembers[Math.min(mentionActive, filteredMembers.length - 1)]);
+        return;
+      }
       if (e.key === "Escape") {
+        e.preventDefault();
         setMentionQuery(null);
+        return;
+      }
+    }
+    // @提及整体删除：光标紧邻 "@昵称" 时，一次退格/删除清掉整段（连尾随空格），
+    // 而不是逐字符啃出 "@李" 这种发不出去的残片。
+    // 正在敲 @query（选择器判定中）时不整体处理：此刻用户是在编辑昵称本身
+    if (
+      !mentionQuery &&
+      (e.key === "Backspace" || e.key === "Delete") &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      textareaRef.current
+    ) {
+      const el = textareaRef.current;
+      const caret = el.selectionStart ?? 0;
+      if (caret === (el.selectionEnd ?? caret)) {
+        const span =
+          e.key === "Backspace"
+            ? mentionSpanBefore(value, caret, mentionNames)
+            : mentionSpanAfter(value, caret, mentionNames);
+        if (span) {
+          e.preventDefault();
+          const next = value.slice(0, span.start) + value.slice(span.end);
+          setValue(next);
+          setMentionQuery(null);
+          requestAnimationFrame(() => {
+            el.focus();
+            el.setSelectionRange(span.start, span.start);
+            autoGrow(el);
+          });
+          return;
+        }
+      }
+    }
+    // @提及整体移动：左右方向键一次跨过整个 "@昵称"，光标不会停在昵称中间；
+    // 按住 Shift 则整段一次纳入/退出选区。尾随空格仍是普通字符，单独走一步
+    if (
+      !mentionQuery &&
+      (e.key === "ArrowLeft" || e.key === "ArrowRight") &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      textareaRef.current
+    ) {
+      const el = textareaRef.current;
+      const selStart = el.selectionStart ?? 0;
+      const selEnd = el.selectionEnd ?? selStart;
+      // 选区的活动端：无选区时就是光标，有选区时按 selectionDirection 取
+      const focus =
+        selStart === selEnd ? selStart : el.selectionDirection === "backward" ? selStart : selEnd;
+      const token =
+        e.key === "ArrowLeft"
+          ? mentionTokenBefore(value, focus, mentionNames)
+          : mentionTokenAfter(value, focus, mentionNames);
+      if (token) {
+        e.preventDefault();
+        const next = e.key === "ArrowLeft" ? token.start : token.end;
+        if (e.shiftKey) {
+          const anchor = selStart === selEnd ? focus : focus === selStart ? selEnd : selStart;
+          el.setSelectionRange(
+            Math.min(anchor, next),
+            Math.max(anchor, next),
+            next < anchor ? "backward" : "forward",
+          );
+        } else {
+          el.setSelectionRange(next, next);
+        }
         return;
       }
     }
@@ -263,7 +410,8 @@ export function Composer({
         <span className="text-primary text-label-sm font-medium">
           {t("chat.reply.label", { name: replyingTo.senderName ?? "" })}
         </span>{" "}
-        {replyingTo.text ?? replyingTo.file?.name ?? t("chat.message.image")}
+        {/* 语音/贴纸引用此前一律显示"[图片]"，摘要口径与发送出去的 quote.excerpt 统一 */}
+        {quoteExcerptOf(replyingTo)}
       </span>
       <button
         onClick={() => setReplyingTo(null)}
@@ -295,7 +443,12 @@ export function Composer({
       <div className="bg-surface-container-low relative shrink-0 px-2.5 pt-2 pb-3">
         {mentionQuery && filteredMembers.length > 0 && (
           <div className="animate-slide-up absolute bottom-full left-2.5 z-20 mb-1 w-56">
-            <MentionPicker members={filteredMembers} onPick={handlePickMention} />
+            <MentionPicker
+              members={filteredMembers}
+              activeIndex={mentionActive}
+              onActiveChange={setMentionActive}
+              onPick={handlePickMention}
+            />
           </div>
         )}
         {replyBar}
@@ -325,15 +478,17 @@ export function Composer({
             }}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
+            // 点输入框要打字 → 收表情面板（键盘要上来，二者互斥）
+            onFocus={() => setShowEmoji(false)}
             placeholder={t("chat.input.placeholder")}
             aria-label={t("chat.input.placeholder")}
-            className="bg-surface-container-high text-body-lg text-on-surface placeholder:text-on-surface-variant/70 max-h-28 min-w-0 flex-1 resize-none rounded-3xl px-4 py-2.5 focus:outline-none"
+            className="bg-surface-container-high text-body-lg text-on-surface placeholder:text-on-surface-variant/70 max-h-28 min-w-0 flex-1 resize-none rounded-lg px-4 py-2.5 focus:outline-none"
           />
           <button
             className="md3-icon-btn text-on-surface-variant"
             aria-label={t("chat.input.emoji")}
             onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => setShowEmoji((s) => !s)}
+            onClick={toggleEmoji}
           >
             <Smile size={20} />
           </button>
@@ -341,7 +496,7 @@ export function Composer({
             <button
               onClick={send}
               aria-label={t("chat.input.send")}
-              className="brand-gradient grid h-10 w-10 shrink-0 place-items-center rounded-full text-white transition-transform active:scale-90"
+              className="brand-gradient flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white transition-transform active:scale-90"
             >
               <Send size={17} />
             </button>
@@ -357,8 +512,13 @@ export function Composer({
         </div>
         {/* 移动端：面板行内渲染在输入行下方，推高布局（不悬浮，规避安卓键盘 fixed 定位坑） */}
         {showEmoji && (
-          <div className="animate-slide-up mt-2 h-56">
-            <EmojiPicker compact onPick={insertEmoji} onClose={() => setShowEmoji(false)} />
+          <div className="animate-slide-up mt-2 h-72">
+            <EmojiPicker
+              compact
+              onPick={insertEmoji}
+              onClose={() => setShowEmoji(false)}
+              onPickSticker={sendSticker}
+            />
           </div>
         )}
         {fileInput}
@@ -371,20 +531,29 @@ export function Composer({
     <div className="border-outline-variant bg-surface-container-low relative shrink-0 border-t px-3 pt-2.5 pb-3">
       {/* 桌面：面板浮层定位于输入卡片上方 */}
       {showEmoji && (
-        <div className="animate-slide-up absolute bottom-full left-3 z-10 mb-1 max-h-72 w-80">
-          <EmojiPicker onPick={insertEmoji} onClose={() => setShowEmoji(false)} />
+        <div className="animate-slide-up absolute bottom-full left-3 z-10 mb-1 h-72 w-80">
+          <EmojiPicker
+            onPick={insertEmoji}
+            onClose={() => setShowEmoji(false)}
+            onPickSticker={sendSticker}
+          />
         </div>
       )}
       {mentionQuery && filteredMembers.length > 0 && (
         <div className="absolute bottom-full left-3 z-20 mb-1 w-64">
-          <MentionPicker members={filteredMembers} onPick={handlePickMention} />
+          <MentionPicker
+            members={filteredMembers}
+            activeIndex={mentionActive}
+            onActiveChange={setMentionActive}
+            onPick={handlePickMention}
+          />
         </div>
       )}
       {replyBar}
       {recording ? (
         voiceBar
       ) : (
-        <div className="border-outline-variant focus-within:border-primary focus-within:ring-primary/15 bg-surface-bright dark:bg-surface-container group rounded-2xl border transition-shadow focus-within:ring-[3px]">
+        <div className="border-outline-variant focus-within:border-primary focus-within:ring-primary/15 bg-surface-bright dark:bg-surface-container group rounded-lg border transition-shadow focus-within:ring-[3px]">
           <textarea
             ref={textareaRef}
             rows={1}
@@ -407,11 +576,7 @@ export function Composer({
             <ToolButton label={t("chat.input.file")} onClick={openAnyFilePicker}>
               <Paperclip size={19} />
             </ToolButton>
-            <ToolButton
-              label={t("chat.input.emoji")}
-              onClick={() => setShowEmoji((s) => !s)}
-              active={showEmoji}
-            >
+            <ToolButton label={t("chat.input.emoji")} onClick={toggleEmoji} active={showEmoji}>
               <Smile size={19} />
             </ToolButton>
             <ToolButton label={t("chat.input.voice")} onClick={() => setRecording(true)}>
@@ -448,7 +613,7 @@ export function Composer({
               disabled={!canSend}
               aria-label={t("chat.input.send")}
               className={cn(
-                "brand-gradient grid h-9 w-9 shrink-0 place-items-center rounded-full text-white transition-all",
+                "brand-gradient flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white transition-all",
                 canSend
                   ? "hover:brightness-105 active:scale-90"
                   : "cursor-not-allowed opacity-40 grayscale-[0.3]",

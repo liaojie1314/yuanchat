@@ -31,7 +31,7 @@ type CreateGroupBody struct {
 
 // Create 建群：校验全员为好友后创建群会话，推送 conversation.created 给全部成员。
 //
-//	@Summary		Create group conversation
+//	@Summary		创建群聊
 //	@Tags			chat
 //	@Security		BearerAuth
 //	@Success		201	{object}	Response
@@ -77,9 +77,9 @@ func (h *ConversationHandler) Create(c *gin.Context) {
 	Created(c, dto)
 }
 
-// List returns all conversations the current user participates in.
+// List 返回当前用户参与的全部会话。
 //
-//	@Summary		List conversations
+//	@Summary		会话列表
 //	@Tags			chat
 //	@Security		BearerAuth
 //	@Success		200	{object}	Response

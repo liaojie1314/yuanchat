@@ -102,7 +102,7 @@ export function InviteMembersModal({
                   aria-label={t("chat.group.removeMember")}
                 >
                   <Avatar name={f.nickname} src={f.avatarUrl} size="md" />
-                  <span className="bg-error absolute -top-0.5 -right-0.5 grid h-4 w-4 place-items-center rounded-full text-white">
+                  <span className="bg-error absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full text-white">
                     <X size={11} />
                   </span>
                 </button>
@@ -142,7 +142,7 @@ export function InviteMembersModal({
                         </span>
                         <span
                           className={cn(
-                            "grid h-5 w-5 shrink-0 place-items-center rounded-full border transition-colors",
+                            "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors",
                             checked
                               ? "border-primary bg-primary text-primary-on"
                               : "border-outline",

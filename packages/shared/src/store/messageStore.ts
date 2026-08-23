@@ -24,13 +24,14 @@ import {
   pseudoWave,
 } from "../api/chat";
 import { compressImage, getUploadUrl, uploadToTicket } from "../api/files";
-import { chatSocket } from "../ws/chatSocket";
+import { asServerMessageId, chatSocket } from "../ws/chatSocket";
+import type { ClientFrames } from "../ws/chatSocket";
 import { encryptFor } from "../crypto/e2eeManager";
 import { useAuthStore } from "./authStore";
 import { showToast } from "./toastStore";
 
 /** 消息在气泡里呈现的内容类别 */
-export type ChatMessageKind = "text" | "image" | "file" | "voice" | "system";
+export type ChatMessageKind = "text" | "image" | "file" | "voice" | "system" | "sticker";
 
 /** 发送状态机（仅自己发出的消息有意义） */
 export type ChatMessageStatus = "sending" | "sent" | "read" | "failed";
@@ -93,6 +94,8 @@ export interface ChatMessage {
   isSelf: boolean;
   /** 发送者昵称（群聊接收方气泡上方显示） */
   senderName?: string;
+  /** 发送者用户 ID（点头像查看资料用；本地乐观条目不带，自己的资料走设置页） */
+  senderId?: string;
   /** 文本内容（text / system 消息） */
   text?: string;
   /**
@@ -103,6 +106,12 @@ export interface ChatMessage {
   image?: { width: number; height: number; key?: string; localUrl?: string };
   file?: FilePayload;
   voice?: VoicePayload;
+  /**
+   * 贴纸消息载荷：width/height 为像素尺寸（固定小尺寸渲染）。
+   * - stickerId：贴纸 ID（关联 stickers 表）
+   * - key：对象存储 key（签下载 URL 渲染）
+   */
+  sticker?: { stickerId?: string; key?: string; width: number; height: number };
   quote?: QuoteRef;
   reactions?: Reaction[];
   /** @提及的用户 ID 列表（渲染时高亮相应昵称段） */
@@ -165,6 +174,11 @@ interface MessageState {
   sendFile: (conversationId: string, file: File) => Promise<void>;
   /** 发送一段语音：乐观插入（伪波形）→ 直传 webm → WS voice 帧 */
   sendVoice: (conversationId: string, blob: Blob, duration: number) => Promise<void>;
+  /** 发送贴纸消息：乐观插入 sending 状态，通过 WS 发送 */
+  sendSticker: (
+    conversationId: string,
+    sticker: { id: string; objectKey: string; width: number; height: number },
+  ) => void;
   /** 重试发送失败的消息（复用原 client_msg_id；图片则从 localUrl 重传） */
   retrySend: (conversationId: string, messageId: string) => void;
   /** WebSocket message.receive：追加新消息（自动按 clientMsgId 去重自己的回显） */
@@ -480,6 +494,51 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     await dispatchVoiceSend(conversationId, blob, duration, clientMsgId, get);
   },
 
+  sendSticker: (conversationId, sticker) => {
+    const clientMsgId = newClientMsgId();
+    const msg: ChatMessage = {
+      id: clientMsgId,
+      conversationId,
+      kind: "sticker",
+      isSelf: true,
+      sticker: {
+        stickerId: sticker.id,
+        key: sticker.objectKey,
+        width: sticker.width,
+        height: sticker.height,
+      },
+      time: now(),
+      dateKey: dateKeyOf(new Date()),
+      createdAtMs: Date.now(),
+      status: "sending",
+      clientMsgId,
+    };
+    set((s) => ({
+      messagesByConv: {
+        ...s.messagesByConv,
+        [conversationId]: [...(s.messagesByConv[conversationId] ?? []), msg],
+      },
+      replyingTo: null,
+    }));
+
+    if (mockMode) {
+      setTimeout(() => get().setStatus(conversationId, clientMsgId, "sent"), 500);
+      return;
+    }
+
+    dispatchStickerSend(
+      conversationId,
+      {
+        stickerId: sticker.id,
+        key: sticker.objectKey,
+        width: sticker.width,
+        height: sticker.height,
+      },
+      clientMsgId,
+      get,
+    );
+  },
+
   retrySend: (conversationId, messageId) => {
     const msg = (get().messagesByConv[conversationId] ?? []).find((m) => m.id === messageId);
     if (!msg) return;
@@ -543,6 +602,25 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
         .then((r) => r.blob())
         .then((blob) => dispatchVoiceSend(conversationId, blob, duration, clientMsgId, get))
         .catch(() => get().setStatus(conversationId, messageId, "failed"));
+      return;
+    }
+
+    // 贴纸：对象已在存储里，重试只需按原 client_msg_id 重发同一帧（无需重传字节）
+    if (msg.kind === "sticker") {
+      const st = msg.sticker;
+      if (!st?.stickerId || !st.key) return;
+      get().setStatus(conversationId, messageId, "sending");
+      if (mockMode) {
+        setTimeout(() => get().setStatus(conversationId, messageId, "sent"), 700);
+        return;
+      }
+      const clientMsgId = msg.clientMsgId ?? messageId;
+      dispatchStickerSend(
+        conversationId,
+        { stickerId: st.stickerId, key: st.key, width: st.width, height: st.height },
+        clientMsgId,
+        get,
+      );
       return;
     }
 
@@ -733,12 +811,16 @@ function dispatchSend(
   get: () => MessageState,
   extras?: { replyToId?: string; mentionIds?: string[] },
 ) {
-  const payload: Record<string, unknown> = {
+  // 帧结构由 ClientFrames["message.send"] 约束（原先是 Record<string, unknown>，
+  // 字段名写错/漏字段编译期无人管——reply_to_id 误填 clientMsgId 就是这么漏出去的）。
+  const payload: ClientFrames["message.send"] = {
     conversation_id: conversationId,
     content: { type: "text", text },
     client_msg_id: clientMsgId,
   };
-  if (extras?.replyToId) payload.reply_to_id = extras.replyToId;
+  // replyToId 来自被引用消息，而调用方（ChatWindow）已用 isServerConfirmed 闸门
+  // 保证它是服务端 id；此处的断言就是那份保证的落点。
+  if (extras?.replyToId) payload.reply_to_id = asServerMessageId(extras.replyToId);
   if (extras?.mentionIds && extras.mentionIds.length > 0) payload.mentions = extras.mentionIds;
 
   // E2EE：单聊且双方均已开启时改发密文。加密涉及网络（首次取 prekey
@@ -755,10 +837,16 @@ function dispatchSend(
 async function maybeEncryptAndSend(
   conversationId: string,
   text: string,
-  payload: Record<string, unknown>,
+  payload: ClientFrames["message.send"],
   clientMsgId: string,
   get: () => MessageState,
 ) {
+  // ack 超时必须在 await 之前挂：encryptFor 首次给某对端发消息会去拉 prekey
+  // bundle（走 fetch，无超时），网络挂死时若等它 settle 才计时，消息会永久停在
+  // sending——既不 failed 也不出现重试按钮。提前挂表也安全：定时器回调只对仍是
+  // sending 的消息生效，下面 catch 分支置 failed 后它就是空操作。
+  armAckTimeout(conversationId, clientMsgId, get);
+
   const selfId = getSelfId?.();
   const peerId = getPeerId?.(conversationId);
 
@@ -776,7 +864,6 @@ async function maybeEncryptAndSend(
   }
 
   chatSocket.send("message.send", payload);
-  armAckTimeout(conversationId, clientMsgId, get);
 }
 
 /**
@@ -959,6 +1046,33 @@ async function dispatchVoiceSend(
   chatSocket.send("message.send", {
     conversation_id: conversationId,
     content: { type: "voice", key, duration, size: blob.size },
+    client_msg_id: clientMsgId,
+  });
+  armAckTimeout(conversationId, clientMsgId, get);
+}
+
+/**
+ * 贴纸发送：发 WS sticker 帧（sticker_id + key + 宽高）。
+ *
+ * @remarks 帧字段必须与服务端 `ws/handler.go` 的 `buildContent` case "sticker" 完全一致
+ *   （四项缺一或宽高 ≤ 0 服务端即回 400）。首发与重试共用本函数，避免两处各写一份漂移。
+ *   与 image/file/voice 不同，贴纸对象已在存储里，无需上传字节，故为同步函数。
+ */
+function dispatchStickerSend(
+  conversationId: string,
+  sticker: { stickerId: string; key: string; width: number; height: number },
+  clientMsgId: string,
+  get: () => MessageState,
+) {
+  chatSocket.send("message.send", {
+    conversation_id: conversationId,
+    content: {
+      type: "sticker",
+      sticker_id: sticker.stickerId,
+      key: sticker.key,
+      width: sticker.width,
+      height: sticker.height,
+    },
     client_msg_id: clientMsgId,
   });
   armAckTimeout(conversationId, clientMsgId, get);

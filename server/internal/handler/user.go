@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// UserHandler handles user authentication and profile endpoints.
+// UserHandler 负责用户认证与个人资料相关端点。
 type UserHandler struct {
 	svc     *service.UserService
 	captcha *CaptchaHandler
@@ -22,7 +22,7 @@ func NewUserHandler(svc *service.UserService, captcha *CaptchaHandler, logger *z
 	return &UserHandler{svc: svc, captcha: captcha, logger: logger}
 }
 
-// Register creates a new user account after CAPTCHA validation.
+// Register 校验图形验证码后创建新账号。
 func (h *UserHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -59,7 +59,7 @@ func (h *UserHandler) Register(c *gin.Context) {
 	})
 }
 
-// Login authenticates a user and returns JWT tokens.
+// Login 认证用户并返回 JWT 令牌。
 func (h *UserHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -93,7 +93,7 @@ func (h *UserHandler) Login(c *gin.Context) {
 	})
 }
 
-// Refresh exchanges a refresh token for a new token pair (sliding session).
+// Refresh 用 refresh 令牌换取新的令牌对（滑动会话）。
 func (h *UserHandler) Refresh(c *gin.Context) {
 	var req RefreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -119,7 +119,7 @@ func (h *UserHandler) Refresh(c *gin.Context) {
 	})
 }
 
-// GetProfile returns the current user's profile.
+// GetProfile 返回当前用户的个人资料。
 func (h *UserHandler) GetProfile(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -141,7 +141,7 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 	Success(c, user)
 }
 
-// UpdateProfile updates the current user's profile fields.
+// UpdateProfile 更新当前用户的资料字段。
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -198,7 +198,7 @@ func (h *UserHandler) GetPublicProfile(c *gin.Context) {
 	})
 }
 
-// --- Request/Response types ---
+// --- 请求 / 响应结构 ---
 
 type RegisterRequest struct {
 	Phone         string `json:"phone" binding:"omitempty,len=11"`

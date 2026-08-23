@@ -6,31 +6,58 @@
  * 点击"删除"按钮取消收藏，长列表支持翻页加载。
  */
 import { useCallback, useEffect, useState } from "react";
-import { FileText, Image, Loader2, MessageSquare, Star, Trash2 } from "lucide-react";
+import { FileText, Image, Loader2, MessageSquare, Mic, Smile, Star, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { captureException, listFavorites, removeFavorite, showToast } from "@yuanchat/shared";
+import {
+  captureException,
+  listFavorites,
+  previewBodyOf,
+  removeFavorite,
+  showToast,
+} from "@yuanchat/shared";
 import type { FavoriteItem } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 
 type TabType = 0 | 1 | 2 | 3; // 0=全部 1=文字 2=图片 3=文件
 
-/** 解析收藏 content JSON，返回可显示的摘要文本。 */
+/** message_type → 会话预览用的类型标记（与服务端 preview_kind 同名）。 */
+const KIND_BY_TYPE: Record<number, string> = {
+  1: "text",
+  2: "image",
+  3: "file",
+  4: "voice",
+  5: "video",
+  6: "system",
+  7: "encrypted",
+  8: "sticker",
+};
+
+/**
+ * 解析收藏 content JSON，返回可显示的摘要文本。
+ *
+ * @remarks 非文本类型的占位文案走 i18n（原实现对任何带 key 的 content 一律返回
+ *   硬编码英文 `"[media]"`，且贴纸没有分支）。文件优先显示文件名。
+ */
 function parseExcerpt(item: FavoriteItem): string {
+  const kind = KIND_BY_TYPE[item.message_type];
   try {
     const c = JSON.parse(item.content) as Record<string, unknown>;
-    if (typeof c.text === "string") return c.text.slice(0, 80);
-    if (typeof c.name === "string") return c.name;
-    if (typeof c.key === "string") return "[media]";
+    if ((kind === "text" || kind === "system") && typeof c.text === "string") {
+      return c.text.slice(0, 80);
+    }
+    if (kind === "file" && typeof c.name === "string" && c.name) return c.name;
   } catch {
-    // content 非合法 JSON 时静默忽略
+    // content 非合法 JSON 时退到类型占位文案
   }
-  return "";
+  return previewBodyOf(kind);
 }
 
 /** 消息类型 → 图标组件。 */
 function TypeIcon({ type }: { type: number }) {
   if (type === 2) return <Image size={16} className="shrink-0 text-blue-400" />;
   if (type === 3) return <FileText size={16} className="shrink-0 text-orange-400" />;
+  if (type === 4) return <Mic size={16} className="shrink-0 text-green-400" />;
+  if (type === 8) return <Smile size={16} className="shrink-0 text-yellow-400" />;
   return <MessageSquare size={16} className="shrink-0 text-gray-400" />;
 }
 

@@ -1,0 +1,153 @@
+{
+  "$comment": [
+    "message.send 帧的黄金样本 — 前端与 Go 服务端共用的唯一契约来源。",
+    "前端（packages/shared/src/__tests__/messageSendGolden.test.ts）驱动 messageStore 真的发一帧，",
+    "把 chatSocket.send 收到的 payload 与本文件深比较；",
+    "Go 侧（server/internal/ws/golden_contract_test.go）把同一份 payload 反序列化进 ws.SendPayload，",
+    "跑 buildContent 并断言 ok=true 且 message_type 与 expected_message_type 一致。",
+    "任一侧改字段名/类型/嵌套层级 → 两侧同时变红。",
+    "此前两端各写一份'同构但独立'的断言，从未跑过同一份 JSON，改字段名照样双绿。",
+    "约定：client_msg_id 是客户端随机生成的，故统一写成占位符 <client_msg_id>，",
+    "前端比较前把实际值换成该占位符；Go 侧不校验其内容。",
+    "conversation_id / reply_to_id / mentions / sticker_id 必须是合法 UUID（Go 侧按 uuid.UUID 解析）。"
+  ],
+  "cases": [
+    {
+      "name": "text",
+      "expected_message_type": 1,
+      "frame": {
+        "type": "message.send",
+        "payload": {
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "content": { "type": "text", "text": "你好，golden" },
+          "client_msg_id": "<client_msg_id>"
+        }
+      }
+    },
+    {
+      "name": "text_with_reply_and_mentions",
+      "expected_message_type": 1,
+      "frame": {
+        "type": "message.send",
+        "payload": {
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "content": { "type": "text", "text": "@张伟 看下这条" },
+          "client_msg_id": "<client_msg_id>",
+          "reply_to_id": "22222222-2222-4222-8222-222222222222",
+          "mentions": ["33333333-3333-4333-8333-333333333333"]
+        }
+      }
+    },
+    {
+      "name": "image",
+      "expected_message_type": 2,
+      "frame": {
+        "type": "message.send",
+        "payload": {
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "content": {
+            "type": "image",
+            "key": "images/2026/08/0f5a1c00-0001.jpg",
+            "width": 800,
+            "height": 600,
+            "size": 7
+          },
+          "client_msg_id": "<client_msg_id>"
+        }
+      }
+    },
+    {
+      "name": "file",
+      "expected_message_type": 3,
+      "frame": {
+        "type": "message.send",
+        "payload": {
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "content": {
+            "type": "file",
+            "key": "files/2026/08/0f5a1c00-0002.pdf",
+            "name": "发布评审_v3.pdf",
+            "size": 8
+          },
+          "client_msg_id": "<client_msg_id>"
+        }
+      }
+    },
+    {
+      "name": "voice",
+      "expected_message_type": 4,
+      "frame": {
+        "type": "message.send",
+        "payload": {
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "content": {
+            "type": "voice",
+            "key": "files/2026/08/0f5a1c00-0003.webm",
+            "duration": 12,
+            "size": 5
+          },
+          "client_msg_id": "<client_msg_id>"
+        }
+      }
+    },
+    {
+      "name": "sticker",
+      "expected_message_type": 8,
+      "frame": {
+        "type": "message.send",
+        "payload": {
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "content": {
+            "type": "sticker",
+            "sticker_id": "44444444-4444-4444-8444-444444444444",
+            "key": "images/2026/08/0f5a1c00-0004.png",
+            "width": 96,
+            "height": 96
+          },
+          "client_msg_id": "<client_msg_id>"
+        }
+      }
+    },
+    {
+      "name": "e2ee_subsequent",
+      "expected_message_type": 7,
+      "frame": {
+        "type": "message.send",
+        "payload": {
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "content": {
+            "type": "e2ee",
+            "ratchet_key": "cmF0Y2hldC1rZXktYmFzZTY0",
+            "n": 3,
+            "pn": 1,
+            "nonce": "bm9uY2UtYmFzZTY0",
+            "ciphertext": "Y2lwaGVydGV4dC1iYXNlNjQ="
+          },
+          "client_msg_id": "<client_msg_id>"
+        }
+      }
+    },
+    {
+      "name": "e2ee_first_message",
+      "expected_message_type": 7,
+      "frame": {
+        "type": "message.send",
+        "payload": {
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "content": {
+            "type": "e2ee",
+            "ratchet_key": "cmF0Y2hldC1rZXktYmFzZTY0",
+            "n": 0,
+            "pn": 0,
+            "nonce": "bm9uY2UtYmFzZTY0",
+            "ciphertext": "Y2lwaGVydGV4dC1iYXNlNjQ=",
+            "identity_key": "aWRlbnRpdHkta2V5LWJhc2U2NA==",
+            "ephemeral_key": "ZXBoZW1lcmFsLWtleS1iYXNlNjQ=",
+            "otk_id": 7
+          },
+          "client_msg_id": "<client_msg_id>"
+        }
+      }
+    }
+  ]
+}

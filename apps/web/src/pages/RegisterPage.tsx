@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { Trans, useTranslation } from "react-i18next";
 import { Button, Input } from "@yuanchat/ui";
 import { useAuthStore, API_BASE } from "@yuanchat/shared";
 import { validatePassword, validatePhone, validateNickname } from "@yuanchat/shared/utils";
 import { UserPlus, RefreshCw } from "lucide-react";
 
 export function RegisterPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const registerWithPassword = useAuthStore((s) => s.registerWithPassword);
 
@@ -27,7 +29,7 @@ export function RegisterPage() {
       setCaptchaImg(await res.text());
       setCaptchaID(res.headers.get("X-Captcha-ID") || "");
     } catch {
-      /* backend not running */
+      /* 后端未启动 */
     }
   };
 
@@ -48,24 +50,25 @@ export function RegisterPage() {
 
     const nnResult = validateNickname(nickname);
     if (!nnResult.valid) {
-      setNicknameError(nnResult.errors[0]);
+      // 校验工具返回 i18n key，落地文案在这里翻译
+      setNicknameError(t(nnResult.errors[0]));
       valid = false;
     }
 
     const phResult = validatePhone(phone);
     if (!phResult.valid) {
-      setPhoneError(phResult.errors[0]);
+      setPhoneError(t(phResult.errors[0]));
       valid = false;
     }
 
     const pwResult = validatePassword(password);
     if (!pwResult.valid) {
-      setPasswordError(pwResult.errors[0]);
+      setPasswordError(t(pwResult.errors[0]));
       valid = false;
     }
 
     if (!captchaAnswer.trim()) {
-      setCaptchaError("请输入验证码");
+      setCaptchaError(t("auth.captchaRequired"));
       valid = false;
     }
     if (!valid) return;
@@ -75,7 +78,7 @@ export function RegisterPage() {
       await registerWithPassword(phone, password, captchaID, Number(captchaAnswer), nickname);
       navigate("/chat", { replace: true });
     } catch (e) {
-      setPasswordError(e instanceof Error ? e.message : "注册失败");
+      setPasswordError(e instanceof Error ? e.message : t("auth.registerFailed"));
       fetchCaptcha();
       setCaptchaAnswer("");
     } finally {
@@ -95,21 +98,25 @@ export function RegisterPage() {
 
       <div className="relative m-auto w-full max-w-md px-5 py-8">
         {/* 磨砂玻璃卡片 */}
-        <div className="rounded-3xl border border-white/60 bg-white/70 px-10 py-12 shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl">
+        <div className="rounded-lg border border-white/60 bg-white/70 px-10 py-12 shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl">
           {/* Logo */}
           <div className="mb-7 text-center">
-            <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl text-white shadow-lg">
+            <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-lg text-white shadow-lg">
               <UserPlus size={30} />
             </div>
-            <h1 className="text-2xl font-bold text-on-surface">创建账号</h1>
-            <p className="text-on-surface-variant mt-1 text-sm">
-              注册后获得专属 <span className="font-medium text-primary">元聊号</span>
+            <h1 className="text-2xl font-bold text-on-surface">{t("auth.createAccount")}</h1>
+            <p className="mt-1 text-sm text-on-surface-variant">
+              {/* 「元聊号」在句中要标主题色，各语言词序不同，用 Trans 按标签插槽渲染 */}
+              <Trans
+                i18nKey="auth.registerHint"
+                components={{ id: <span className="font-medium text-primary" /> }}
+              />
             </p>
           </div>
 
           <div className="space-y-1">
             <Input
-              placeholder="昵称"
+              placeholder={t("auth.nickname")}
               value={nickname}
               onChange={(e) => {
                 setNickname(e.target.value);
@@ -118,7 +125,7 @@ export function RegisterPage() {
               error={nicknameError}
             />
             <Input
-              placeholder="手机号"
+              placeholder={t("auth.phone")}
               type="tel"
               value={phone}
               onChange={(e) => {
@@ -128,7 +135,7 @@ export function RegisterPage() {
               error={phoneError}
             />
             <Input
-              placeholder="密码（至少 8 位）"
+              placeholder={t("auth.passwordPlaceholder")}
               type="password"
               value={password}
               onChange={(e) => {
@@ -142,7 +149,7 @@ export function RegisterPage() {
             <div className="flex items-start gap-2">
               <div className="flex-1">
                 <Input
-                  placeholder="验证码"
+                  placeholder={t("auth.verificationCode")}
                   value={captchaAnswer}
                   onChange={(e) => {
                     setCaptchaAnswer(e.target.value);
@@ -155,15 +162,15 @@ export function RegisterPage() {
               <button
                 type="button"
                 onClick={fetchCaptcha}
-                className="group relative mt-[1px] h-12 w-[120px] shrink-0 overflow-hidden rounded-xl border border-outline-variant bg-surface-container-low"
-                title="点击刷新验证码"
+                className="group relative mt-[1px] h-12 w-[120px] shrink-0 overflow-hidden rounded-lg border border-outline-variant bg-surface-container-low"
+                title={t("auth.captchaRefresh")}
               >
                 <span
                   className="block h-full w-full [&>svg]:h-full [&>svg]:w-full"
                   dangerouslySetInnerHTML={{
                     __html:
                       captchaImg ||
-                      '<span class="flex h-full items-center justify-center text-xs text-on-surface-variant">点击获取</span>',
+                      `<span class="flex h-full items-center justify-center text-xs text-on-surface-variant">${t("auth.captchaLoad")}</span>`,
                   }}
                 />
                 <span className="absolute inset-0 flex items-center justify-center bg-surface/80 opacity-0 transition-opacity group-hover:opacity-100">
@@ -173,14 +180,14 @@ export function RegisterPage() {
             </div>
 
             <Button className="mt-1 w-full" onClick={handleRegister} disabled={loading}>
-              {loading ? "注册中…" : "注 册"}
+              {loading ? t("auth.registering") : t("auth.register")}
             </Button>
           </div>
 
-          <p className="text-on-surface-variant mt-6 text-center text-sm">
-            已有账号？{" "}
+          <p className="mt-6 text-center text-sm text-on-surface-variant">
+            {t("auth.hasAccount")}{" "}
             <Link to="/login" replace className="font-medium text-primary hover:opacity-80">
-              立即登录
+              {t("auth.loginNow")}
             </Link>
           </p>
         </div>

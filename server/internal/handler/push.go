@@ -23,7 +23,7 @@ func NewPushHandler(svc *service.PushService, logger *zap.Logger) *PushHandler {
 
 // PublicKey 返回 VAPID 公钥（前端 pushManager.subscribe 需要）。
 //
-//	@Summary		Web Push VAPID public key
+//	@Summary		Web Push VAPID 公钥
 //	@Tags			push
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/push/public-key [get]
@@ -47,7 +47,7 @@ type SubscribeBody struct {
 
 // Subscribe 登记推送订阅。
 //
-//	@Summary		Subscribe to web push
+//	@Summary		订阅 Web Push
 //	@Tags			push
 //	@Security		BearerAuth
 //	@Success		200	{object}	Response
@@ -89,7 +89,7 @@ type UnsubscribeBody struct {
 
 // Unsubscribe 取消推送订阅。
 //
-//	@Summary		Unsubscribe from web push
+//	@Summary		取消订阅 Web Push
 //	@Tags			push
 //	@Security		BearerAuth
 //	@Success		200	{object}	Response

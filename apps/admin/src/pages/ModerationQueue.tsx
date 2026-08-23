@@ -50,8 +50,8 @@ function FlaggedTab() {
             <td className="max-w-md px-4 py-3 text-body-md text-on-surface">
               <p className="line-clamp-2">{contentText(m.content)}</p>
             </td>
-            <td className="text-on-surface-variant px-4 py-3 text-body-md">{m.sender_nickname}</td>
-            <td className="text-on-surface-variant whitespace-nowrap px-4 py-3 text-body-md">
+            <td className="px-4 py-3 text-body-md text-on-surface-variant">{m.sender_nickname}</td>
+            <td className="whitespace-nowrap px-4 py-3 text-body-md text-on-surface-variant">
               {new Date(m.created_at).toLocaleString()}
             </td>
             <td className="space-x-3 whitespace-nowrap px-4 py-3">
@@ -137,12 +137,12 @@ function ReportsTab() {
             <td className="px-4 py-3 text-body-md font-medium text-on-surface">
               {r.reporter_nickname}
             </td>
-            <td className="text-on-surface-variant px-4 py-3 text-body-md">
+            <td className="px-4 py-3 text-body-md text-on-surface-variant">
               <span className="font-mono text-xs">
                 {r.target_type}:{r.target_id.slice(0, 8)}…
               </span>
             </td>
-            <td className="text-on-surface-variant max-w-xs px-4 py-3 text-body-md">
+            <td className="max-w-xs px-4 py-3 text-body-md text-on-surface-variant">
               <p className="line-clamp-2">{r.reason || "—"}</p>
             </td>
             <td className="px-4 py-3">
@@ -151,7 +151,7 @@ function ReportsTab() {
                   "rounded px-2 py-0.5 text-label-sm",
                   r.status === 0
                     ? "bg-primary-container text-primary-on-container"
-                    : "text-on-surface-variant bg-surface-container",
+                    : "bg-surface-container text-on-surface-variant",
                 )}
               >
                 {t(REPORT_STATUS_KEY[r.status] ?? "admin.moderation.statusPending")}

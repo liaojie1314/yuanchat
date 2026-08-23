@@ -1,6 +1,6 @@
 # 元聊 YuanChat — 开发与打包指南
 
-> **最后更新**：2026-07-27（v0.3.0：E2EE、PWA/Web Push、桌面自动更新、生产部署编排、管理后台）
+> **最后更新**：2026-08-23（贴纸/收藏表情 + 移动端真机实测修复：旧 WebView 兼容兜底、i18n 四语全量覆盖、长按菜单、静态门禁 `check:i18n` / `check:theme`）
 >
 > ⚠️ **文档维护规则**：任何 `package.json` scripts、Tauri 配置、环境变量、workflow 的变更，**必须同步更新本文档**。此规则对所有会话生效。
 
@@ -21,6 +21,7 @@ yuanchat/
 │   ├── ui/               # 共享 UI 组件（Button, Input, MainLayout 等）
 │   └── design-system/    # Material 3 设计 Tokens、i18n、全局样式
 ├── server/               # Go 后端
+├── contracts/            # 前后端共用的黄金契约样本（见下方「跨端契约」）
 ├── deploy/               # Docker Compose 部署配置
 ├── docs/                 # 项目文档
 ├── pnpm-workspace.yaml   # pnpm monorepo 配置
@@ -266,13 +267,14 @@ pnpm --filter @yuanchat/desktop tauri android build
 
 > Go 工具链位置：`/home/liaojie1314/env/go/go/bin`（若 `go` 不在 PATH：`export PATH=/home/liaojie1314/env/go/go/bin:$PATH`）
 
-| 命令                                                             | 说明                                               |
-| ---------------------------------------------------------------- | -------------------------------------------------- |
-| `cd server && make dev`                                          | 启动服务（REST :8085 + WebSocket :8086，同一进程） |
-| `cd server && go run ./cmd/server`                               | 等价于 make dev                                    |
-| `cd server && go run ./cmd/seed`                                 | 灌入联调测试数据（幂等，可重复执行）               |
-| `cd server && make build`                                        | 编译为 `server/bin/yuanchat-server`                |
-| `cd server && go test -v -race -coverprofile=coverage.out ./...` | 运行测试                                           |
+| 命令                                                             | 说明                                                |
+| ---------------------------------------------------------------- | --------------------------------------------------- |
+| `cd server && make dev`                                          | 启动服务（REST :8085 + WebSocket :8086，同一进程）  |
+| `cd server && go run ./cmd/server`                               | 等价于 make dev                                     |
+| `cd server && go run ./cmd/seed`                                 | 灌入联调测试数据（幂等，可重复执行）                |
+| `cd server && go run ./cmd/gc`                                   | 对象存储 GC 试运行（只报告；见下方「对象存储 GC」） |
+| `cd server && make build`                                        | 编译为 `server/bin/yuanchat-server`                 |
+| `cd server && go test -v -race -coverprofile=coverage.out ./...` | 运行测试                                            |
 
 ### 聊天功能联调（前端 + 后端全链路）
 
@@ -305,6 +307,30 @@ pnpm --filter @yuanchat/web dev:real
 通讯录联调：登录 Alice → 通讯录「新的朋友」有 Carol 的待处理申请（同意后自动建单聊 + 打招呼消息）；「+」添加联系人支持手机号 / 元聊号 / 邮箱精确搜索。
 
 > 聊天 REST 端点与 WebSocket 协议详见 [`docs/02_CHAT_API.md`](./02_CHAT_API.md)。
+
+### 对象存储 GC（`cmd/gc`）
+
+业务路径**从不删对象**：撤回只把 `messages.content` 置 `{}`、清空聊天记录只推进本人水位、
+删贴纸只删表行。于是三类字节会永久留在 MinIO 里——被撤回消息的媒体、被删收藏贴纸的对象、
+以及「上传成功但消息没发出去」的孤儿。回收由离线作业负责，**不在撤回时同步删**：
+同一个 `object_key` 可被多方引用（转发逐字复制 content 含 key、不同用户可各自收藏同一对象），
+同步删会打断别人的副本且需要引用计数。
+
+```bash
+cd server
+go run ./cmd/gc                       # 默认 dry-run：只报告将被回收的对象
+go run ./cmd/gc -delete               # 实际删除
+go run ./cmd/gc -grace 720h -delete   # 宽限期 30 天（默认 7 天）
+go run ./cmd/gc -prefix images/       # 只扫某前缀
+go run ./cmd/gc -batch 200            # 引用判定的分批大小（默认 500）
+```
+
+判定规则：对象 `LastModified` 早于宽限期，且 key 不被 `messages.content->>'key'` /
+`stickers.object_key` / `users.avatar_url` / `conversations.avatar_url` 任何一处引用 → 可回收。
+宽限期是必需的——前端先传字节、后发 WS 帧，刚上传的对象可能"消息还在路上"。
+
+> **调度是独立的运维决策**：本仓不预置 cron/定时任务（改 `deploy/` 生产配置需单独评审）。
+> 首次在生产执行务必先跑 dry-run 核对清单。
 
 ---
 
@@ -456,15 +482,27 @@ npx tauri android build --aab --split-per-abi --target aarch64
 
 ## 七、Monorepo 全局命令
 
-| 命令             | 说明                                   |
-| ---------------- | -------------------------------------- |
-| `pnpm install`   | 安装所有 workspace 依赖                |
-| `pnpm dev:*`     | **一键启动**（见第零章）               |
-| `pnpm dev:stop`  | 停止一键启动拉起的全部进程与容器       |
-| `pnpm typecheck` | 所有包 TypeScript 类型检查             |
-| `pnpm lint`      | ESLint 全量检查                        |
-| `pnpm build`     | 构建所有应用（**仅前端 JS/CSS**）      |
-| `pnpm build:pkg` | **交互式打包**（桌面安装包 + APK/AAB） |
+| 命令               | 说明                                                 |
+| ------------------ | ---------------------------------------------------- |
+| `pnpm install`     | 安装所有 workspace 依赖                              |
+| `pnpm dev:*`       | **一键启动**（见第零章）                             |
+| `pnpm dev:stop`    | 停止一键启动拉起的全部进程与容器                     |
+| `pnpm typecheck`   | 所有包 TypeScript 类型检查                           |
+| `pnpm lint`        | ESLint 全量检查                                      |
+| `pnpm check`       | 静态门禁全跑（lint + 格式 + 样式 + i18n + 主题色类） |
+| `pnpm check:i18n`  | i18n 翻译完整性 + 代码 key 对账                      |
+| `pnpm check:theme` | 主题色工具类是否都在色板里注册                       |
+| `pnpm build`       | 构建所有应用（**仅前端 JS/CSS**）                    |
+| `pnpm build:pkg`   | **交互式打包**（桌面安装包 + APK/AAB）               |
+
+### 静态门禁在查什么
+
+两个脚本都拦的是**不报错但界面出错**的一类问题，改前端时必须跑（`pnpm check` 已包含）：
+
+| 脚本                              | 三层校验                                                                                                                                                                     | 拦住的现象                                                                                   |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `scripts/check-i18n.mjs`          | ① 三个 locale 对 zh-CN 对账（key 集合 + `%{var}` 占位符集合）<br>② 源码里静态 `t("key")` 的 key 必须存在<br>③ **死键**：locale 里的 key 必须在 `packages/`、`apps/` 中出现过 | 少翻译一门语言 → 该语言回落中文；key 写错 → 界面直接显示 key 字面量；词条堆积                |
+| `scripts/check-theme-classes.mjs` | ① 三个 app 的 Tailwind 色板必须一致（共用同一 preset）<br>② 源码里所有主题色工具类（`surface`/`primary`/`on-*`/`outline`…）必须能在色板里找到 key                            | 色板里没注册的颜色类**不产出任何 CSS**，元素静默继承父级色——次要文字与正文同色、hover 无反应 |
 
 ---
 
@@ -510,11 +548,11 @@ npx tauri android build --aab --split-per-abi --target aarch64
 
 ### 前端测试
 
-| 包                       | 测试框架                 | 环境  | 覆盖内容                                                                                    |
-| ------------------------ | ------------------------ | ----- | ------------------------------------------------------------------------------------------- |
-| `packages/shared`        | Vitest                   | node  | Store（auth/theme/conversation）、Utils（cn/formatTime/truncate/validate\*/getAvatarColor） |
-| `packages/ui`            | Vitest + Testing Library | jsdom | React 组件（Avatar/Button/Input/ChatWindow 等）                                             |
-| `packages/design-system` | Vitest                   | node  | Tokens、Skins、i18n                                                                         |
+| 包                       | 测试框架                 | 环境  | 覆盖内容                                                                                                                                |
+| ------------------------ | ------------------------ | ----- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/shared`        | Vitest                   | node  | Store（auth/theme/conversation/message）、Utils（cn/formatTime/truncate/validate\*/getAvatarColor/mentionText）、语言持久化与冷启动恢复 |
+| `packages/ui`            | Vitest + Testing Library | jsdom | React 组件（Avatar/Button/Input/ChatWindow 等）、录音 hook                                                                              |
+| `packages/design-system` | Vitest                   | node  | Tokens、Skins、i18n                                                                                                                     |
 
 #### 常用命令
 
@@ -574,15 +612,29 @@ packages/shared/coverage/
 
 #### 已有测试覆盖
 
-| 包                      | 测试文件               | 内容                                          |
-| ----------------------- | ---------------------- | --------------------------------------------- |
-| `internal/pkg/jwt`      | `jwt_test.go`          | Token 生成/验证/过期/无效                     |
-| `internal/pkg/password` | `password_test.go`     | bcrypt 哈希/验证/盐值                         |
-| `internal/service`      | `user_service_test.go` | 密码哈希、strPtr、错误常量                    |
-| `internal/ws`           | `hub_test.go`          | Hub 注册/注销、多设备投递、连接上限、并发安全 |
-| `internal/ws`           | `protocol_test.go`     | WS 信封编解码                                 |
+| 包                      | 测试文件                  | 内容                                          |
+| ----------------------- | ------------------------- | --------------------------------------------- |
+| `internal/pkg/jwt`      | `jwt_test.go`             | Token 生成/验证/过期/无效                     |
+| `internal/pkg/password` | `password_test.go`        | bcrypt 哈希/验证/盐值                         |
+| `internal/service`      | `user_service_test.go`    | 密码哈希、strPtr、错误常量                    |
+| `internal/ws`           | `hub_test.go`             | Hub 注册/注销、多设备投递、连接上限、并发安全 |
+| `internal/ws`           | `protocol_test.go`        | WS 信封编解码                                 |
+| `internal/ws`           | `golden_contract_test.go` | 黄金契约（见下方「跨端契约」）                |
 
 > **注意**：`UserService` 依赖具体的 `*repository.UserRepository` 而非接口，完整的 Register/Login/Profile 集成测试需要连接测试数据库或重构为接口注入。
+
+### 跨端契约（contracts/）
+
+`contracts/message-send.golden.json` 为每种 `content.type` 存一个完整的 `message.send`
+样本帧，**前后端跑同一份 JSON**：
+
+| 侧   | 测试文件                                                  | 做什么                                                                              |
+| ---- | --------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| 前端 | `packages/shared/src/__tests__/messageSendGolden.test.ts` | 驱动 `messageStore` 真的发帧，把 `chatSocket.send` 的 payload 与样本深比较          |
+| Go   | `server/internal/ws/golden_contract_test.go`              | 以 `DisallowUnknownFields` 解进 `SendPayload`，跑 `buildContent` 断言通过与落库类型 |
+
+改帧结构的**正确顺序**：先改 golden 样本 → 再让两侧变绿。任一侧擅自改字段名/类型/嵌套
+都会两端同时变红；新增 content type 忘了补样本，Go 侧的覆盖度用例会失败。
 
 ### E2E 端到端测试
 
@@ -590,6 +642,11 @@ packages/shared/coverage/
 **环境**：测试自动启动 Vite dev server（Mock 模式，`VITE_ENABLE_MOCK=true`），使用 MSW Service Worker 拦截所有 API 调用，无需真实后端。
 
 **测试文件位置**：`apps/web/e2e/`
+
+> **界面语言被钉在 zh-CN**：`playwright.config.ts` 设了 `use.locale: "zh-CN"`，
+> 因此断言与定位器里出现的中文必须与 `zh-CN.json` 词条**逐字一致**（含排版空格，
+> 用 `\s*` 兼容）。用文案定位按钮时正则要**首尾锚定**：`getByRole` 的可访问名是子串匹配，
+> `/登录/` 会同时命中「登录」和「扫码登录」，strict mode 直接报双命中。
 
 #### 命令
 
@@ -602,16 +659,19 @@ packages/shared/coverage/
 
 #### 覆盖范围
 
-| 测试文件                        | 覆盖内容                                                        |
-| ------------------------------- | --------------------------------------------------------------- |
-| `e2e/login.spec.ts`             | 登录成功/失败、表单校验错误、API 错误、Enter 快捷键             |
-| `e2e/register.spec.ts`          | 注册成功/失败、表单校验、验证码加载/刷新、Enter 快捷键          |
-| `e2e/logout.spec.ts`            | 登出跳转、localStorage 清除、登出后路由守卫                     |
-| `e2e/route-guards.spec.ts`      | 未登录重定向（/ → /login）、已登录重定向（/login → /chat）      |
-| `e2e/navigation.spec.ts`        | 登录/注册页间跳转、表单状态独立                                 |
-| `e2e/authenticated-nav.spec.ts` | 已登录状态下聊天/通讯录/收藏/设置四大区域可访问、侧边栏导航链接 |
-| `e2e/search.spec.ts`            | Ctrl/Meta+K 打开搜索弹窗、输入框自动聚焦、Escape/关闭按钮关闭   |
-| `e2e/favorites.spec.ts`         | 收藏页可访问、四个分类 Tab 按钮可见且可点击                     |
+| 测试文件                            | 覆盖内容                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------- |
+| `e2e/login.spec.ts`                 | 登录成功/失败、表单校验错误、API 错误、Enter 快捷键                             |
+| `e2e/register.spec.ts`              | 注册成功/失败、表单校验、验证码加载/刷新、Enter 快捷键                          |
+| `e2e/logout.spec.ts`                | 登出跳转、localStorage 清除、登出后路由守卫                                     |
+| `e2e/route-guards.spec.ts`          | 未登录重定向（/ → /login）、已登录重定向（/login → /chat）                      |
+| `e2e/navigation.spec.ts`            | 登录/注册页间跳转、表单状态独立                                                 |
+| `e2e/authenticated-nav.spec.ts`     | 已登录状态下聊天/通讯录/收藏/设置四大区域可访问、侧边栏导航链接                 |
+| `e2e/search.spec.ts`                | Ctrl/Meta+K 打开搜索弹窗、输入框自动聚焦、Escape/关闭按钮关闭                   |
+| `e2e/favorites.spec.ts`             | 收藏页可访问、四个分类 Tab 按钮可见且可点击                                     |
+| `e2e/stickers.spec.ts`              | 贴纸两 tab 渲染、官方/收藏列表数量、发贴纸、图片→收藏、删除收藏、缩略图真实出图 |
+| `e2e/chat-experience.spec.ts`       | 清空聊天记录（确认后消息流清空）、群公告横幅点开全文、群内昵称编辑并保存        |
+| `e2e/conversation-settings.spec.ts` | 右键会话菜单置顶/取消置顶、免打扰开关的状态翻转                                 |
 
 #### 测试文件结构
 
@@ -698,11 +758,50 @@ macOS / Windows 代码签名（可选，用 `if` 门控——secrets 存在时�
 
 ---
 
-## 十一、文档更新规则
+## 十一、前端约定（i18n / 旧 WebView 兼容）
+
+### i18n：四语，零硬编码
+
+- **词条**：`packages/design-system/src/i18n/locales/{zh-CN,en-US,ja-JP,ko-KR}.json`，
+  扁平点号 key（`auth.loginTitle`），插值占位符是 `%{name}`（i18n 初始化里改过
+  `interpolation.prefix/suffix`，不是 i18next 默认的 `{{}}`）
+- **组件**：一律 `const { t } = useTranslation()` + `t("key")`。句子中间要给某个词单独上色时用
+  `<Trans i18nKey="auth.registerHint" components={{ id: <span className="text-primary" /> }} />`，
+  不要用字符串拼接——各语言词序不同，拼出来的句子在日/韩语下是错的
+- **纯函数拿不到 `t()`**：`packages/shared/src/utils/validation.ts` 的校验器返回的是
+  **i18n key**，由调用方 `t(result.errors[0])` 翻译。往里塞中文提示会绕过整套 i18n
+- **切换语言只走 `useThemeStore.setLocale()`**（内部已 `i18n.changeLanguage`），组件里不要再自己调
+  `i18n.changeLanguage`；冷启动的语言恢复由 themeStore 的 `onRehydrateStorage` 负责，
+  原因见 [`.claude/TROUBLESHOOTING.md`](../.claude/TROUBLESHOOTING.md) 的
+  「切换语言后重开应用又变回系统语言」
+- **新增文案必须四语同时补齐**，否则 `pnpm check:i18n` 直接失败（见第七章）
+
+### 旧 WebView（Android 10 自带 Chrome 74）兼容清单
+
+`build.target=es2019` 只解决**语法**降级，下面四类是它管不到的，且**全部静默失效**——
+不报错、只是界面不对，桌面浏览器上永远复现不出来：
+
+| 层         | 约定                                                                                                                                                                                                      | 落点                                                |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| 运行时内置 | ES2020+ 的**内置方法**要手动补（已补 `Object.hasOwn`，`@noble/curves` 在模块初始化就调它）；只补真正被用到的，且必须是入口第一个 import                                                                   | `packages/shared/src/polyfills.ts`                  |
+| flex `gap` | `gap-*` 要 Chrome 84。JS 实测一次能力后在 `<html>` 挂 `no-flex-gap`，Tailwind 插件为该类名额外输出 margin 兜底（含四种 flex-direction）                                                                   | `packages/design-system/src/legacyWebViewCompat.ts` |
+| preflight  | Tailwind preflight 用了 `:where()`（Chrome 88）。CSS 规范里选择器列表**一项非法则整条规则作废**，`button` 复位与 `[hidden]` 一起失效 → 全站按钮回落系统灰底。用不带新语法的选择器在 `global.css` 里补一遍 | `packages/design-system/src/global.css`             |
+| CSS 简写   | `inset`（Chrome 87）、`place-items` / `place-content` 的单值形式在 74 上作废，一律写长写法；stylelint 的「合并回简写」规则已对这三个开例外                                                                | `stylelint.config.js`                               |
+
+还有一条与语法无关但只在移动端出现：给 `::-webkit-scrollbar` 设过任何样式后，
+Android WebView 会把「滚动时才浮现的覆盖式滚动条」换成**常驻实体滚动条**，
+因此滚动条定制包在 `@media (hover: hover) and (pointer: fine)` 里，只对桌面生效。
+
+> 验证只能靠真机/模拟器：`Medium_Phone_API_29`（Chrome 74）跑 `tauri android build` 出的
+> 生产 APK。dev 模式在 74 上跑不起来（`@vite/client` 自身用 `?.`），详见第三章。
+
+---
+
+## 十二、文档更新规则
 
 1. 任何 `package.json` scripts 的**增删改**，必须同步更新本文档的对应章节
 2. 任何 Tauri 配置（`tauri.conf.json`、`capabilities/`）的变更，必须同步更新本文档
-3. 环境变量的**新增/修改/删除**，必须同步更新本文档第七章
+3. 环境变量的**新增/修改/删除**，必须同步更新本文档第八章
 4. 故障排查 / 踩坑记录 → 追加到 `.claude/TROUBLESHOOTING.md`（按平台分类）
 5. 本文档和 `.claude/TROUBLESHOOTING.md` 必须并行更新，所有 AI 会话必须遵守此规则
 6. `.github/workflows/` 的变更须同步更新本文档"CI/CD 与发版"章节，签名策略变化须更新 `docs/RELEASE.md`

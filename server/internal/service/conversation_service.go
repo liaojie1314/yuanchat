@@ -51,11 +51,28 @@ type ConversationDTO struct {
 }
 
 // LastMessageDTO 会话预览用的最后一条消息摘要。
+//
+// Preview 只对文本/系统消息有值；其余类型为空串，客户端按 PreviewKind 渲染
+// 本地化占位文案（见 previewOf 的说明）。
 type LastMessageDTO struct {
 	Preview        string    `json:"preview"`
+	PreviewKind    string    `json:"preview_kind"`
 	SenderNickname string    `json:"sender_nickname"`
 	CreatedAt      time.Time `json:"created_at"`
 }
+
+// previewKind* 会话列表预览的消息类型标记（客户端据此选本地化占位文案）。
+const (
+	previewKindText      = "text"
+	previewKindSystem    = "system"
+	previewKindImage     = "image"
+	previewKindFile      = "file"
+	previewKindVoice     = "voice"
+	previewKindVideo     = "video"
+	previewKindSticker   = "sticker"
+	previewKindEncrypted = "encrypted"
+	previewKindUnknown   = "unknown"
+)
 
 // PeerDTO 单聊对端用户信息。
 type PeerDTO struct {
@@ -136,8 +153,10 @@ func (s *ConversationService) List(ctx context.Context, userID uuid.UUID) ([]Con
 		}
 
 		if last, err := s.msgRepo.GetLastMessage(ctx, item.ID, item.ClearedBeforeSeq); err == nil && last != nil {
+			preview, kind := previewOf(last)
 			dto.LastMessage = &LastMessageDTO{
-				Preview:        previewOf(last),
+				Preview:        preview,
+				PreviewKind:    kind,
 				SenderNickname: last.SenderNickname,
 				CreatedAt:      last.CreatedAt,
 			}
@@ -148,25 +167,41 @@ func (s *ConversationService) List(ctx context.Context, userID uuid.UUID) ([]Con
 	return dtos, nil
 }
 
-// previewOf 将消息内容压缩为列表预览文案。
-func previewOf(m *repository.MessageWithSender) string {
+// previewOf 将消息内容压缩为列表预览：返回 (正文, 类型标记)。
+//
+// 只有文本与系统消息有正文；其余类型正文为空、由客户端按 kind 渲染本地化占位
+// （"[图片]"/"[表情]"…）。文案不留在服务端：同一条消息 WS 实时路径走前端 i18n，
+// REST 列表若返回硬编码中文，英/日/韩界面就会"实时一种语言、刷新另一种语言"。
+func previewOf(m *repository.MessageWithSender) (string, string) {
 	switch m.MessageType {
 	case model.MessageTypeText:
 		var c model.MessageContentText
 		if err := json.Unmarshal([]byte(m.Content), &c); err == nil {
-			return c.Text
+			return c.Text, previewKindText
 		}
-		return ""
+		return "", previewKindText
+	case model.MessageTypeSystem:
+		// 系统消息与文本同为 {"text":...}，原实现落 default 返回空串 → 建群后列表预览空白
+		var c model.MessageContentText
+		if err := json.Unmarshal([]byte(m.Content), &c); err == nil {
+			return c.Text, previewKindSystem
+		}
+		return "", previewKindSystem
 	case model.MessageTypeImage:
-		return "[图片]"
+		return "", previewKindImage
 	case model.MessageTypeFile:
-		return "[文件]"
+		return "", previewKindFile
 	case model.MessageTypeVoice:
-		return "[语音]"
+		return "", previewKindVoice
 	case model.MessageTypeVideo:
-		return "[视频]"
+		return "", previewKindVideo
+	case model.MessageTypeSticker:
+		return "", previewKindSticker
+	case model.MessageTypeE2EE:
+		// 服务端无法解密，只能告诉客户端"这是一条加密消息"
+		return "", previewKindEncrypted
 	default:
-		return ""
+		return "", previewKindUnknown
 	}
 }
 

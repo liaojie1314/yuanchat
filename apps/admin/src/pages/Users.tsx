@@ -54,14 +54,14 @@ export function UsersPage() {
                   </span>
                 )}
               </div>
-              <span className="text-on-surface-variant text-label-sm">#{u.short_id}</span>
+              <span className="text-label-sm text-on-surface-variant">#{u.short_id}</span>
             </td>
-            <td className="text-on-surface-variant px-4 py-3 text-body-md">
+            <td className="px-4 py-3 text-body-md text-on-surface-variant">
               {u.phone || u.email || "—"}
             </td>
             <td className="px-4 py-3">
               {u.status === 2 ? (
-                <span className="text-error-on-container rounded bg-error-container px-2 py-0.5 text-label-sm">
+                <span className="rounded bg-error-container px-2 py-0.5 text-label-sm text-error-on-container">
                   {t("admin.users.statusBanned")}
                 </span>
               ) : (
@@ -70,7 +70,7 @@ export function UsersPage() {
                 </span>
               )}
             </td>
-            <td className="text-on-surface-variant px-4 py-3 text-body-md">
+            <td className="px-4 py-3 text-body-md text-on-surface-variant">
               {new Date(u.created_at).toLocaleDateString()}
             </td>
             <td className="px-4 py-3">

@@ -25,14 +25,14 @@ func NewMessageHandler(svc *service.MessageService, dispatcher ws.Dispatcher, lo
 	return &MessageHandler{svc: svc, dispatcher: dispatcher, logger: logger}
 }
 
-// History returns paginated messages of a conversation (seq descending).
+// History 分页返回某会话的消息（按 seq 倒序）。
 //
-//	@Summary		Get message history
+//	@Summary		拉取消息历史
 //	@Tags			chat
 //	@Security		BearerAuth
-//	@Param			id			path	string	true	"conversation id"
-//	@Param			before_seq	query	int		false	"fetch messages with seq < before_seq; 0 = latest"
-//	@Param			limit		query	int		false	"page size, default 30, max 100"
+//	@Param			id			path	string	true	"会话 id"
+//	@Param			before_seq	query	int		false	"拉取 seq < before_seq 的消息；0 表示最新"
+//	@Param			limit		query	int		false	"每页条数，默认 30，上限 100"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/conversations/{id}/messages [get]
 func (h *MessageHandler) History(c *gin.Context) {
@@ -74,10 +74,10 @@ func (h *MessageHandler) History(c *gin.Context) {
 
 // Recall 撤回消息（发送者本人、2 分钟窗口内）。
 //
-//	@Summary		Recall a message
+//	@Summary		撤回消息
 //	@Tags			chat
 //	@Security		BearerAuth
-//	@Param			id	path	string	true	"message id"
+//	@Param			id	path	string	true	"消息 id"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/messages/{id}/recall [post]
 func (h *MessageHandler) Recall(c *gin.Context) {
@@ -131,10 +131,10 @@ type ReactBody struct {
 
 // React 切换自己对消息的 emoji 回应（toggle 语义），推 message.reaction 帧给会话全员。
 //
-//	@Summary		Toggle a message reaction
+//	@Summary		切换消息表情回应
 //	@Tags			chat
 //	@Security		BearerAuth
-//	@Param			id	path	string	true	"message id"
+//	@Param			id	path	string	true	"消息 id"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/messages/{id}/reactions [post]
 func (h *MessageHandler) React(c *gin.Context) {
@@ -187,13 +187,13 @@ func (h *MessageHandler) React(c *gin.Context) {
 
 // Search 全文搜索当前用户有权访问的消息。
 //
-//	@Summary		Search messages
+//	@Summary		搜索消息
 //	@Tags			chat
 //	@Security		BearerAuth
-//	@Param			q				query	string	true	"search keyword (min 3 chars)"
-//	@Param			conversation_id	query	string	false	"limit to this conversation"
-//	@Param			before			query	string	false	"pagination cursor (RFC3339)"
-//	@Param			limit			query	int		false	"page size (default 20, max 50)"
+//	@Param			q				query	string	true	"搜索关键词（至少 3 字）"
+//	@Param			conversation_id	query	string	false	"限定在该会话内搜索"
+//	@Param			before			query	string	false	"分页游标（RFC3339）"
+//	@Param			limit			query	int		false	"每页条数（默认 20，上限 50）"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/messages/search [get]
 func (h *MessageHandler) Search(c *gin.Context) {

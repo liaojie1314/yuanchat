@@ -29,8 +29,8 @@ type LocalPresence struct{}
 
 func NewLocalPresence() *LocalPresence { return &LocalPresence{} }
 
-func (*LocalPresence) PublishOnline(uuid.UUID)                            {}
-func (*LocalPresence) PublishOffline(uuid.UUID)                           {}
-func (*LocalPresence) FilterRemoteOnline([]uuid.UUID) []uuid.UUID         { return nil }
+func (*LocalPresence) PublishOnline(uuid.UUID)                              {}
+func (*LocalPresence) PublishOffline(uuid.UUID)                             {}
+func (*LocalPresence) FilterRemoteOnline([]uuid.UUID) []uuid.UUID           { return nil }
 func (*LocalPresence) SetRemoteHandler(func(userID uuid.UUID, online bool)) {}
-func (*LocalPresence) Close() error                                       { return nil }
+func (*LocalPresence) Close() error                                         { return nil }

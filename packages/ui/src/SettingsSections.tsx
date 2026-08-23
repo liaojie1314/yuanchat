@@ -23,9 +23,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useThemeStore } from "@yuanchat/shared";
-import type { SupportedLocale } from "@yuanchat/design-system/i18n";
 import { SUPPORTED_LOCALES } from "@yuanchat/design-system/i18n";
-import i18n from "@yuanchat/design-system/i18n";
 import { cn } from "@yuanchat/shared/utils";
 import { copyText } from "./copyText";
 import { E2EESection } from "./E2EESection";
@@ -44,7 +42,7 @@ function SectionHeader({ title, desc }: { title: string; desc?: string }) {
 /** 信息卡片：合并多行为一张卡，行间加分隔线 */
 function InfoCard({ children }: { children: React.ReactNode }) {
   return (
-    <div className="bg-surface-container divide-outline-variant divide-y overflow-hidden rounded-xl">
+    <div className="bg-surface-container divide-outline-variant divide-y overflow-hidden rounded-lg">
       {children}
     </div>
   );
@@ -76,7 +74,7 @@ function InfoRow({
 
   return (
     <div className="flex min-h-14 items-center gap-3 px-4 py-2.5">
-      <span className="bg-surface-container-high text-on-surface-variant grid h-9 w-9 shrink-0 place-items-center rounded-lg">
+      <span className="bg-surface-container-high text-on-surface-variant flex h-9 w-9 shrink-0 items-center justify-center rounded-lg">
         <Icon size={18} />
       </span>
       <div className="min-w-0 flex-1">
@@ -132,7 +130,7 @@ export function AccountSection({
           disabled
           className="text-on-surface-variant flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left opacity-60"
         >
-          <span className="bg-surface-container-high grid h-9 w-9 shrink-0 place-items-center rounded-lg">
+          <span className="bg-surface-container-high flex h-9 w-9 shrink-0 items-center justify-center rounded-lg">
             <Key size={18} />
           </span>
           <div className="min-w-0 flex-1">
@@ -157,7 +155,7 @@ function ThemeCards() {
       <button
         onClick={() => !isDark || toggleMode()}
         className={cn(
-          "group relative overflow-hidden rounded-xl border-2 p-3 text-left transition-all",
+          "group relative overflow-hidden rounded-lg border-2 p-3 text-left transition-all",
           !isDark
             ? "border-primary shadow-elevation-1"
             : "border-outline-variant hover:border-primary/50",
@@ -180,7 +178,7 @@ function ThemeCards() {
             {t("settings.themeLight")}
           </span>
           {!isDark && (
-            <span className="bg-primary text-primary-on grid h-5 w-5 place-items-center rounded-full">
+            <span className="bg-primary text-primary-on flex h-5 w-5 items-center justify-center rounded-full">
               <Check size={13} />
             </span>
           )}
@@ -190,7 +188,7 @@ function ThemeCards() {
       <button
         onClick={() => isDark || toggleMode()}
         className={cn(
-          "group relative overflow-hidden rounded-xl border-2 p-3 text-left transition-all",
+          "group relative overflow-hidden rounded-lg border-2 p-3 text-left transition-all",
           isDark
             ? "border-primary shadow-elevation-1"
             : "border-outline-variant hover:border-primary/50",
@@ -213,7 +211,7 @@ function ThemeCards() {
             {t("settings.themeDark")}
           </span>
           {isDark && (
-            <span className="bg-primary text-primary-on grid h-5 w-5 place-items-center rounded-full">
+            <span className="bg-primary text-primary-on flex h-5 w-5 items-center justify-center rounded-full">
               <Check size={13} />
             </span>
           )}
@@ -226,11 +224,8 @@ function ThemeCards() {
 /** 语言分段控件（Segmented） */
 function LanguageSegmented() {
   const locale = useThemeStore((s) => s.locale);
+  // setLocale 内部已经切 i18n 语言，这里不要再补一次
   const setLocale = useThemeStore((s) => s.setLocale);
-  const changeLocale = (code: SupportedLocale) => {
-    void i18n.changeLanguage(code);
-    setLocale(code);
-  };
   return (
     <div className="bg-surface-container inline-flex w-full rounded-lg p-1">
       {SUPPORTED_LOCALES.map(({ code, nativeLabel }) => {
@@ -238,7 +233,7 @@ function LanguageSegmented() {
         return (
           <button
             key={code}
-            onClick={() => changeLocale(code)}
+            onClick={() => setLocale(code)}
             className={cn(
               "text-label-lg flex-1 rounded-md py-2 font-medium transition-all",
               active
@@ -286,7 +281,7 @@ export function AboutSection({ extra }: { extra?: ReactNode } = {}) {
 
       {/* 品牌 hero */}
       <div className="mb-6 flex flex-col items-center gap-3 py-6">
-        <div className="brand-gradient shadow-elevation-2 text-headline-md grid h-20 w-20 place-items-center rounded-2xl font-bold text-white">
+        <div className="brand-gradient shadow-elevation-2 text-headline-md flex h-20 w-20 items-center justify-center rounded-lg font-bold text-white">
           元
         </div>
         <p className="text-title-lg text-on-surface font-semibold">YuanChat</p>

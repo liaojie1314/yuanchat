@@ -11,7 +11,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// CaptchaHandler handles CAPTCHA generation and verification.
+// CaptchaHandler 负责图形验证码的生成与校验。
 type CaptchaHandler struct {
 	rdb *redis.Client
 }
@@ -20,13 +20,13 @@ func NewCaptchaHandler(rdb *redis.Client) *CaptchaHandler {
 	return &CaptchaHandler{rdb: rdb}
 }
 
-// Generate returns an SVG math CAPTCHA image and stores the answer in Redis.
+// Generate 返回 SVG 算术验证码图片，并把答案存入 Redis。
 //
-//	@Summary		Generate CAPTCHA
-//	@Description	Returns a math CAPTCHA as SVG image
+//	@Summary		生成图形验证码
+//	@Description	返回 SVG 格式的算术验证码图片
 //	@Tags			system
 //	@Produce		svg
-//	@Success		200	{string}	string	"SVG image"
+//	@Success		200	{string}	string	"SVG 图片"
 //	@Router			/api/v1/captcha [get]
 func (h *CaptchaHandler) Generate(c *gin.Context) {
 	// 生成随机数学题：a op b = ?
@@ -72,14 +72,14 @@ func (h *CaptchaHandler) Generate(c *gin.Context) {
 	c.String(http.StatusOK, svg)
 }
 
-// VerifyRequest is the CAPTCHA validation request body.
+// VerifyRequest 是校验验证码的请求体。
 type VerifyRequest struct {
 	ID     string `json:"captcha_id" binding:"required"`
 	Answer int    `json:"captcha_answer" binding:"required"`
 }
 
-// Validate checks a CAPTCHA answer against the stored value in Redis.
-// Returns true if the answer is correct and removes the key (one-time use).
+// Validate 用 Redis 中存的答案校验提交值。
+// 答案正确时返回 true 并删除该 key（一次性使用）。
 func (h *CaptchaHandler) Validate(ctx context.Context, id string, answer int) bool {
 	val, err := h.rdb.Get(ctx, id).Int()
 	if err != nil {

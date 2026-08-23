@@ -13,7 +13,7 @@ import (
 )
 
 // ========================================
-// Register — Password Hashing Tests
+// Register —— 密码哈希相关用例
 // ========================================
 
 func TestRegisterPasswordHashing(t *testing.T) {
@@ -60,7 +60,7 @@ func TestRegisterDifferentSalts(t *testing.T) {
 }
 
 // ========================================
-// Login — Password Verification Tests
+// Login —— 密码校验相关用例
 // ========================================
 
 func TestLoginPasswordVerify(t *testing.T) {
@@ -75,7 +75,7 @@ func TestLoginPasswordVerify(t *testing.T) {
 }
 
 // ========================================
-// strPtr Helper
+// strPtr 辅助函数
 // ========================================
 
 func TestStrPtr(t *testing.T) {
@@ -88,7 +88,7 @@ func TestStrPtr(t *testing.T) {
 }
 
 // ========================================
-// Error Constants
+// 错误常量
 // ========================================
 
 func TestErrorConstants(t *testing.T) {
@@ -104,12 +104,12 @@ func TestErrorConstants(t *testing.T) {
 }
 
 // ========================================
-// Refresh — Token Rotation Tests
+// Refresh —— 令牌轮换相关用例
 // ========================================
 
 // refreshSvc 构造仅含 JWT 生成器的 UserService。
 // 以下用例全部在 token 校验阶段失败返回，不会触达 nil repo
-//（合法 refresh 的完整链路由 E2E 覆盖）。
+// （合法 refresh 的完整链路由 E2E 覆盖）。
 func refreshSvc(accessTTL, refreshTTL time.Duration) (*UserService, *jwt.Generator) {
 	gen := jwt.NewGenerator("test-secret", accessTTL, refreshTTL)
 	return NewUserService(nil, gen, nil, zap.NewNop()), gen
@@ -169,8 +169,7 @@ func TestRefreshRejectsTamperedSignature(t *testing.T) {
 	}
 }
 
-// Note: Full UserService.Register() / Login() / Profile() integration tests
-// require either a test PostgreSQL database or refactoring UserService to accept
-// a repository interface instead of the concrete *repository.UserRepository.
-// The password hashing, JWT generation, and validation logic are covered
-// by unit tests in their respective packages (pkg/password, pkg/jwt).
+// 说明：UserService.Register() / Login() / Profile() 的完整集成测试需要一个测试用
+// PostgreSQL 库，或把 UserService 改成依赖 repository 接口而非具体的
+// *repository.UserRepository。密码哈希、JWT 签发与校验这几段逻辑已由各自所在包
+//（pkg/password、pkg/jwt）的单元测试覆盖。

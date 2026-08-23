@@ -19,7 +19,7 @@
  * // apps/web 与 apps/desktop 的 ChatPage 直接渲染
  * <ChatScreen />
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageSquare } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -44,6 +44,7 @@ import { ConversationList } from "./ConversationList";
 import { CreateGroupModal } from "./CreateGroupModal";
 import { MembersView } from "./MembersView";
 import { ResizeHandle } from "./ResizeHandle";
+import { UserProfileView } from "./UserProfileView";
 
 /** mock 模式成员全列表回退数据（与 ChatDetail 头像墙一致，覆盖 owner/admin/member 三态） */
 const MOCK_MEMBERS: ConversationMember[] = [
@@ -62,6 +63,14 @@ export function ChatScreen() {
 
   const [showDetail, setShowDetail] = useState(false);
   const [detailView, setDetailView] = useState<"info" | "members">("info");
+  // 资料页目标用户（点消息头像进入，null 表示未打开）
+  const [profileTarget, setProfileTarget] = useState<{
+    userId: string;
+    name?: string;
+    isSelf?: boolean;
+  } | null>(null);
+  // 进资料页前详情面板是否已打开：决定返回时回到详情还是回到聊天
+  const detailWasOpen = useRef(false);
   const [members, setMembers] = useState<ConversationMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
   const [groupOpen, setGroupOpen] = useState(false);
@@ -141,9 +150,30 @@ export function ChatScreen() {
     </>
   );
 
-  /** 详情面板内容：info（ChatDetail）↔ members（MembersView） */
+  /** 点消息头像 → 在详情面板位置打开资料页 */
+  const openProfile = useCallback(
+    (target: { userId: string; name?: string; isSelf?: boolean }) => {
+      detailWasOpen.current = showDetail;
+      setProfileTarget(target);
+      setShowDetail(true);
+    },
+    [showDetail],
+  );
+
+  /** 详情面板内容：profile（资料页）> members（成员列表）> info（会话详情） */
   const detailPanel = (onClose: () => void) =>
-    detailView === "members" ? (
+    profileTarget ? (
+      <UserProfileView
+        userId={profileTarget.userId}
+        fallbackName={profileTarget.name}
+        isSelf={profileTarget.isSelf}
+        onBack={() => {
+          setProfileTarget(null);
+          // 从消息头像直接进来的（详情面板本来是关着的），返回即回到聊天
+          if (!detailWasOpen.current) onClose();
+        }}
+      />
+    ) : detailView === "members" ? (
       <MembersView
         members={members}
         loading={membersLoading}
@@ -179,6 +209,7 @@ export function ChatScreen() {
           <ChatWindow
             onBack={() => setActive(null)}
             onShowDetail={() => setShowDetail(true)}
+            onShowProfile={openProfile}
             compactComposer
           />
           {modals}
@@ -212,7 +243,7 @@ export function ChatScreen() {
       {/* 聊天窗口 */}
       <div className="bg-surface min-w-0 flex-1">
         {activeId ? (
-          <ChatWindow onShowDetail={() => setShowDetail((v) => !v)} />
+          <ChatWindow onShowDetail={() => setShowDetail((v) => !v)} onShowProfile={openProfile} />
         ) : (
           <EmptyState
             title={t("chat.selectConversation")}

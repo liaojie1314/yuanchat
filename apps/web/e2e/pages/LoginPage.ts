@@ -19,7 +19,10 @@ export class LoginPage {
     this.page = page;
     this.yuanchatIdInput = page.getByPlaceholder("元聊号");
     this.passwordInput = page.getByPlaceholder("密码");
-    this.loginButton = page.getByRole("button", { name: /登 录|登录中…/ });
+    // 按钮文案来自 zh-CN 词条（playwright.config.ts 已把 locale 钉在 zh-CN）。
+    // 两字按钮中间的排版空格属样式取舍，用 \s* 兼容有无空格两种写法；
+    // 必须首尾锚定，否则「扫码登录」按钮也会命中，strict mode 直接报双命中
+    this.loginButton = page.getByRole("button", { name: /^(登\s*录|登录中…)$/ });
     this.registerLink = page.getByRole("link", { name: "立即注册" });
   }
 

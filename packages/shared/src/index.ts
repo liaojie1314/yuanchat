@@ -17,6 +17,7 @@ export * from "./api/presence";
 export * from "./api/search";
 export * from "./api/favorites";
 export * from "./api/reports";
+export * from "./api/stickers";
 export * from "./push/webPush";
 export * from "./crypto/primitives";
 export * from "./crypto/x3dh";
@@ -33,8 +34,14 @@ export {
   needsRefresh,
 } from "./api/tokenManager";
 export type { RefreshHandler } from "./api/tokenManager";
-export { chatSocket } from "./ws/chatSocket";
-export type { FrameHandler, ServerFrames } from "./ws/chatSocket";
+export { chatSocket, asServerMessageId } from "./ws/chatSocket";
+export type {
+  FrameHandler,
+  ServerFrames,
+  ClientFrames,
+  ClientContent,
+  ServerMessageId,
+} from "./ws/chatSocket";
 export { useIsDesktop } from "./hooks/useIsDesktop";
 export { useResizable } from "./hooks/useResizable";
 export { useKeyboardAwareViewport } from "./hooks/useKeyboardAwareViewport";
@@ -44,3 +51,7 @@ export { useChatBootstrap, isMockEnabled } from "./hooks/useChatBootstrap";
 export { useVoiceRecorder } from "./hooks/useVoiceRecorder";
 export type { VoiceRecorderState } from "./hooks/useVoiceRecorder";
 export { initSentry, captureException } from "./observability/sentry";
+export { previewBodyOf, quoteExcerptOf } from "./utils/messagePreview";
+export { isServerConfirmed } from "./utils/messageActions";
+export type { ActionableMessage } from "./utils/messageActions";
+export type { MessagePreviewKind } from "./utils/messagePreview";

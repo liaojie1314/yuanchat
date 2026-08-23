@@ -570,4 +570,101 @@ describe("messageStore.clearConversation", () => {
     expect(state.messagesByConv[CONV_B]).toHaveLength(1);
     expect(state.hasMoreByConv[CONV_B]).toBe(true);
   });
+
+  describe("sendSticker", () => {
+    it("optimistically inserts a sticker message with sending status", () => {
+      useMessageStore.setState({ messagesByConv: {}, hasMoreByConv: {} });
+      useMessageStore.getState().sendSticker("c1", {
+        id: "s1",
+        objectKey: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+      const msgs = useMessageStore.getState().messagesByConv["c1"];
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].kind).toBe("sticker");
+      expect(msgs[0].isSelf).toBe(true);
+      expect(msgs[0].status).toBe("sending");
+      expect(msgs[0].sticker).toEqual({
+        stickerId: "s1",
+        key: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+    });
+
+    // 帧格式必须与服务端 buildContent 的 case "sticker" 完全对齐：
+    // content 是对象（非 JSON 字符串）、带 type、四字段齐全，否则服务端回 400 且贴纸发不出去。
+    it("emits a message.send frame matching the server sticker contract", () => {
+      useMessageStore.setState({ messagesByConv: {}, hasMoreByConv: {} });
+      useMessageStore.getState().sendSticker("c1", {
+        id: "s1",
+        objectKey: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+
+      const call = vi.mocked(chatSocket.send).mock.calls.find(([tp]) => tp === "message.send");
+      expect(call).toBeTruthy();
+      const payload = call![1] as {
+        conversation_id: string;
+        content: Record<string, unknown>;
+        client_msg_id: string;
+      };
+      expect(payload.conversation_id).toBe("c1");
+      expect(payload.content).toEqual({
+        type: "sticker",
+        sticker_id: "s1",
+        key: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+      expect(payload.client_msg_id).toBeTruthy();
+    });
+
+    it("marks the sticker failed when no ack arrives before the timeout", () => {
+      useMessageStore.setState({ messagesByConv: {}, hasMoreByConv: {} });
+      useMessageStore.getState().sendSticker("c1", {
+        id: "s1",
+        objectKey: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+
+      vi.advanceTimersByTime(20_000);
+
+      expect(useMessageStore.getState().messagesByConv["c1"][0].status).toBe("failed");
+    });
+
+    // 贴纸没有本地 blob 可重传，重试就是按原 client_msg_id 重发同一帧；
+    // 若 retrySend 漏了 sticker 分支，会落到文本路径被 `if (!msg.text) return` 静默吞掉。
+    it("retrySend re-emits the same sticker frame with the original client_msg_id", () => {
+      useMessageStore.setState({ messagesByConv: {}, hasMoreByConv: {} });
+      useMessageStore.getState().sendSticker("c1", {
+        id: "s1",
+        objectKey: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+      vi.advanceTimersByTime(20_000);
+      const msg = useMessageStore.getState().messagesByConv["c1"][0];
+      expect(msg.status).toBe("failed");
+      vi.mocked(chatSocket.send).mockClear();
+
+      useMessageStore.getState().retrySend("c1", msg.id);
+
+      expect(useMessageStore.getState().messagesByConv["c1"][0].status).toBe("sending");
+      const call = vi.mocked(chatSocket.send).mock.calls.find(([tp]) => tp === "message.send");
+      expect(call).toBeTruthy();
+      const payload = call![1] as { content: Record<string, unknown>; client_msg_id: string };
+      expect(payload.content).toEqual({
+        type: "sticker",
+        sticker_id: "s1",
+        key: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+      expect(payload.client_msg_id).toBe(msg.clientMsgId);
+    });
+  });
 });

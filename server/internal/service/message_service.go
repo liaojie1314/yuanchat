@@ -41,6 +41,13 @@ var (
 	ErrForwardTooMany = errors.New("too many forward targets")
 	// ErrForwardNoTarget 转发未提供任何目标会话。
 	ErrForwardNoTarget = errors.New("no forward target")
+	// ErrForwardEncrypted 端到端加密消息不可转发。
+	//
+	// 密文是针对「本会话、本棘轮状态」加密的：原样复制到另一个会话后，那边
+	// 任何人（包括转发者自己）都拿不到对应的链密钥，只会渲染成"无法解密"。
+	// 服务端又无法解密后重新加密（这正是 E2EE 的前提），所以只能在入口拒绝，
+	// 而不是让用户成功转发出一条永久乱码。
+	ErrForwardEncrypted = errors.New("encrypted message cannot be forwarded")
 )
 
 // RecallWindow 消息可撤回的时间窗口（自发送起 2 分钟）。
@@ -293,6 +300,10 @@ func (s *MessageService) Forward(
 	// 系统消息不允许转发
 	if src.MessageType == model.MessageTypeSystem {
 		return nil, ErrMessageNotFound
+	}
+	// E2EE 密文换会话即不可解，转发出去只会是一条永久"无法解密"，入口直接拒绝
+	if src.MessageType == model.MessageTypeE2EE {
+		return nil, ErrForwardEncrypted
 	}
 	// actor 必须是 source 会话成员，且必须是每个 target 会话成员
 	if ok, err := s.convRepo.IsMember(ctx, src.ConversationID, actorID); err != nil {

@@ -18,7 +18,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// Common errors returned by ContactService.
+// ContactService 可能返回的错误。
 var (
 	ErrSelfRequest       = errors.New("cannot add yourself as a friend")
 	ErrAlreadyFriends    = errors.New("already friends")
@@ -35,7 +35,7 @@ var digitRe = regexp.MustCompile(`^[0-9]+$`)
 // SearchResult 用户搜索结果：用户 + 与当前用户的关系。
 type SearchResult struct {
 	User *model.User
-	// none | friend | pending_out | pending_in | self
+	// 取值：none | friend | pending_out | pending_in | self
 	Relation string
 }
 
@@ -358,7 +358,7 @@ func (s *ContactService) Reject(ctx context.Context, userID, requestID uuid.UUID
 // findPrivateConvID 查双方共同所在、恰好 2 人的单聊会话 ID；无则返回 uuid.Nil。
 //
 // db 可以是根连接或事务句柄。注意：gorm Raw().Scan 不能直接扫进 uuid.UUID
-//（驱动返回 string），用 string 中转。
+// （驱动返回 string），用 string 中转。
 func findPrivateConvID(ctx context.Context, db *gorm.DB, a, b uuid.UUID) (uuid.UUID, error) {
 	var idStr string
 	err := db.WithContext(ctx).Raw(`

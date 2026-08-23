@@ -12,6 +12,7 @@ const TYPE_KEY: Record<number, string> = {
   2: "chat.message.image",
   3: "chat.message.file",
   4: "chat.message.voice",
+  8: "chat.message.sticker",
 };
 
 /** content JSONB 原文 → 展示文本（text 消息取 text 字段，解析失败回退原文） */
@@ -63,8 +64,8 @@ export function MessageAuditPage() {
                 {contentText(m.content)}
               </p>
             </td>
-            <td className="text-on-surface-variant px-4 py-3 text-body-md">{m.sender_nickname}</td>
-            <td className="text-on-surface-variant whitespace-nowrap px-4 py-3 text-body-md">
+            <td className="px-4 py-3 text-body-md text-on-surface-variant">{m.sender_nickname}</td>
+            <td className="whitespace-nowrap px-4 py-3 text-body-md text-on-surface-variant">
               {new Date(m.created_at).toLocaleString()}
             </td>
             <td className="px-4 py-3">

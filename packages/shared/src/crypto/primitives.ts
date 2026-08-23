@@ -45,7 +45,7 @@ export function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-/** base64 → Uint8Array */
+/** base64 字符串 → 字节数组 */
 export function fromBase64(b64: string): Uint8Array {
   const binary = atob(b64);
   const out = new Uint8Array(binary.length);
@@ -116,7 +116,7 @@ export function verify(signature: Uint8Array, message: Uint8Array, publicKey: Ui
   }
 }
 
-// ---------- KDF ----------
+// ---------- 密钥派生（KDF） ----------
 
 /**
  * HKDF-SHA256。

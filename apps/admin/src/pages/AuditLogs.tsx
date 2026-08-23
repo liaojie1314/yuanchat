@@ -60,12 +60,12 @@ export function AuditLogsPage() {
                 {log.action}
               </span>
             </td>
-            <td className="text-on-surface-variant px-4 py-3 text-body-md">
+            <td className="px-4 py-3 text-body-md text-on-surface-variant">
               <span className="font-mono text-xs">
                 {log.target_type}:{log.target_id.slice(0, 8)}…
               </span>
             </td>
-            <td className="text-on-surface-variant whitespace-nowrap px-4 py-3 text-body-md">
+            <td className="whitespace-nowrap px-4 py-3 text-body-md text-on-surface-variant">
               {new Date(log.created_at).toLocaleString()}
             </td>
           </tr>

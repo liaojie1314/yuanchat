@@ -89,7 +89,7 @@ export function ForwardModal({
       onClick={onClose}
     >
       <div
-        className="bg-surface-container-low shadow-elevation-4 flex max-h-[80vh] w-full max-w-md flex-col rounded-2xl"
+        className="bg-surface-container-low shadow-elevation-4 flex max-h-[80vh] w-full max-w-md flex-col rounded-lg"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex h-14 shrink-0 items-center justify-between px-5">
@@ -142,7 +142,7 @@ export function ForwardModal({
                 </span>
                 <span
                   className={cn(
-                    "grid h-5 w-5 place-items-center rounded-full border",
+                    "flex h-5 w-5 items-center justify-center rounded-full border",
                     active ? "border-primary bg-primary text-primary-on" : "border-outline-variant",
                   )}
                 >

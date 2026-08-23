@@ -1,7 +1,7 @@
 /**
  * api/chat DTO 映射与时间格式化单元测试
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   formatDateDivider,
   formatFileMeta,
@@ -81,23 +81,45 @@ describe("parseImageContent", () => {
 });
 
 describe("formatMessageTime / formatListTime", () => {
-  it("formats today's date as HH:mm", () => {
-    const today = new Date();
-    today.setHours(9, 5, 0, 0);
+  // 固定"现在"为 2026-08-23 15:00（周日），各档期望值才与运行日期无关
+  const NOW = new Date(2026, 7, 23, 15, 0, 0);
+
+  beforeEach(async () => {
+    // CI runner locale 是 en_US，强制切 zh-CN 保证"昨天"与 Intl 输出可断言
+    const { default: i18n } = await import("@yuanchat/design-system/i18n");
+    await i18n.changeLanguage("zh-CN");
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("今天 → HH:mm", () => {
+    const today = new Date(2026, 7, 23, 9, 5, 0);
     expect(formatMessageTime(today.toISOString())).toBe("09:05");
     expect(formatListTime(today.toISOString())).toBe("09:05");
   });
 
-  it("formats other days of this year as M月D日", () => {
-    const d = new Date();
-    // 取一个必不为"今天"且同年的日期（1月1日或12月31日）
-    const other =
-      d.getMonth() === 0 && d.getDate() === 1
-        ? new Date(d.getFullYear(), 11, 31)
-        : new Date(d.getFullYear(), 0, 1);
-    expect(formatListTime(other.toISOString())).toBe(
-      other.getMonth() + 1 + "月" + other.getDate() + "日",
-    );
+  it("昨天 → 昨天（不是 8月22日）", () => {
+    expect(formatListTime(new Date(2026, 7, 22, 23, 30).toISOString())).toBe("昨天");
+  });
+
+  it("一周内 → 星期简称", () => {
+    expect(formatListTime(new Date(2026, 7, 18, 10, 0).toISOString())).toBe("周二");
+  });
+
+  it("今年更早 → 月日", () => {
+    expect(formatListTime(new Date(2026, 7, 1, 10, 0).toISOString())).toBe("8月1日");
+  });
+
+  it("跨年 → 完整日期", () => {
+    expect(formatListTime(new Date(2025, 11, 31, 10, 0).toISOString())).toBe("2025/12/31");
+  });
+
+  it("客户端时钟偏差导致的未来时间按今天显示", () => {
+    expect(formatListTime(new Date(2026, 7, 24, 8, 30).toISOString())).toBe("08:30");
   });
 
   it("returns empty string for invalid date", () => {
@@ -449,5 +471,57 @@ describe("conversationUpdatePatch", () => {
     expect(conversationUpdatePatch({ conversation_id: "c1", name: "新群名" })).not.toHaveProperty(
       "announcement",
     );
+  });
+});
+
+describe("mapMessage sticker", () => {
+  it("maps message_type 8 to kind sticker with parsed content", () => {
+    const dto: MessageDTO = {
+      id: "m1",
+      conversation_id: "c1",
+      sender_id: "u1",
+      seq: 1,
+      message_type: 8,
+      content: JSON.stringify({
+        sticker_id: "s1",
+        key: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      }),
+      status: 1,
+      created_at: "2026-08-09T10:00:00+08:00",
+      sender_nickname: "Alice",
+    };
+    const msg = mapMessage(dto, "u2");
+    expect(msg.kind).toBe("sticker");
+    expect(msg.sticker).toEqual({
+      stickerId: "s1",
+      key: "images/2026/08/a.png",
+      width: 96,
+      height: 96,
+    });
+  });
+});
+
+describe("mapMessage e2ee history", () => {
+  const dto: MessageDTO = {
+    id: "m-e2ee",
+    conversation_id: "c1",
+    sender_id: "u2",
+    seq: 9,
+    message_type: 7,
+    content: JSON.stringify({ ratchet_key: "rk", n: 0, pn: 0, nonce: "nn", ciphertext: "cc" }),
+    status: 1,
+    created_at: "2026-08-21T10:00:00+08:00",
+    sender_nickname: "Alice",
+  };
+
+  it("加密历史消息给出可读占位，而不是空气泡", () => {
+    const msg = mapMessage(dto, "u1");
+    // kindMap 没有 7，kind 回退 text；关键是 text 必须有内容
+    expect(msg.kind).toBe("text");
+    expect(msg.text).toBeTruthy();
+    // 必须是真有翻译的文案，而不是原始 key
+    expect(msg.text).not.toMatch(/^e2ee\./);
   });
 });

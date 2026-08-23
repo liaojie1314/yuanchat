@@ -24,7 +24,7 @@ func TestGenerateAndValidate(t *testing.T) {
 		t.Fatal("RefreshToken is empty")
 	}
 	if pair.ExpiresIn != int64((15 * time.Minute).Seconds()) {
-		t.Fatalf("ExpiresIn = %d, want %d", pair.ExpiresIn, int64((15*time.Minute).Seconds()))
+		t.Fatalf("ExpiresIn = %d, want %d", pair.ExpiresIn, int64((15 * time.Minute).Seconds()))
 	}
 
 	// 验证 access token

@@ -4,6 +4,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"time"
 
@@ -104,6 +105,29 @@ func (s *Storage) PresignGet(ctx context.Context, objectKey string, expires time
 	return u.String(), nil
 }
 
+// PutObject 服务端直接写入对象（供内部工具如 seed 使用；
+// 业务上传路径统一走 PresignPut 预签名直传，不经服务端中转字节）。
+func (s *Storage) PutObject(ctx context.Context, objectKey, contentType string, reader io.Reader, size int64) error {
+	_, err := s.client.PutObject(ctx, s.bucket, objectKey, reader, size, minio.PutObjectOptions{ContentType: contentType})
+	return err
+}
+
+// ObjectExists 判断对象是否真实存在。
+//
+// 用于「登记引用前先确认对象在」的场景（如贴纸收藏）：PresignGet 只做 URL 签名、
+// 不校验对象存在性，因此没有这一步就会把指向空对象的记录写进库，前端拿到合法 URL
+// 但渲染 404，且该坏数据会长期存活。找不到对象返回 (false, nil)，其余错误照原样返回。
+func (s *Storage) ObjectExists(ctx context.Context, objectKey string) (bool, error) {
+	_, err := s.client.StatObject(ctx, s.bucket, objectKey, minio.StatObjectOptions{})
+	if err == nil {
+		return true, nil
+	}
+	if minio.ToErrorResponse(err).Code == "NoSuchKey" {
+		return false, nil
+	}
+	return false, fmt.Errorf("failed to stat %q: %w", objectKey, err)
+}
+
 // PublicURL 拼出对象的公共访问 URL，形如 scheme://endpoint/bucket/key。
 // 仅对已开放匿名读的前缀（avatars/）有效。
 func (s *Storage) PublicURL(objectKey string) string {
@@ -112,4 +136,41 @@ func (s *Storage) PublicURL(objectKey string) string {
 		scheme = "https"
 	}
 	return fmt.Sprintf("%s://%s/%s/%s", scheme, s.endpoint, s.bucket, objectKey)
+}
+
+// ObjectInfo 对象清单条目（GC 用：判定引用要 key，判定宽限期要 LastModified）。
+type ObjectInfo struct {
+	Key          string
+	Size         int64
+	LastModified time.Time
+}
+
+// ListObjects 递归遍历 prefix 下的全部对象，逐条回调。
+//
+// 回调式而非返回切片：桶内对象数随消息量线性增长，全量装载会把内存压成 O(N)
+// ——同 ListMine 当初无 LIMIT 的问题形态。回调返回错误即中止遍历。
+func (s *Storage) ListObjects(ctx context.Context, prefix string, fn func(ObjectInfo) error) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel() // 提前 return 时关闭 minio 内部的 goroutine 与 channel
+
+	for obj := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: true,
+	}) {
+		if obj.Err != nil {
+			return fmt.Errorf("list objects %q: %w", prefix, obj.Err)
+		}
+		if err := fn(ObjectInfo{Key: obj.Key, Size: obj.Size, LastModified: obj.LastModified}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RemoveObject 删除单个对象（供 cmd/gc 回收无人引用的对象；业务路径不删对象）。
+func (s *Storage) RemoveObject(ctx context.Context, objectKey string) error {
+	if err := s.client.RemoveObject(ctx, s.bucket, objectKey, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("failed to remove %q: %w", objectKey, err)
+	}
+	return nil
 }

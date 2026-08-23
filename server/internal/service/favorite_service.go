@@ -58,7 +58,7 @@ func (s *FavoriteService) Add(ctx context.Context, userID, messageID uuid.UUID) 
 		return nil, fmt.Errorf("find conversation: %w", err)
 	}
 
-	// conv.Name is *string; private chats may have nil name
+	// conv.Name 是 *string：单聊可能没有名字（nil）
 	convName := ""
 	if conv.Name != nil {
 		convName = *conv.Name

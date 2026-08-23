@@ -1,6 +1,9 @@
 /**
  * Web 端入口 — 初始化 i18n、M3 主题、Sentry、MSW Mock（仅 dev），挂载 React 应用
  */
+// 旧 WebView 补丁必须排在所有 import 之前：依赖会在模块初始化阶段就调用
+// ES2022 API（如 @noble/curves 用 Object.hasOwn），补晚了整屏空白
+import "@yuanchat/shared/polyfills";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";

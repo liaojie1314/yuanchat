@@ -1,11 +1,15 @@
-// migrate は goose マイグレーション CLI ラッパー。
-// Usage:
+// migrate 是 goose 数据库迁移的 CLI 包装。
 //
-//	go run ./cmd/migrate up
-//	go run ./cmd/migrate down
-//	go run ./cmd/migrate status
-//	go run ./cmd/migrate reset
-//	go run ./cmd/migrate version
+// 迁移文件通过 database.MigrationFiles() 以 embed.FS 提供，因此编译后的二进制
+// 自带全部 SQL，部署时无需附带 migrations 目录。
+//
+// 用法：
+//
+//	go run ./cmd/migrate up       # 应用全部未执行的迁移
+//	go run ./cmd/migrate down     # 回滚最近一次迁移
+//	go run ./cmd/migrate status   # 查看各迁移的执行状态
+//	go run ./cmd/migrate reset    # 回滚全部迁移（仅开发环境）
+//	go run ./cmd/migrate version  # 查看当前版本号
 package main
 
 import (

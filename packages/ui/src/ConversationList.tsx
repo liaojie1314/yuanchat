@@ -26,6 +26,11 @@ import { applyConversationSetting, useConversationStore } from "@yuanchat/shared
 import type { Conversation } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
+import { useLongPress } from "./useLongPress";
+import type { UseLongPressResult } from "./useLongPress";
+
+/** 列表滚动位移超过该像素才关闭快捷菜单，容忍「零位移」滚动事件与真机抖动 */
+const SCROLL_CLOSE_DELTA = 8;
 
 /** 过滤器类别，对应顶部 chips */
 type Filter = "all" | "unread" | "group" | "private" | "mentions";
@@ -53,6 +58,29 @@ function matchFilter(conv: Conversation, filter: Filter): boolean {
   }
 }
 
+/** 会话快捷菜单状态：目标会话 + 呼出点坐标（右键落点或长按触点） */
+type ContextMenuState = {
+  conv: Conversation;
+  x: number;
+  y: number;
+};
+
+/** 快捷菜单外框尺寸（两项 + 上下内边距），仅用于贴边时收敛位置 */
+const CONTEXT_MENU_SIZE = { width: 144, height: 88 };
+
+/**
+ * 把呼出点收敛进视口，避免菜单在屏幕右侧 / 底部被裁掉。
+ *
+ * @param x - 呼出点横坐标（视口坐标系）
+ * @param y - 呼出点纵坐标（视口坐标系）
+ * @returns 可直接用作 fixed 定位的 left / top 像素值
+ */
+function menuPosition(x: number, y: number): { left: number; top: number } {
+  const maxLeft = Math.max(8, window.innerWidth - CONTEXT_MENU_SIZE.width - 8);
+  const maxTop = Math.max(8, window.innerHeight - CONTEXT_MENU_SIZE.height - 8);
+  return { left: Math.min(x, maxLeft), top: Math.min(y, maxTop) };
+}
+
 export function ConversationList({
   hideHeader = false,
   onNewGroup,
@@ -72,6 +100,31 @@ export function ConversationList({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [showMenu, setShowMenu] = useState(false);
+  // 会话快捷菜单的状态提到列表层：菜单全列表只有一个（再次呼出即替换），
+  // 位置按呼出坐标 fixed 定位。原来每个条目各自持有开关，
+  // 于是能同时挂出多个菜单，且只会贴在条目自身右上角，与右键位置无关。
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  // 按住的是哪一条：条目在 touchstart 时登记，长按达成时据此开菜单
+  const pressedConv = useRef<Conversation | null>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  // 开菜单瞬间列表的滚动位置，用于判断后续滚动是否真的把条目带走了
+  const scrollTopAtOpen = useRef(0);
+  /**
+   * 在呼出点开会话菜单。
+   * 必须声明在 useLongPress 之前：长按回调要引用它，
+   * 放在后面就是「先访问后声明」，回调拿的还是旧闭包
+   */
+  const openContextMenu = (conv: Conversation, x: number, y: number) => {
+    scrollTopAtOpen.current = scrollerRef.current?.scrollTop ?? 0;
+    setContextMenu({ conv, x, y });
+  };
+
+  // 长按手势放在列表层：位移容差 + 抬手后的合成事件豁免详见 useLongPress。
+  // 同一时刻只可能按住一个条目，refs 共享无冲突，且关闭监听正好要读同一份手势状态
+  const { handlers: longPressHandlers, isTouchEcho } = useLongPress((x, y) => {
+    const conv = pressedConv.current;
+    if (conv) openContextMenu(conv, x, y);
+  });
 
   const hasUnread = conversations.some((c) => c.unreadCount > 0);
 
@@ -107,6 +160,44 @@ export function ConversationList({
     clearUnread(id);
   };
 
+  /** 条目按下时登记长按目标 */
+  const markPressed = (conv: Conversation) => {
+    pressedConv.current = conv;
+  };
+
+  // 点菜单之外的任意处关闭；菜单自身用 stopPropagation 挡住这层监听。
+  // 唯一例外是长按余波：抬手时浏览器会在长按目标上补发一整套合成鼠标事件
+  // （mousedown → mouseup → click），无差别关闭会让菜单在弹出的同一帧被自己的
+  // 合成 mousedown 秒关（真机上一闪而过），判定见 useLongPress。桌面右键没有余波，
+  // 右键后左键点同一条目仍照常关闭菜单并切换会话。
+  // 菜单是 fixed 定位在呼出点上的，页面滚动 / 窗口尺寸变化后位置就失真了，一并关掉。
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const closeUnlessEcho = () => {
+      if (isTouchEcho()) return;
+      setContextMenu(null);
+    };
+    // 滚动只在列表真的滚走后才关：浏览器会在右键/长按落点上补发一次位移为零的
+    // scroll（菜单弹出的同一毫秒就到），真机上手指的细微移动也会让列表抖动一两像素
+    const closeIfScrolledAway = () => {
+      const top = scrollerRef.current?.scrollTop;
+      if (top === undefined || Math.abs(top - scrollTopAtOpen.current) > SCROLL_CLOSE_DELTA) {
+        setContextMenu(null);
+      }
+    };
+    document.addEventListener("mousedown", closeUnlessEcho);
+    document.addEventListener("touchstart", closeUnlessEcho);
+    document.addEventListener("scroll", closeIfScrolledAway, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("mousedown", closeUnlessEcho);
+      document.removeEventListener("touchstart", closeUnlessEcho);
+      document.removeEventListener("scroll", closeIfScrolledAway, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [contextMenu, isTouchEcho]);
+
   return (
     <div className="flex h-full flex-col">
       {!hideHeader && (
@@ -132,7 +223,7 @@ export function ConversationList({
                 />
                 <div
                   role="menu"
-                  className="bg-surface-container-high shadow-elevation-2 animate-fade-in absolute top-full right-0 z-20 mt-1 w-40 overflow-hidden rounded-lg py-1"
+                  className="bg-surface-container-high shadow-elevation-2 animate-fade-in absolute top-full right-0 z-20 mt-1 w-40 overflow-hidden rounded-lg p-1"
                 >
                   <MenuItem
                     icon={<Users size={17} />}
@@ -202,7 +293,7 @@ export function ConversationList({
       </div>
 
       {/* 会话列表（置顶分组 + 全部） */}
-      <div className="flex-1 overflow-y-auto px-2 pb-3">
+      <div ref={scrollerRef} className="flex-1 overflow-y-auto px-2 pb-3">
         {loading && conversations.length === 0 ? (
           <ConversationSkeleton />
         ) : (
@@ -216,6 +307,10 @@ export function ConversationList({
                     conv={conv}
                     isActive={conv.id === activeId}
                     onClick={() => handleSelect(conv.id)}
+                    onOpenMenu={openContextMenu}
+                    longPress={longPressHandlers}
+                    onPressStart={markPressed}
+                    isTouchEcho={isTouchEcho}
                   />
                 ))}
               </>
@@ -229,6 +324,10 @@ export function ConversationList({
                     conv={conv}
                     isActive={conv.id === activeId}
                     onClick={() => handleSelect(conv.id)}
+                    onOpenMenu={openContextMenu}
+                    longPress={longPressHandlers}
+                    onPressStart={markPressed}
+                    isTouchEcho={isTouchEcho}
                   />
                 ))}
               </>
@@ -241,6 +340,36 @@ export function ConversationList({
           </>
         )}
       </div>
+
+      {/* 会话快捷菜单：整个列表共用一个，落点即呼出点 */}
+      {contextMenu && (
+        <div
+          role="menu"
+          style={menuPosition(contextMenu.x, contextMenu.y)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          className="bg-surface-container-high shadow-elevation-2 animate-fade-in fixed z-40 w-36 overflow-hidden rounded-lg py-1"
+        >
+          <MenuItem
+            icon={contextMenu.conv.isPinned ? <PinOff size={17} /> : <Pin size={17} />}
+            label={t(contextMenu.conv.isPinned ? "chat.menu.unpin" : "chat.menu.pin")}
+            onClick={() => {
+              const { id, isPinned } = contextMenu.conv;
+              setContextMenu(null);
+              void applyConversationSetting(id, { isPinned: !isPinned });
+            }}
+          />
+          <MenuItem
+            icon={contextMenu.conv.isMuted ? <Bell size={17} /> : <BellOff size={17} />}
+            label={t(contextMenu.conv.isMuted ? "chat.menu.unmute" : "chat.menu.mute")}
+            onClick={() => {
+              const { id, isMuted } = contextMenu.conv;
+              setContextMenu(null);
+              void applyConversationSetting(id, { isMuted: !isMuted });
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -267,10 +396,12 @@ function MenuItem({
     <button
       role="menuitem"
       onClick={onClick}
-      className="text-body-md text-on-surface hover:bg-surface-container flex w-full items-center gap-3 px-3 py-2 text-left transition-colors"
+      className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors"
     >
       <span className="text-on-surface-variant shrink-0">{icon}</span>
-      {label}
+      {/* 文案单独包一层：旧 WebView 的 gap 兜底靠相邻兄弟选择器，
+          裸文本节点是匿名 flex item，`* + *` 命中不到，图标与文字会紧贴 */}
+      <span className="truncate">{label}</span>
     </button>
   );
 }
@@ -304,176 +435,112 @@ function ConversationItem({
   conv,
   isActive,
   onClick,
+  onOpenMenu,
+  longPress,
+  onPressStart,
+  isTouchEcho,
 }: {
   conv: Conversation;
   isActive: boolean;
   onClick: () => void;
+  onOpenMenu: (conv: Conversation, x: number, y: number) => void;
+  longPress: UseLongPressResult["handlers"];
+  onPressStart: (conv: Conversation) => void;
+  isTouchEcho: UseLongPressResult["isTouchEcho"];
 }) {
   const { t } = useTranslation();
   const hasDraft = !!conv.draft;
-  const [menuOpen, setMenuOpen] = useState(false);
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // 长按已触发标记：触屏抬手后浏览器会补发一次合成 click，
-  // 而本组件的长按目标同时是可点击的会话按钮（与 MessageBubble 的
-  // 长按目标不同，后者没有 onClick），不拦截会在开菜单的同时误切会话。
-  const longPressFired = useRef(false);
-  // 本条目根节点：用于判定 document 上的 mousedown 是否落在自己身上
-  const rootRef = useRef<HTMLDivElement | null>(null);
 
-  // 点击本条目之外的任意处关闭菜单。
-  // 唯一例外是「长按刚触发」后落在本条目内的 mousedown：触屏抬手时浏览器会在
-  // 长按目标上补发一整套合成鼠标事件（mousedown → mouseup → click），
-  // 无差别关闭会让菜单在弹出的同一帧被自己的合成 mousedown 秒关（触屏上一闪而过）。
-  // 用 longPressFired 限定范围，桌面右键后左键点同一条目仍照常关闭菜单。
-  useEffect(() => {
-    if (!menuOpen) return;
-    const close = (e: MouseEvent) => {
-      const root = rootRef.current;
-      const insideSelf = root && e.target instanceof Node && root.contains(e.target);
-      if (insideSelf && longPressFired.current) return;
-      setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [menuOpen]);
-
-  // 卸载时清掉未触发的长按定时器，避免已卸载组件上 setState
-  useEffect(() => {
-    return () => {
-      if (longPressTimer.current) clearTimeout(longPressTimer.current);
-    };
-  }, []);
-
-  const openMenu = (e: { preventDefault: () => void }) => {
-    e.preventDefault();
-    setMenuOpen(true);
-  };
-  const startLongPress = (e: { preventDefault: () => void }) => {
-    // 预复位：上一次长按若未跟随合成 click（手指拖走 / touchcancel /
-    // Android Chrome 长按后抑制合成事件），标志会残留并吞掉本次真实点击
-    longPressFired.current = false;
-    longPressTimer.current = setTimeout(() => {
-      longPressFired.current = true;
-      openMenu(e);
-    }, 500);
-  };
-  const cancelLongPress = () => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  };
   const handleClick = () => {
-    // 吞掉长按后的合成 click，并复位标记供下次点击
-    if (longPressFired.current) {
-      longPressFired.current = false;
-      return;
-    }
+    // 条目本身可点，长按抬手后浏览器补发的那次合成 click 必须吞掉，
+    // 否则开菜单的同时会误切会话（MessageBubble 的长按目标没有 onClick，不涉及）
+    if (isTouchEcho()) return;
     onClick();
   };
 
   return (
-    <div className="relative" ref={rootRef}>
-      <button
-        onClick={handleClick}
-        onContextMenu={openMenu}
-        onTouchStart={startLongPress}
-        onTouchEnd={cancelLongPress}
-        onTouchMove={cancelLongPress}
-        onTouchCancel={cancelLongPress}
-        aria-current={isActive || undefined}
-        className={cn(
-          "relative flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors",
-          isActive
-            ? "bg-primary-container"
-            : "hover:bg-surface-container-high active:bg-surface-container",
-        )}
-      >
-        {/* 置顶标记：左侧主题色短竖条 */}
-        {conv.isPinned && (
-          <span className="bg-primary absolute top-1/2 left-0.5 h-5 w-[3px] -translate-y-1/2 rounded-full" />
-        )}
+    <button
+      onClick={handleClick}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onOpenMenu(conv, e.clientX, e.clientY);
+      }}
+      onTouchStart={(e) => {
+        // 手势状态在列表层共享，按下时先登记按的是哪一条
+        onPressStart(conv);
+        longPress.onTouchStart(e);
+      }}
+      onTouchMove={longPress.onTouchMove}
+      onTouchEnd={longPress.onTouchEnd}
+      onTouchCancel={longPress.onTouchCancel}
+      aria-current={isActive || undefined}
+      className={cn(
+        "relative flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors",
+        isActive
+          ? "bg-primary-container"
+          : "hover:bg-surface-container-high active:bg-surface-container",
+      )}
+    >
+      {/* 置顶标记：左侧主题色短竖条 */}
+      {conv.isPinned && (
+        <span className="bg-primary absolute top-1/2 left-0.5 h-5 w-[3px] -translate-y-1/2 rounded-full" />
+      )}
 
-        <Avatar
-          name={conv.name}
-          src={conv.avatarUrl}
-          presence={conv.presence}
-          online={conv.presence ? undefined : conv.isOnline}
-        />
+      <Avatar
+        name={conv.name}
+        src={conv.avatarUrl}
+        presence={conv.presence}
+        online={conv.presence ? undefined : conv.isOnline}
+      />
 
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline justify-between gap-2">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-2">
+          <span
+            className={cn(
+              "text-body-lg text-on-surface truncate",
+              conv.unreadCount > 0 ? "font-bold" : "font-medium",
+            )}
+          >
+            {conv.name}
+          </span>
+          <span className="text-label-sm text-on-surface-variant shrink-0 tabular-nums">
+            {conv.lastTime}
+          </span>
+        </div>
+        <div className="mt-0.5 flex items-center justify-between gap-2">
+          <span className="text-body-sm text-on-surface-variant truncate">
+            {hasDraft ? (
+              <>
+                <span className="text-error font-medium">{t("chat.preview.draft")} </span>
+                {conv.draft}
+              </>
+            ) : (
+              <>
+                {(conv.mentionedMe || conv.mentionUnread) && (
+                  <span className="font-semibold text-amber-600 dark:text-amber-400">
+                    {t("chat.preview.mentionYou")}{" "}
+                  </span>
+                )}
+                {conv.lastMessage || t("chat.preview.empty")}
+              </>
+            )}
+          </span>
+          {conv.unreadCount > 0 ? (
             <span
               className={cn(
-                "text-body-lg text-on-surface truncate",
-                conv.unreadCount > 0 ? "font-bold" : "font-medium",
+                "text-label-sm inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full px-1.5 font-bold text-white",
+                conv.isMuted ? "bg-outline" : "bg-red-500",
               )}
             >
-              {conv.name}
+              {conv.unreadCount > 99 ? "99+" : conv.unreadCount}
             </span>
-            <span className="text-label-sm text-on-surface-variant shrink-0 tabular-nums">
-              {conv.lastTime}
-            </span>
-          </div>
-          <div className="mt-0.5 flex items-center justify-between gap-2">
-            <span className="text-body-sm text-on-surface-variant truncate">
-              {hasDraft ? (
-                <>
-                  <span className="text-error font-medium">{t("chat.preview.draft")} </span>
-                  {conv.draft}
-                </>
-              ) : (
-                <>
-                  {(conv.mentionedMe || conv.mentionUnread) && (
-                    <span className="font-semibold text-amber-600 dark:text-amber-400">
-                      {t("chat.preview.mentionYou")}{" "}
-                    </span>
-                  )}
-                  {conv.lastMessage || t("chat.preview.empty")}
-                </>
-              )}
-            </span>
-            {conv.unreadCount > 0 ? (
-              <span
-                className={cn(
-                  "text-label-sm inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full px-1.5 font-bold text-white",
-                  conv.isMuted ? "bg-outline" : "bg-red-500",
-                )}
-              >
-                {conv.unreadCount > 99 ? "99+" : conv.unreadCount}
-              </span>
-            ) : conv.isMuted ? (
-              <BellOff size={14} className="text-on-surface-variant/60 shrink-0" />
-            ) : conv.isPinned ? (
-              <Pin size={12} className="text-on-surface-variant/40 shrink-0" />
-            ) : null}
-          </div>
+          ) : conv.isMuted ? (
+            <BellOff size={14} className="text-on-surface-variant/60 shrink-0" />
+          ) : conv.isPinned ? (
+            <Pin size={12} className="text-on-surface-variant/40 shrink-0" />
+          ) : null}
         </div>
-      </button>
-      {menuOpen && (
-        <div
-          role="menu"
-          onMouseDown={(e) => e.stopPropagation()}
-          className="bg-surface-container-high shadow-elevation-2 animate-fade-in absolute top-full right-2 z-20 -mt-1 w-36 overflow-hidden rounded-lg py-1"
-        >
-          <MenuItem
-            icon={conv.isPinned ? <PinOff size={17} /> : <Pin size={17} />}
-            label={t(conv.isPinned ? "chat.menu.unpin" : "chat.menu.pin")}
-            onClick={() => {
-              setMenuOpen(false);
-              void applyConversationSetting(conv.id, { isPinned: !conv.isPinned });
-            }}
-          />
-          <MenuItem
-            icon={conv.isMuted ? <Bell size={17} /> : <BellOff size={17} />}
-            label={t(conv.isMuted ? "chat.menu.unmute" : "chat.menu.mute")}
-            onClick={() => {
-              setMenuOpen(false);
-              void applyConversationSetting(conv.id, { isMuted: !conv.isMuted });
-            }}
-          />
-        </div>
-      )}
-    </div>
+      </div>
+    </button>
   );
 }

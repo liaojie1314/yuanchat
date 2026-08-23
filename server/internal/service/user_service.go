@@ -15,7 +15,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// Common errors returned by UserService.
+// UserService 可能返回的错误。
 var (
 	ErrDuplicateUser   = errors.New("phone or email already registered")
 	ErrInvalidPassword = errors.New("invalid password")
@@ -24,19 +24,19 @@ var (
 	ErrUserBanned      = errors.New("user is banned")
 )
 
-// UserService handles user registration, login, and profile operations.
+// UserService 负责注册、登录与个人资料相关的业务逻辑。
 type UserService struct {
-	repo      *repository.UserRepository
-	jwtGen    *jwt.Generator
-	sidGen    *shortid.Generator
-	logger    *zap.Logger
+	repo   *repository.UserRepository
+	jwtGen *jwt.Generator
+	sidGen *shortid.Generator
+	logger *zap.Logger
 }
 
 func NewUserService(repo *repository.UserRepository, jwtGen *jwt.Generator, sidGen *shortid.Generator, logger *zap.Logger) *UserService {
 	return &UserService{repo: repo, jwtGen: jwtGen, sidGen: sidGen, logger: logger}
 }
 
-// RegisterRequest is the input for creating a new account.
+// RegisterRequest 是注册新账号的入参。
 type RegisterRequest struct {
 	Phone    string `json:"phone"`
 	Email    string `json:"email"`
@@ -44,22 +44,22 @@ type RegisterRequest struct {
 	Nickname string `json:"nickname"`
 }
 
-// LoginRequest is the input for authenticating.
+// LoginRequest 是登录认证的入参。
 type LoginRequest struct {
 	Account  string `json:"account"` // phone or email
 	Password string `json:"password"`
 }
 
-// AuthResult contains the tokens and user info returned on successful login/register.
+// AuthResult 是登录 / 注册成功后返回的令牌与用户信息。
 type AuthResult struct {
-	User         model.User     `json:"user"`
-	TokenPair    jwt.TokenPair  `json:"-"`
-	AccessToken  string         `json:"access_token"`
-	RefreshToken string         `json:"refresh_token"`
-	ExpiresIn    int64          `json:"expires_in"`
+	User         model.User    `json:"user"`
+	TokenPair    jwt.TokenPair `json:"-"`
+	AccessToken  string        `json:"access_token"`
+	RefreshToken string        `json:"refresh_token"`
+	ExpiresIn    int64         `json:"expires_in"`
 }
 
-// Register creates a new user account and returns JWT tokens.
+// Register 创建新账号并返回 JWT 令牌。
 func (s *UserService) Register(ctx context.Context, req RegisterRequest) (*AuthResult, error) {
 	// 生成短号
 	shortID, err := s.sidGen.Next(ctx)
@@ -67,7 +67,7 @@ func (s *UserService) Register(ctx context.Context, req RegisterRequest) (*AuthR
 		return nil, fmt.Errorf("generate short id: %w", err)
 	}
 
-	// Check for duplicate
+	// 查重
 	exists, err := s.repo.ExistsByPhoneOrEmail(ctx, req.Phone, req.Email)
 	if err != nil {
 		return nil, fmt.Errorf("check duplicate: %w", err)
@@ -76,7 +76,7 @@ func (s *UserService) Register(ctx context.Context, req RegisterRequest) (*AuthR
 		return nil, ErrDuplicateUser
 	}
 
-	// Hash password
+	// 哈希密码
 	hash, err := password.Hash(req.Password)
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
@@ -100,9 +100,9 @@ func (s *UserService) Register(ctx context.Context, req RegisterRequest) (*AuthR
 	return s.buildAuthResult(*user, "web")
 }
 
-// Login authenticates a user by phone/email + password and returns JWT tokens.
+// Login 用「手机号 / 邮箱 + 密码」认证用户并返回 JWT 令牌。
 func (s *UserService) Login(ctx context.Context, req LoginRequest) (*AuthResult, error) {
-	// Find user by phone or email
+	// 按手机号或邮箱查用户
 	var user *model.User
 	var err error
 
@@ -118,7 +118,7 @@ func (s *UserService) Login(ctx context.Context, req LoginRequest) (*AuthResult,
 		return nil, ErrUserNotFound
 	}
 
-	// Verify password
+	// 校验密码
 	if !password.Verify(user.PasswordHash, req.Password) {
 		return nil, ErrInvalidPassword
 	}
@@ -133,7 +133,7 @@ func (s *UserService) Login(ctx context.Context, req LoginRequest) (*AuthResult,
 	return s.buildAuthResult(*user, "web")
 }
 
-// Profile returns the current user's profile.
+// Profile 返回当前用户的个人资料。
 func (s *UserService) Profile(ctx context.Context, userID uuid.UUID) (*model.User, error) {
 	user, err := s.repo.FindByID(ctx, userID)
 	if err != nil {
@@ -180,7 +180,7 @@ func (s *UserService) UpdateProfile(
 	return user, nil
 }
 
-// Refresh exchanges a valid refresh token for a brand-new token pair.
+// Refresh 用有效的 refresh 令牌换取全新的令牌对。
 //
 // 滑动会话（轮换）策略：access 与 refresh 都重新签发、各自重置 TTL，
 // 持续活跃的用户永不掉线。旧 refresh 在剩余有效期内仍可用（无服务端存储）。

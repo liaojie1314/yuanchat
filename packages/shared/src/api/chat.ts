@@ -7,6 +7,7 @@
  */
 import { apiGet, apiPost, apiPut } from "./client";
 import i18n from "@yuanchat/design-system/i18n";
+import { previewBodyOf } from "../utils/messagePreview";
 import type { Conversation } from "../store/conversationStore";
 import type { ChatMessage } from "../store/messageStore";
 
@@ -21,7 +22,10 @@ interface PeerDTO {
 }
 
 interface LastMessageDTO {
+  /** 正文：仅文本/系统消息有值，其余类型为空串（文案由 preview_kind 在前端本地化） */
   preview: string;
+  /** 消息类型标记：text/system/image/file/voice/video/sticker/encrypted/unknown */
+  preview_kind?: string;
   sender_nickname: string;
   created_at: string;
 }
@@ -72,18 +76,66 @@ export interface MessageDTO {
 // 时间格式化
 // ========================================
 
-/** 会话列表时间标签：今天 → HH:mm，今年 → M月D日，更早 → YYYY/M/D */
+/** 当前界面语言，交给 Intl 做日期本地化；i18n 未就绪时回落浏览器语言 */
+function uiLocale(): string {
+  return (
+    i18n.language || (typeof navigator !== "undefined" ? navigator.language : undefined) || "zh-CN"
+  );
+}
+
+/** 本地零点时间戳，用于按「日」比较（跨月跨年安全） */
+function startOfDay(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/** 相差整日数：0 今天，1 昨天，负数为未来（时钟偏差） */
+function dayDiff(from: Date, to: Date): number {
+  return Math.round((startOfDay(to) - startOfDay(from)) / 86400000);
+}
+
+/** 星期简称：周六 / Sat / 土 / 토 */
+function weekdayShort(d: Date): string {
+  if (typeof Intl === "undefined") return monthDay(d);
+  return new Intl.DateTimeFormat(uiLocale(), { weekday: "short" }).format(d);
+}
+
+/** 月日：8月22日 / Aug 22 / 8月22日 / 8월 22일 */
+function monthDay(d: Date): string {
+  if (typeof Intl === "undefined") return d.getMonth() + 1 + "/" + d.getDate();
+  return new Intl.DateTimeFormat(uiLocale(), { month: "short", day: "numeric" }).format(d);
+}
+
+/** 完整日期：2026/8/22 / 8/22/2026 / 2026/8/22 / 2026. 8. 22. */
+function fullDate(d: Date): string {
+  if (typeof Intl === "undefined") {
+    return d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate();
+  }
+  return new Intl.DateTimeFormat(uiLocale(), {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).format(d);
+}
+
+/**
+ * 会话列表时间标签，按 IM 惯例分档
+ *
+ * @param iso - 消息时间（ISO 字符串）
+ * @returns 今天 → `HH:mm`；昨天 → 「昨天」；一周内 → 星期简称；
+ *   今年 → 月日；更早 → 完整日期。非法时间返回空串。
+ * @remarks 昨天走 i18n，月日/星期/完整日期走 Intl，四语言都不写死中文格式。
+ */
 export function formatListTime(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
-  const today = new Date();
-  if (d.toDateString() === today.toDateString()) {
-    return two(d.getHours()) + ":" + two(d.getMinutes());
-  }
-  if (d.getFullYear() === today.getFullYear()) {
-    return d.getMonth() + 1 + "月" + d.getDate() + "日";
-  }
-  return d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate();
+  const now = new Date();
+  const days = dayDiff(d, now);
+  // 未来时间（客户端时钟偏差）当今天处理，不显示「星期」
+  if (days <= 0) return two(d.getHours()) + ":" + two(d.getMinutes());
+  if (days === 1) return i18n.t("chat.yesterday");
+  if (days < 7) return weekdayShort(d);
+  if (d.getFullYear() === now.getFullYear()) return monthDay(d);
+  return fullDate(d);
 }
 
 /** 气泡时间标签：HH:mm */
@@ -104,11 +156,11 @@ export function dateKeyOf(d: Date): string {
 }
 
 /**
- * 日期分隔线文案：今天 / 昨天 / `M月D日`（今年）/ `YYYY/M/D`（跨年）
+ * 日期分隔线文案：今天 / 昨天 / 月日（今年）/ 完整日期（跨年）
  *
  * @param dateKey - `YYYY-MM-DD` 本地日期键（由 dateKeyOf 产出）
  * @remarks 今天/昨天经 i18n（shared 层直接 `i18n.t`，不依赖 react 组件层）；
- *   月日格式沿用 formatListTime 的中文风格，跨年与其一致。
+ *   月日与完整日期走 Intl，与 formatListTime 同源。
  */
 export function formatDateDivider(dateKey: string): string {
   const parts = dateKey.split("-");
@@ -123,8 +175,8 @@ export function formatDateDivider(dateKey: string): string {
   if (dateKey === dateKeyOf(today)) return i18n.t("chat.today");
   const yesterday = new Date(today.getTime() - 86400000);
   if (dateKey === dateKeyOf(yesterday)) return i18n.t("chat.yesterday");
-  if (year === today.getFullYear()) return month + "月" + day + "日";
-  return year + "/" + month + "/" + day;
+  if (year === today.getFullYear()) return monthDay(d);
+  return fullDate(d);
 }
 
 // ========================================
@@ -132,11 +184,16 @@ export function formatDateDivider(dateKey: string): string {
 // ========================================
 
 export function mapConversation(dto: ConversationDTO): Conversation {
-  const preview = dto.last_message
-    ? dto.type === 2
-      ? dto.last_message.sender_nickname + ": " + dto.last_message.preview
-      : dto.last_message.preview
+  // 非文本类消息的占位文案由前端按当前语言产出，与 WS 实时路径同源（见 previewBodyOf）
+  const body = dto.last_message
+    ? previewBodyOf(dto.last_message.preview_kind, dto.last_message.preview)
     : undefined;
+  const preview =
+    dto.last_message && body !== undefined
+      ? dto.type === 2 && dto.last_message.preview_kind !== "system"
+        ? dto.last_message.sender_nickname + ": " + body
+        : body
+      : undefined;
 
   return {
     id: dto.id,
@@ -229,6 +286,31 @@ export function parseVoiceContent(content: string): { key?: string; duration: nu
   }
 }
 
+/** content JSON → 贴纸载荷（sticker_id + key + 宽高） */
+export function parseStickerContent(content: string): {
+  stickerId?: string;
+  key?: string;
+  width: number;
+  height: number;
+} {
+  try {
+    const parsed = JSON.parse(content) as {
+      sticker_id?: string;
+      key?: string;
+      width?: number;
+      height?: number;
+    };
+    return {
+      stickerId: typeof parsed.sticker_id === "string" ? parsed.sticker_id : undefined,
+      key: typeof parsed.key === "string" ? parsed.key : undefined,
+      width: typeof parsed.width === "number" ? parsed.width : 0,
+      height: typeof parsed.height === "number" ? parsed.height : 0,
+    };
+  } catch {
+    return { width: 0, height: 0 };
+  }
+}
+
 /** duration 为种子生成固定伪波形（12-20 根，高度 6-18px 确定性伪随机） */
 export function pseudoWave(duration: number): number[] {
   const bars = Math.min(20, Math.max(12, duration + 8));
@@ -247,7 +329,9 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     3: "file",
     4: "voice",
     6: "system",
+    8: "sticker",
   };
+
   // status=2 表示已撤回：气泡走灰字系统占位，忽略 kind/text
   const recalled = dto.status === 2;
   const isImage = dto.message_type === 2;
@@ -263,6 +347,12 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     const parsed = parseVoiceContent(dto.content);
     voice = { seconds: parsed.duration, wave: pseudoWave(parsed.duration), key: parsed.key };
   }
+  const isSticker = dto.message_type === 8;
+  // E2EE 密文（type 7）：本设备不保存历史明文，且双棘轮状态早已推进，
+  // 拿到旧密文也无法就地重新解密（强行调 decryptFrom 还会污染当前会话棘轮状态）。
+  // 原实现 kindMap 缺 7 → kind 回退 "text"，而 text 只在 type 1|6 赋值 →
+  // 加密单聊刷新后整段历史变空气泡，连"这是加密消息"都看不出来。
+  const isEncrypted = dto.message_type === 7;
 
   return {
     id: dto.id,
@@ -270,12 +360,17 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     kind: kindMap[dto.message_type] || "text",
     isSelf,
     senderName: dto.sender_nickname,
-    text:
-      dto.message_type === 1 || dto.message_type === 6 ? parseTextContent(dto.content) : undefined,
+    senderId: dto.sender_id,
+    text: isEncrypted
+      ? i18n.t("e2ee.historyNotStored")
+      : dto.message_type === 1 || dto.message_type === 6
+        ? parseTextContent(dto.content)
+        : undefined,
     // 历史图片：解析 key + 宽高，渲染时按 key 签下载 URL（无 localUrl）
     image: isImage ? parseImageContent(dto.content) : undefined,
     file,
     voice,
+    sticker: isSticker ? parseStickerContent(dto.content) : undefined,
     reactions: dto.reactions,
     seq: dto.seq,
     time: formatMessageTime(dto.created_at),

@@ -11,8 +11,8 @@ import { MainLayout } from "../MainLayout";
 import { useThemeStore, useAuthStore } from "@yuanchat/shared";
 
 beforeEach(() => {
-  // Spy on DOM APIs instead of replacing document entirely
-  // (jsdom provides working document.body/head for React rendering)
+  // 只对 DOM API 打 spy，不整体替换 document
+  //（jsdom 已提供可用的 document.body / head 供 React 渲染）
   vi.spyOn(document.documentElement.style, "setProperty").mockImplementation(() => {});
   vi.spyOn(document.documentElement.classList, "toggle").mockImplementation(() => false);
 

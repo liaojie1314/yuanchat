@@ -16,7 +16,7 @@ describe("Avatar", () => {
 
   it("renders fallback when no src provided", () => {
     render(<Avatar name="Test" />);
-    // Radix Avatar renders a span with the initials
+    // Radix Avatar 会渲染一个带首字母的 span
     expect(screen.getByText("TE")).toBeInTheDocument();
   });
 

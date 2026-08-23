@@ -70,7 +70,7 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-// ---------- Web Push ----------
+// ---------- Web Push 推送 ----------
 
 interface PushPayload {
   title: string;

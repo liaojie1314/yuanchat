@@ -3,7 +3,7 @@ name = "yuanchat-desktop"
 version = "0.1.0"
 description = "元聊 YuanChat — 企业级即时通讯桌面端"
 authors = ["元渊"]
-license = "Proprietary"
+license = "MIT"
 repository = "https://github.com/liaojie1314/yuanchat"
 edition = "2021"
 rust-version = "1.77.2"
@@ -35,3 +35,8 @@ time = ">=0.3.35, <0.3.37"
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+
+# WebKitGTK 默认不给 media-stream，也不会弹授权框，语音消息要靠它开权限。
+# 版本与 tauri 自身依赖的一致，保证拿到的是同一个 WebView 类型
+[target."cfg(target_os = \"linux\")".dependencies]
+webkit2gtk = { version = "2", features = ["v2_40"] }

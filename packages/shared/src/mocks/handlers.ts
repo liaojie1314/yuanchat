@@ -10,6 +10,7 @@
  * @see https://mswjs.io/docs/
  */
 import { http, HttpResponse, passthrough, delay } from "msw";
+import { DEMO_FRIENDS } from "./demoData";
 
 // ========================================
 // Mock 数据
@@ -112,7 +113,7 @@ function generateCaptchaSvg(): string {
 }
 
 // ========================================
-// Helper
+// 辅助函数
 // ========================================
 
 function apiOk<T>(data: T) {
@@ -134,14 +135,151 @@ function apiError(code: number, message: string) {
  */
 
 // ========================================
-// Handlers
+// 贴纸 Mock 状态（进程内可变，模拟"收藏/删除立即生效"）
+// ========================================
+
+/** 贴纸 mock 数据形状（与 api/stickers.ts 的 StickerItem 对齐）。 */
+interface MockSticker {
+  id: string;
+  object_key: string;
+  width: number;
+  height: number;
+  /** 去重键，仅 mock 内部使用（真实接口不返回） */
+  content_hash?: string;
+}
+
+/**
+ * 生成一张可直接渲染的内联 SVG 贴纸。
+ *
+ * @remarks mock 模式下没有 MinIO，`/files/download-url` 返回 data URL 即可让
+ *   `<img>` 真的出图——否则 StickerThumb/StickerImage 一律走 error 分支显示破图，
+ *   E2E 也就没法验证"贴纸网格里有可点的贴纸"。
+ */
+function stickerDataUrl(key: string): string {
+  // 由 key 派生色相，让不同贴纸在演示与截图里看起来不同
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) % 360;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><rect width="96" height="96" rx="12" fill="hsl(${hash}, 70%, 88%)"/><circle cx="36" cy="40" r="6" fill="hsl(${hash}, 60%, 30%)"/><circle cx="60" cy="40" r="6" fill="hsl(${hash}, 60%, 30%)"/><path d="M32 60 Q48 74 64 60" stroke="hsl(${hash}, 60%, 30%)" stroke-width="5" fill="none" stroke-linecap="round"/></svg>`;
+  return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+}
+
+/** 官方表情包（唯一一个，8 张，与后端 seed 的规模一致）。 */
+const MOCK_PACK_STICKERS: MockSticker[] = Array.from({ length: 8 }, (_, i) => ({
+  id: "pack_sticker_" + (i + 1),
+  object_key: "images/2026/08/0f5a1c00-000" + (i + 1) + ".svg",
+  width: 96,
+  height: 96,
+}));
+
+/**
+ * 本人收藏（可被 POST/DELETE 改动；预置 2 张让"收藏 tab 非空"可测）。
+ *
+ * @remarks MSW browser 模式下 handler 在页面上下文求值，故这份状态随页面重载复位——
+ *   E2E 各用例天然隔离，无需显式 reset 钩子。
+ */
+let mockMyStickers: MockSticker[] = [
+  {
+    id: "fav_sticker_1",
+    object_key: "images/2026/08/beef0001-0001.svg",
+    width: 96,
+    height: 96,
+    content_hash: "a".repeat(64),
+  },
+  {
+    id: "fav_sticker_2",
+    object_key: "images/2026/08/beef0001-0002.svg",
+    width: 96,
+    height: 96,
+    content_hash: "b".repeat(64),
+  },
+];
+
+// ========================================
+// 收藏 Mock 状态（进程内可变，模拟「收藏/取消立即生效」）
+// ========================================
+
+/** 收藏条目 mock 形状（与 api/favorites.ts 的 FavoriteItem 对齐）。 */
+interface MockFavorite {
+  id: string;
+  message_id: string;
+  conversation_id: string;
+  conv_name: string;
+  sender_nickname: string;
+  /** 1=文字 2=图片 3=文件 4=语音 */
+  message_type: number;
+  /** 与消息 content 同构的 JSON 字符串 */
+  content: string;
+  created_at: string;
+}
+
+/**
+ * 预置收藏（文字/图片/文件/语音各一条，四个筛选 tab 都有内容可看）。
+ *
+ * @remarks 收藏端点此前没有 mock，请求会顺着兜底 passthrough 打到真实后端：
+ *   后端在跑时 mock 模式的假 token 换回 401 → 触发强制刷新 → 仍 401 → 清登录态，
+ *   于是「打开收藏页就被踢回登录页」。mock 模式必须自成闭环，不依赖后端在不在。
+ */
+let mockFavorites: MockFavorite[] = [
+  {
+    id: "fav_1",
+    message_id: "msg_fav_0001",
+    conversation_id: "1",
+    conv_name: "产品研发群",
+    sender_nickname: "张伟",
+    message_type: 1,
+    content: JSON.stringify({ text: "发布评审改到明早 9 点，记得提前十分钟到会议室。" }),
+    created_at: "2026-08-20T09:02:00+08:00",
+  },
+  {
+    id: "fav_2",
+    message_id: "msg_fav_0002",
+    conversation_id: "1",
+    conv_name: "产品研发群",
+    sender_nickname: "李四",
+    message_type: 2,
+    content: JSON.stringify({
+      key: "images/2026/08/deadbeef-0002.png",
+      width: 220,
+      height: 140,
+    }),
+    created_at: "2026-08-19T15:40:00+08:00",
+  },
+  {
+    id: "fav_3",
+    message_id: "msg_fav_0003",
+    conversation_id: "2",
+    conv_name: "李四",
+    sender_nickname: "李四",
+    message_type: 3,
+    content: JSON.stringify({ name: "需求评审记录.pdf", size: 402_311 }),
+    created_at: "2026-08-18T11:05:00+08:00",
+  },
+  {
+    id: "fav_4",
+    message_id: "msg_fav_0004",
+    conversation_id: "2",
+    conv_name: "李四",
+    sender_nickname: "李四",
+    message_type: 4,
+    content: JSON.stringify({ key: "audio/2026/08/deadbeef-0004.webm", duration: 6 }),
+    created_at: "2026-08-17T20:12:00+08:00",
+  },
+];
+
+/** 测试辅助：剥掉仅 mock 内部使用的 content_hash，保持响应形状与真实接口一致。 */
+function toStickerDTO(s: MockSticker) {
+  return { id: s.id, object_key: s.object_key, width: s.width, height: s.height };
+}
+
+// ========================================
+// 处理器
 // ========================================
 
 export const handlers = [
   // --------------------------------------------------
   // 认证 — 登录
   // POST /api/v1/users/login
-  // Body: { account: string; password: string }
+  // 请求体：{ account: string; password: string }
   // --------------------------------------------------
   http.post("http://localhost:8085/api/v1/users/login", async ({ request }) => {
     await delay(600); // 模拟网络延迟
@@ -260,6 +398,171 @@ export const handlers = [
     await delay(200);
     const body = (await request.json()) as { alias?: string };
     return apiOk({ alias: body.alias ?? "" });
+  }),
+
+  // --------------------------------------------------
+  // 用户 — 公开资料（点消息头像弹出的资料卡按 id 现拉）
+  // GET /api/v1/users/:id
+  // 好友表里找不到时也返回一份占位资料：群里的陌生人同样要能看
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/users/:id", async ({ params }) => {
+    await delay(150);
+    const id = String(params.id);
+    const friend = DEMO_FRIENDS.find((f) => f.id === id);
+    return apiOk({
+      id,
+      nickname: friend?.nickname ?? MOCK_USER.nickname,
+      avatar_url: friend?.avatarUrl ?? null,
+      short_id: friend?.shortId ?? MOCK_USER.short_id,
+      bio: "这是 mock 模式下的个性签名",
+      gender: 0,
+    });
+  }),
+
+  // --------------------------------------------------
+  // 文件 — 换取下载 URL（mock 模式无 MinIO，直接给 data URL）
+  // GET /api/v1/files/download-url?key=...
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/files/download-url", ({ request }) => {
+    const key = new URL(request.url).searchParams.get("key") ?? "";
+    if (!key) return apiError(40010, "key required");
+    return apiOk({ url: stickerDataUrl(key), expires_in: 3600 });
+  }),
+
+  // --------------------------------------------------
+  // 贴纸 — 本人收藏列表
+  // GET /api/v1/stickers/mine
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/stickers/mine", async () => {
+    await delay(150);
+    return apiOk({ stickers: mockMyStickers.map(toStickerDTO), has_more: false });
+  }),
+
+  // --------------------------------------------------
+  // 贴纸 — 收藏一张（按 content_hash 幂等，与后端 ON CONFLICT 语义一致）
+  // POST /api/v1/stickers
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/stickers", async ({ request }) => {
+    await delay(200);
+    const body = (await request.json()) as {
+      object_key?: string;
+      width?: number;
+      height?: number;
+      content_hash?: string;
+    };
+    // 与服务端同口径的形态校验：key 锚定正则、hash 必须是 64 位小写十六进制、宽高为正
+    // 与服务端 handler/file.go 的锚定正则同形（贴纸只收 images/ 前缀）
+    const KEY_RE = /^images\/[0-9]{4}\/[0-9]{2}\/[0-9a-f-]+\.[a-z0-9]+$/;
+    if (!body.object_key || !KEY_RE.test(body.object_key)) {
+      return apiError(40011, "invalid object key");
+    }
+    if (!body.content_hash || !/^[0-9a-f]{64}$/.test(body.content_hash)) {
+      return apiError(40012, "invalid content hash");
+    }
+    if (!body.width || !body.height || body.width <= 0 || body.height <= 0) {
+      return apiError(40013, "invalid size");
+    }
+    const existing = mockMyStickers.find((s) => s.content_hash === body.content_hash);
+    if (existing) return apiOk(toStickerDTO(existing));
+
+    const created: MockSticker = {
+      id: "fav_sticker_" + (mockMyStickers.length + 1) + "_" + Date.now(),
+      object_key: body.object_key,
+      width: body.width,
+      height: body.height,
+      content_hash: body.content_hash,
+    };
+    mockMyStickers = [created].concat(mockMyStickers);
+    return apiOk(toStickerDTO(created));
+  }),
+
+  // --------------------------------------------------
+  // 贴纸 — 取消收藏（不存在回 404，与服务端 RowsAffected==0 的口径一致）
+  // DELETE /api/v1/stickers/:id
+  // --------------------------------------------------
+  http.delete("http://localhost:8085/api/v1/stickers/:id", async ({ params }) => {
+    await delay(150);
+    const id = String(params.id);
+    if (!mockMyStickers.some((s) => s.id === id)) return apiError(40401, "sticker not found");
+    mockMyStickers = mockMyStickers.filter((s) => s.id !== id);
+    return apiOk({ message: "removed" });
+  }),
+
+  // --------------------------------------------------
+  // 贴纸 — 表情包列表（仅官方包）
+  // GET /api/v1/sticker-packs
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/sticker-packs", async () => {
+    await delay(150);
+    return apiOk({
+      packs: [
+        {
+          pack: {
+            id: "pack_official_1",
+            name: "元聊小黄脸",
+            cover_url: null,
+            is_official: true,
+            sort: 0,
+          },
+          stickers: MOCK_PACK_STICKERS.map(toStickerDTO),
+        },
+      ],
+    });
+  }),
+
+  // --------------------------------------------------
+  // 收藏 — 列表（倒序 + created_at 游标 + 类型过滤，与服务端 List 同口径）
+  // GET /api/v1/favorites
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/favorites", async ({ request }) => {
+    await delay(150);
+    const qs = new URL(request.url).searchParams;
+    const type = Number(qs.get("type") ?? 0);
+    const limit = Number(qs.get("limit") ?? 20) || 20;
+    const before = qs.get("before");
+    let list = mockFavorites.slice().sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+    if (type > 0) list = list.filter((f) => f.message_type === type);
+    // 游标是上一页最后一条的 created_at，严格早于它的才算下一页
+    if (before) list = list.filter((f) => f.created_at < before);
+    const page = list.slice(0, limit);
+    return apiOk({ favorites: page, has_more: list.length > page.length });
+  }),
+
+  // --------------------------------------------------
+  // 收藏 — 添加（按 message_id 幂等，与服务端唯一索引语义一致）
+  // POST /api/v1/favorites
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/favorites", async ({ request }) => {
+    await delay(200);
+    const body = (await request.json()) as { message_id?: string };
+    if (!body.message_id) return apiError(40014, "message_id required");
+    const existing = mockFavorites.find((f) => f.message_id === body.message_id);
+    if (existing) return apiOk({ id: existing.id, message_id: existing.message_id });
+
+    // 真实后端按被收藏消息落快照；mock 拿不到那条消息，统一记成文字快照
+    const created: MockFavorite = {
+      id: "fav_" + (mockFavorites.length + 1) + "_" + Date.now(),
+      message_id: body.message_id,
+      conversation_id: "1",
+      conv_name: "产品研发群",
+      sender_nickname: "李四",
+      message_type: 1,
+      content: JSON.stringify({ text: "刚刚收藏的消息" }),
+      created_at: new Date().toISOString(),
+    };
+    mockFavorites = [created].concat(mockFavorites);
+    return apiOk({ id: created.id, message_id: created.message_id });
+  }),
+
+  // --------------------------------------------------
+  // 收藏 — 取消（按 message_id；不存在也回成功，与服务端不校验 RowsAffected 一致）
+  // DELETE /api/v1/favorites/:messageId
+  // --------------------------------------------------
+  http.delete("http://localhost:8085/api/v1/favorites/:messageId", async ({ params }) => {
+    await delay(150);
+    const messageId = String(params.messageId);
+    mockFavorites = mockFavorites.filter((f) => f.message_id !== messageId);
+    return apiOk({ message: "removed" });
   }),
 
   // --------------------------------------------------

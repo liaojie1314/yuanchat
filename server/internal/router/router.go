@@ -20,8 +20,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// Setup wires all dependencies and returns the Gin engine plus the
-// WebSocket handler (served by a dedicated listener in main).
+// Setup 接线全部依赖，返回 Gin 引擎与 WebSocket handler
+// （后者在 main 里由独立监听器提供服务）。
 // st 为对象存储句柄，可能为 nil（MinIO 不可达时），文件相关端点据此降级为 503。
 func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Config, logger *zap.Logger) (*gin.Engine, *ws.Handler) {
 	if cfg.Server.IsProduction() {
@@ -35,7 +35,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	r.Use(middleware.CORS())
 	r.Use(middleware.Prometheus())
 
-	// --- Dependency wiring ---
+	// --- 依赖接线 ---
 	jwtGen := jwt.NewGenerator(cfg.JWT.Secret, cfg.JWT.AccessTokenTTL, cfg.JWT.RefreshTokenTTL)
 	userRepo := repository.NewUserRepository(db)
 	convRepo := repository.NewConversationRepository(db)
@@ -54,6 +54,15 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	favSvc := service.NewFavoriteService(favRepo, msgRepo, convRepo, userRepo, logger)
 	favH := handler.NewFavoriteHandler(favSvc, logger)
 
+	stickerRepo := repository.NewStickerRepository(db)
+	stickerSvc := service.NewStickerService(stickerRepo, logger)
+	// 收藏前校验对象真实存在（st 为 nil 时——MinIO 不可达——降级跳过该校验，
+	// 与 fileH 的 503 降级策略一致，不因存储不可达而整条链路 500）
+	if st != nil {
+		stickerSvc.SetObjectChecker(st)
+	}
+	stickerH := handler.NewStickerHandler(stickerSvc, logger)
+
 	healthH := handler.NewHealthHandler()
 	captchaH := handler.NewCaptchaHandler(rdb)
 	userH := handler.NewUserHandler(userSvc, captchaH, logger)
@@ -64,6 +73,9 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	contactH := handler.NewContactHandler(contactSvc, hub, logger)
 	convH := handler.NewConversationHandler(convSvc, hub, logger)
 	fileH := handler.NewFileHandler(st, cfg.Upload, logger)
+	// 对象级读授权（download-url）：key 必须被请求者可见的消息或其可用贴纸引用。
+	// 未注入时 handler 对私有对象一律拒绝（fail closed），故这里必须接上。
+	fileH.SetObjectACL(repository.NewObjectACLRepository(db))
 	presenceH := handler.NewPresenceHandler(contactRepo, hub, logger)
 	blocklistH := handler.NewBlocklistHandler(blocklistSvc, logger)
 	forwardH := handler.NewForwardHandler(msgSvc, hub, logger)
@@ -78,6 +90,16 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	pushH := handler.NewPushHandler(pushSvc, logger)
 
 	e2eeH := handler.NewE2EEHandler(repository.NewE2EERepository(db), logger)
+
+	// 贴纸发送校验：WS 帧里的 sticker_id 必须属于发送者（或属于某个官方包），
+	// 且落库的 key/宽高一律取服务端权威值，不采信客户端传参。
+	wsH.SetStickerResolver(func(ctx context.Context, senderID, stickerID uuid.UUID) (string, int, int, error) {
+		st, err := stickerSvc.ResolveSendable(ctx, senderID, stickerID)
+		if err != nil {
+			return "", 0, 0, err
+		}
+		return st.ObjectKey, st.Width, st.Height, nil
+	})
 
 	// 离线成员补推浏览器通知：WS 在线者已实时收到，不重复打扰。
 	// VAPID 未配置时 NotifyUsers 内部直接返回，等于功能关闭。
@@ -111,6 +133,8 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 			body = "[文件]"
 		case "voice":
 			body = "[语音]"
+		case "sticker":
+			body = "[表情]"
 		}
 		pushSvc.NotifyUsers(ctx, recipients, service.PushPayload{
 			Title:          info.SenderNickname,
@@ -155,7 +179,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		go notifyFriends(userID, online)
 	})
 
-	// --- Routes ---
+	// --- 路由 ---
 	api := r.Group("/api/v1")
 	api.GET("/health", healthH.Check)
 	api.GET("/captcha", captchaH.Generate)
@@ -219,6 +243,13 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 		chat.POST("/favorites", favH.Add)
 		chat.DELETE("/favorites/:messageId", favH.Remove)
 		chat.GET("/favorites", favH.List)
+
+		// 写操作限流照 /reports 的既定档位；读操作也挂（收藏列表虽已分页，
+		// 仍是可被高频拉取的鉴权端点）
+		chat.GET("/stickers/mine", middleware.LimitByIP(20, 40), stickerH.ListMine)
+		chat.POST("/stickers", middleware.LimitByIP(10, 20), stickerH.Add)
+		chat.DELETE("/stickers/:id", middleware.LimitByIP(10, 20), stickerH.Remove)
+		chat.GET("/sticker-packs", middleware.LimitByIP(20, 40), stickerH.ListPacks)
 
 		chat.POST("/reports", middleware.LimitByIP(10, 20), reportH.Create)
 

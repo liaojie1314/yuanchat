@@ -29,7 +29,7 @@ import { updateMyProfile } from "../api/users";
 import type { ProfilePatch } from "../api/users";
 
 // ========================================
-// Types
+// 类型定义
 // ========================================
 
 interface User {
@@ -116,7 +116,7 @@ interface AuthState {
 }
 
 // ========================================
-// Store
+// Store 定义
 // ========================================
 
 export const useAuthStore = create<AuthState>()(

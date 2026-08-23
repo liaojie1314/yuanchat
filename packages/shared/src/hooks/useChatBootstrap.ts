@@ -37,9 +37,11 @@ import { useContactStore } from "../store/contactStore";
 import { useConversationStore } from "../store/conversationStore";
 import { setE2EEContext, setMessageMockMode, useMessageStore } from "../store/messageStore";
 import { decryptFrom } from "../crypto/e2eeManager";
+import { captureException } from "../observability/sentry";
 import { usePresenceStore } from "../store/presenceStore";
 import { resetChatStores, revokeAllLocalPreviews } from "../store/resetStores";
 import { showToast } from "../store/toastStore";
+import { previewBodyOf } from "../utils/messagePreview";
 import type { ChatMessage } from "../store/messageStore";
 import { chatSocket } from "../ws/chatSocket";
 
@@ -55,6 +57,33 @@ export function isMockEnabled(): boolean {
 
 /** 帧处理器只需注册一次（模块级防重） */
 let wired = false;
+
+/**
+ * 处理服务端 `error` 帧。
+ *
+ * @remarks 服务端有 21 个 `sendError` 调用点（贴纸/图片/文件/语音字段校验、文本超长、
+ *   BLOCKED、无效 mention/quote、落库失败 500 等）。此前只认 `message === "BLOCKED"`，
+ *   其余 20 种连 `code` 都不看就丢弃——消息停在 sending 直到 5s ack 超时才无理由变
+ *   failed，用户既不知原因、重试还会以同一帧再失败。任何新增服务端校验都会重现该症状，
+ *   故这里做通用分发。服务端 `message` 是英文技术描述，只送 Sentry 不直接展示。
+ */
+export function applyErrorFrame(p: { code: number; message: string; client_msg_id?: string }) {
+  if (p.client_msg_id) {
+    useMessageStore.getState().failByClientMsgId(p.client_msg_id);
+  }
+  if (p.message === "BLOCKED") {
+    showToast("error", i18n.t("chat.message.blockedRejected"));
+  } else if (p.code === 400) {
+    showToast("error", i18n.t("chat.error.invalidFrame"));
+  } else if (p.code === 403) {
+    showToast("error", i18n.t("chat.error.rejected"));
+  } else {
+    showToast("error", i18n.t("chat.error.serverError"));
+  }
+  captureException(new Error(`ws error frame ${p.code}: ${p.message}`), {
+    clientMsgId: p.client_msg_id,
+  });
+}
 
 function wireSocket() {
   if (wired) return;
@@ -119,6 +148,7 @@ function wireSocket() {
       const isSystem = p.content.type === "system";
       const isFile = p.content.type === "file";
       const isVoice = p.content.type === "voice";
+      const isSticker = p.content.type === "sticker";
 
       const kind: ChatMessage["kind"] = isSystem
         ? "system"
@@ -128,13 +158,16 @@ function wireSocket() {
             ? "file"
             : isVoice
               ? "voice"
-              : "text";
+              : isSticker
+                ? "sticker"
+                : "text";
       const msg: ChatMessage = {
         id: p.message_id,
         conversationId: p.conversation_id,
         kind,
         isSelf,
         senderName: p.sender_nickname,
+        senderId: p.sender_id,
         text: kind === "text" || kind === "system" ? p.content.text : undefined,
         image: isImage
           ? { key: p.content.key, width: p.content.width ?? 0, height: p.content.height ?? 0 }
@@ -153,6 +186,14 @@ function wireSocket() {
               key: p.content.key,
             }
           : undefined,
+        sticker: isSticker
+          ? {
+              stickerId: p.content.sticker_id,
+              key: p.content.key,
+              width: p.content.width ?? 96,
+              height: p.content.height ?? 96,
+            }
+          : undefined,
         seq: p.seq,
         time: formatMessageTime(iso),
         dateKey: dateKeyOf(new Date(p.timestamp)),
@@ -166,14 +207,9 @@ function wireSocket() {
 
       const convStore = useConversationStore.getState();
       const conv = convStore.conversations.find((c) => c.id === p.conversation_id);
-      // 图片/文件/语音消息列表预览走占位文案；文本/系统消息用正文
-      const body = isImage
-        ? i18n.t("chat.message.image")
-        : isFile
-          ? i18n.t("chat.message.file")
-          : isVoice
-            ? i18n.t("chat.message.voice")
-            : (p.content.text ?? "");
+      // 列表预览与 REST 路径（mapConversation）同源：非文本类走本地化占位、文本用正文。
+      // 两条路径各自写一遍占位文案是"实时英文、刷新中文"的成因，见 previewBodyOf。
+      const body = previewBodyOf(kind, p.content.text);
       // system 消息不加昵称前缀
       const preview =
         conv && conv.type === "group" && !isSelf && !isSystem
@@ -318,13 +354,7 @@ function wireSocket() {
       useContactStore.getState().removeFriend(p.friend_id);
     },
 
-    error: (p) => {
-      // BLOCKED：单聊被拉黑拒发。把对应乐观消息翻 failed + toast 提示
-      if (p.message === "BLOCKED" && p.client_msg_id) {
-        useMessageStore.getState().failByClientMsgId(p.client_msg_id);
-        showToast("error", i18n.t("chat.message.blockedRejected"));
-      }
-    },
+    error: applyErrorFrame,
 
     presence: (p) => {
       useConversationStore.getState().applyPresence(p.user_id, p.online);
