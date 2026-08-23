@@ -58,6 +58,12 @@ export default defineConfig({
     // ?./??，旧 WebView 解析期直接 SyntaxError → React 不挂载 → 白屏且无报错。
     // es2019 在所有现代桌面 WebView（WebView2 / WebKitGTK）上同样兼容。
     target: "es2019",
+    // CSS 另设浏览器目标：es2019 是 JS 年份，esbuild 据此无法判断 CSS 特性支持度，
+    // 会当作「什么都支持」——不仅不降级新语法，还会把 top/right/bottom/left
+    // 主动合并成 Chrome 87 才有的 inset 简写，手写长写法也会被合回去。
+    // 指名 chrome74（Android 10 自带 WebView 版本）后，esbuild 才会反过来
+    // 拆简写、降级 :where()/:is() 等选择器。
+    cssTarget: "chrome74",
     minify: process.env.TAURI_DEBUG ? false : "esbuild",
     sourcemap: !!process.env.TAURI_DEBUG || !!process.env.SENTRY_AUTH_TOKEN,
   },

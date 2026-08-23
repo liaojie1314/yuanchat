@@ -15,8 +15,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ChevronRight, LogOut, ShieldCheck, Palette, Info, User, ArrowLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useAuthStore, useThemeStore, useBreakpoint } from "@yuanchat/shared";
-import i18n from "@yuanchat/design-system/i18n";
+import { useAuthStore, useBreakpoint } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
 import { ProfileEditView } from "./ProfileEditView";
@@ -53,19 +52,11 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
   const bp = useBreakpoint();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const locale = useThemeStore((s) => s.locale);
 
   const isMobile = bp === "mobile";
   // 桌面/平板默认选中个人资料；移动端从 index 列表开始
   const [view, setView] = useState<SettingsView>("profile");
   const [confirmLogout, setConfirmLogout] = useState(false);
-
-  // 挂载时对齐 i18n 语言与已持久化的 locale（main.tsx 初始 lng 由 detectLocale）
-  useEffect(() => {
-    if (locale !== i18n.language) {
-      void i18n.changeLanguage(locale);
-    }
-  }, [locale]);
 
   // 移动端首屏应落在 index；断点切回桌面时确保有选中项
   useEffect(() => {
@@ -229,7 +220,7 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
               >
                 <span
                   className={cn(
-                    "grid h-9 w-9 shrink-0 place-items-center rounded-lg transition-colors",
+                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors",
                     active
                       ? "bg-primary text-primary-on"
                       : "bg-surface-container-high text-on-surface-variant group-hover:bg-surface-container-highest",
@@ -305,7 +296,7 @@ function MobileNavRow({
       onClick={onClick}
       className="bg-surface-container hover:bg-surface-container-high flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors"
     >
-      <span className="bg-primary-container/60 text-primary-on-container grid h-9 w-9 shrink-0 place-items-center rounded-lg">
+      <span className="bg-primary-container/60 text-primary-on-container flex h-9 w-9 shrink-0 items-center justify-center rounded-lg">
         <Icon size={18} />
       </span>
       <div className="min-w-0 flex-1">

@@ -63,7 +63,7 @@ export function PushToggle() {
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="text-body-md font-medium text-on-surface">{t("push.title")}</p>
-          <p className="text-on-surface-variant mt-0.5 text-label-md">
+          <p className="mt-0.5 text-label-md text-on-surface-variant">
             {error || (denied ? t("push.denied") : subscribed ? t("push.enabled") : t("push.desc"))}
           </p>
         </div>

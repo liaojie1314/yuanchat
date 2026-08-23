@@ -10,6 +10,7 @@
  * @see https://mswjs.io/docs/
  */
 import { http, HttpResponse, passthrough, delay } from "msw";
+import { DEMO_FRIENDS } from "./demoData";
 
 // ========================================
 // Mock 数据
@@ -193,6 +194,78 @@ let mockMyStickers: MockSticker[] = [
   },
 ];
 
+// ========================================
+// 收藏 Mock 状态（进程内可变，模拟「收藏/取消立即生效」）
+// ========================================
+
+/** 收藏条目 mock 形状（与 api/favorites.ts 的 FavoriteItem 对齐）。 */
+interface MockFavorite {
+  id: string;
+  message_id: string;
+  conversation_id: string;
+  conv_name: string;
+  sender_nickname: string;
+  /** 1=文字 2=图片 3=文件 4=语音 */
+  message_type: number;
+  /** 与消息 content 同构的 JSON 字符串 */
+  content: string;
+  created_at: string;
+}
+
+/**
+ * 预置收藏（文字/图片/文件/语音各一条，四个筛选 tab 都有内容可看）。
+ *
+ * @remarks 收藏端点此前没有 mock，请求会顺着兜底 passthrough 打到真实后端：
+ *   后端在跑时 mock 模式的假 token 换回 401 → 触发强制刷新 → 仍 401 → 清登录态，
+ *   于是「打开收藏页就被踢回登录页」。mock 模式必须自成闭环，不依赖后端在不在。
+ */
+let mockFavorites: MockFavorite[] = [
+  {
+    id: "fav_1",
+    message_id: "msg_fav_0001",
+    conversation_id: "1",
+    conv_name: "产品研发群",
+    sender_nickname: "张伟",
+    message_type: 1,
+    content: JSON.stringify({ text: "发布评审改到明早 9 点，记得提前十分钟到会议室。" }),
+    created_at: "2026-08-20T09:02:00+08:00",
+  },
+  {
+    id: "fav_2",
+    message_id: "msg_fav_0002",
+    conversation_id: "1",
+    conv_name: "产品研发群",
+    sender_nickname: "李四",
+    message_type: 2,
+    content: JSON.stringify({
+      key: "images/2026/08/deadbeef-0002.png",
+      width: 220,
+      height: 140,
+    }),
+    created_at: "2026-08-19T15:40:00+08:00",
+  },
+  {
+    id: "fav_3",
+    message_id: "msg_fav_0003",
+    conversation_id: "2",
+    conv_name: "李四",
+    sender_nickname: "李四",
+    message_type: 3,
+    content: JSON.stringify({ name: "需求评审记录.pdf", size: 402_311 }),
+    created_at: "2026-08-18T11:05:00+08:00",
+  },
+  {
+    id: "fav_4",
+    message_id: "msg_fav_0004",
+    conversation_id: "2",
+    conv_name: "李四",
+    sender_nickname: "李四",
+    message_type: 4,
+    content: JSON.stringify({ key: "audio/2026/08/deadbeef-0004.webm", duration: 6 }),
+    created_at: "2026-08-17T20:12:00+08:00",
+  },
+];
+
 /** 测试辅助：剥掉仅 mock 内部使用的 content_hash，保持响应形状与真实接口一致。 */
 function toStickerDTO(s: MockSticker) {
   return { id: s.id, object_key: s.object_key, width: s.width, height: s.height };
@@ -328,6 +401,25 @@ export const handlers = [
   }),
 
   // --------------------------------------------------
+  // 用户 — 公开资料（点消息头像弹出的资料卡按 id 现拉）
+  // GET /api/v1/users/:id
+  // 好友表里找不到时也返回一份占位资料：群里的陌生人同样要能看
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/users/:id", async ({ params }) => {
+    await delay(150);
+    const id = String(params.id);
+    const friend = DEMO_FRIENDS.find((f) => f.id === id);
+    return apiOk({
+      id,
+      nickname: friend?.nickname ?? MOCK_USER.nickname,
+      avatar_url: friend?.avatarUrl ?? null,
+      short_id: friend?.shortId ?? MOCK_USER.short_id,
+      bio: "这是 mock 模式下的个性签名",
+      gender: 0,
+    });
+  }),
+
+  // --------------------------------------------------
   // 文件 — 换取下载 URL（mock 模式无 MinIO，直接给 data URL）
   // GET /api/v1/files/download-url?key=...
   // --------------------------------------------------
@@ -416,6 +508,61 @@ export const handlers = [
         },
       ],
     });
+  }),
+
+  // --------------------------------------------------
+  // 收藏 — 列表（倒序 + created_at 游标 + 类型过滤，与服务端 List 同口径）
+  // GET /api/v1/favorites
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/favorites", async ({ request }) => {
+    await delay(150);
+    const qs = new URL(request.url).searchParams;
+    const type = Number(qs.get("type") ?? 0);
+    const limit = Number(qs.get("limit") ?? 20) || 20;
+    const before = qs.get("before");
+    let list = mockFavorites.slice().sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+    if (type > 0) list = list.filter((f) => f.message_type === type);
+    // 游标是上一页最后一条的 created_at，严格早于它的才算下一页
+    if (before) list = list.filter((f) => f.created_at < before);
+    const page = list.slice(0, limit);
+    return apiOk({ favorites: page, has_more: list.length > page.length });
+  }),
+
+  // --------------------------------------------------
+  // 收藏 — 添加（按 message_id 幂等，与服务端唯一索引语义一致）
+  // POST /api/v1/favorites
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/favorites", async ({ request }) => {
+    await delay(200);
+    const body = (await request.json()) as { message_id?: string };
+    if (!body.message_id) return apiError(40014, "message_id required");
+    const existing = mockFavorites.find((f) => f.message_id === body.message_id);
+    if (existing) return apiOk({ id: existing.id, message_id: existing.message_id });
+
+    // 真实后端按被收藏消息落快照；mock 拿不到那条消息，统一记成文字快照
+    const created: MockFavorite = {
+      id: "fav_" + (mockFavorites.length + 1) + "_" + Date.now(),
+      message_id: body.message_id,
+      conversation_id: "1",
+      conv_name: "产品研发群",
+      sender_nickname: "李四",
+      message_type: 1,
+      content: JSON.stringify({ text: "刚刚收藏的消息" }),
+      created_at: new Date().toISOString(),
+    };
+    mockFavorites = [created].concat(mockFavorites);
+    return apiOk({ id: created.id, message_id: created.message_id });
+  }),
+
+  // --------------------------------------------------
+  // 收藏 — 取消（按 message_id；不存在也回成功，与服务端不校验 RowsAffected 一致）
+  // DELETE /api/v1/favorites/:messageId
+  // --------------------------------------------------
+  http.delete("http://localhost:8085/api/v1/favorites/:messageId", async ({ params }) => {
+    await delay(150);
+    const messageId = String(params.messageId);
+    mockFavorites = mockFavorites.filter((f) => f.message_id !== messageId);
+    return apiOk({ message: "removed" });
   }),
 
   // --------------------------------------------------

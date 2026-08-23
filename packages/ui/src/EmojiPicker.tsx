@@ -12,9 +12,9 @@
  *
  * @param onPick - 选中回调，参数为原生 emoji 字符
  * @param onClose - 关闭回调（预留给父层，如需在选后关闭）
- * @param compact - 移动端紧凑模式（收窄网格间距）
+ * @param compact - 移动端紧凑模式（放大表情、收窄格子）
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { ImageOff, Trash2 } from "lucide-react";
 import { cn } from "@yuanchat/shared/utils";
@@ -77,6 +77,7 @@ export function EmojiPicker({
 }) {
   const { t } = useTranslation();
   const [recent, setRecent] = useState<string[]>(() => readRecent());
+  const tabsRef = useRef<HTMLDivElement>(null);
   const [activeKey, setActiveKey] = useState<string>(EMOJI_CATEGORIES[0].key);
   const [myStickers, setMyStickers] = useState<StickerItem[]>([]);
   const [packs, setPacks] = useState<StickerPackItem[]>([]);
@@ -152,6 +153,34 @@ export function EmojiPicker({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [stickerMenuId]);
 
+  // 分类 tab 栏的竖向滚轮转横向滚动。桌面没有触摸滑动，只靠 6px 滚动条很难拖，
+  // 不接这一层就等于后面几个分类根本到不了。必须用原生非被动监听：
+  // React 的 onWheel 在根节点是 passive 注册，preventDefault 无效。
+  useEffect(() => {
+    const el = tabsRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth) return;
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  // 切分类后把选中 tab 滚进可视区（键盘 Tab 走焦点、点击走这里）
+  useEffect(() => {
+    const active = tabsRef.current?.querySelector<HTMLElement>(
+      '[role="tab"][aria-selected="true"]',
+    );
+    // scrollIntoView 不是所有环境都有（jsdom 没实现、老 WebView 也可能缺），
+    // 缺了只是少一次滚动，不能让整个面板挂掉
+    if (active && typeof active.scrollIntoView === "function") {
+      active.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }, [activeKey]);
+
   const activeEmojis =
     activeKey === "recent"
       ? recent
@@ -173,12 +202,17 @@ export function EmojiPicker({
         setStickerMenuId(null);
         e.stopPropagation();
       }}
-      className="bg-surface-container-high border-outline-variant flex flex-col overflow-hidden rounded-lg border shadow-lg"
+      // h-full 是必需的：父容器（Composer）给的是固定高度，缺了它面板会按内容自由生长，
+      // 撑破父容器后在手机端直接顶出视口底部（最后一行贴纸点不到，且页面不可滚动）
+      className="bg-surface-container-high border-outline-variant flex h-full flex-col overflow-hidden rounded-lg border shadow-lg"
     >
-      {/* 分类 tab 栏 */}
+      {/* 分类 tab 栏：固定单行 + 横向滚动。分类多达 9 个，换行会把 tab 栏越撑越高，
+          吃掉下方贴纸网格的可用高度（面板总高固定）。滚动条保留可见（全局 6px 细条），
+          否则用户看不出后面还有分类 */}
       <div
         role="tablist"
-        className="border-outline-variant flex shrink-0 gap-0.5 overflow-x-auto border-b px-1.5 py-1.5"
+        ref={tabsRef}
+        className="border-outline-variant flex shrink-0 gap-0.5 overflow-x-auto border-b px-1.5 pt-1.5 pb-1"
       >
         {onPickSticker && (
           <CategoryTab
@@ -289,8 +323,13 @@ export function EmojiPicker({
       ) : (
         <div
           className={cn(
-            "grid flex-1 auto-rows-min grid-cols-8 overflow-y-auto p-1.5",
-            compact ? "gap-0.5" : "gap-1",
+            "grid flex-1 gap-0.5 overflow-y-auto p-1.5",
+            // 固定格子边长而非按列数等分：等分后每格宽度随面板走
+            // （手机满宽 8 列 ≈ 48px 一格），表情只有 20px，格间空档比表情还大，
+            // 视觉上散成一片。定长格子 + auto-fill 由宽度决定列数，排布始终紧凑。
+            compact
+              ? "auto-rows-[2.75rem] grid-cols-[repeat(auto-fill,minmax(2.75rem,1fr))]"
+              : "auto-rows-[2.25rem] grid-cols-[repeat(auto-fill,minmax(2.25rem,1fr))]",
           )}
         >
           {activeEmojis.map((emoji, i) => (
@@ -299,7 +338,10 @@ export function EmojiPicker({
               type="button"
               aria-label={emoji}
               onClick={() => handlePick(emoji)}
-              className="hover:bg-surface-container-low grid aspect-square place-items-center rounded-lg text-xl transition-colors active:scale-90"
+              className={cn(
+                "hover:bg-surface-container-low flex items-center justify-center rounded-lg transition-colors active:scale-90",
+                compact ? "text-2xl" : "text-xl",
+              )}
             >
               {emoji}
             </button>

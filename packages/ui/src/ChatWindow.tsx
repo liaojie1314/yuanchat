@@ -61,10 +61,13 @@ import { MessageBubble, TypingIndicator } from "./MessageBubble";
 export function ChatWindow({
   onBack,
   onShowDetail,
+  onShowProfile,
   compactComposer = false,
 }: {
   onBack?: () => void;
   onShowDetail?: () => void;
+  /** 点消息头像：交给外层在详情面板位置打开资料页（缺省则头像不可点） */
+  onShowProfile?: (target: { userId: string; name?: string; isSelf?: boolean }) => void;
   compactComposer?: boolean;
 }) {
   const { t } = useTranslation();
@@ -487,6 +490,18 @@ export function ChatWindow({
                                 .then(() => showToast("info", t("report.submitted")))
                                 .catch(() => showToast("error", t("report.failed")));
                             }
+                          : undefined
+                      }
+                      onAvatarClick={
+                        // 自己的消息点自己的头像看自己的资料（乐观发送的本地条目没有
+                        // senderId，用登录态的 userId 兜底）
+                        onShowProfile && (msg.isSelf ? selfUserId : msg.senderId)
+                          ? () =>
+                              onShowProfile({
+                                userId: (msg.isSelf ? selfUserId : msg.senderId)!,
+                                name: msg.senderName,
+                                isSelf: msg.isSelf,
+                              })
                           : undefined
                       }
                     />

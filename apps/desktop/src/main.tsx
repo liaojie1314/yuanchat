@@ -4,6 +4,9 @@
  * 与 Web 端的区别：
  * - 监听 auth-success 事件（来自注册窗口），自动跳转到聊天页
  */
+// 旧 WebView 补丁必须排在所有 import 之前：依赖会在模块初始化阶段就调用
+// ES2022 API（如 @noble/curves 用 Object.hasOwn），补晚了整屏空白
+import "@yuanchat/shared/polyfills";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";

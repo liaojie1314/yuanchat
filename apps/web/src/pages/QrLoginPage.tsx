@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { RefreshCw, CheckCircle, Clock, Smartphone } from "lucide-react";
 
 type QrStatus = "waiting" | "scanning" | "confirmed" | "expired";
@@ -71,6 +72,7 @@ function QrCodeCanvas({ size = 180, dimmed = false }: { size?: number; dimmed?: 
 }
 
 export function QrLoginPage() {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<QrStatus>("waiting");
   const [qrKey, setQrKey] = useState(0);
 
@@ -113,8 +115,8 @@ export function QrLoginPage() {
               <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-lg text-white shadow-lg">
                 <Smartphone size={28} />
               </div>
-              <h1 className="text-2xl font-bold text-on-surface">扫码登录</h1>
-              <p className="text-on-surface-variant mt-1 text-sm">使用元聊 App 扫描二维码</p>
+              <h1 className="text-2xl font-bold text-on-surface">{t("auth.qrLogin")}</h1>
+              <p className="mt-1 text-sm text-on-surface-variant">{t("auth.qrSubtitle")}</p>
             </div>
 
             {/* 二维码区域 */}
@@ -124,22 +126,22 @@ export function QrLoginPage() {
               {status === "expired" && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center rounded-lg bg-black/40">
                   <Clock size={28} className="mb-2 text-white" />
-                  <p className="text-sm font-medium text-white">二维码已过期</p>
+                  <p className="text-sm font-medium text-white">{t("auth.qrExpired")}</p>
                 </div>
               )}
 
               {status === "scanning" && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center rounded-lg bg-primary/85">
                   <CheckCircle size={36} className="mb-2 text-white" />
-                  <p className="text-sm font-medium text-white">已扫描</p>
-                  <p className="mt-0.5 text-xs text-white/80">请在手机上确认登录</p>
+                  <p className="text-sm font-medium text-white">{t("auth.qrScanned")}</p>
+                  <p className="mt-0.5 text-xs text-white/80">{t("auth.qrConfirmOnPhone")}</p>
                 </div>
               )}
             </div>
 
             {/* 状态提示 */}
             {status === "waiting" && (
-              <p className="text-on-surface-variant text-sm">打开元聊，点击「扫一扫」登录</p>
+              <p className="text-sm text-on-surface-variant">{t("auth.qrHint")}</p>
             )}
             {status === "expired" && (
               <button
@@ -148,7 +150,7 @@ export function QrLoginPage() {
                 className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:opacity-80"
               >
                 <RefreshCw size={14} />
-                刷新二维码
+                {t("auth.qrRefresh")}
               </button>
             )}
 
@@ -157,9 +159,9 @@ export function QrLoginPage() {
               <Link
                 to="/login"
                 replace
-                className="text-on-surface-variant text-sm hover:text-primary hover:opacity-80"
+                className="text-sm text-on-surface-variant hover:text-primary hover:opacity-80"
               >
-                返回密码登录
+                {t("auth.backToPasswordLogin")}
               </Link>
             </div>
           </div>

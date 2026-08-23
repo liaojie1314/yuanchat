@@ -29,8 +29,12 @@ import koKR from "./locales/ko-KR.json";
 /**
  * 获取浏览器首选语言
  * zh-CN、zh、zh-TW → zh-CN；ja → ja-JP；ko → ko-KR；其他 → en-US
+ *
+ * @returns 受支持的 locale 代码
+ * @remarks 仅在用户从未选过语言时作为默认值；一旦手动选过，
+ *   持久化的选择优先（见 themeStore 的 locale 与 onRehydrateStorage）
  */
-function detectLocale(): string {
+export function detectLocale(): SupportedLocale {
   if (typeof navigator === "undefined") return "zh-CN";
   const lang = navigator.language || "zh-CN";
   if (lang.startsWith("zh")) return "zh-CN";

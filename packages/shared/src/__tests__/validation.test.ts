@@ -14,31 +14,31 @@ describe("validatePassword", () => {
   it("rejects password shorter than 8 characters", () => {
     const r = validatePassword("Ab1!");
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.includes("8"))).toBe(true);
+    expect(r.errors).toContain("validation.passwordMinLength");
   });
 
   it("rejects password without uppercase letter", () => {
     const r = validatePassword("abc1234!");
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.includes("大写"))).toBe(true);
+    expect(r.errors).toContain("validation.passwordUppercase");
   });
 
   it("rejects password without lowercase letter", () => {
     const r = validatePassword("ABC1234!");
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.includes("小写"))).toBe(true);
+    expect(r.errors).toContain("validation.passwordLowercase");
   });
 
   it("rejects password without digit", () => {
     const r = validatePassword("Abcdefg!");
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.includes("数字"))).toBe(true);
+    expect(r.errors).toContain("validation.passwordDigit");
   });
 
   it("rejects password without special character", () => {
     const r = validatePassword("Abc12345");
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.includes("特殊"))).toBe(true);
+    expect(r.errors).toContain("validation.passwordSpecial");
   });
 
   it("returns multiple errors for a weak password", () => {
@@ -60,19 +60,19 @@ describe("validateYuanchatId", () => {
   it("rejects id shorter than 3 characters", () => {
     const r = validateYuanchatId("ab");
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.includes("3"))).toBe(true);
+    expect(r.errors).toContain("validation.idMinLength");
   });
 
   it("rejects id with special characters", () => {
     const r = validateYuanchatId("user@name");
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.includes("字母"))).toBe(true);
+    expect(r.errors).toContain("validation.idCharset");
   });
 
   it("rejects id with Chinese characters", () => {
     const r = validateYuanchatId("用户名");
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.includes("字母"))).toBe(true);
+    expect(r.errors).toContain("validation.idCharset");
   });
 
   it("rejects empty id", () => {
@@ -94,13 +94,13 @@ describe("validatePhone", () => {
   it("rejects empty phone", () => {
     const r = validatePhone("");
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.includes("请输入"))).toBe(true);
+    expect(r.errors).toContain("validation.phoneRequired");
   });
 
   it("rejects phone with wrong length", () => {
     const r = validatePhone("1381234567");
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.includes("格式"))).toBe(true);
+    expect(r.errors).toContain("validation.phoneFormat");
   });
 
   it("rejects phone starting with invalid prefix", () => {
@@ -125,18 +125,18 @@ describe("validateNickname", () => {
   it("rejects empty nickname", () => {
     const r = validateNickname("");
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.includes("请输入"))).toBe(true);
+    expect(r.errors).toContain("validation.nicknameRequired");
   });
 
   it("rejects nickname shorter than 2", () => {
     const r = validateNickname("张");
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.includes("2"))).toBe(true);
+    expect(r.errors).toContain("validation.nicknameMinLength");
   });
 
   it("rejects nickname longer than 20", () => {
     const r = validateNickname("这是一个超过二十个字的昵称来测试一下长度限制");
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.includes("20"))).toBe(true);
+    expect(r.errors).toContain("validation.nicknameMaxLength");
   });
 });

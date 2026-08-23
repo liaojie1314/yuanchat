@@ -142,7 +142,7 @@ export function ForwardModal({
                 </span>
                 <span
                   className={cn(
-                    "grid h-5 w-5 place-items-center rounded-full border",
+                    "flex h-5 w-5 items-center justify-center rounded-full border",
                     active ? "border-primary bg-primary text-primary-on" : "border-outline-variant",
                   )}
                 >

@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 语音消息录制。WebView 的 getUserMedia 会经 onPermissionRequest 转成这两项运行时申请，
+         清单里不声明的话 requestPermissions 直接返回拒绝、系统弹框根本不出现，
+         前端只能看到 getUserMedia 失败（表现为「无麦克风权限」） -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- required=false：没有麦克风的设备（部分 TV / 模拟器）照样能装，只是录不了音 -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -10,11 +17,15 @@
         android:label="@string/app_name"
         android:theme="@style/Theme.yuanchat_desktop"
         android:usesCleartextTraffic="${usesCleartextTraffic}">
+        <!-- adjustResize：Android 11 以下没有 IME inset 可读，只能靠系统把窗口改矮，
+             WebView 的 visualViewport 才会收缩、输入框才会被顶到键盘上方。
+             Android 11 及以上走 MainActivity 里的 edge-to-edge + IME inset 分支。 -->
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
             android:launchMode="singleTask"
             android:label="@string/main_activity_title"
             android:name=".MainActivity"
+            android:windowSoftInputMode="adjustResize"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

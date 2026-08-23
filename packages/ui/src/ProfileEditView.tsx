@@ -125,13 +125,13 @@ export function ProfileEditView({ onBack }: { onBack: () => void }) {
           {/* 上传中：半透明遮罩 + 转圈，压住整个头像 */}
           {uploading && (
             <span
-              className="absolute inset-0 grid place-items-center rounded-full bg-black/45 text-white"
+              className="absolute inset-0 flex items-center justify-center rounded-full bg-black/45 text-white"
               aria-label={t("settings.avatarUploading")}
             >
               <Loader2 size={22} className="animate-spin" />
             </span>
           )}
-          <span className="bg-primary text-primary-on absolute -right-1 -bottom-1 grid h-7 w-7 place-items-center rounded-full border-2 border-white dark:border-neutral-900">
+          <span className="bg-primary text-primary-on absolute -right-1 -bottom-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white dark:border-neutral-900">
             <Camera size={14} />
           </span>
         </button>

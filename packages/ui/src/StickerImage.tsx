@@ -74,7 +74,7 @@ export function StickerImage({
         onClick={retry}
         aria-label={t("sticker.imageFailed")}
         style={box}
-        className="bg-surface-container-high text-on-surface-variant grid place-items-center rounded-lg transition-opacity hover:opacity-80"
+        className="bg-surface-container-high text-on-surface-variant flex items-center justify-center rounded-lg transition-opacity hover:opacity-80"
       >
         <ImageOff size={22} strokeWidth={1.25} />
       </button>

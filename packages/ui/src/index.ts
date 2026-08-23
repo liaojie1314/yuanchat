@@ -41,6 +41,7 @@ export { CreateGroupModal } from "./CreateGroupModal";
 export { InviteMembersModal } from "./InviteMembersModal";
 export { MentionPicker } from "./MentionPicker";
 export { ForwardModal } from "./ForwardModal";
+export { UserProfileView } from "./UserProfileView";
 
 // 通讯录组件
 export { ContactsScreen } from "./ContactsScreen";

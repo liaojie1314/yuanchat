@@ -22,9 +22,9 @@
  * @param onRecall - 撤回回调（右键 / 长按菜单触发，仅自己 2 分钟内的消息可用）
  * @param onImageClick - 点击图片气泡打开全屏查看器的回调，参数为当前展示 URL
  * @param onFavorite - 收藏消息回调（仅服务端已确认消息提供，撤回/系统消息不可收藏）
+ * @param onAvatarClick - 点头像进入用户详情页（自己的消息点自己的头像；缺省则头像不可点）
  */
 import {
-  AlertCircle,
   Check,
   CheckCheck,
   Copy,
@@ -35,12 +35,14 @@ import {
   Pause,
   Play,
   Reply,
+  RotateCcw,
   Smile,
   Sparkles,
   Star,
   Undo2,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { getDownloadUrl, showToast } from "@yuanchat/shared";
 import type { ChatMessage } from "@yuanchat/shared";
@@ -50,10 +52,23 @@ import { MessageImage } from "./MessageImage";
 import { StickerImage } from "./StickerImage";
 import { copyText } from "./copyText";
 import { fileIconOf } from "./fileIcon";
+import { useLongPress } from "./useLongPress";
 import { currentPlayingId, playVoice, subscribeVoicePlayer } from "./voicePlayer";
 
 /** 菜单快捷回应条的固定 emoji */
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🎉"];
+
+/** 菜单与锚点（右键位置 / 长按触点）之间的间距（px） */
+const MENU_GAP = 4;
+
+/** 菜单距视口边缘的最小留白（px） */
+const MENU_EDGE = 8;
+
+/** 菜单自身可滚动时的最小高度（px），避免空间极小时缩成一条看不出是菜单 */
+const MENU_MIN_HEIGHT = 96;
+
+/** 气泡纵向位移超过该像素才因滚动关闭菜单，容忍「零位移」滚动事件与真机抖动 */
+const SCROLL_CLOSE_DELTA = 8;
 
 /** 把文本中的所有 @昵称 段切成高亮 token（只在消息 mentions 非空时启用） */
 function renderTextWithMentions(text: string, mentions?: string[]) {
@@ -87,6 +102,7 @@ export function MessageBubble({
   onFavorite,
   onAddSticker,
   onReport,
+  onAvatarClick,
 }: {
   msg: ChatMessage;
   compact?: boolean;
@@ -100,6 +116,7 @@ export function MessageBubble({
   onFavorite?: () => void;
   onAddSticker?: () => void;
   onReport?: () => void;
+  onAvatarClick?: () => void;
 }) {
   const { t } = useTranslation();
   // 气泡内联操作菜单（右键 / 长按弹出，点外部关闭）
@@ -107,7 +124,23 @@ export function MessageBubble({
   // 撤回项是否在 2 分钟窗口内——在打开菜单的事件里用 Date.now() 求值并存下，
   // 避免在 render 里调用 Date.now()（不纯，react-hooks/purity 禁止）
   const [recallInWindow, setRecallInWindow] = useState(false);
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  // 菜单锚点（视口坐标）：右键落点或长按触点。
+  // 必须放在 state 里而不是 ref：安卓 WebView 长按到时会自己补发一次 contextmenu，
+  // 和我们 500ms 的长按定时器只差几毫秒，于是「菜单已开着又开一次」。
+  // 那一路 menuOpen 从 true 到 true 没有变化，定位 effect 不会重跑，
+  // 而 openMenuAt 已经把 menuStyle 清成了 null——菜单就永久停在 visibility: hidden 的 0,0。
+  // 锚点进 state 后每次呼出都是新对象，定位必定重量一次
+  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
+  // 开菜单瞬间气泡在视口中的纵向位置，用于判断后续滚动是否真的把气泡带走了
+  const bubbleTopAtOpen = useRef(0);
+  // 菜单最终定位：量到真实尺寸后才算出，算出前不可见，避免闪到错误位置
+  const [menuStyle, setMenuStyle] = useState<{
+    left: number;
+    top: number;
+    maxHeight?: number;
+  } | null>(null);
   // 语音播放态：模块级单例播放器广播当前播放的 messageId
   const [voicePlayingId, setVoicePlayingId] = useState<string | null>(() => currentPlayingId());
 
@@ -116,13 +149,118 @@ export function MessageBubble({
     return subscribeVoicePlayer(setVoicePlayingId);
   }, [msg.kind]);
 
+  const isSelf = msg.isSelf;
+  // 撤回资格（render 纯判定）：仅自己且父层给了回调；实际的 2 分钟窗口在开菜单时判
+  const recallEligible = !!onRecall && isSelf && !!msg.createdAtMs;
+  // 文本消息才提供复制项
+  const canCopy = msg.kind === "text" && !!msg.text;
+  // 引用回复：父层给了回调即可（文本/图片/文件/语音均可引用）
+  const canReply = !!onReply;
+  const canForward = !!onForward;
+  // 菜单当前展示的撤回项（资格 + 窗口内）
+  const showRecall = recallEligible && recallInWindow;
+
+  /** 菜单是否有任何可用项：一项都没有就不弹 */
+  const hasMenuItem = (withinWindow: boolean) =>
+    withinWindow ||
+    canCopy ||
+    canReply ||
+    !!onReact ||
+    canForward ||
+    !!onFavorite ||
+    !!onAddSticker;
+
+  /** 头像文字兜底：自己的消息服务端不回发送者昵称 */
+  const avatarName = isSelf ? t("common.me") : (msg.senderName ?? "?");
+
+  /** 撤回是否还在 2 分钟窗口内（Date.now 不纯，只能在事件里求值，不能在 render 调用） */
+  const recallStillOpen = () => recallEligible && Date.now() - (msg.createdAtMs ?? 0) < 120_000;
+
+  /** 在给定视口坐标处打开菜单 */
+  const openMenuAt = (withinWindow: boolean, x: number, y: number) => {
+    setRecallInWindow(withinWindow);
+    setMenuAnchor({ x, y });
+    bubbleTopAtOpen.current = bubbleRef.current?.getBoundingClientRect().top ?? 0;
+    // 先清掉上一次的定位与限高，让 layout effect 量到未被裁的原始尺寸
+    setMenuStyle(null);
+    setMenuOpen(true);
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    const withinWindow = recallStillOpen();
+    if (!hasMenuItem(withinWindow)) return;
+    e.preventDefault();
+    openMenuAt(withinWindow, e.clientX, e.clientY);
+  };
+
+  /** 长按达成：按当下的撤回窗口重新判定可用项，再在触点处弹菜单 */
+  const handleLongPress = (x: number, y: number) => {
+    const withinWindow = recallStillOpen();
+    if (!hasMenuItem(withinWindow)) return;
+    openMenuAt(withinWindow, x, y);
+  };
+
+  // 触屏长按手势：位移容差 + 抬手后的合成事件豁免都在 hook 里，详见 useLongPress
+  const { handlers: longPressHandlers, isTouchEcho } = useLongPress(handleLongPress);
+
   useEffect(() => {
     if (!menuOpen) return;
-    const close = () => setMenuOpen(false);
-    // 捕获阶段监听，任何 document 点击都关闭（菜单根 onMouseDown 阻止冒泡自保）
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [menuOpen]);
+    // 点外部关闭；长按余波（手指未抬起 / 抬手后的合成鼠标事件）一律放行，
+    // 否则真机上菜单会在弹出的同一瞬被自己的合成 mousedown 关掉
+    const closeUnlessEcho = () => {
+      if (isTouchEcho()) return;
+      setMenuOpen(false);
+    };
+    // 菜单是 fixed 定位，气泡被滚走后菜单就指错地方了，故滚动要关；但只认「真的滚走了」：
+    // 浏览器在右键/长按落点上会补发一次位移为零的 scroll（菜单弹出的同一毫秒就到），
+    // 真机上手指的细微移动也会让列表抖动一两像素，无差别关闭等于菜单刚出现就消失
+    const closeIfScrolledAway = () => {
+      const top = bubbleRef.current?.getBoundingClientRect().top;
+      if (top === undefined || Math.abs(top - bubbleTopAtOpen.current) > SCROLL_CLOSE_DELTA) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", closeUnlessEcho);
+    // 触屏另加 touchstart：合成鼠标事件在部分机型上会被长按手势抑制，
+    // 只监听 mousedown 时菜单会关不掉
+    document.addEventListener("touchstart", closeUnlessEcho);
+    document.addEventListener("scroll", closeIfScrolledAway, true);
+    window.addEventListener("resize", closeUnlessEcho);
+    return () => {
+      document.removeEventListener("mousedown", closeUnlessEcho);
+      document.removeEventListener("touchstart", closeUnlessEcho);
+      document.removeEventListener("scroll", closeIfScrolledAway, true);
+      window.removeEventListener("resize", closeUnlessEcho);
+    };
+  }, [menuOpen, isTouchEcho]);
+
+  // 菜单挂载后按真实尺寸定位：优先向下展开，下方不够就翻上去，两边都不够则自身滚动
+  useLayoutEffect(() => {
+    if (!menuOpen || !menuAnchor) return;
+    const menu = menuRef.current;
+    if (!menu) return;
+    const { x, y } = menuAnchor;
+    const menuW = menu.offsetWidth;
+    const menuH = menu.offsetHeight;
+    const viewW = window.innerWidth;
+    const viewH = window.innerHeight;
+
+    const spaceBelow = viewH - y - MENU_GAP - MENU_EDGE;
+    const spaceAbove = y - MENU_GAP - MENU_EDGE;
+    const below = menuH <= spaceBelow || spaceBelow >= spaceAbove;
+    const room = below ? spaceBelow : spaceAbove;
+    const maxHeight = menuH > room ? Math.max(room, MENU_MIN_HEIGHT) : undefined;
+    const shownH = Math.min(menuH, maxHeight ?? menuH);
+
+    // 自己的消息右对齐，菜单向左展开，避免总是撞右边缘
+    const rawLeft = msg.isSelf ? x - menuW : x;
+    const rawTop = below ? y + MENU_GAP : y - MENU_GAP - shownH;
+    setMenuStyle({
+      left: Math.min(Math.max(MENU_EDGE, rawLeft), Math.max(MENU_EDGE, viewW - menuW - MENU_EDGE)),
+      top: Math.min(Math.max(MENU_EDGE, rawTop), Math.max(MENU_EDGE, viewH - shownH - MENU_EDGE)),
+      maxHeight,
+    });
+  }, [menuOpen, menuAnchor, msg.isSelf]);
 
   // 系统消息：居中胶囊，无头像无气泡
   if (msg.kind === "system") {
@@ -148,56 +286,6 @@ export function MessageBubble({
       </div>
     );
   }
-
-  const isSelf = msg.isSelf;
-  // 撤回资格（render 纯判定）：仅自己且父层给了回调；实际的 2 分钟窗口在开菜单时判
-  const recallEligible = !!onRecall && isSelf && !!msg.createdAtMs;
-  // 文本消息才提供复制项
-  const canCopy = msg.kind === "text" && !!msg.text;
-  // 引用回复：父层给了回调即可（文本/图片/文件/语音均可引用）
-  const canReply = !!onReply;
-  const canForward = !!onForward;
-  // 菜单当前展示的撤回项（资格 + 窗口内）
-  const showRecall = recallEligible && recallInWindow;
-
-  const openMenu = (e: { preventDefault: () => void }) => {
-    // 窗口判定放事件里（Date.now 不纯，不能在 render 调用）
-    const withinWindow = recallEligible && Date.now() - (msg.createdAtMs ?? 0) < 120_000;
-    if (
-      !withinWindow &&
-      !canCopy &&
-      !canReply &&
-      !onReact &&
-      !canForward &&
-      !onFavorite &&
-      !onAddSticker
-    )
-      return;
-    e.preventDefault();
-    setRecallInWindow(withinWindow);
-    setMenuOpen(true);
-  };
-
-  const startLongPress = (e: { preventDefault: () => void }) => {
-    if (
-      !recallEligible &&
-      !canCopy &&
-      !canReply &&
-      !onReact &&
-      !canForward &&
-      !onFavorite &&
-      !onAddSticker
-    )
-      return;
-    longPressTimer.current = setTimeout(() => openMenu(e), 500);
-  };
-
-  const cancelLongPress = () => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  };
 
   const handleCopy = () => {
     void copyText(msg.text ?? "");
@@ -237,16 +325,26 @@ export function MessageBubble({
   return (
     <div
       className={cn(
-        "flex items-start gap-2",
+        "flex items-start gap-2.5",
         compact ? "mt-0.5" : "mt-2",
         isSelf && "flex-row-reverse",
       )}
-      onDoubleClick={onReply}
     >
       {compact ? (
         <div className="w-10 shrink-0" aria-hidden />
+      ) : onAvatarClick ? (
+        // 头像可点：进资料页。注意不要把双击引用挂在整行上——
+        // 头像也在行内，双击头像会连带引用这条消息（用户实测到的怪异行为）
+        <button
+          type="button"
+          onClick={onAvatarClick}
+          aria-label={t("profile.viewProfile")}
+          className="shrink-0 rounded-full transition-opacity hover:opacity-80"
+        >
+          <Avatar name={avatarName} size="md" />
+        </button>
       ) : (
-        <Avatar name={isSelf ? "我" : (msg.senderName ?? "?")} size="md" />
+        <Avatar name={avatarName} size="md" />
       )}
 
       <div className={cn("flex max-w-[70%] flex-col", isSelf && "items-end")}>
@@ -256,18 +354,8 @@ export function MessageBubble({
         )}
 
         <div className={cn("flex items-center gap-1.5", isSelf && "flex-row-reverse")}>
-          {/* 失败重试按钮：贴在气泡外侧 */}
-          {isSelf && msg.status === "failed" && (
-            <button
-              onClick={onRetry}
-              aria-label={t("chat.status.failed")}
-              className="text-error hover:bg-error/10 rounded-full p-1.5 transition-colors"
-            >
-              <AlertCircle size={16} />
-            </button>
-          )}
-
           <div
+            ref={bubbleRef}
             // data-kind 挂在气泡本体（右键菜单的宿主元素）上：E2E 既能按形态计数，
             // 也能直接右键定位到会弹菜单的那个节点。原 E2E 用的选择器应用里不存在。
             data-kind={msg.kind}
@@ -281,10 +369,9 @@ export function MessageBubble({
                     isSelf ? "msg-bubble-self rounded-br-sm" : "msg-bubble-peer rounded-bl-sm",
                   ),
             )}
-            onContextMenu={openMenu}
-            onTouchStart={startLongPress}
-            onTouchEnd={cancelLongPress}
-            onTouchMove={cancelLongPress}
+            onContextMenu={handleContextMenu}
+            onDoubleClick={onReply}
+            {...longPressHandlers}
           >
             {/* 引用块 */}
             {msg.quote && (
@@ -351,7 +438,7 @@ export function MessageBubble({
                       .catch(() => showToast("error", t("chat.file.downloadFailed")));
                   }}
                   className={cn(
-                    "grid h-8 w-8 shrink-0 place-items-center rounded-full transition-colors",
+                    "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors",
                     isSelf
                       ? "bg-white/15 text-white hover:bg-white/25"
                       : "bg-primary-container text-primary-on-container hover:opacity-85",
@@ -381,20 +468,32 @@ export function MessageBubble({
                     }}
                     aria-label={t("chat.input.voice")}
                     className={cn(
-                      "grid h-8 w-8 shrink-0 place-items-center rounded-full transition-transform active:scale-90",
+                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform active:scale-90",
                       isSelf
                         ? "bg-white/25 text-white"
                         : "bg-primary-container text-primary-on-container",
                     )}
                   >
-                    {voicePlayingId === msg.id ? <Pause size={14} /> : <Play size={14} />}
+                    {/* lucide 的 Pause/Play 只有描边，14px 下细到看不见，必须填充 */}
+                    {voicePlayingId === msg.id ? (
+                      <Pause size={14} fill="currentColor" />
+                    ) : (
+                      <Play size={14} fill="currentColor" />
+                    )}
                   </button>
-                  <span className="flex h-5 items-center gap-0.5" aria-hidden>
+                  <span
+                    className={cn(
+                      "flex h-5 items-center gap-0.5",
+                      voicePlayingId === msg.id && "voice-wave-playing",
+                    )}
+                    aria-hidden
+                  >
                     {msg.voice.wave.map((h, i) => (
                       <i
                         key={i}
                         className="w-0.5 rounded-sm bg-current opacity-50"
-                        style={{ height: h }}
+                        // 相邻条错开相位，起伏才像波在往右跑；取模让长波形循环复用同一组延时
+                        style={{ height: h, animationDelay: `${(i % 5) * 110}ms` }}
                       />
                     ))}
                   </span>
@@ -411,98 +510,108 @@ export function MessageBubble({
               </div>
             )}
 
-            {/* 内联操作菜单：右键 / 长按弹出，快捷回应条 + 复制 + 引用 + 撤回 */}
-            {menuOpen && (
-              <div
-                role="menu"
-                onMouseDown={(e) => e.stopPropagation()}
-                className={cn(
-                  "bg-surface-container-high border-outline-variant absolute bottom-full z-10 mb-1 min-w-[7rem] overflow-hidden rounded-lg border py-1 shadow-lg",
-                  isSelf ? "right-0" : "left-0",
-                )}
-              >
-                {onReact && (
-                  <div className="border-outline-variant flex gap-0.5 border-b px-1.5 pb-1">
-                    {QUICK_REACTIONS.map((e) => (
-                      <button
-                        key={e}
-                        role="menuitem"
-                        onClick={() => {
-                          setMenuOpen(false);
-                          onReact(e);
-                        }}
-                        className="hover:bg-surface-container-low grid h-7 w-7 place-items-center rounded-lg text-base transition-transform active:scale-90"
-                      >
-                        {e}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {canCopy && (
-                  <button
-                    role="menuitem"
-                    onClick={handleCopy}
-                    className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
-                  >
-                    <Copy size={15} /> {t("chat.message.copy")}
-                  </button>
-                )}
-                {canReply && (
-                  <button
-                    role="menuitem"
-                    onClick={handleReply}
-                    className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
-                  >
-                    <Reply size={15} /> {t("chat.message.reply")}
-                  </button>
-                )}
-                {canForward && (
-                  <button
-                    role="menuitem"
-                    onClick={handleForward}
-                    className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
-                  >
-                    <Forward size={15} /> {t("chat.message.forward")}
-                  </button>
-                )}
-                {onFavorite && (
-                  <button
-                    role="menuitem"
-                    onClick={handleFavorite}
-                    className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
-                  >
-                    <Star size={15} /> {t("chat.message.favorite")}
-                  </button>
-                )}
-                {onAddSticker && msg.kind === "image" && (
-                  <button
-                    role="menuitem"
-                    onClick={handleAddSticker}
-                    className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
-                  >
-                    <Smile size={15} /> {t("sticker.addToStickers")}
-                  </button>
-                )}
-                {onReport && (
-                  <button
-                    role="menuitem"
-                    onClick={handleReport}
-                    className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
-                  >
-                    <Flag size={15} /> {t("chat.message.report")}
-                  </button>
-                )}
-                {showRecall && (
-                  <button
-                    role="menuitem"
-                    onClick={handleRecall}
-                    className="text-body-md text-error hover:bg-surface-container-highest flex w-full items-center gap-2 px-3 py-2 text-left"
-                  >
-                    <Undo2 size={15} /> {t("chat.message.revoke")}
-                  </button>
-                )}
-              </div>
-            )}
+            {/* 内联操作菜单：右键 / 长按弹出，快捷回应条 + 复制 + 引用 + 撤回。
+                挂到 body 而不是气泡内：绝对定位的菜单会被消息列表的 overflow 裁掉，
+                且同层后来的气泡（图片/贴纸）会盖在它上面 */}
+            {menuOpen &&
+              createPortal(
+                <div
+                  role="menu"
+                  ref={menuRef}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  style={{
+                    left: menuStyle?.left ?? 0,
+                    top: menuStyle?.top ?? 0,
+                    maxHeight: menuStyle?.maxHeight,
+                    // 定位算出前先隐藏，避免在原点闪一帧
+                    visibility: menuStyle ? "visible" : "hidden",
+                  }}
+                  className="bg-surface-container-high border-outline-variant fixed z-40 min-w-[7rem] overflow-x-hidden overflow-y-auto rounded-lg border p-1 shadow-lg"
+                >
+                  {onReact && (
+                    <div className="border-outline-variant flex gap-0.5 border-b px-1.5 pb-1">
+                      {QUICK_REACTIONS.map((e) => (
+                        <button
+                          key={e}
+                          role="menuitem"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            onReact(e);
+                          }}
+                          className="hover:bg-surface-container-low flex h-7 w-7 items-center justify-center rounded-lg text-base transition-transform active:scale-90"
+                        >
+                          {e}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {canCopy && (
+                    <button
+                      role="menuitem"
+                      onClick={handleCopy}
+                      className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors"
+                    >
+                      <Copy size={15} /> {t("chat.message.copy")}
+                    </button>
+                  )}
+                  {canReply && (
+                    <button
+                      role="menuitem"
+                      onClick={handleReply}
+                      className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors"
+                    >
+                      <Reply size={15} /> {t("chat.message.reply")}
+                    </button>
+                  )}
+                  {canForward && (
+                    <button
+                      role="menuitem"
+                      onClick={handleForward}
+                      className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors"
+                    >
+                      <Forward size={15} /> {t("chat.message.forward")}
+                    </button>
+                  )}
+                  {onFavorite && (
+                    <button
+                      role="menuitem"
+                      onClick={handleFavorite}
+                      className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors"
+                    >
+                      <Star size={15} /> {t("chat.message.favorite")}
+                    </button>
+                  )}
+                  {onAddSticker && msg.kind === "image" && (
+                    <button
+                      role="menuitem"
+                      onClick={handleAddSticker}
+                      className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors"
+                    >
+                      <Smile size={15} /> {t("sticker.addToStickers")}
+                    </button>
+                  )}
+                  {onReport && (
+                    <button
+                      role="menuitem"
+                      onClick={handleReport}
+                      className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors"
+                    >
+                      <Flag size={15} /> {t("chat.message.report")}
+                    </button>
+                  )}
+                  {showRecall && (
+                    <button
+                      role="menuitem"
+                      onClick={handleRecall}
+                      className="text-body-md text-error hover:bg-surface-container-highest flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors"
+                    >
+                      <Undo2 size={15} /> {t("chat.message.revoke")}
+                    </button>
+                  )}
+                </div>,
+                document.body,
+              )}
           </div>
         </div>
 
@@ -534,7 +643,17 @@ export function MessageBubble({
           )}
         >
           {isSelf && msg.status === "failed" ? (
-            <span className="text-error">{t("chat.status.failed")}</span>
+            // 失败重试做在 meta 行里：以前在气泡与头像之间插一个「!」按钮，
+            // 会把这一行撑开、把气泡和头像顶得老远
+            <button
+              type="button"
+              onClick={onRetry}
+              className="text-error hover:bg-error/10 -mx-1 flex items-center gap-1 rounded px-1 transition-colors"
+            >
+              <RotateCcw size={11} aria-hidden />
+              <span>{t("chat.status.failed")}</span>
+              <span className="underline">{t("common.retry")}</span>
+            </button>
           ) : (
             <>
               <span className="tabular-nums">{msg.time}</span>
@@ -565,7 +684,7 @@ export function MessageBubble({
 export function TypingIndicator({ name }: { name: string }) {
   const { t } = useTranslation();
   return (
-    <div className="mt-2 flex items-end gap-2">
+    <div className="mt-2 flex items-end gap-2.5">
       <Avatar name={name} size="md" />
       <div className="flex flex-col">
         <div className="msg-bubble-peer w-fit rounded-lg rounded-bl-sm px-3 py-2">

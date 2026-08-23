@@ -2,7 +2,7 @@
 
 即时通讯软件 — 从零构建的现代 IM 解决方案。
 
-**当前状态**：MVP 已完成，v0.1.0 发版准备就绪。GitHub Actions 自动打包 Web + Desktop 三平台 + Android APK。
+**当前状态**：v0.3.0 已发版（Web + Desktop 三平台 + Android APK 由 GitHub Actions 自动打包）。当前迭代为聊天体验增强（贴纸/收藏表情、会话维护、移动端真机适配）。
 
 ## 平台支持（Tauri 2 统一桌面 + 移动端）
 
@@ -36,8 +36,11 @@
 - **消息撤回**：发送后 2 分钟内可撤回；自己文本 5 分钟内可「重新编辑」回填输入框
 - **图片消息**：canvas 压缩 → MinIO 预签名直传，Lightbox 全屏查看，粘贴/选图发送，PNG 保 alpha
 - **文件消息**：任意扩展直传 MinIO，气泡按类型显示 lucide 图标（PDF/Word/表格/演示/压缩/音视频/图片/代码）+ 品类色 + 预签名下载
-- **语音消息**：MediaRecorder + audio/webm（1-60s，超 60s 自动截断），模块级单例播放器
+- **语音消息**：MediaRecorder + audio/webm（1-60s，超 60s 自动截断），录音可暂停/续录，模块级单例播放器 + 播放中波形动画
 - **表情回应 Reactions**：右键菜单快捷 6 emoji 条 + 气泡点击 toggle，全员实时同步 + 历史聚合回填（mine 相对请求者）
+- **贴纸/收藏表情**：官方表情包 + 图片一键转收藏（blob 内容寻址去重），贴纸消息独立 content type，前后端共用 golden 契约
+- **消息菜单**：桌面右键 / 移动端长按 500ms 呼出（位移容差 12px，抬手后的合成事件与 WebView 补发的 `contextmenu` 一并豁免）
+- **会话维护**：清空聊天记录、群公告（横幅 + 全文弹层）、群内昵称
 
 ### 群管理
 
@@ -51,9 +54,9 @@
 
 ### 系统能力
 
-- **i18n**：zh-CN / en-US 双语（`react-i18next`，扁平 key）
-- **主题**：多皮肤（Aurora / Ocean / Emerald 等）+ 亮暗模式，字体缩放
-- **兼容性**：所有 `build.target` 保持 `es2019`，支持旧 Android WebView（Chrome 74+）
+- **i18n**：zh-CN / en-US / ja-JP / ko-KR 四语全量覆盖（`react-i18next`，扁平 key，`pnpm check:i18n` 门禁挡漏翻/写错 key/死键），语言选择持久化，重开应用即生效
+- **主题**：多皮肤（Aurora / Ocean / Emerald 等）+ 亮暗模式，字体缩放（`pnpm check:theme` 校验颜色工具类都在色板里）
+- **兼容性**：所有 `build.target` 保持 `es2019`，支持旧 Android WebView（Chrome 74+）——含 `Object.hasOwn` 运行时补丁、flex `gap` 的 margin 兜底、Tailwind preflight `:where()` 失效的复位补写
 
 ### 未做（明确留待下轮迭代）
 
@@ -66,7 +69,7 @@
 - **桌面 + 移动**：Tauri 2（Rust 内核 + WebView，同一套 React UI 全平台复用）
 - **后端**：Go 1.25 + Gin + GORM + gorilla/websocket + MinIO SDK（REST :8080 + WS :8081）
 - **存储**：PostgreSQL 16 + Redis 7 + MinIO（S3 兼容，用于图片/文件/语音/头像）
-- **测试**：vitest（前端 249+）+ go test（集成测试 -race）+ Playwright E2E
+- **测试**：vitest（前端 463）+ go test（集成测试 -race）+ Playwright E2E（58）
 - **发版**：release-it + GitHub Actions（tag 触发 5 平台并行打包）
 
 ## 快速开始
@@ -130,7 +133,8 @@ pnpm release:dry        # 模拟运行，看会做什么
 - **[详细架构设计](docs/01_ARCHITECTURE.md)** — 前后端模块划分、数据流
 - **[聊天 API 与 WebSocket 协议](docs/02_CHAT_API.md)** — REST 端点 + WS 帧 + 系统消息约定
 - **[数据库设计](docs/03_DB_SCHEMA.md)** — 表结构 + 索引 + 迁移
-- **[开发与打包指南](docs/DEVELOPMENT.md)** — 启动/构建/调试/测试命令
+- **[开发与打包指南](docs/DEVELOPMENT.md)** — 启动/构建/调试/测试命令，i18n 与旧 WebView 兼容约定
+- **[常见问题排查](.claude/TROUBLESHOOTING.md)** — 按平台分类的踩坑记录（白屏、软键盘、旧 WebView 静默失效、语言持久化…）
 - **[发版指南](docs/RELEASE.md)** — release-it + GitHub Actions + 签名策略
 - **[UI/UX 设计规范](docs/design/README.md)** — Material Design 3 Aurora 主题、组件、多端适配
 

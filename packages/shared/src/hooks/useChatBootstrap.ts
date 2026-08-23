@@ -167,6 +167,7 @@ function wireSocket() {
         kind,
         isSelf,
         senderName: p.sender_nickname,
+        senderId: p.sender_id,
         text: kind === "text" || kind === "system" ? p.content.text : undefined,
         image: isImage
           ? { key: p.content.key, width: p.content.width ?? 0, height: p.content.height ?? 0 }

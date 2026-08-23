@@ -75,6 +75,9 @@ export function ContactsPanel({
     }
   };
 
+  // 索引条是否显示：列表右内边距要据此让位，否则字母压在昵称上
+  const showIndexBar = !searching && friends.length >= INDEX_BAR_MIN_FRIENDS && groups.length > 1;
+
   return (
     <div className="flex h-full flex-col">
       {/* 顶部栏 */}
@@ -152,7 +155,10 @@ export function ContactsPanel({
 
       {/* 字母分组列表 + 索引条 */}
       <div className="relative min-h-0 flex-1">
-        <div ref={listRef} className="h-full overflow-y-auto px-2 pb-3">
+        <div
+          ref={listRef}
+          className={cn("h-full overflow-y-auto px-2 pb-3", showIndexBar && "pr-10")}
+        >
           {groups.length === 0 && (
             <p className="text-body-md text-on-surface-variant px-4 py-8 text-center">
               {searching ? t("contacts.searchEmpty") : t("contacts.empty")}
@@ -192,17 +198,18 @@ export function ContactsPanel({
           ))}
         </div>
 
-        {/* 字母索引条 */}
-        {!searching && friends.length >= INDEX_BAR_MIN_FRIENDS && groups.length > 1 && (
+        {/* 字母索引条：裸字母贴在面板分隔线上会被当成漏出的乱码，
+            收进半透明胶囊内并给足点击区，才像一个可操作控件 */}
+        {showIndexBar && (
           <nav
-            className="absolute top-1/2 right-0.5 flex -translate-y-1/2 flex-col items-center"
+            className="border-outline-variant/60 bg-surface-container-high/90 absolute top-1/2 right-1.5 flex -translate-y-1/2 flex-col items-center gap-0.5 rounded-lg border px-1 py-1.5 shadow-sm select-none"
             aria-label={t("contacts.indexBar")}
           >
             {groups.map((g) => (
               <button
                 key={g.letter}
                 onClick={() => jumpTo(g.letter)}
-                className="text-label-sm text-on-surface-variant hover:text-primary h-4 w-4 leading-4"
+                className="text-label-sm text-on-surface-variant hover:bg-primary/10 hover:text-primary flex h-5 w-5 items-center justify-center rounded-full font-medium transition-colors"
               >
                 {g.letter}
               </button>

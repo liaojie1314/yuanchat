@@ -313,6 +313,13 @@ func TestStickerResolveSendable(t *testing.T) {
 	if err := db.Create(&pack).Error; err != nil {
 		t.Fatalf("create pack: %v", err)
 	}
+	// 官方包及包内贴纸 owner_id 为空，不随测试用户级联删除，必须显式清理：
+	// 否则每跑一次测试就往 dev 库多塞一个官方包，开发者表情面板的官方 tab
+	// 会多出一格指向不存在对象的破图。
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM stickers WHERE pack_id = ?`, pack.ID)
+		db.Exec(`DELETE FROM sticker_packs WHERE id = ?`, pack.ID)
+	})
 	packSticker := model.Sticker{
 		PackID:      &pack.ID,
 		ObjectKey:   "images/2026/08/0f1e2d3c4b5a.png",

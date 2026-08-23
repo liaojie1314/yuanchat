@@ -121,7 +121,7 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
                 >
                   <span
                     className={cn(
-                      "relative grid h-8 min-w-[60px] place-items-center rounded-full transition-colors",
+                      "relative flex h-8 min-w-[60px] items-center justify-center rounded-full transition-colors",
                       active && "bg-primary-container text-primary-on-container",
                     )}
                   >

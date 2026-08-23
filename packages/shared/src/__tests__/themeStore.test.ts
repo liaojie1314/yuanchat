@@ -4,8 +4,10 @@
  * @description
  * 测试主题 Store 的状态管理方法。
  * applyTheme() 需要 DOM API（document.documentElement），在 vitest node 环境下 mock。
+ * locale 相关用例同时校验 i18n 语言是否真的跟着切，避免「状态改了界面没变」。
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import i18n from "@yuanchat/design-system/i18n";
 import { useThemeStore } from "../store/themeStore";
 
 /** 模拟 CSS 变量写入目标 */
@@ -112,6 +114,16 @@ describe("themeStore", () => {
     it("changes locale to en-US", () => {
       useThemeStore.getState().setLocale("en-US");
       expect(useThemeStore.getState().locale).toBe("en-US");
+    });
+
+    it("同步切换 i18n 语言（界面文案随之变化，不是只改状态）", async () => {
+      useThemeStore.getState().setLocale("ja-JP");
+      // changeLanguage 是异步的，等一轮微任务
+      await Promise.resolve();
+      expect(i18n.language).toBe("ja-JP");
+      useThemeStore.getState().setLocale("zh-CN");
+      await Promise.resolve();
+      expect(i18n.language).toBe("zh-CN");
     });
   });
 

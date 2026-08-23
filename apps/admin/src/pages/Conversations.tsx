@@ -76,13 +76,13 @@ export function ConversationsPage() {
             className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low"
           >
             <td className="px-4 py-3 text-body-md font-medium text-on-surface">{cv.name || "—"}</td>
-            <td className="text-on-surface-variant px-4 py-3 text-body-md">
+            <td className="px-4 py-3 text-body-md text-on-surface-variant">
               {cv.type === 2
                 ? t("admin.conversations.typeGroup")
                 : t("admin.conversations.typePrivate")}
             </td>
-            <td className="text-on-surface-variant px-4 py-3 text-body-md">{cv.member_count}</td>
-            <td className="text-on-surface-variant px-4 py-3 text-body-md">
+            <td className="px-4 py-3 text-body-md text-on-surface-variant">{cv.member_count}</td>
+            <td className="px-4 py-3 text-body-md text-on-surface-variant">
               {new Date(cv.created_at).toLocaleDateString()}
             </td>
             <td className="px-4 py-3">

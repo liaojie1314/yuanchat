@@ -76,18 +76,66 @@ export interface MessageDTO {
 // 时间格式化
 // ========================================
 
-/** 会话列表时间标签：今天 → HH:mm，今年 → M月D日，更早 → YYYY/M/D */
+/** 当前界面语言，交给 Intl 做日期本地化；i18n 未就绪时回落浏览器语言 */
+function uiLocale(): string {
+  return (
+    i18n.language || (typeof navigator !== "undefined" ? navigator.language : undefined) || "zh-CN"
+  );
+}
+
+/** 本地零点时间戳，用于按「日」比较（跨月跨年安全） */
+function startOfDay(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/** 相差整日数：0 今天，1 昨天，负数为未来（时钟偏差） */
+function dayDiff(from: Date, to: Date): number {
+  return Math.round((startOfDay(to) - startOfDay(from)) / 86400000);
+}
+
+/** 星期简称：周六 / Sat / 土 / 토 */
+function weekdayShort(d: Date): string {
+  if (typeof Intl === "undefined") return monthDay(d);
+  return new Intl.DateTimeFormat(uiLocale(), { weekday: "short" }).format(d);
+}
+
+/** 月日：8月22日 / Aug 22 / 8月22日 / 8월 22일 */
+function monthDay(d: Date): string {
+  if (typeof Intl === "undefined") return d.getMonth() + 1 + "/" + d.getDate();
+  return new Intl.DateTimeFormat(uiLocale(), { month: "short", day: "numeric" }).format(d);
+}
+
+/** 完整日期：2026/8/22 / 8/22/2026 / 2026/8/22 / 2026. 8. 22. */
+function fullDate(d: Date): string {
+  if (typeof Intl === "undefined") {
+    return d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate();
+  }
+  return new Intl.DateTimeFormat(uiLocale(), {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).format(d);
+}
+
+/**
+ * 会话列表时间标签，按 IM 惯例分档
+ *
+ * @param iso - 消息时间（ISO 字符串）
+ * @returns 今天 → `HH:mm`；昨天 → 「昨天」；一周内 → 星期简称；
+ *   今年 → 月日；更早 → 完整日期。非法时间返回空串。
+ * @remarks 昨天走 i18n，月日/星期/完整日期走 Intl，四语言都不写死中文格式。
+ */
 export function formatListTime(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
-  const today = new Date();
-  if (d.toDateString() === today.toDateString()) {
-    return two(d.getHours()) + ":" + two(d.getMinutes());
-  }
-  if (d.getFullYear() === today.getFullYear()) {
-    return d.getMonth() + 1 + "月" + d.getDate() + "日";
-  }
-  return d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate();
+  const now = new Date();
+  const days = dayDiff(d, now);
+  // 未来时间（客户端时钟偏差）当今天处理，不显示「星期」
+  if (days <= 0) return two(d.getHours()) + ":" + two(d.getMinutes());
+  if (days === 1) return i18n.t("chat.yesterday");
+  if (days < 7) return weekdayShort(d);
+  if (d.getFullYear() === now.getFullYear()) return monthDay(d);
+  return fullDate(d);
 }
 
 /** 气泡时间标签：HH:mm */
@@ -108,11 +156,11 @@ export function dateKeyOf(d: Date): string {
 }
 
 /**
- * 日期分隔线文案：今天 / 昨天 / `M月D日`（今年）/ `YYYY/M/D`（跨年）
+ * 日期分隔线文案：今天 / 昨天 / 月日（今年）/ 完整日期（跨年）
  *
  * @param dateKey - `YYYY-MM-DD` 本地日期键（由 dateKeyOf 产出）
  * @remarks 今天/昨天经 i18n（shared 层直接 `i18n.t`，不依赖 react 组件层）；
- *   月日格式沿用 formatListTime 的中文风格，跨年与其一致。
+ *   月日与完整日期走 Intl，与 formatListTime 同源。
  */
 export function formatDateDivider(dateKey: string): string {
   const parts = dateKey.split("-");
@@ -127,8 +175,8 @@ export function formatDateDivider(dateKey: string): string {
   if (dateKey === dateKeyOf(today)) return i18n.t("chat.today");
   const yesterday = new Date(today.getTime() - 86400000);
   if (dateKey === dateKeyOf(yesterday)) return i18n.t("chat.yesterday");
-  if (year === today.getFullYear()) return month + "月" + day + "日";
-  return year + "/" + month + "/" + day;
+  if (year === today.getFullYear()) return monthDay(d);
+  return fullDate(d);
 }
 
 // ========================================
@@ -312,6 +360,7 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     kind: kindMap[dto.message_type] || "text",
     isSelf,
     senderName: dto.sender_nickname,
+    senderId: dto.sender_id,
     text: isEncrypted
       ? i18n.t("e2ee.historyNotStored")
       : dto.message_type === 1 || dto.message_type === 6

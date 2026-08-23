@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Button, Input } from "@yuanchat/ui";
 import { useAuthStore } from "@yuanchat/shared";
 import { validatePassword, validateYuanchatId } from "@yuanchat/shared/utils";
 import { MessageCircle, QrCode } from "lucide-react";
 
 export function LoginPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [yuanchatId, setYuanchatId] = useState("");
   const [password, setPassword] = useState("");
@@ -33,18 +35,19 @@ export function LoginPage() {
     let valid = true;
 
     if (!yuanchatId.trim()) {
-      setYuanchatIdError("请输入元聊号");
+      setYuanchatIdError(t("auth.yuanchatIdRequired"));
       valid = false;
     } else {
       const idResult = validateYuanchatId(yuanchatId);
       if (!idResult.valid) {
-        setYuanchatIdError(idResult.errors[0]);
+        // 校验工具返回 i18n key，落地文案在这里翻译
+        setYuanchatIdError(t(idResult.errors[0]));
         valid = false;
       }
     }
     const pwResult = validatePassword(password);
     if (!pwResult.valid) {
-      setPasswordError(pwResult.errors[0]);
+      setPasswordError(t(pwResult.errors[0]));
       valid = false;
     }
     if (!valid) return;
@@ -53,7 +56,7 @@ export function LoginPage() {
     try {
       await loginWithPassword(yuanchatId, password);
     } catch (e) {
-      setPasswordError(e instanceof Error ? e.message : "登录失败");
+      setPasswordError(e instanceof Error ? e.message : t("auth.loginFailed"));
     } finally {
       setLoading(false);
     }
@@ -79,13 +82,13 @@ export function LoginPage() {
             <div className="brand-gradient glow-brand mb-4 inline-flex h-16 w-16 items-center justify-center rounded-lg text-white shadow-lg">
               <MessageCircle size={30} />
             </div>
-            <h1 className="text-2xl font-bold text-on-surface">元聊</h1>
-            <p className="text-on-surface-variant mt-1 text-sm">即时通讯</p>
+            <h1 className="text-2xl font-bold text-on-surface">{t("auth.brandName")}</h1>
+            <p className="mt-1 text-sm text-on-surface-variant">{t("auth.brandTagline")}</p>
           </div>
 
           <div className="space-y-1">
             <Input
-              placeholder="元聊号"
+              placeholder={t("auth.yuanchatId")}
               type="text"
               value={yuanchatId}
               onChange={(e) => {
@@ -96,7 +99,7 @@ export function LoginPage() {
               error={yuanchatIdError}
             />
             <Input
-              placeholder="密码"
+              placeholder={t("auth.password")}
               type="password"
               value={password}
               onChange={(e) => {
@@ -107,29 +110,29 @@ export function LoginPage() {
               error={passwordError}
             />
             <Button className="mt-1 w-full" onClick={handleLogin} disabled={loading}>
-              {loading ? "登录中…" : "登 录"}
+              {loading ? t("auth.loggingIn") : t("auth.login")}
             </Button>
           </div>
 
           {/* 辅助链接行 */}
           <div className="mt-4 flex items-center justify-between text-sm">
             <Link to="/forgot-password" className="text-on-surface-variant hover:text-primary">
-              忘记密码
+              {t("auth.forgotPassword")}
             </Link>
             <button
               type="button"
               onClick={() => navigate("/qr-login")}
-              className="text-on-surface-variant inline-flex items-center gap-1.5 hover:text-primary"
+              className="inline-flex items-center gap-1.5 text-on-surface-variant hover:text-primary"
             >
               <QrCode size={14} />
-              扫码登录
+              {t("auth.qrLogin")}
             </button>
           </div>
 
-          <p className="text-on-surface-variant mt-4 text-center text-sm">
-            还没有账号？{" "}
+          <p className="mt-4 text-center text-sm text-on-surface-variant">
+            {t("auth.noAccount")}{" "}
             <Link to="/register" replace className="cursor-pointer font-medium text-primary">
-              立即注册
+              {t("auth.registerNow")}
             </Link>
           </p>
         </div>

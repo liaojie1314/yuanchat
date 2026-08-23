@@ -191,7 +191,9 @@ export function ChatDetail({
 
       {/* 头像和名称 */}
       <div className="px-4 pt-2 pb-5 text-center">
-        <div className="mb-2.5 inline-flex">
+        {/* 用块级 flex 居中而非 inline-flex：inline-flex 与下面的名称行都是行内级元素，
+            面板够宽时两者会排在同一行（手机上详情页占满宽度，必然撞上） */}
+        <div className="mb-2.5 flex justify-center">
           <Avatar name={conv.name} src={conv.avatarUrl} size="xl" presence={conv.presence} />
         </div>
         {editingName ? (
@@ -217,15 +219,16 @@ export function ChatDetail({
             </button>
           </div>
         ) : (
-          <h3 className="text-title-md text-on-surface inline-flex items-center gap-1.5 font-semibold">
-            {conv.name}
+          <h3 className="text-title-md text-on-surface flex items-center justify-center gap-1.5 font-semibold">
+            {/* 名称单独包一层：长名称截断不挤走改名按钮，也让间距兜底能命中（裸文本节点不参与选择器） */}
+            <span className="truncate">{conv.name}</span>
             {isGroup && myRole >= 1 && (
               <button
                 onClick={() => {
                   setNameDraft(conv.name);
                   setEditingName(true);
                 }}
-                className="text-on-surface-variant hover:text-primary transition-colors"
+                className="text-on-surface-variant hover:text-primary shrink-0 transition-colors"
                 aria-label={t("detail.renameGroup")}
               >
                 <Pencil size={14} />
@@ -276,7 +279,7 @@ export function ChatDetail({
               <Avatar key={m.userId} name={m.nickname} src={m.avatarUrl} size="sm" />
             ))}
             {extraMembers > 0 && (
-              <span className="bg-surface-container-high text-on-surface-variant text-label-sm grid h-8 w-8 place-items-center rounded-full font-medium">
+              <span className="bg-surface-container-high text-on-surface-variant text-label-sm flex h-8 w-8 items-center justify-center rounded-full font-medium">
                 +{extraMembers}
               </span>
             )}

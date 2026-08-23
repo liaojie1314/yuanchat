@@ -64,8 +64,8 @@ export function MessageAuditPage() {
                 {contentText(m.content)}
               </p>
             </td>
-            <td className="text-on-surface-variant px-4 py-3 text-body-md">{m.sender_nickname}</td>
-            <td className="text-on-surface-variant whitespace-nowrap px-4 py-3 text-body-md">
+            <td className="px-4 py-3 text-body-md text-on-surface-variant">{m.sender_nickname}</td>
+            <td className="whitespace-nowrap px-4 py-3 text-body-md text-on-surface-variant">
               {new Date(m.created_at).toLocaleString()}
             </td>
             <td className="px-4 py-3">

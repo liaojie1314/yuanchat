@@ -94,6 +94,8 @@ export interface ChatMessage {
   isSelf: boolean;
   /** 发送者昵称（群聊接收方气泡上方显示） */
   senderName?: string;
+  /** 发送者用户 ID（点头像查看资料用；本地乐观条目不带，自己的资料走设置页） */
+  senderId?: string;
   /** 文本内容（text / system 消息） */
   text?: string;
   /**
