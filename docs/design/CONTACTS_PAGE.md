@@ -2,7 +2,7 @@
 
 > 路由: `/contacts`
 > 涵盖：联系人列表 / 字母索引 / 好友申请 / 搜索添加 / 扫码 / 联系人详情 / 群组列表 / 企业通讯录
-> 依赖：`00_DESIGN_LANGUAGE.md`
+> 依赖：`DESIGN_LANGUAGE.md`
 
 ---
 

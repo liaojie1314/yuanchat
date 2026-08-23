@@ -83,6 +83,22 @@ i18n.use(initReactI18next).init({
 });
 
 /**
+ * 把当前语言同步到 `<html lang>`
+ *
+ * @param locale - 生效中的 locale 代码
+ * @remarks 影响浏览器断词换行、读屏发音、拼写检查与输入法候选；
+ *   非 DOM 环境（node 测试、SSR）直接跳过
+ */
+function syncDocumentLang(locale: string): void {
+  if (typeof document === "undefined") return;
+  document.documentElement.lang = locale;
+}
+
+// 语言变更的唯一落地点是 i18next，故在此挂载而非各端入口
+i18n.on("languageChanged", syncDocumentLang);
+syncDocumentLang(i18n.language);
+
+/**
  * 格式化相对时间（locale 感知）
  *
  * @param date - 目标时间

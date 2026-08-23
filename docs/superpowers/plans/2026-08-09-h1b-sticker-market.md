@@ -7,6 +7,26 @@
 > **依赖**：H1 必须先完成合并（本文档全部建立在 H1 的 `sticker_packs`/`stickers`
 > 两表、`MessageTypeSticker=8`、EmojiPicker 收藏/官方 tab 之上）。
 
+> ⚠️ **本文档不是真源**。范围与待实现内容的唯一依据是 `docs/MASTER_PLAN.md`。
+> 本文档只是 H1b 的设计细节展开，执行前必须先用 `superpowers:writing-plans`
+> 展开为 task/step 级 TDD 计划，并以 MASTER_PLAN 的范围为准复核。
+>
+> **基线**：`dev`（不再是 `b84a0b2`）。H1 主体、H1 审计修复批、对象级 ACL 与 GC
+> 均已合入 dev，下文「H1 将提供的接口面」已成为既有现状。
+>
+> **迁移号：015**。原文写的 012 已被 `012_sticker_constraints.sql` 占用，
+> 013 是对象 ACL/GC，014 属批次 A8（auth 补全）。
+>
+> 🔴 **执行 H1b 前必须先修的前置缺陷（不可跳过）**：
+> `internal/repository/object_acl_repo.go:80` 的 `ReferencedKeys` 只从
+> `messages.content->>'key'`、`stickers.object_key`、`users/conversations.avatar_url`
+> 三处收集在用对象，**没有收集 `sticker_packs.cover_url`**。
+> 也就是说 `cmd/gc -delete` 会把贴纸包封面判为孤儿删掉。
+> 注意这个风险**现在就已存在**（官方包封面已入库），不是 H1b 才引入的。
+> 修法：在 `ReferencedKeys` 里补一段对 `sticker_packs.cover_url` 的收集；
+> `cover_url` 与 `avatar_url` 一样存的是**完整 URL**，必须用同样的
+> `LIKE '%' || k` 后缀匹配，不能用等值 `IN`。
+
 ## 目标
 
 1. **表情商城**：浏览全站公开表情包（官方 + 用户发布），免费「添加」到我的表情包列表，添加后在 EmojiPicker 中可用。
@@ -31,11 +51,11 @@
 | H1b-k | 每用户发布包数量上限   | **20**（硬编码常量，非配置项）                                                                                                                                                 | 防止单用户刷包污染商城列表；20 是防滥用的保守起点，非精算值，后续可按实际情况调整为配置项                                                    |
 | H1b-k | 发布数量上限           | **20 个/用户**                                                                                                                                                                 | 纯运营防滥用护栏，无审核队列时防止刷屏；后续可调整为配置项                                                                                   |
 
-## 现状基座（探索核实，HEAD=b84a0b2）
+## 现状基座（基线 dev）
 
-### H1 将提供的接口面（本文档的直接依赖）
+### H1 已提供的接口面（本文档的直接依赖）
 
-- 迁移 **011**（H1）；本批次是 **012**
+- 迁移 **011**（H1）、**012**（贴纸约束）、**013**（对象 ACL/GC）已落地；本批次是 **015**
 - `sticker_packs(id, name VARCHAR(64), cover_url VARCHAR(500), is_official BOOLEAN DEFAULT FALSE, sort INTEGER DEFAULT 0, created_at)` — **无 `owner_id`、无 `is_public`**，本批次必须补
 - `stickers(id, pack_id → sticker_packs ON DELETE CASCADE, owner_id → users ON DELETE CASCADE, object_key, width, height, content_hash, created_at, UNIQUE(owner_id, content_hash))`
 - Service：`Add(ctx, userID, objectKey, width, height, contentHash)` / `Remove(ctx, userID, id)` / `ListMine(ctx, userID)` / `ListPacks(ctx)`；错误 `ErrInvalidObjectKey` / `ErrInvalidContentHash`
@@ -64,7 +84,7 @@
 | i18n          | 4 文件扁平点分 key，**同名 key 四文件行号完全相同**；`chat.emoji.*` 已被 EmojiPicker 占用                                                    | 商城新开顶层 ns（与 `favorites.` 平级）；admin 侧进 `admin.*`                                                            |
 | E2E           | `favorites.spec.ts` 页面级只验「可达 + 控件可见 + 点击不崩」（注释明说不测数据加载）；MSW **无 favorites/reports handler**                   | 商城页要测出列表内容**必须先补 MSW handler**；`authenticated-nav.spec.ts` 需补新导航项断言                               |
 
-## 数据模型（迁移 012）
+## 数据模型（迁移 015）
 
 ```sql
 -- +goose Up
@@ -191,7 +211,16 @@ H1b-f（直传）与 H1b-j（封面公共读）都需要扩展 `server/internal/
 
 ### i18n
 
-新开顶层命名空间 `stickerMarket.*`（与 `favorites.` 平级）：`stickerMarket.title` / `.add` / `.added` / `.publish` / `.publishSuccess` / `.publishLimitExceeded` / `.edit` / `.myPacks` / `.stickerCount` / `.byUser` / `.byOfficial` / `.deletedUser` / `.empty` / `.loadFailed` / `.report` / `.uploadNew` / `.fromFavorites` 等。admin 侧进 `admin.moderation.*`（下架相关）。四语言同步，过 `check-i18n.mjs`。
+**复用既有 `sticker.*` 命名空间**，不新开顶层 ns。`sticker.*` 已存在 13 个 key
+（`packages/design-system/src/i18n/locales/zh-CN.json:241-253`：`sticker.tab.favorites`、
+`sticker.tab.official`、`sticker.addToStickers`、`sticker.addSuccess`、`sticker.addFailed`、
+`sticker.remove`、`sticker.send`、`sticker.addFailedExpired`、`sticker.listFailed`、
+`sticker.emptyFavorites`、`sticker.emptyOfficial`、`sticker.removeFailed`、`sticker.imageFailed`），
+商城相关 key 挂到它下面的二级段：`sticker.market.title` / `.add` / `.added` / `.publish` /
+`.publishSuccess` / `.publishLimitExceeded` / `.edit` / `.myPacks` / `.stickerCount` /
+`.byUser` / `.byOfficial` / `.deletedUser` / `.empty` / `.loadFailed` / `.report` /
+`.uploadNew` / `.fromFavorites` 等。admin 侧进 `admin.moderation.*`（下架相关）。
+四语言（zh-CN / en-US / ja-JP / ko-KR）与代码**同一 commit** 同步，过 `check-i18n.mjs`。
 
 ## 工作量预估
 

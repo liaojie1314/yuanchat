@@ -2,7 +2,7 @@
  * ContactsScreen 组件 — 通讯录主界面（三端响应式）
  *
  * @description
- * 面板 + 内容区的响应式编排（对应 docs/design/03_CONTACTS_PAGE.md）：
+ * 面板 + 内容区的响应式编排（对应 docs/design/CONTACTS_PAGE.md）：
  *
  * - **desktop / tablet（≥768px）**：双栏，左面板（desktop 可拖拽调宽）｜内容区
  *   （空状态 / 好友资料 / 新的朋友）

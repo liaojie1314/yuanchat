@@ -1,7 +1,7 @@
 # 02 — 主界面设计规范（Main Interface）
 
 > 涵盖：主布局 / 侧边导航 / 会话列表 / 聊天窗口 / 详情面板 / 命令面板 / AI 助手
-> 依赖：`00_DESIGN_LANGUAGE.md`
+> 依赖：`DESIGN_LANGUAGE.md`
 
 ---
 
@@ -1129,7 +1129,7 @@ WebSocket 重连机制: 1s → 2s → 4s → 8s → 16s（最大 30s）指数退
 
 ### 11.2 空状态汇总
 
-见 `00_DESIGN_LANGUAGE.md §14.2`
+见 `DESIGN_LANGUAGE.md §14.2`
 
 ### 11.3 错误状态
 

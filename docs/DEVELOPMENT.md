@@ -306,7 +306,7 @@ pnpm --filter @yuanchat/web dev:real
 
 通讯录联调：登录 Alice → 通讯录「新的朋友」有 Carol 的待处理申请（同意后自动建单聊 + 打招呼消息）；「+」添加联系人支持手机号 / 元聊号 / 邮箱精确搜索。
 
-> 聊天 REST 端点与 WebSocket 协议详见 [`docs/02_CHAT_API.md`](./02_CHAT_API.md)。
+> 聊天 REST 端点与 WebSocket 协议详见 [`docs/CHAT_API.md`](./CHAT_API.md)。
 
 ### 对象存储 GC（`cmd/gc`）
 
@@ -360,7 +360,7 @@ Compose 含三个服务：**PostgreSQL**（`:5434`→5432）、**Redis**（`:638
 - **健康检查**：`curl http://localhost:9002/minio/health/live` 返回 200 即就绪。
 - 后端首次连接时幂等创建 `yuanchat` 桶，并对 `avatars/` 前缀开放匿名公共读（头像用永久 public URL，
   免签名）；图片消息落 `images/` 前缀，文件/语音消息落 `files/` 前缀，均走一次性预签名 GET
-  （详见 `docs/02_CHAT_API.md` 的 files 端点）。
+  （详见 `docs/CHAT_API.md` 的 files 端点）。
 - **上传 MIME 白名单**（`server/config/config.yaml` 的 `upload.allowed_types`）：图片 4 类
   （jpeg/png/gif/webp）+ 文档（pdf/doc/docx/xlsx/pptx/txt/zip）+ 语音 `audio/webm`。
   新增可传类型时在此追加，重启后端生效；白名单外的 MIME 在 `upload-url` 阶段被 `4001` 拒绝。
@@ -775,6 +775,9 @@ macOS / Windows 代码签名（可选，用 `if` 门控——secrets 存在时�
   原因见 [`.claude/TROUBLESHOOTING.md`](../.claude/TROUBLESHOOTING.md) 的
   「切换语言后重开应用又变回系统语言」
 - **新增文案必须四语同时补齐**，否则 `pnpm check:i18n` 直接失败（见第七章）
+- **`<html lang>` 自动跟随**：`packages/design-system/src/i18n/index.ts` 挂了 `languageChanged`
+  监听同步 `document.documentElement.lang`（影响断词换行、读屏发音、输入法候选），
+  各端入口不需要再自己写
 
 ### 旧 WebView（Android 10 自带 Chrome 74）兼容清单
 
