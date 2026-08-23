@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS friend_requests (
 - `useChatBootstrap.wireSocket()` 注册 `contact.request`（插入 requests + 角标）与 `contact.accepted`（好友列表加人 + 重拉会话列表）
 - Mock：`mocks/handlers.ts` 补上述 REST handler，`demoData.ts` 加 demo 好友/申请，保证 `dev:web:mock` 可演示
 
-### UI（packages/ui，遵循 docs/design/03_CONTACTS_PAGE.md）
+### UI（packages/ui，遵循 docs/design/CONTACTS_PAGE.md）
 
 新增 `ContactsScreen.tsx` 编排（对应 `/contacts` 路由，替换现占位；App.tsx 两端改指向 ContactsPage）：
 
@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS friend_requests (
 - Go：contact_service 单测（申请/同意建会话+打招呼/拒绝/重复申请/非法操作者）+ 现有测试全绿（`go vet && go test ./...`）
 - TS：tokenManager、contactStore、contacts API 映射单测 + 现有测试全绿 + `tsc --noEmit`
 - E2E（Playwright 双上下文）：Carol 搜索 Bob 手机号 → 发申请 → Bob 实时收到角标 → 同意 → 双方好友列表出现对方、Carol 会话列表实时出现新单聊（含打招呼消息）→ Carol 从联系人详情进入聊天发消息；15 分钟 token 过期场景用缩短 TTL 的 config 验证静默刷新（REST 与 WS 均不中断）
-- 完成后按惯例：更新 `docs/02_CHAT_API.md`（新 REST + WS 帧）、`docs/DEVELOPMENT.md`（如有命令变化）、README 功能清单、AGENTS.md 当前状态；测试后关闭全部进程/容器
+- 完成后按惯例：更新 `docs/CHAT_API.md`（新 REST + WS 帧）、`docs/DEVELOPMENT.md`（如有命令变化）、README 功能清单、AGENTS.md 当前状态；测试后关闭全部进程/容器
 
 ## 分支与提交
 

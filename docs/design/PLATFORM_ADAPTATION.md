@@ -2,7 +2,7 @@
 
 > 元聊支持 Web / 桌面应用 (Tauri 2) / 移动端 (Tauri Android)
 > 全端共用同一套 React + Tailwind CSS 代码，通过响应式断点和平台检测 Hook 实现差异化
-> 依赖：`00_DESIGN_LANGUAGE.md`
+> 依赖：`DESIGN_LANGUAGE.md`
 
 ---
 
@@ -482,7 +482,7 @@ Token 存储:
 退出动画: scale(1→0.95) + opacity(1→0) 150ms accelerate
 背景遮罩: rgba(0,0,0,0.5)，click 关闭（除 Alert Dialog）
 
-z-index: z-modal（see 00_DESIGN_LANGUAGE.md §Z-Index）
+z-index: z-modal（see DESIGN_LANGUAGE.md §Z-Index）
 
 居中: fixed inset-0, flex items-center justify-center, p-4
 

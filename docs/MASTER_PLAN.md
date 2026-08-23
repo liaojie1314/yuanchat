@@ -2,18 +2,18 @@
 
 ## 一、项目概述
 
-| 项目        | 说明                                                   |
-| ----------- | ------------------------------------------------------ |
-| 项目名称    | 元聊 (YuanChat)                                        |
-| 项目类型    | 即时通讯 (IM) 软件                                     |
-| 开发模式    | GitFlow 工作流                                         |
-| 目标平台    | Web / Windows / macOS / Linux / Android / iOS / 平板   |
-| 前端语言    | TypeScript                                             |
-| 前端框架    | React                                                  |
-| 后端语言    | Go (Golang)                                            |
-| 容器化      | Docker Compose（开发环境），Kubernetes（生产环境可选） |
-| 文档位置    | `docs/` 目录（本文档所在目录）                         |
-| AI 辅助文档 | `.claude/` 目录、`AGENTS.md`、`CLAUDE.md`              |
+| 项目        | 说明                                                              |
+| ----------- | ----------------------------------------------------------------- |
+| 项目名称    | 元聊 (YuanChat)                                                   |
+| 项目类型    | 即时通讯 (IM) 软件                                                |
+| 开发模式    | GitFlow 工作流                                                    |
+| 目标平台    | Web / Windows / macOS / Linux / Android / iOS / 平板              |
+| 前端语言    | TypeScript                                                        |
+| 前端框架    | React                                                             |
+| 后端语言    | Go (Golang)                                                       |
+| 容器化      | Docker Compose（开发与生产编排都在 `deploy/`，未使用 Kubernetes） |
+| 文档位置    | `docs/` 目录（本文档所在目录）                                    |
+| AI 辅助文档 | `AGENTS.md`（根目录约束）、`.claude/TROUBLESHOOTING.md`           |
 
 ---
 
@@ -35,9 +35,8 @@
 - **移动端**：Tauri 2 Android（同一套 React UI，与桌面共享代码）
 - **iOS**：Tauri 2 iOS（需 Apple Developer 账户，规划中）
 
-> **为什么弃用 Capacitor？** 详见 `.claude/CLAUDE.md` 的"跨平台策略"章节：Tauri 2 已原生支持
-> 移动端，同一套 React 代码 + Tailwind CSS 在桌面/移动/Web 100% 复用；Capacitor 会引入独立的
-> 移动打包链路，团队维护成本翻倍。
+> **为什么弃用 Capacitor？** Tauri 2 已原生支持移动端，同一套 React 代码 + Tailwind CSS 在
+> 桌面/移动/Web 100% 复用；Capacitor 会引入独立的移动打包链路，团队维护成本翻倍。
 
 > **macOS/iOS 构建说明**：无 macOS 本地设备时，通过 GitHub Actions 的 `macos-latest` runner
 > 自动打包（已实现，见 `.github/workflows/release.yml`）；产物为 universal `.dmg`（Intel + M 系列）。
@@ -45,76 +44,80 @@
 
 ### 2.2 后端技术方案
 
-| 方案                         | 推荐度     | 说明                                                   |
-| ---------------------------- | ---------- | ------------------------------------------------------ |
-| **Go 微服务架构**            | ⭐⭐⭐⭐⭐ | 高性能、低资源消耗、类型安全；单仓库多服务（Monorepo） |
-| **API 网关 + gRPC 内部通信** | ⭐⭐⭐⭐   | Kong / 自研网关；服务间使用 gRPC 高效通信              |
-| **WebSocket 长连接服务**     | ⭐⭐⭐⭐⭐ | Go 的 goroutine 天然适合管理海量 WebSocket 连接        |
+**最终采用方案（当前实现）：Go 单体，单进程多监听**
+
+| 组成             | 实现                                                                        |
+| ---------------- | --------------------------------------------------------------------------- |
+| HTTP/REST        | Gin，监听 `:8085`，路由前缀 `/api/v1`（装配在 `internal/router/router.go`） |
+| WebSocket 长连接 | gorilla/websocket，独立监听 `:8086`，进程内 Hub 管理连接与帧分发            |
+| 指标暴露         | Prometheus client，独立监听 `:9090/metrics`                                 |
+| 数据访问         | GORM + goose 嵌入式 SQL 迁移（`internal/database/migrations/`）             |
+| 分层             | handler → service → repository，构造与依赖注入集中在 `router.Setup`         |
+
+同一个进程里起 REST、WebSocket、metrics 三个 `http.Server`（见 `server/cmd/server/main.go`），
+共享同一套 service / repository 实例，**没有服务间 RPC**。
+
+曾评估但**未采用**：拆分微服务 + gRPC 内部通信、独立 API 网关（Kong / 自研）。
+当前规模下拆分只会增加部署、调试与本地开发成本，收益为负。
+
+横向扩容的现状：presence 已支持 Redis Pub/Sub 跨实例广播（配置 `presence.backend=redis`），
+但消息分发的 `Dispatcher` 仍是进程内 Hub 实现，多实例部署前需先补一层分布式分发。
 
 ### 2.3 通信协议
 
 ```
-客户端 ←→ WebSocket ←→ 长连接网关 (Go) ←→ gRPC ←→ 微服务集群
-客户端 ←→ HTTP/REST ←→ API 网关 (Go)  ←→ gRPC ←→ 微服务集群
+客户端 ──── HTTP/REST  :8085 ────┐
+                                 ├──→ yuanchat-server（单进程 Go）
+客户端 ──── WebSocket  :8086 ────┘      Gin 路由 + Hub 分发，共享 service/repository
+                                              │
+                                              ▼
+                                PostgreSQL / Redis / MinIO
 ```
+
+REST 承载增删改查与文件预签名；WebSocket 承载实时帧（消息投递、已读回执、正在输入、
+presence、会话创建/变更/移除、reaction、角色变更等）。帧类型与载荷定义见
+[`CHAT_API.md`](./CHAT_API.md)，服务端在 `server/internal/ws/protocol.go`。
 
 ---
 
 ## 三、系统架构图
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        客户端层                              │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
-│  │  Web 端  │  │ 桌面端   │  │  iOS 端  │  │Android端 │   │
-│  │React+Vite│  │Tauri2+React││Tauri2+React│ │Tauri2+React│  │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘   │
-│       │             │             │             │          │
-│       └─────────────┴──────┬──────┴─────────────┘          │
-│                            │                                │
-└────────────────────────────┼────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                          客户端层                             │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐     │
+│  │  Web 端  │  │  桌面端  │  │ Android  │  │ 管理后台 │     │
+│  │React+Vite│  │ Tauri 2  │  │ Tauri 2  │  │React+Vite│     │
+│  │   PWA    │  │Win/Mac/Lx│  │  签名APK │  │apps/admin│     │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘     │
+└───────┼─────────────┼─────────────┼─────────────┼───────────┘
+        └─────────────┴──────┬──────┴─────────────┘
+                             │ HTTPS / WSS
+                   ┌─────────▼──────────┐
+                   │   Nginx（生产）    │ ← TLS 终止 + 反向代理 + 静态资源
+                   │   certbot 续期     │
+                   └─────────┬──────────┘
                              │
-                    ┌────────▼────────┐
-                    │    Nginx/Envoy   │  ← 反向代理 & 负载均衡
-                    └────────┬────────┘
-                             │
-              ┌──────────────┼──────────────┐
-              │              │              │
-     ┌────────▼───┐  ┌───────▼──────┐  ┌──▼──────────┐
-     │  API 网关   │  │ 长连接网关   │  │  静态资源   │
-     │  (HTTP)    │  │ (WebSocket)  │  │  (CDN/Nginx)│
-     └────────┬───┘  └───────┬──────┘  └─────────────┘
-              │              │
-              └──────┬───────┘
-                     │  gRPC
-     ┌───────────────┼───────────────┐
-     │               │               │
-┌────▼────┐   ┌──────▼──────┐   ┌───▼───────┐
-│用户服务  │   │  消息服务    │   │ 群组服务  │
-└────┬────┘   └──────┬──────┘   └───┬───────┘
-     │               │               │
-┌────▼────┐   ┌──────▼──────┐   ┌───▼───────┐
-│文件服务  │   │  通知服务    │   │ 会话服务  │
-└────┬────┘   └──────┬──────┘   └───┬───────┘
-     │               │               │
-┌────▼────┐   ┌──────▼──────┐   ┌───▼───────┐
-│搜索服务  │   │  机器人服务  │   │ 开放API   │
-└─────────┘   └─────────────┘   └───────────┘
-     │               │               │
-     └───────────────┼───────────────┘
-                     │
-     ┌───────────────┼───────────────┐
-     │               │               │
-┌────▼────┐   ┌──────▼──────┐   ┌───▼───────┐
-│PostgreSQL│   │   Redis     │   │   MinIO   │
-│ 持久化存储│   │ 缓存/会话   │   │ 文件存储  │
-└─────────┘   └─────────────┘   └───────────┘
+        ┌────────────────────▼─────────────────────┐
+        │      yuanchat-server（单进程 Go 单体）    │
+        │  :8085 REST (Gin)  :8086 WebSocket Hub   │
+        │  :9090 /metrics                          │
+        │  handler → service → repository          │
+        └───┬───────────────┬───────────────┬──────┘
+            │               │               │
+   ┌────────▼─────┐  ┌──────▼──────┐  ┌─────▼──────┐
+   │  PostgreSQL  │  │    Redis    │  │   MinIO    │
+   │ 业务数据 +   │  │ 验证码/限流 │  │ 图片/文件/ │
+   │ pg_trgm 检索 │  │ presence    │  │ 语音/头像  │
+   └──────────────┘  └─────────────┘  └────────────┘
 
-     ┌───────────┐   ┌───────────────┐
-     │Elasticsearch│  │ Prometheus +  │
-     │ 消息搜索    │   │ Grafana 监控  │
-     └───────────┘   └───────────────┘
+可观测性：Prometheus 抓 `:9090` → Grafana 看板；loki + promtail 收 zap 结构化日志；
+前端异常走 Sentry。
 ```
+
+> 单进程内 REST 与 WebSocket 共享 service/repository 实例，消息经进程内 Hub 直接投递给
+> 目标连接，不经消息队列。多实例部署需先把 `Dispatcher` 换成分布式实现（presence 已可切
+> Redis Pub/Sub）。
 
 ---
 
@@ -123,51 +126,63 @@
 ```
 yuanchat/
 ├── docs/                          # 📖 项目文档
-│   ├── 00_MASTER_PLAN.md         # 总体计划书（本文件）
-│   ├── 01_ARCHITECTURE.md        # 详细架构设计
-│   ├── 02_API_DESIGN.md          # API 接口设计
-│   ├── 03_DB_SCHEMA.md           # 数据库设计
-│   ├── 04_FRONTEND_GUIDE.md      # 前端开发指南
-│   ├── 05_DEPLOYMENT.md          # 部署运维文档
-│   └── 06_CHANGELOG.md           # 开发变更日志
+│   ├── MASTER_PLAN.md            # 总体计划书（本文件）
+│   ├── ARCHITECTURE.md           # 详细架构设计
+│   ├── CHAT_API.md               # 聊天 REST 端点 + WebSocket 协议
+│   ├── DB_SCHEMA.md              # 数据库设计 + 迁移
+│   ├── DEVELOPMENT.md            # 开发与打包指南（启动/构建/调试/测试）
+│   ├── ROADMAP.md                # 迭代路线图
+│   ├── RELEASE.md                # 发版指南
+│   ├── design/                   # UI/UX 设计规范（7 份专题 + README）
+│   ├── deploy/                   # 部署文档（self-hosted.md / env.md）
+│   ├── observability/            # 可观测性（logging.md）
+│   └── superpowers/              # SDD 产物：specs/ 设计文档 + plans/ TDD 实施计划
 │
-├── .claude/                      # 🤖 AI 辅助文档
-│   ├── CLAUDE.md                 # Claude 项目上下文
-│   ├── MEMORY.md                 # 项目记忆索引
-│   ├── settings.json             # Claude 项目设置
-│   └── memories/                 # 持久化记忆文件
+├── AGENTS.md                     # AI Agent 指南（根目录，核心约束清单）
+├── CHANGELOG.md                  # 变更日志（release-it + conventional-changelog 生成）
+├── contracts/                    # 前后端黄金契约（message-send.golden.json）
+├── .claude/                      # 🤖 Claude Code 项目配置
+│   ├── TROUBLESHOOTING.md        # 按平台分类的踩坑记录
+│   └── settings.local.json       # 本地权限设置
 │
-├── AGENTS.md                     # AI Agent 指南（根目录）
-│
-├── server/                       # 🔧 后端 Go 服务（单进程双端口：REST :8080 + WS :8081）
+├── server/                       # 🔧 后端 Go 服务（单进程双端口：REST :8085 + WS :8086）
 │   ├── go.mod
+│   ├── Makefile                  # 后端本地任务（构建 / 测试 / vet）
+│   ├── Dockerfile
 │   ├── cmd/
-│   │   ├── server/               # 主服务入口（含 REST + WS 网关 + 内存 Hub 分发）
-│   │   └── seed/                 # 开发种子数据（Alice/Bob/Carol 测试账号）
+│   │   ├── server/               # 主服务入口（REST + WS 网关 + Hub 分发 + metrics）
+│   │   ├── migrate/              # goose 迁移单独执行（生产部署用）
+│   │   ├── seed/                 # 开发种子数据（Alice/Bob/Carol 测试账号）
+│   │   ├── gc/                   # 离线对象 GC（清理未被引用的 MinIO 对象）
+│   │   └── genvapid/             # 生成 Web Push VAPID 密钥对
 │   ├── internal/
 │   │   ├── config/               # Viper 配置加载
-│   │   ├── handler/              # HTTP handlers（user/conversation/message/contact/file/presence）
+│   │   ├── database/             # goose 迁移执行器 + migrations/（001…013，embed 进二进制）
+│   │   ├── handler/              # HTTP handlers（user/conversation/message/contact/file/presence/
+│   │   │                         #   favorite/sticker/report/admin/e2ee/push/captcha）
 │   │   ├── middleware/           # 认证 / 限流 / CORS / 日志
-│   │   ├── model/                # GORM 模型（user/conversation/message/reaction/friend_request）
+│   │   ├── model/                # GORM 模型
 │   │   ├── pkg/                  # jwt / password / shortid
+│   │   ├── redis/                # Redis 客户端（图形验证码 / 限流 / 分布式 presence）
 │   │   ├── repository/           # 数据访问层
 │   │   ├── router/               # 路由装配
-│   │   ├── service/              # 业务服务（user/conversation/conversation_manage/message/contact）
-│   │   ├── storage/              # MinIO 对象存储封装（预签名 URL / 桶管理）
+│   │   ├── service/              # 业务服务
+│   │   ├── storage/              # MinIO 对象存储封装（预签名 URL / 桶策略）
 │   │   └── ws/                   # WebSocket Hub + protocol 帧定义
 │   └── config/config.yaml
 │
-├── apps/                         # 🎨 前端应用（monorepo workspace）
+├── apps/                         # 🎨 前端应用（pnpm workspace）
 │   ├── web/                      # 🌐 Web (Vite + React 19)
 │   │   ├── src/                  # 页面路由 + 应用壳
-│   │   └── e2e/                  # Playwright E2E
-│   └── desktop/                  # 🖥️📱 Desktop + Mobile (Tauri 2)
-│       ├── src/                  # React UI（复用 packages/ui）
-│       └── src-tauri/            # Rust 内核 + 平台配置
-│           ├── Cargo.toml
-│           ├── tauri.conf.json
-│           ├── capabilities/     # Tauri 2 权限声明
-│           └── gen/android/      # Tauri Android 生成的 Gradle 工程
+│   │   └── e2e/                  # Playwright E2E（含 pages/ POM + fixtures/）
+│   ├── desktop/                  # 🖥️📱 Desktop + Mobile (Tauri 2)
+│   │   ├── src/                  # React UI（复用 packages/ui）
+│   │   └── src-tauri/            # Rust 内核 + 平台配置
+│   │       ├── Cargo.toml
+│   │       ├── tauri.conf.json
+│   │       ├── capabilities/     # Tauri 2 权限声明（按平台分文件，桌面专属进 desktop.json）
+│   │       └── gen/android/      # Tauri Android 生成的 Gradle 工程
+│   └── admin/                    # 🛡️ 管理后台 (React + Vite)：用户封禁 / 审核队列 / 审计日志
 │
 ├── packages/                     # 📦 前端共享包（workspace）
 │   ├── shared/                   # 跨端共享：api/store/hooks/ws/utils
@@ -175,20 +190,29 @@ yuanchat/
 │   └── design-system/            # 设计令牌 + i18n 资源 + Tailwind preset
 │
 ├── deploy/                       # 🚀 部署配置
-│   ├── docker-compose.yml        # 开发环境（PostgreSQL/Redis/MinIO）
+│   ├── docker-compose.yml        # 开发环境（PostgreSQL/Redis/MinIO，镜像均钉版本号）
+│   ├── docker-compose.prod.yml   # 生产编排（+ nginx / prometheus / grafana）
+│   ├── logging.yml               # 日志栈（loki + promtail）
+│   ├── install.sh / backup.sh    # 一键部署 / 备份脚本
+│   ├── nginx/ grafana/ prometheus*.yml
 │   └── init-scripts/             # DB 初始化 SQL
 │
 ├── scripts/                      # 📜 脚本工具
 │   ├── dev.mjs                   # 一键启动（web/desktop/android/server + 停止）
 │   ├── build.mjs                 # 打包脚本
+│   ├── check-env.mjs             # 环境检查（preinstall 钩子）
+│   ├── check-i18n.mjs            # i18n 门禁（四语齐全 + 查代码实际使用的 key + 死键）
+│   ├── check-theme-classes.mjs   # 主题门禁（颜色工具类必须在色板内）
 │   └── sync-version.mjs          # release-it 用：同步版本到子包与 tauri.conf.json
 │
 ├── .github/workflows/            # ⚙️ CI/CD
-│   ├── ci.yml                    # 每次 push/PR：前端 test + tsc + 后端 vet/test/-race
+│   ├── ci.yml                    # push 到 dev / 目标 dev 的 PR：i18n 门禁 + 前端 test + 双端 tsc + Playwright E2E + 后端 vet/test/-race
 │   └── release.yml               # tag v* 触发：Web + Desktop 三平台 + Android 打包
 │
+├── turbo.json                    # Turborepo 任务编排
+├── pnpm-workspace.yaml           # workspace 定义（apps/* + packages/*）
 ├── .release-it.json              # release-it 配置（requireBranch: main）
-├── .gitignore
+├── LICENSE
 └── README.md                     # 项目说明
 ```
 
@@ -196,9 +220,7 @@ yuanchat/
 
 ## 五、核心功能清单
 
-> 进度更新于 2026-07-22（MVP 已完成，v0.1.0 发版准备就绪）
-
-### 阶段一：基础能力（MVP — 第1~3个月）✅ 全部完成
+### 阶段一：基础能力（MVP）✅ 全部完成
 
 - [x] 用户注册/登录（手机号/邮箱 + 密码 + SVG 验证码，JWT 双 Token 静默刷新）
 - [x] 单聊消息（文本 + 图片 + 文件 + 语音 + 表情回应）
@@ -207,37 +229,140 @@ yuanchat/
 - [x] Web 端基础 UI（登录/注册/三端响应式聊天主界面）
 - [x] 消息持久化存储（PostgreSQL，seq 会话内原子分配）
 
-### 阶段二：核心体验（第3~6个月）✅ MVP 部分完成
+### 阶段二：核心体验 ✅ 全部完成
 
 - [x] 群组聊天（建群 + 群管理五操作：改名/邀请/踢人/退群/解散，权限模型 role 0/1/2）
 - [x] 图片/文件消息（MinIO 预签名直传，气泡 lucide 图标 + 预签名下载）
 - [x] 语音消息（MediaRecorder + audio/webm，60s 自动截断，模块级单例播放器）
 - [x] 消息已读/未读（last_read_seq 回执机制 + 未读角标）
-- [ ] 离线消息推送（Web Push / FCM，未做）
+- [x] 离线消息推送（Web Push：VAPID + Service Worker，仅推离线收件人并过滤免打扰；
+      FCM / APNs 原生推送未接）
 - [x] 桌面端基础版本（Tauri 2 Windows/macOS/Linux + Android，同一套 React UI）
-- [ ] 消息全文搜索（需 Elasticsearch，未做）
+- [x] 消息全文搜索（PostgreSQL `pg_trgm` GIN 索引，全局 + 会话内；未引入 Elasticsearch）
 - [x] 桌面系统通知（Tauri notification plugin，失焦 + 非免打扰时弹）
 
-### 阶段三：进阶功能（第6~9个月）— 计划中
+### 阶段三：进阶功能
 
 - [ ] 语音/视频通话 (WebRTC)
-- [ ] 端到端加密 (E2EE)
+- [x] 端到端加密 E2EE（X3DH + Double Ratchet，仅单聊，用户自行开启，对方未启用降级明文）
 - [x] 多设备消息同步（WS 协议已支持多设备推送 + 已读多端同步）
 - [x] 移动端基础版本（Tauri 2 Android，签名 APK 已可通过 CI 打包）
 - [ ] 聊天机器人/自动化
 - [x] 消息引用/回复（UI + 后端 reply_to_id 联通）
 - [x] 消息撤回/编辑（2 分钟撤回窗口 + 5 分钟内可「重新编辑」回填输入框）
 - [x] 表情回应 Reactions（快捷 6 emoji 条 + 气泡 toggle + 历史聚合回填）
+- [x] 消息转发（一次最多 9 个会话）/ `@` 提及 / 消息收藏
+- [x] 贴纸与收藏表情（blob 内容寻址去重，独立 content type，前后端共用 golden 契约）
 
-### 阶段四：企业级特性（第9~12个月）
+### 阶段四：企业级特性
 
 - [ ] 组织架构/企业通讯录
-- [ ] 审批/公告等企业应用
+- [ ] 企业审批应用（群公告已实现，企业级审批流未做）
 - [ ] 开放 API / Webhook
-- [ ] 数据统计面板
-- [ ] 管理员后台
-- [ ] 审计日志
-- [ ] 性能优化 & 压测
+- [ ] 数据统计面板（管理后台目前只有列表与工单，无聚合看板）
+- [x] 管理员后台（`apps/admin`：用户封禁解封 / 会话解散 / 消息审核删除 / 举报处理，
+      `/api/v1/admin/*` 走 JWT + `role=admin` 双重校验）
+- [x] 审计日志（管理端写操作落 `admin_action_logs`，`GET /admin/audit-logs` 分页查询）
+- [x] 内容安全（用户举报工单 + 敏感词 `flagged` 审核队列，命中不阻塞发送）
+- [ ] 压测（消息列表虚拟滚动、检索索引、限流等前后端优化已做，系统性压测未做）
+
+### 未做清单总览（单一真源）
+
+> **本小节是「还有什么没做」的唯一真源。**`docs/ROADMAP.md` 只排批次顺序，
+> `docs/superpowers/plans/*.md` 只在某功能即将实现时才写、写完即用于执行，**都不是真源**。
+> 新发现的待实现项、主动留下的技术债，**当次登记到这里**——别的会话不知道你发现了什么，
+> 漏登记等于永久丢失（已发生过：A6/A7 的 plan 被删后范围只剩会话记忆）。
+
+**图例**：🔴 数据丢失/安全风险，必须优先 · 🟡 影响体验或可维护性 · ⚪ 增强项
+
+#### 1. A8 — auth 补全与安全加固（已有 spec + plan，待执行）
+
+设计：[`specs/2026-08-23-auth-completion-design.md`](superpowers/specs/2026-08-23-auth-completion-design.md)
+执行：[`plans/2026-08-23-auth-completion.md`](superpowers/plans/2026-08-23-auth-completion.md)（18 Task）
+
+| 级别 | 条目                                                                                                         |
+| ---- | ------------------------------------------------------------------------------------------------------------ |
+| 🔴   | 忘记密码是**假链路**：三处 `setTimeout(r,500)` 占位（`ForgotPasswordPage.tsx:43,61,85`），后端零端点         |
+| 🔴   | 扫码登录是**假链路**：`let s = 31337` 拼假二维码（web `:44`/desktop `:50`），`scanning`/`confirmed` 是死状态 |
+| 🔴   | 登录无账号级失败锁定：`LimitByIP` 是进程内按 IP 计数，换 IP 即可绕过撞库                                     |
+| 🔴   | 后端无密码复杂度校验（仅 `min=8`），绕过前端即可设 `12345678`                                                |
+| 🔴   | 无会话吊销机制：改密后旧 token 仍有效（本批次加 `users.token_version` + JWT `tv`）                           |
+| 🟡   | `POST /auth/logout` 路由不存在，但前端 `authStore.ts:184` 一直在调，404 被 catch 吞掉                        |
+| 🟡   | `Refresh` 不校验封禁与 token 版本，注释却写着「校验用户状态」（说谎注释）                                    |
+| 🟡   | 注册无「确认密码」与服务条款勾选                                                                             |
+| 🟡   | 桌面端 `tauri.conf.json` 是 `"csp": null`；nginx HSTS 仍被注释                                               |
+| 🟡   | 4 个 auth 页在 web/desktop 各写一份，共 1657 行重复（下沉到 `packages/ui/src/auth/`）                        |
+
+**A8 主动留债**（本批次明确不做，做完后仍留在本清单）：
+
+| 级别 | 条目                                                                                                                                        |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🟡   | `/auth/*` 与 `/users/login`、`/users/register` 前缀不统一——统一是破坏性变更，需前后端同版发布                                               |
+| 🟡   | `AuthRequired` 中间件不校验 `token_version`（它当前零 IO；加校验需先给版本号做 Redis 缓存），改密后 access token 仍有最长 15 分钟残余有效期 |
+| ⚪   | 多设备会话管理与「单设备登出」：无 device/session 表，`logout` 只能全量踢或不踢，本批次选不踢                                               |
+| ⚪   | 真实短信/邮件 provider：本批次只有 `LogSender`，`codesender.provider` 留了扩展位                                                            |
+| ⚪   | `verification_codes` 表只写审计不读，无审计查询入口                                                                                         |
+
+#### 2. H1b — 贴纸商城与投稿发布（已有 plan，待执行）
+
+执行：[`plans/2026-08-09-h1b-sticker-market.md`](superpowers/plans/2026-08-09-h1b-sticker-market.md)，占用迁移号 **015**。
+
+| 级别 | 条目                                                                                                                                                                                                                                                                                                                                                                |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🔴   | **不可跳过的前置修复**：`repository/object_acl_repo.go:80` 的 `ReferencedKeys` 只扫 `messages.content->>'key'`、`stickers.object_key`、`users/conversations.avatar_url`，**漏了 `sticker_packs.cover_url`** → 现在跑 `cmd/gc -delete` 会删掉所有贴纸包封面。修时注意 `cover_url` 存的是完整 URL，必须像 `avatar_url` 那样用 `LIKE '%' \|\| k` 后缀匹配，不能用 `IN` |
+| 🟡   | `sticker_service.go:240` `ListPacks` 无分页，商城列表规模上来会全量返回                                                                                                                                                                                                                                                                                             |
+| ⚪   | 商城 i18n 复用既有 `sticker.market.*` 命名空间（`zh-CN.json:241-253` 已有 13 个 `sticker.*` key），不要新造 `stickerMarket.*`                                                                                                                                                                                                                                       |
+| ⚪   | H1c 付费贴纸为候选，未立项                                                                                                                                                                                                                                                                                                                                          |
+
+#### 3. 既有代码的真实缺陷（无 plan，可随手批次收口）
+
+| 级别 | 位置                             | 问题                                                                       |
+| ---- | -------------------------------- | -------------------------------------------------------------------------- |
+| 🟡   | `handler/captcha.go:83-90`       | `Validate` 先 `Del` 再比较 → 用户输错一次验证码即被作废，只能重新获取      |
+| 🟡   | `handler/captcha.go:52`          | captcha id 用 `math/rand/v2` 的 `rand.IntN(1000000)` → 会碰撞且非加密安全  |
+| 🟡   | `middleware/ratelimit.go:92-107` | 令牌桶是**进程内** map + mutex，多实例部署时各限各的，形同失效             |
+| 🟡   | `.husky/` 钩子不跑 `tsc`         | 幽灵依赖与类型错误只在 CI 暴露（pnpm 本地提升掩盖）                        |
+| 🟡   | `deploy/docker-compose.yml`      | minio / certbot / prometheus 三个镜像未钉版本号，仍是 `latest`             |
+| ⚪   | `internal/testutil/` 不存在      | handler 包涉及 Redis 的用例被 `t.Skipf` 跳过（A8 Task 1 先建最小夹具）     |
+| ⚪   | 消息分发 `Dispatcher`            | 进程内 Hub，多实例需换分布式实现；presence 已可切 `presence.backend=redis` |
+
+#### 4. J 泳道 — 用户体验与无障碍（新增，未立项）
+
+6.1 已承诺 WCAG 2.1 AA，但从未系统验证过。**这条泳道不是"新奇功能"，是把已承诺的质量补上。**
+
+| 编号 | 条目                  | 说明                                                                     |
+| ---- | --------------------- | ------------------------------------------------------------------------ |
+| J1   | 键盘可达性与焦点管理  | 全部弹窗/抽屉做焦点陷阱与 Esc 关闭；Tab 序与可见焦点环；跳转到主内容链接 |
+| J2   | 屏幕阅读器语义        | `aria-label` / `role` 系统化；新消息与在线状态用 live region 播报        |
+| J3   | 快捷键一览表 + 自定义 | 现有快捷键无处可查；先出一览表，再考虑自定义                             |
+| J4   | 骨架屏与 CLS 收敛     | MSW mock 已有，骨架屏未全覆盖；目标 CLS < 0.1                            |
+| J5   | 空状态 / 错误态统一   | 各页空状态文案与插图各写一套，收敛成共享组件                             |
+| J6   | 首次使用引导          | 新用户进来没有任何 onboarding                                            |
+| J7   | 动效降级              | 尊重 `prefers-reduced-motion`；aurora orb / cursor-glow 应可关           |
+| J8   | 字号缩放与大字体模式  | 系统字号放大时布局不应溢出                                               |
+| J9   | 离线态与重连反馈      | WS 断线目前静默重连，用户不知道自己处于离线                              |
+| J10  | i18n 文案质量         | ja-JP / ko-KR 为机翻，未经母语校对；key 集合已由 `check:i18n` 守住       |
+
+#### 5. C5–C9 — 性能与容量（新增，未立项）
+
+已做的是点状优化（虚拟滚动、`pg_trgm` 索引、限流）；**从未做过一次量化测量**。
+
+| 编号 | 条目              | 目标与手段                                                                    |
+| ---- | ----------------- | ----------------------------------------------------------------------------- |
+| C5   | 首屏与包体        | 路由级 code split；依赖体积审计；es2019 产物大小基线与预算（超预算 CI 报警）  |
+| C6   | 长列表与图片内存  | 虚拟滚动已有；缺图片解码节流与滚出视口后的内存回收，长会话滑久了会卡          |
+| C7   | DB 慢查询         | 开 `pg_stat_statements`；排 N+1（会话列表 + 未读数 + 最后一条消息是重点嫌疑） |
+| C8   | WS 吞吐与消息压测 | k6/vegeta 打并发连接与消息扇出，定 QPS 与 P99 目标（阶段四「压测」的具体化）  |
+| C9   | 移动端启动与内存  | 旧机型 Chrome 74 WebView 冷启动时间、内存峰值；对照 `08b4e88` 的白屏教训      |
+
+#### 6. B6–B9 — 文档与质量门禁（新增）
+
+| 编号 | 条目               | 状态                                                                                                                         |
+| ---- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| B6   | 四份主文档口径对齐 | ✅ 已完成（README / AGENTS / MASTER_PLAN / ROADMAP 端口与完成度）                                                            |
+| B7   | CI 门禁补齐        | 待做：`tsc --noEmit`、`go vet`、覆盖率阈值（后端 80% / 前端 60%，6.2 已承诺未落地）；`docs/DB_SCHEMA.md` 按 001-013 迁移重建 |
+| B8   | 测试基建           | 待做：`server/internal/testutil/`（DB + Redis 夹具）、前端统一 render helper                                                 |
+| B9   | 压测与容量文档     | 待做：C8 产出的数字要落成文档，否则下次还得重测                                                                              |
 
 ---
 
@@ -312,32 +437,38 @@ docs(api): update WebSocket protocol documentation
 
 ### 9.1 所需工具
 
-| 工具           | 版本要求      | 用途                 |
-| -------------- | ------------- | -------------------- |
-| Go             | ≥ 1.23        | 后端服务             |
-| Node.js        | ≥ 20 LTS      | 前端构建             |
-| Docker         | ≥ 26.x        | 容器运行时           |
-| Docker Compose | ≥ v2.27       | 服务编排             |
-| Rust           | latest stable | Tauri 桌面端         |
-| Android Studio | latest        | Android 构建         |
-| Xcode          | latest        | iOS 构建（仅 macOS） |
+| 工具           | 版本要求                                 | 用途                 |
+| -------------- | ---------------------------------------- | -------------------- |
+| Go             | ≥ 1.25（`server/go.mod` 声明 1.25.7）    | 后端服务             |
+| Node.js        | ≥ 20.19（仓库固定 22.23.0，见 `.nvmrc`） | 前端构建             |
+| pnpm           | ≥ 10（`packageManager` 钉 10.22.0）      | 包管理               |
+| Docker         | ≥ 26.x                                   | 容器运行时           |
+| Docker Compose | ≥ v2.27                                  | 服务编排             |
+| Rust           | latest stable                            | Tauri 桌面端与移动端 |
+| Android Studio | latest                                   | Android 构建         |
+| Xcode          | latest                                   | iOS 构建（仅 macOS） |
 
-### 9.2 快速启动（Docker Compose）
+### 9.2 快速启动
+
+依赖服务（PostgreSQL / Redis / MinIO）、种子数据、后端、前端全部由 `pnpm dev:*` 一键编排。
+**不要手敲底层命令** —— docker / goose / go run / vite 的启动参数与就绪等待都封装在
+`scripts/dev.mjs` 里，绕过它会漏掉迁移与健康检查。
 
 ```bash
-# 1. 克隆项目
 git clone <repository-url> yuanchat
 cd yuanchat
+pnpm install          # 安装依赖（preinstall 跑 check-env.mjs 校验 Node/Go/Rust 版本）
 
-# 2. 启动所有依赖服务
-docker compose -f deploy/docker-compose.yml up -d
-
-# 3. 启动后端服务
-cd server && make dev
-
-# 4. 启动前端开发服务器
-cd web && npm install && npm run dev
+pnpm dev:web          # 真实后端 + Web：docker(pg/redis/minio) → seed → Go 服务 → Vite
+pnpm dev:web:mock     # 免后端：MSW Mock + demo 数据
+pnpm dev:desktop      # 真实后端 + Tauri 桌面窗口
+pnpm dev:android      # 真实后端 + Tauri Android（自动 adb reverse 8085/8086）
+pnpm dev:server       # 仅后端
+pnpm dev:stop         # 停止全部（应用进程 + docker 容器）
 ```
+
+后端监听 **REST :8085 + WS :8086**（见 `server/config/config.yaml`）。分步启动、打包、测试与门禁
+命令的完整表格见 [`DEVELOPMENT.md`](./DEVELOPMENT.md)。
 
 ---
 
@@ -351,53 +482,61 @@ cd web && npm install && npm run dev
 | **Elasticsearch** | 消息全文搜索                        | ⭐⭐⭐⭐   |
 | **MongoDB**       | 消息历史归档（可选替代 PostgreSQL） | ⭐⭐⭐     |
 
+**实际采用**：PostgreSQL + Redis + MinIO 三件套。消息全文搜索用 PostgreSQL 的 `pg_trgm`
+GIN 索引实现（`migrations/003_message_search_index.sql`），**未引入 Elasticsearch**；
+MongoDB 亦未引入，消息历史留在 PostgreSQL。Redis 用于图形验证码、限流与分布式 presence，
+未用作消息队列。
+
 ---
 
 ## 十一、安全设计
 
-- [ ] HTTPS/TLS 全链路加密
-- [ ] JWT + Refresh Token 鉴权
-- [ ] 密码 bcrypt 哈希
-- [ ] SQL 注入防护（参数化查询）
-- [ ] XSS 防护（CSP、输入校验）
-- [ ] CSRF Token
-- [ ] 速率限制 (Rate Limiting)
-- [ ] WebSocket 连接认证
-- [ ] 文件上传类型/大小校验
-- [ ] 端到端加密（Signal Protocol，阶段三）
+- [x] HTTPS/TLS 全链路加密（生产 nginx TLS 1.2/1.3 + certbot 自动续期，
+      `X-Content-Type-Options` / `X-Frame-Options` / `Referrer-Policy` 已下发；
+      HSTS 默认注释关闭，待证书稳定后开启）
+- [x] JWT + Refresh Token 鉴权（access 15m / refresh 168h，滑动轮换）
+- [x] 密码 bcrypt 哈希（cost 12）
+- [x] SQL 注入防护（GORM 参数化查询）
+- [ ] XSS 防护：输入校验已做（Gin binding 校验 + 服务端约束，React 默认转义），
+      但 **Content-Security-Policy 未下发**（nginx 无 CSP 头，Tauri `csp` 为 `null`）
+- [ ] CSRF Token（**未做**；当前鉴权走 Authorization 头而非 Cookie，风险有限）
+- [x] 速率限制（`middleware.LimitByIP`，注册/登录/刷新/上传/举报等端点按档位限流）
+- [x] WebSocket 连接认证（`?token=` 传 access token，`jwt.Validate` 校验后才升级）
+- [x] 文件上传类型/大小校验（`upload.allowed_types` 白名单 + `max_file_size` 100MB）
+- [x] 端到端加密（X3DH + Double Ratchet，仅单聊，用户自行开启）
 
 ---
 
-## 十二、里程碑与时间线
+## 十二、交付节奏
 
-```
-Month 1-2  │  架构搭建、CI/CD、用户系统、Web 端骨架
-Month 3    │  MVP 发布：单聊、联系人、在线状态
-Month 4-5  │  群组聊天、文件消息、消息状态
-Month 6    │  桌面端 Beta、离线推送、消息搜索
-Month 7-8  │  音视频通话、E2EE、多设备同步
-Month 9    │  移动端 Beta、聊天机器人
-Month 10-11│  企业特性、开放 API、管理后台
-Month 12   │  正式上线、性能优化、安全审计
-```
+按批次迭代交付，版本与批次的映射见 [`ROADMAP.md`](./ROADMAP.md)，逐版本变更见
+[`CHANGELOG.md`](../CHANGELOG.md)。tag 名与计划阶段并非严格对应，实际交付内容以 CHANGELOG 为准。
+
+| 版本   | 交付内容                                                                                                                             |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| v0.1.0 | MVP：认证、单聊（文本/图片/文件/语音/reactions）、联系人、在线状态、群聊、Web + 桌面 + Android 骨架、CI/CD                           |
+| v0.2.0 | 删好友与黑名单、群角色管理、@提及 / 引用回复 / 转发、Sentry 错误监控、goose 迁移 + Prometheus 指标 + Grafana 看板、E2E 接 CI         |
+| v0.3.0 | 端到端加密（单聊）、管理后台 + 内容审核、ja-JP / ko-KR 翻译 + i18n CI 门禁、分布式 Presence、PWA、生产部署编排、后端端口改 8085/8086 |
+
+发版由 tag `v*` 触发 GitHub Actions 打包 Web + 桌面三平台 + Android，流程见
+[`RELEASE.md`](./RELEASE.md)。
 
 ---
 
 ## 十三、文档索引
 
-| 文档                                       | 内容                           | 状态        |
-| ------------------------------------------ | ------------------------------ | ----------- |
-| [00_MASTER_PLAN.md](./00_MASTER_PLAN.md)   | 总体计划书                     | ✅ 已完成   |
-| [01_ARCHITECTURE.md](./01_ARCHITECTURE.md) | 详细架构设计                   | ✅ 已完成   |
-| [02_CHAT_API.md](./02_CHAT_API.md)         | 聊天 REST API + WebSocket 协议 | ✅ 已完成   |
-| [03_DB_SCHEMA.md](./03_DB_SCHEMA.md)       | 数据库设计                     | ✅ 已完成   |
-| [DEVELOPMENT.md](./DEVELOPMENT.md)         | 开发与打包指南（启动/测试）    | ✅ 持续更新 |
-| [design/](./design/)                       | UI/UX 设计规范                 | ✅ 已完成   |
-| 05_DEPLOYMENT.md                           | 部署运维文档                   | 📝 待编写   |
-| 06_CHANGELOG.md                            | 开发变更日志（见 release-it）  | 📝 待编写   |
-
----
-
-> **最后更新**：2026-06-12
-> **文档版本**：v1.0
-> **下一步**：请审阅本计划书，确认架构选型后，开始编写详细架构文档和搭建项目骨架。
+| 文档                                                   | 内容                             | 状态        |
+| ------------------------------------------------------ | -------------------------------- | ----------- |
+| [MASTER_PLAN.md](./MASTER_PLAN.md)                     | 总体计划书                       | ✅ 已完成   |
+| [ARCHITECTURE.md](./ARCHITECTURE.md)                   | 详细架构设计                     | ✅ 已完成   |
+| [CHAT_API.md](./CHAT_API.md)                           | 聊天 REST API + WebSocket 协议   | ✅ 已完成   |
+| [DB_SCHEMA.md](./DB_SCHEMA.md)                         | 数据库设计 + goose 迁移工作流    | ✅ 已完成   |
+| [DEVELOPMENT.md](./DEVELOPMENT.md)                     | 开发与打包指南（启动/测试）      | ✅ 持续更新 |
+| [ROADMAP.md](./ROADMAP.md)                             | 迭代路线图（批次 → 版本映射）    | ✅ 持续更新 |
+| [RELEASE.md](./RELEASE.md)                             | 发版指南（release-it + CI 签名） | ✅ 已完成   |
+| [design/](./design/)                                   | UI/UX 设计规范（7 份专题）       | ✅ 已完成   |
+| [deploy/self-hosted.md](./deploy/self-hosted.md)       | 自托管部署（域名/证书/备份）     | ✅ 已完成   |
+| [deploy/env.md](./deploy/env.md)                       | 环境变量清单                     | ✅ 已完成   |
+| [observability/logging.md](./observability/logging.md) | 结构化日志 + loki 查询           | ✅ 已完成   |
+| [superpowers/](./superpowers/)                         | SDD 产物：specs/ + plans/        | ✅ 持续更新 |
+| [../CHANGELOG.md](../CHANGELOG.md)                     | 变更日志（release-it 自动生成）  | ✅ 持续更新 |

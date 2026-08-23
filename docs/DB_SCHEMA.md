@@ -1,6 +1,6 @@
 # 03 — 数据库设计
 
-> **前置阅读**：[01_ARCHITECTURE.md](./01_ARCHITECTURE.md)
+> **前置阅读**：[ARCHITECTURE.md](./ARCHITECTURE.md)
 
 ---
 
@@ -330,4 +330,4 @@ yuanchat/
 
 ---
 
-> **下一步**：[02_API_DESIGN.md](./02_API_DESIGN.md) — 详细的 API 接口定义
+> **下一步**：[CHAT_API.md](./CHAT_API.md) — 聊天 REST API 与 WebSocket 协议

@@ -2,7 +2,7 @@
  * ContactDetail 组件 — 好友资料视图
  *
  * @description
- * 对齐 docs/design/03_CONTACTS_PAGE.md §6 联系人详情：
+ * 对齐 docs/design/CONTACTS_PAGE.md §6 联系人详情：
  * - 顶部横幅：基于昵称哈希色的 135° 渐变（同 Avatar 色系），底部渐隐过渡
  * - 头像出血：80px Avatar 骑跨横幅下缘，4px surface 描边制造浮出感，
  *   右下角在线状态点（presenceStore 实时驱动）

@@ -184,7 +184,7 @@ Aurora 认证背景光晕（3 光球）：
 | `sunset-light` / `sunset-dark`（预留）     | 日落   | `#B45309` / `#FCD34D` | 温暖橙     |
 | `graphite-light` / `graphite-dark`（预留） | 墨石   | `#4B5563` / `#9CA3AF` | 极简中性   |
 
-**皮肤对话框预览规格**：见 `04_SETTINGS_PAGE.md#外观设置`。
+**皮肤对话框预览规格**：见 `SETTINGS_PAGE.md#外观设置`。
 
 ### 3.6 颜色使用铁律
 
@@ -496,7 +496,7 @@ opacity: 50%, cursor: not-allowed, 背景 outline-variant/40%
 
 ### 9.4 消息气泡（Message Bubble）
 
-见 `02_MAIN_INTERFACE.md` 详规。以下为设计系统层面基础规格：
+见 `MAIN_INTERFACE.md` 详规。以下为设计系统层面基础规格：
 
 ```
 公共:
@@ -702,7 +702,7 @@ Radio:
 
 ### 9.17 CommandPalette（命令面板，新增）
 
-`Cmd/Ctrl + K` 触发的全局命令面板，是元聊超越竞品的关键组件。详见 `02_MAIN_INTERFACE.md`。
+`Cmd/Ctrl + K` 触发的全局命令面板，是元聊超越竞品的关键组件。详见 `MAIN_INTERFACE.md`。
 
 ---
 
@@ -848,7 +848,7 @@ WCAG 2.1 Level AA 全面达标；关键操作达 AAA。
 
 ### 12.5 键盘完整地图（Full Keyboard Map）
 
-见 `06_PLATFORM_ADAPTATION.md#键盘快捷键`。
+见 `PLATFORM_ADAPTATION.md#键盘快捷键`。
 
 ---
 

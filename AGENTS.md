@@ -16,64 +16,70 @@
 8. **测试门禁**：每个功能必须先通过测试（单元/集成/E2E）才能标记完成。测试未通过 = 功能未完成。不允许在未通过测试时开始下一个功能。
 9. **前端 Mock**：所有前端 API 调用必须有 MSW Mock 覆盖正常/空/错误/加载四种状态。
 10. **骨架屏**：所有图片必须用 Skeleton 占位（固定宽高），列表加载必须有骨架屏，CLS 必须为零。
-11. **JSDoc/注释**：所有导出函数/组件/Store/Hook 必须写 JSDoc。Go 所有导出函数/包必须写 godoc。关键并发/事务/错误分支必须注释。先写注释再写代码。[[]]
+11. **JSDoc/注释**：所有导出函数/组件/Store/Hook 必须写 JSDoc。Go 所有导出函数/包必须写 godoc。关键并发/事务/错误分支必须注释。先写注释再写代码。
 12. **浏览器/WebView 兼容适配**：前端代码必须兼容低版本 WebView。`vite.config.ts` 的 `build.target` 须为 `es2019`（转译 `?.`/`??` 等 ES2020+ 语法），不得使用 `chrome105`/`es2020`，否则旧 Android System WebView（如 Chrome 74）解析期 SyntaxError → 白屏。新增 JS 语法/Web API 前须确认目标 WebView 支持，或确保已被转译/polyfill。详见 `docs/DEVELOPMENT.md`、`.claude/TROUBLESHOOTING.md`。
-13. **i18n 国际化适配**：所有用户可见文案**禁止硬编码**，必须通过 `react-i18next`（`useTranslation` / `t()`）引用，并在 `packages/design-system/src/i18n/locales/`（`zh-CN`、`en-US`）补齐对应 key。新增/修改 UI 文案时必须同步维护两种语言的翻译条目。
+13. **i18n 国际化适配**：所有用户可见文案**禁止硬编码**，必须通过 `react-i18next`（`useTranslation` / `t()`）引用，并在 `packages/design-system/src/i18n/locales/`（`zh-CN`、`en-US`、`ja-JP`、`ko-KR`）补齐对应 key。新增/修改 UI 文案时必须同步维护四种语言的翻译条目，`node scripts/check-i18n.mjs`（CI 门禁）会挡下漏翻、写错 key 与死键。
 
 ## 技术栈速查
 
-- **前端**：React + TypeScript + Vite + Tailwind CSS + Zustand
+- **前端**：React 19 + TypeScript + Vite + Tailwind CSS + Zustand + react-i18next
 - **桌面端 + 移动端**：Tauri 2（桌面 Win/Mac/Linux + 移动 Android/iOS，同一套 Rust 内核 + React UI）
-- **后端**：Go 微服务 + gRPC + WebSocket
-- **数据库**：PostgreSQL + Redis + MinIO + Elasticsearch
-- **部署**：Docker Compose (开发) → Kubernetes (生产)
+- **后端**：Go 单体（Gin + GORM + gorilla/websocket），一个进程同时监听 REST 与 WebSocket，消息分发走进程内 Hub
+- **数据库**：PostgreSQL（全文检索用 `pg_trgm` GIN 索引）+ Redis + MinIO
+- **可观测性**：zap 结构化日志 + Prometheus 指标（`:9090/metrics`）+ Sentry 前端错误上报
+- **部署**：Docker Compose — 开发 `deploy/docker-compose.yml`（pg/redis/minio），生产 `deploy/docker-compose.prod.yml`（+ nginx/certbot/prometheus/grafana/loki）
 
 ## 项目结构
 
-详见 `docs/00_MASTER_PLAN.md`
+详见 `docs/MASTER_PLAN.md`
 
 ## 当前状态
 
-> 更新于 2026-07-22
+已实现的能力（代码路径与协议细节见 `docs/CHAT_API.md`、`docs/ARCHITECTURE.md`）：
 
-**MVP 核心链路已打通**（阶段一进行中）：
-
-- ✅ 认证：注册/登录（手机号/邮箱 + 密码 + SVG 验证码）、JWT 双 Token、
+- 认证：注册/登录（手机号/邮箱 + 密码 + SVG 验证码）、JWT 双 Token、
   token 静默刷新（滑动会话轮换 + 401 兜底重试，`api/tokenManager.ts`）
-- ✅ 聊天核心闭环：会话列表、文本消息 WebSocket 实时收发、已读回执、
-  正在输入、历史游标分页、断线重连、失败重试（协议见 `docs/02_CHAT_API.md`）
-- ✅ 好友核心闭环：精确搜索（手机号/元聊号/邮箱）→ 发申请（WS 实时推送）→
+- 聊天核心闭环：会话列表、文本消息 WebSocket 实时收发、已读回执、
+  正在输入、历史游标分页、断线重连、失败重试
+- 好友与关系：精确搜索（手机号/元聊号/邮箱）→ 发申请（WS 实时推送）→
   同意/拒绝 → 同意即原子建单聊 + 打招呼消息 → 字母分组好友列表
-  （`ContactsScreen.tsx` 三端编排，端点见 `docs/02_CHAT_API.md`）
-- ✅ 三端响应式聊天主界面（`packages/ui/src/ChatScreen.tsx` 编排）
-- ✅ 设置页 / 个人资料：昵称/签名/性别编辑 + 头像上传（512px 中心裁方 → MinIO
+  （`ContactsScreen.tsx` 三端编排）；删好友（双向软删，幂等）+ 黑名单
+  （单聊发送拦截 403 `BLOCKED`，群聊不受影响）
+- 三端响应式聊天主界面（`packages/ui/src/ChatScreen.tsx` 编排）
+- 设置页 / 个人资料：昵称/签名/性别编辑 + 头像上传（512px 中心裁方 → MinIO
   `avatars/` 公开 URL，落库持久化，`PUT /users/me`）
-- ✅ 建群流程：好友多选建群（校验全员互为好友）→ 系统消息 + `conversation.created`
-  实时推送（`CreateGroupModal.tsx`，端点见 `docs/02_CHAT_API.md`）
-- ✅ 群管理五操作：改名 / 邀请（好友校验）/ 踢人（role 权限）/ 退群 / 解散（软删）→
-  `conversation.updated` + `conversation.removed` + `message.receive[system]` 帧驱动
-- ✅ 消息撤回：发送后 2 分钟内本人可撤回 → `message.recalled` 全员推送 + 气泡占位；
-  自己文本 5 分钟内可「重新编辑」回填输入框
-- ✅ 图片消息：MinIO 对象存储 + 预签名直传（canvas 压缩、乐观缩略图、失败重试）、
-  Lightbox 全屏查看、粘贴/选图发送、列表 `[图片]` 预览（files 端点见 `docs/02_CHAT_API.md`）
-- ✅ 文件消息：任意扩展直传 MinIO（`files/` 前缀）→ 气泡按类型显示 lucide 图标 + 品类色 +
-  预签名下载（`fileIconOf`：pdf/doc/表格/演示/压缩/音视频/图片/代码，未识别回退 File）
-- ✅ 语音消息：MediaRecorder + audio/webm（1-60s，超 60s 自动截断）→ 直传 → 气泡播放
-  （模块级单例 Audio，toggle 播放/停止）
-- ✅ 表情回应（Reactions）：右键菜单快捷 6 emoji + 气泡点击 toggle → `message_reactions`
-  持久化 + `message.reaction` 帧全员实时 + 历史聚合回填（mine 相对请求者）
-- ✅ Presence 在线状态：Hub 首连/末连回调 → 广播给在线好友；`GET /presence` 快照
-  加 `presence` 帧增量；`applyPresence` 按 peerId 匹配单聊，副标题「在线/离线」实时同步
-- ✅ 桌面系统通知：Tauri notification plugin 注入 shared `notifyIncoming`，
-  失焦 + 非免打扰时弹（正文截 60 字）
-- ✅ 一键启动：`pnpm dev:web` / `dev:web:mock` / `dev:desktop` / `dev:android` /
+- 群聊：好友多选建群（校验全员互为好友）→ 系统消息 + `conversation.created` 实时推送；
+  群管理改名 / 邀请 / 踢人 / 退群 / 解散（软删）；任命与撤销管理员、转让群主
+  （`conversation.role_changed` 帧推群内全员）；群公告、群内昵称、清空聊天记录
+- 消息类型：文本、图片（canvas 压缩 + 预签名直传 + Lightbox）、文件（任意扩展 →
+  `fileIconOf` 按类型出图标 + 预签名下载）、语音（MediaRecorder + audio/webm，
+  1-60s 自动截断）、贴纸/收藏表情（blob 内容寻址去重，独立 content type，
+  前后端共用 `contracts/` golden 契约）
+- 消息操作：撤回（2 分钟窗口 → `message.recalled` 全员推送 + 气泡占位，
+  自己文本 5 分钟内可「重新编辑」）、引用回复、表情回应（`message.reaction` 帧
+  实时 + 历史聚合回填，mine 相对请求者）、转发（一次最多 9 个会话）、
+  `@` 提及（落 `mention_unread` → 会话列表角标）、收藏
+- 消息搜索：全局 + 会话内，`GET /messages/search`，PostgreSQL `pg_trgm` GIN 索引，
+  只命中当前用户有权访问的会话
+- Presence 在线状态：Hub 首连/末连回调 → 广播给在线好友；`GET /presence` 快照
+  加 `presence` 帧增量；`applyPresence` 按 peerId 匹配单聊
+- 通知：桌面 Tauri notification plugin（注入 shared `notifyIncoming`，失焦 + 非免打扰时弹）；
+  Web Push（VAPID + Service Worker，仅推离线收件人并过滤免打扰会话，未配 VAPID 密钥即关闭）
+- 端到端加密：X3DH + Double Ratchet（`packages/shared/src/crypto/`），用户自行开启，
+  仅单聊，对方未启用自动降级明文，支持密钥备份/恢复
+- 管理后台 `apps/admin`：用户封禁解封、会话解散、消息检索与删除、举报处理、审计日志；
+  `/api/v1/admin/*` 走 JWT + `role=admin` 双重校验，写操作留审计日志；
+  敏感词命中标记 `flagged=true` 进审核队列（不阻塞发送）
+- PWA：生产构建注入自定义 Service Worker（app shell 预缓存 + Web Push 监听）
+- 一键启动：`pnpm dev:web` / `dev:web:mock` / `dev:desktop` / `dev:android` /
   `dev:server` / `dev:stop`（`scripts/dev.mjs`，见 `docs/DEVELOPMENT.md` 第零章）
-- ⏳ 未做：管理员任命/转让、语音转文字、消息搜索（需 ES）、删好友/黑名单、
-  presence 换 Redis Pub/Sub（多实例部署时再做）
 
-后端单进程双端口：REST :8080 + WebSocket :8081；消息分发为内存 Hub
-（`Dispatcher` 接口，多实例时换 Redis Pub/Sub 实现）。对象存储为 MinIO（`:9000` S3 端点、
-`:9001` 控制台），随 `deploy/docker-compose.yml` 启动。
+未做：语音转文字、音视频通话（WebRTC）、聊天机器人 / 开放 API、iOS 打包（需 Apple 开发者账户）。
+
+后端单进程双端口：REST :8085 + WebSocket :8086（另有 Prometheus `:9090/metrics`）。
+消息分发是进程内 Hub（`Dispatcher` 接口，多实例需换分布式实现）；presence 可通过
+`presence.backend=redis` 走 Redis Pub/Sub 跨实例广播。对象存储为 MinIO（`:9002` S3 端点、
+`:9003` 控制台），PostgreSQL `:5434`、Redis `:6380`，随 `deploy/docker-compose.yml` 启动。
 
 ## 博客
 

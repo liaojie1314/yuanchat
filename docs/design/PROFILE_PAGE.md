@@ -1,7 +1,7 @@
 # 05 — 个人资料页面设计规范（Profile Page）
 
 > 涵盖：我的个人资料 / 编辑资料 / 我的二维码 / 他人资料 / 在线状态 / 动态/朋友圈（预留）
-> 依赖：`00_DESIGN_LANGUAGE.md`
+> 依赖：`DESIGN_LANGUAGE.md`
 
 ---
 
@@ -536,7 +536,7 @@ Status Picker（Popover / Bottom Sheet）:
 [编辑资料] Button Outlined, 全宽
 ```
 
-**快速操作项规格**（同 `03_CONTACTS_PAGE.md §6.2`）
+**快速操作项规格**（同 `CONTACTS_PAGE.md §6.2`）
 
 ### 7.4 共同关系展示（Trust Signals）
 
@@ -592,7 +592,7 @@ Status Picker（Popover / Bottom Sheet）:
 
 ## 九、加好友附言弹窗
 
-（同 `03_CONTACTS_PAGE.md §4.3`，此处不重复）
+（同 `CONTACTS_PAGE.md §4.3`，此处不重复）
 
 ---
 

@@ -155,7 +155,7 @@ H1 贴纸功能在实现过程中连续出现三次同类缺陷（`retrySend` �
     `CHECK ((pack_id IS NULL) <> (owner_id IS NULL))`；已验证 Up/Down 可逆
   - 31：`ListPacks` 改两次查询 + 内存分组，消除逐包 N+1；超软上限只告警不静默截断
   - 36：纠正 `sticker_service.go` 关于 `images/` 前缀作用的错位注释
-  - 连带：`docs/02_CHAT_API.md` 更新四端点的校验规则、状态码、分页与 WS 帧语义
+  - 连带：`docs/CHAT_API.md` 更新四端点的校验规则、状态码、分页与 WS 帧语义
 - [x] **批 C｜功能级 bug**（第 8–13 项）
   - 8：`contentPayloadFromMessage` 补 sticker 分支；签名改 `(payload, ok bool)`，
     `json.Unmarshal` 全部查错，`default` 回 `ok=false` → 推送循环**跳过并告警**，
@@ -178,7 +178,7 @@ H1 贴纸功能在实现过程中连续出现三次同类缺陷（`retrySend` �
     新增 `TestPreviewOfNeverEmitsLocalizedText` 防止有人把中文文案写回服务端；
     顺带修既有 bug：系统消息原先落 `default` → 建群后列表预览空白
   - 客户端向后兼容：`preview_kind` 缺失时回退用 `preview` 原文（旧服务端可用）
-  - 连带：`docs/02_CHAT_API.md` 补 `preview_kind` 字段语义与转发新增的 `400`
+  - 连带：`docs/CHAT_API.md` 补 `preview_kind` 字段语义与转发新增的 `400`
   - **刻意延后**：`server/internal/router/router.go:126-135` 离线推送通知体仍硬编码
     中文 `[图片]/[文件]/[语音]/[表情]`。该文案由 OS 渲染、服务端无 per-user locale 字段，
     要做需先加用户语言偏好（建表字段 + 登录/设置写入），属独立缺口，不并入第 13 项
@@ -219,7 +219,7 @@ H1 贴纸功能在实现过程中连续出现三次同类缺陷（`retrySend` �
     `listMyStickers`/`listStickerPacks` 对非数组响应**抛错**（UI 走错误态 + 重试），
     并区分"真的空"与"结构坏"两个用例；服务端 `ListMine` 同步保证空结果是 `[]` 而非
     `nil`（否则 `null` 会撞进新的报错路径），新增 Go 用例锁死 JSON 形态
-  - 连带：`docs/02_CHAT_API.md` 记录 `stickers`/`packs` 恒为数组的约定
+  - 连带：`docs/CHAT_API.md` 记录 `stickers`/`packs` 恒为数组的约定
 - [x] **批 E｜结构性根治**（第 20、34、35 项）
   - 20：`hashBlob` 从 `crypto.subtle` 换到 `@noble/hashes`（shared 既有依赖，零新增）。
     局域网 IP 直连（`http://192.168.x.x`，本项目的现实部署形态）不是安全上下文，
@@ -239,12 +239,12 @@ H1 贴纸功能在实现过程中连续出现三次同类缺陷（`retrySend` �
     `SendPayload` 再跑 `buildContent`，断言 ok 与落库 message_type，另有一条
     "样本必须覆盖每种 content type"的用例。反向验证过：把样本里的 `sticker_id`
     改成 `stickerId`，前端与 Go **同时**变红
-  - 连带：`docs/02_CHAT_API.md` 与 `docs/DEVELOPMENT.md` 记录契约位置与
+  - 连带：`docs/CHAT_API.md` 与 `docs/DEVELOPMENT.md` 记录契约位置与
     "先改 golden 再让两侧变绿"的改动顺序
 - [x] **顺带清理（用户要求一并收掉）**
   - 圆角：全仓 45 处 `rounded-xl` / `rounded-2xl` / `rounded-3xl` 统一降到 `rounded-lg`
     （8px 上限约束），气泡尾角由 `rounded-b*-md` 改 `rounded-b*-sm` 以保留"尖角"观感；
-    `docs/design/00_DESIGN_LANGUAGE.md` 的圆角表同步改写（原表把 12px/16px 写成规范，
+    `docs/design/DESIGN_LANGUAGE.md` 的圆角表同步改写（原表把 12px/16px 写成规范，
     与项目约束直接冲突，是复发源头）
   - `docs/DEVELOPMENT.md` 的 E2E 覆盖表补上此前漏记的
     `chat-experience.spec.ts` 与 `conversation-settings.spec.ts`
@@ -279,7 +279,7 @@ H1 贴纸功能在实现过程中连续出现三次同类缺陷（`retrySend` �
     （403 不签发任何 URL、头像跳过 ACL、漏接线 fail closed、查库出错 500）、
     `cmd/gc` 4 例（只回收宽限期外的孤儿 / dry-run 不删 / 引用判定分批含收尾批 /
     单个删除失败不中断整轮）
-  - 连带：`docs/02_CHAT_API.md` 新增「对象级读授权」小节与 TTL 改动；
+  - 连带：`docs/CHAT_API.md` 新增「对象级读授权」小节与 TTL 改动；
     `docs/DEVELOPMENT.md` 新增「对象存储 GC」小节
 
 - [ ] **仍待决策（与代码无关，纯运维）**

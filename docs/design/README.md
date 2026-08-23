@@ -8,15 +8,15 @@
 
 ## 文档目录
 
-| 文件                                                     | 内容                                             | 状态    | 版本 |
-| -------------------------------------------------------- | ------------------------------------------------ | ------- | ---- |
-| [00_DESIGN_LANGUAGE.md](./00_DESIGN_LANGUAGE.md)         | 设计语言（色彩/字体/间距/组件/动效/A11y）        | ✅ 完成 | v1.1 |
-| [01_AUTH_PAGES.md](./01_AUTH_PAGES.md)                   | 认证流程（登录/注册/忘记密码/二步验证/生物识别） | ✅ 完成 | v1.1 |
-| [02_MAIN_INTERFACE.md](./02_MAIN_INTERFACE.md)           | 主界面（三栏布局/会话/聊天/CommandPalette/AI）   | ✅ 完成 | v1.1 |
-| [03_CONTACTS_PAGE.md](./03_CONTACTS_PAGE.md)             | 通讯录（联系人/添加/群组/企业通讯录）            | ✅ 完成 | v1.1 |
-| [04_SETTINGS_PAGE.md](./04_SETTINGS_PAGE.md)             | 设置（账号/通知/外观/隐私/快捷键/AI）            | ✅ 完成 | v1.1 |
-| [05_PROFILE_PAGE.md](./05_PROFILE_PAGE.md)               | 个人资料（我的/编辑/二维码/他人/在线状态）       | ✅ 完成 | v1.1 |
-| [06_PLATFORM_ADAPTATION.md](./06_PLATFORM_ADAPTATION.md) | 多端适配（移动/桌面 Tauri/Web/手势/性能）        | ✅ 完成 | v1.1 |
+| 文件                                               | 内容                                             | 状态    | 版本 |
+| -------------------------------------------------- | ------------------------------------------------ | ------- | ---- |
+| [DESIGN_LANGUAGE.md](./DESIGN_LANGUAGE.md)         | 设计语言（色彩/字体/间距/组件/动效/A11y）        | ✅ 完成 | v1.1 |
+| [AUTH_PAGES.md](./AUTH_PAGES.md)                   | 认证流程（登录/注册/忘记密码/二步验证/生物识别） | ✅ 完成 | v1.1 |
+| [MAIN_INTERFACE.md](./MAIN_INTERFACE.md)           | 主界面（三栏布局/会话/聊天/CommandPalette/AI）   | ✅ 完成 | v1.1 |
+| [CONTACTS_PAGE.md](./CONTACTS_PAGE.md)             | 通讯录（联系人/添加/群组/企业通讯录）            | ✅ 完成 | v1.1 |
+| [SETTINGS_PAGE.md](./SETTINGS_PAGE.md)             | 设置（账号/通知/外观/隐私/快捷键/AI）            | ✅ 完成 | v1.1 |
+| [PROFILE_PAGE.md](./PROFILE_PAGE.md)               | 个人资料（我的/编辑/二维码/他人/在线状态）       | ✅ 完成 | v1.1 |
+| [PLATFORM_ADAPTATION.md](./PLATFORM_ADAPTATION.md) | 多端适配（移动/桌面 Tauri/Web/手势/性能）        | ✅ 完成 | v1.1 |
 
 ---
 

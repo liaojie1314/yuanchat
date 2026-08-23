@@ -2,7 +2,7 @@
 
 > 路由: `/settings`
 > 涵盖：导航侧边栏 / 账号与安全 / 消息与通知 / 外观设置 / 隐私 / 设备管理 / 帮助 / 关于
-> 依赖：`00_DESIGN_LANGUAGE.md`
+> 依赖：`DESIGN_LANGUAGE.md`
 
 ---
 
