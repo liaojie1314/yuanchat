@@ -119,6 +119,23 @@ func (h *UserHandler) Refresh(c *gin.Context) {
 	})
 }
 
+// Logout 结束当前会话。
+//
+// 服务端不保存会话状态，因此这里不吊销任何令牌：客户端删除本地令牌即为登出。
+// 特别地，不递增 token_version——那会把该用户所有设备一并踢下线，属意外行为；
+// 全量吊销只发生在改密。真正的单设备吊销要等有了 device/session 表再做。
+//
+// 端点本身仍挂在 AuthRequired 之后：匿名请求返回 401，前端据此区分「未登录」与「已登出」。
+//
+//	@Summary		退出登录
+//	@Tags			auth
+//	@Security		BearerAuth
+//	@Success		204
+//	@Router			/api/v1/auth/logout [post]
+func (h *UserHandler) Logout(c *gin.Context) {
+	c.Status(http.StatusNoContent)
+}
+
 // GetProfile 返回当前用户的个人资料。
 func (h *UserHandler) GetProfile(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)

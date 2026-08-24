@@ -186,6 +186,8 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	// VAPID 公钥：前端 pushManager.subscribe 前拉取，无需鉴权
 	api.GET("/push/public-key", pushH.PublicKey)
 	api.POST("/auth/refresh", middleware.LimitByIP(20, 40), userH.Refresh)
+	// 登出只需鉴权（前端 authStore 一直在调，此前 404 被 try/catch 吞掉）
+	api.POST("/auth/logout", middleware.AuthRequired(cfg.JWT), userH.Logout)
 
 	users := api.Group("/users")
 	{
