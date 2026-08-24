@@ -89,6 +89,24 @@ func (r *UserRepository) Update(ctx context.Context, user *model.User) error {
 	return r.db.WithContext(ctx).Save(user).Error
 }
 
+// TokenVersion 只取该用户的 token_version 字段。
+//
+// WS 建连时校验令牌是否已被吊销，只需要这一个整数，故不走 FindByID 拉整行。
+// 用户不存在时返回 ErrRecordNotFound，由调用方按「拒绝连接」处理。
+func (r *UserRepository) TokenVersion(ctx context.Context, id uuid.UUID) (int, error) {
+	var versions []int
+	err := r.db.WithContext(ctx).Model(&model.User{}).
+		Where("id = ?", id).
+		Pluck("token_version", &versions).Error
+	if err != nil {
+		return 0, err
+	}
+	if len(versions) == 0 {
+		return 0, gorm.ErrRecordNotFound
+	}
+	return versions[0], nil
+}
+
 // TouchLastLogin 把用户的 last_login_at 更新为当前时间。
 func (r *UserRepository) TouchLastLogin(ctx context.Context, id uuid.UUID) error {
 	return r.db.WithContext(ctx).Model(&model.User{}).

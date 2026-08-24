@@ -22,6 +22,11 @@ const opTimeout = 5 * time.Second
 // maxTextLen 文本消息最大长度（字符数）。
 const maxTextLen = 4000
 
+// TokenVersionReader 读取用户当前的令牌吊销版本号。
+type TokenVersionReader interface {
+	TokenVersion(ctx context.Context, userID uuid.UUID) (int, error)
+}
+
 // Handler 处理 /ws 升级请求与业务帧派发。
 type Handler struct {
 	hub      *Hub
@@ -31,6 +36,8 @@ type Handler struct {
 	isProd   bool
 	upgrader websocket.Upgrader
 	logger   *zap.Logger
+	// versions 供建连时校验 access 令牌的 tv 声明是否仍与库中一致
+	versions TokenVersionReader
 	// offlinePush 消息落库后对「无任何 WS 连接」的成员补推浏览器通知
 	//（router 注入；nil 表示未启用 Web Push）
 	offlinePush func(recipients []uuid.UUID, info OfflineMsgInfo)
@@ -62,6 +69,10 @@ func (h *Handler) SetOfflinePush(fn func(recipients []uuid.UUID, info OfflineMsg
 }
 
 // NewHandler 创建 WebSocket Handler。
+//
+// versions 为必需依赖：建连时要用它校验令牌版本号，传 nil 会在首次建连时 panic。
+// 与 SetOfflinePush / SetStickerResolver 那两个可选回调不同，
+// 安全校验不能以「未注入即跳过」的方式退化。
 func NewHandler(
 	hub *Hub,
 	msgSvc *service.MessageService,
@@ -69,14 +80,16 @@ func NewHandler(
 	cfg config.WebSocketConfig,
 	isProd bool,
 	logger *zap.Logger,
+	versions TokenVersionReader,
 ) *Handler {
 	h := &Handler{
-		hub:    hub,
-		msgSvc: msgSvc,
-		tokens: tokens,
-		cfg:    cfg,
-		isProd: isProd,
-		logger: logger,
+		hub:      hub,
+		msgSvc:   msgSvc,
+		tokens:   tokens,
+		cfg:      cfg,
+		isProd:   isProd,
+		logger:   logger,
+		versions: versions,
 	}
 	h.upgrader = websocket.Upgrader{
 		ReadBufferSize:  4096,
@@ -107,6 +120,25 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.tokens.Validate(token)
 	if err != nil || claims.TokenUse != "access" {
 		http.Error(w, "invalid token", http.StatusUnauthorized)
+		return
+	}
+
+	// 改密后 token_version 递增，早先签发的 access 令牌不得再建立连接。
+	// 建连是低频动作，这一次查库可接受；REST 侧不做同样校验（见迁移 014 的说明）。
+	// 读不到版本号时一律拒绝，不放行。
+	current, err := h.versions.TokenVersion(r.Context(), claims.UserID)
+	if err != nil {
+		h.logger.Error("读取 token_version 失败",
+			zap.String("user_id", claims.UserID.String()), zap.Error(err))
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if claims.TokenVersion != current {
+		h.logger.Info("ws 拒绝已吊销的令牌",
+			zap.String("user_id", claims.UserID.String()),
+			zap.Int("token_tv", claims.TokenVersion),
+			zap.Int("current_tv", current))
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 

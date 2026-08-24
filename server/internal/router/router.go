@@ -68,7 +68,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	userH := handler.NewUserHandler(userSvc, captchaH, logger)
 
 	hub := ws.NewHub(cfg.WebSocket.MaxConnectionsPerUser, logger)
-	wsH := ws.NewHandler(hub, msgSvc, jwtGen, cfg.WebSocket, cfg.Server.IsProduction(), logger)
+	wsH := ws.NewHandler(hub, msgSvc, jwtGen, cfg.WebSocket, cfg.Server.IsProduction(), logger, userRepo)
 	msgH := handler.NewMessageHandler(msgSvc, hub, logger)
 	contactH := handler.NewContactHandler(contactSvc, hub, logger)
 	convH := handler.NewConversationHandler(convSvc, hub, logger)
