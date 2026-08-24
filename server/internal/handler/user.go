@@ -42,6 +42,12 @@ func (h *UserHandler) Register(c *gin.Context) {
 		Nickname: req.Nickname,
 	})
 	if err != nil {
+		// 弱密码：message 里回 i18n key，前端据此展示对应规则文案
+		var weak *service.WeakPasswordError
+		if errors.As(err, &weak) {
+			BadRequest(c, weak.MessageKey)
+			return
+		}
 		if errors.Is(err, service.ErrDuplicateUser) {
 			Error(c, http.StatusConflict, 409, "phone or email already registered")
 			return

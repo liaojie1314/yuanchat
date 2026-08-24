@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/model"
@@ -22,7 +23,72 @@ var (
 	ErrUserNotFound    = errors.New("user not found")
 	ErrInvalidRefresh  = errors.New("invalid or expired refresh token")
 	ErrUserBanned      = errors.New("user is banned")
+	ErrWeakPassword    = errors.New("weak password")
 )
+
+// 密码复杂度校验失败时回给前端的 i18n key（按 R7 约定放进响应 message 字段）。
+//
+// 前 4 个键复用 packages/design-system 既有的 validation.password*；
+// MaxLength / NoWhitespace 两条规则前端 validatePassword 里没有，
+// 因此 UI 不可能触发，只有绕过前端直连接口才会命中——那种调用方不需要本地化文案。
+const (
+	msgPasswordMinLength    = "validation.passwordMinLength"
+	msgPasswordMaxLength    = "validation.passwordMaxLength"
+	msgPasswordLowercase    = "validation.passwordLowercase"
+	msgPasswordUppercase    = "validation.passwordUppercase"
+	msgPasswordDigit        = "validation.passwordDigit"
+	msgPasswordNoWhitespace = "validation.passwordNoWhitespace"
+)
+
+// WeakPasswordError 表示密码不满足复杂度要求，并携带命中规则的 i18n key。
+type WeakPasswordError struct {
+	// MessageKey 命中的规则对应的 i18n key，如 validation.passwordDigit
+	MessageKey string
+}
+
+func (e *WeakPasswordError) Error() string { return "weak password: " + e.MessageKey }
+
+// Unwrap 让调用方可以只判哨兵：errors.Is(err, ErrWeakPassword)。
+func (e *WeakPasswordError) Unwrap() error { return ErrWeakPassword }
+
+// ValidatePasswordStrength 校验密码复杂度：长度 8-64、同时含小写 / 大写 / 数字、不含空白字符。
+//
+// 注册与改密两条路径共用，否则绕过前端直连接口即可把密码设成 12345678。
+// 长度按字节计而非字符：bcrypt 只取前 72 字节，按字符放行会让多字节密码被静默截断。
+//
+// 规则以 spec / constraints 为准，与前端 validatePassword 并不完全等价——
+// 前端另有「必须含特殊字符」且不限上限、不禁空白，两侧差异见批次报告。
+func ValidatePasswordStrength(pw string) error {
+	if len(pw) < 8 {
+		return &WeakPasswordError{MessageKey: msgPasswordMinLength}
+	}
+	if len(pw) > 64 {
+		return &WeakPasswordError{MessageKey: msgPasswordMaxLength}
+	}
+
+	var hasLower, hasUpper, hasDigit bool
+	for _, r := range pw {
+		switch {
+		case unicode.IsSpace(r):
+			return &WeakPasswordError{MessageKey: msgPasswordNoWhitespace}
+		case unicode.IsLower(r):
+			hasLower = true
+		case unicode.IsUpper(r):
+			hasUpper = true
+		case unicode.IsDigit(r):
+			hasDigit = true
+		}
+	}
+	switch {
+	case !hasLower:
+		return &WeakPasswordError{MessageKey: msgPasswordLowercase}
+	case !hasUpper:
+		return &WeakPasswordError{MessageKey: msgPasswordUppercase}
+	case !hasDigit:
+		return &WeakPasswordError{MessageKey: msgPasswordDigit}
+	}
+	return nil
+}
 
 // UserService 负责注册、登录与个人资料相关的业务逻辑。
 type UserService struct {
@@ -61,6 +127,11 @@ type AuthResult struct {
 
 // Register 创建新账号并返回 JWT 令牌。
 func (s *UserService) Register(ctx context.Context, req RegisterRequest) (*AuthResult, error) {
+	// 密码复杂度：handler 的 binding 只管 8-64 长度，弱密码要在此拦下
+	if err := ValidatePasswordStrength(req.Password); err != nil {
+		return nil, err
+	}
+
 	// 生成短号
 	shortID, err := s.sidGen.Next(ctx)
 	if err != nil {
