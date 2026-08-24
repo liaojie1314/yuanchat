@@ -113,6 +113,10 @@ func (h *UserHandler) Refresh(c *gin.Context) {
 			Unauthorized(c, "invalid or expired refresh token")
 			return
 		}
+		if errors.Is(err, service.ErrUserBanned) {
+			Error(c, http.StatusForbidden, 40301, "account banned")
+			return
+		}
 		h.logger.Error("refresh failed", zap.Error(err))
 		InternalError(c, "refresh failed")
 		return
