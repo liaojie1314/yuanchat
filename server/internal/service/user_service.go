@@ -199,7 +199,7 @@ func (s *UserService) Refresh(ctx context.Context, refreshToken string) (*jwt.To
 		return nil, ErrInvalidRefresh
 	}
 
-	pair, err := s.jwtGen.GeneratePair(claims.UserID, claims.DeviceID)
+	pair, err := s.jwtGen.GeneratePair(claims.UserID, claims.DeviceID, user.TokenVersion)
 	if err != nil {
 		return nil, fmt.Errorf("generate tokens: %w", err)
 	}
@@ -207,7 +207,7 @@ func (s *UserService) Refresh(ctx context.Context, refreshToken string) (*jwt.To
 }
 
 func (s *UserService) buildAuthResult(user model.User, deviceID string) (*AuthResult, error) {
-	pair, err := s.jwtGen.GeneratePair(user.ID, deviceID)
+	pair, err := s.jwtGen.GeneratePair(user.ID, deviceID, user.TokenVersion)
 	if err != nil {
 		return nil, fmt.Errorf("generate tokens: %w", err)
 	}

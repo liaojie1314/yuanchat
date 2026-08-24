@@ -12,7 +12,7 @@ func TestGenerateAndValidate(t *testing.T) {
 	userID := uuid.New()
 	deviceID := "test-device"
 
-	pair, err := gen.GeneratePair(userID, deviceID)
+	pair, err := gen.GeneratePair(userID, deviceID, 0)
 	if err != nil {
 		t.Fatalf("GeneratePair() error = %v", err)
 	}
@@ -70,7 +70,7 @@ func TestValidateExpiredToken(t *testing.T) {
 	gen := NewGenerator("test-secret", 1*time.Millisecond, 7*24*time.Hour)
 	userID := uuid.New()
 
-	pair, _ := gen.GeneratePair(userID, "test")
+	pair, _ := gen.GeneratePair(userID, "test", 0)
 
 	// 等待 token 过期
 	time.Sleep(5 * time.Millisecond)
@@ -78,5 +78,33 @@ func TestValidateExpiredToken(t *testing.T) {
 	_, err := gen.Validate(pair.AccessToken)
 	if err == nil {
 		t.Fatal("Validate() should fail for expired token")
+	}
+}
+
+// TestGeneratePairCarriesTokenVersion 断言签发时的 token_version 快照写进了两类令牌。
+// 该声明是改密后吊销旧令牌的依据，缺失即等于吊销机制失效。
+func TestGeneratePairCarriesTokenVersion(t *testing.T) {
+	gen := NewGenerator("test-secret-key-for-jwt", 15*time.Minute, 7*24*time.Hour)
+	userID := uuid.New()
+
+	pair, err := gen.GeneratePair(userID, "web", 7)
+	if err != nil {
+		t.Fatalf("GeneratePair() error = %v", err)
+	}
+
+	access, err := gen.Validate(pair.AccessToken)
+	if err != nil {
+		t.Fatalf("Validate(accessToken) error = %v", err)
+	}
+	if access.TokenVersion != 7 {
+		t.Fatalf("access TokenVersion = %d, want 7", access.TokenVersion)
+	}
+
+	refresh, err := gen.Validate(pair.RefreshToken)
+	if err != nil {
+		t.Fatalf("Validate(refreshToken) error = %v", err)
+	}
+	if refresh.TokenVersion != 7 {
+		t.Fatalf("refresh TokenVersion = %d, want 7", refresh.TokenVersion)
 	}
 }

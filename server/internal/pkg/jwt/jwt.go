@@ -14,9 +14,10 @@ import (
 
 // Claims 是两类令牌共用的载荷，携带用户身份。
 type Claims struct {
-	UserID   uuid.UUID `json:"uid"`
-	DeviceID string    `json:"did"`
-	TokenUse string    `json:"use"` // "access" or "refresh"
+	UserID       uuid.UUID `json:"uid"`
+	DeviceID     string    `json:"did"`
+	TokenUse     string    `json:"use"` // "access" or "refresh"
+	TokenVersion int       `json:"tv"`  // 签发时的 users.token_version 快照
 	jwt.RegisteredClaims
 }
 
@@ -44,13 +45,16 @@ func NewGenerator(secret string, accessTTL, refreshTTL time.Duration) *Generator
 }
 
 // GeneratePair 为指定用户签发一对 access / refresh 令牌。
-func (g *Generator) GeneratePair(userID uuid.UUID, deviceID string) (*TokenPair, error) {
-	access, err := g.generate(userID, deviceID, "access", g.accessTTL)
+//
+// tokenVersion 传入 users.token_version 的当前值，作为快照写进两个令牌的 tv 声明；
+// 改密时该列递增，校验方比较 tv 与库中值即可判定令牌已被吊销。
+func (g *Generator) GeneratePair(userID uuid.UUID, deviceID string, tokenVersion int) (*TokenPair, error) {
+	access, err := g.generate(userID, deviceID, "access", tokenVersion, g.accessTTL)
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
 
-	refresh, err := g.generate(userID, deviceID, "refresh", g.refreshTTL)
+	refresh, err := g.generate(userID, deviceID, "refresh", tokenVersion, g.refreshTTL)
 	if err != nil {
 		return nil, fmt.Errorf("generate refresh token: %w", err)
 	}
@@ -62,12 +66,13 @@ func (g *Generator) GeneratePair(userID uuid.UUID, deviceID string) (*TokenPair,
 	}, nil
 }
 
-func (g *Generator) generate(userID uuid.UUID, deviceID, use string, ttl time.Duration) (string, error) {
+func (g *Generator) generate(userID uuid.UUID, deviceID, use string, tokenVersion int, ttl time.Duration) (string, error) {
 	now := time.Now()
 	claims := Claims{
-		UserID:   userID,
-		DeviceID: deviceID,
-		TokenUse: use,
+		UserID:       userID,
+		DeviceID:     deviceID,
+		TokenUse:     use,
+		TokenVersion: tokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),

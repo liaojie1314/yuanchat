@@ -127,7 +127,7 @@ func TestRefreshRejectsGarbageToken(t *testing.T) {
 func TestRefreshRejectsAccessTokenAsRefresh(t *testing.T) {
 	svc, gen := refreshSvc(time.Minute, time.Hour)
 
-	pair, err := gen.GeneratePair(uuid.New(), "web")
+	pair, err := gen.GeneratePair(uuid.New(), "web", 0)
 	if err != nil {
 		t.Fatalf("generate pair: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestRefreshRejectsAccessTokenAsRefresh(t *testing.T) {
 func TestRefreshRejectsExpiredRefreshToken(t *testing.T) {
 	svc, gen := refreshSvc(time.Minute, -time.Minute) // refresh 签发即过期
 
-	pair, err := gen.GeneratePair(uuid.New(), "web")
+	pair, err := gen.GeneratePair(uuid.New(), "web", 0)
 	if err != nil {
 		t.Fatalf("generate pair: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestRefreshRejectsTamperedSignature(t *testing.T) {
 
 	// 用另一个 secret 签发的 refresh token
 	otherGen := jwt.NewGenerator("other-secret", time.Minute, time.Hour)
-	pair, err := otherGen.GeneratePair(uuid.New(), "web")
+	pair, err := otherGen.GeneratePair(uuid.New(), "web", 0)
 	if err != nil {
 		t.Fatalf("generate pair: %v", err)
 	}
