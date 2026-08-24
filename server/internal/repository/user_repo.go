@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/model"
@@ -86,4 +87,11 @@ func (r *UserRepository) ExistsByPhoneOrEmail(ctx context.Context, phone, email 
 // Update 更新已有用户的字段。
 func (r *UserRepository) Update(ctx context.Context, user *model.User) error {
 	return r.db.WithContext(ctx).Save(user).Error
+}
+
+// TouchLastLogin 把用户的 last_login_at 更新为当前时间。
+func (r *UserRepository) TouchLastLogin(ctx context.Context, id uuid.UUID) error {
+	return r.db.WithContext(ctx).Model(&model.User{}).
+		Where("id = ?", id).
+		Update("last_login_at", time.Now()).Error
 }

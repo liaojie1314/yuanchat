@@ -7,9 +7,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/pkg/jwt"
 	"github.com/yuanchat/server/internal/pkg/password"
+	"github.com/yuanchat/server/internal/repository"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // ========================================
@@ -169,7 +172,96 @@ func TestRefreshRejectsTamperedSignature(t *testing.T) {
 	}
 }
 
-// 说明：UserService.Register() / Login() / Profile() 的完整集成测试需要一个测试用
-// PostgreSQL 库，或把 UserService 改成依赖 repository 接口而非具体的
-// *repository.UserRepository。密码哈希、JWT 签发与校验这几段逻辑已由各自所在包
-//（pkg/password、pkg/jwt）的单元测试覆盖。
+// 说明：以上用例全部在令牌校验阶段返回，不触达 repo。下面几条需要真实用户行，
+// 因此走包内既有的 testDB / newTestUser 集成夹具（库不可达时自动 skip）。
+
+// authSvc 构造接真实 repo 的 UserService 与配套 JWT 生成器。
+func authSvc(db *gorm.DB) (*UserService, *jwt.Generator) {
+	gen := jwt.NewGenerator("test-secret", time.Minute, time.Hour)
+	return NewUserService(repository.NewUserRepository(db), gen, nil, zap.NewNop()), gen
+}
+
+func TestRefreshRejectsBannedUser(t *testing.T) {
+	db := testDB(t)
+	user := newTestUser(t, db, "refresh-banned")
+	svc, gen := authSvc(db)
+
+	pair, err := gen.GeneratePair(user.ID, "web", user.TokenVersion)
+	if err != nil {
+		t.Fatalf("generate pair: %v", err)
+	}
+
+	if err := db.Model(user).Update("status", model.UserStatusDisabled).Error; err != nil {
+		t.Fatalf("disable user: %v", err)
+	}
+
+	if _, err := svc.Refresh(context.Background(), pair.RefreshToken); !errors.Is(err, ErrUserBanned) {
+		t.Fatalf("expected ErrUserBanned, got %v", err)
+	}
+}
+
+func TestRefreshRejectsStaleTokenVersion(t *testing.T) {
+	db := testDB(t)
+	user := newTestUser(t, db, "refresh-stale-tv")
+	svc, gen := authSvc(db)
+
+	pair, err := gen.GeneratePair(user.ID, "web", user.TokenVersion)
+	if err != nil {
+		t.Fatalf("generate pair: %v", err)
+	}
+
+	// 模拟改密：token_version 递增后，早先签发的 refresh 令牌应立即失效
+	if err := db.Model(user).Update("token_version", user.TokenVersion+1).Error; err != nil {
+		t.Fatalf("bump token_version: %v", err)
+	}
+
+	if _, err := svc.Refresh(context.Background(), pair.RefreshToken); !errors.Is(err, ErrInvalidRefresh) {
+		t.Fatalf("expected ErrInvalidRefresh, got %v", err)
+	}
+}
+
+func TestRefreshAcceptsCurrentTokenVersion(t *testing.T) {
+	db := testDB(t)
+	user := newTestUser(t, db, "refresh-ok-tv")
+	svc, gen := authSvc(db)
+
+	pair, err := gen.GeneratePair(user.ID, "web", user.TokenVersion)
+	if err != nil {
+		t.Fatalf("generate pair: %v", err)
+	}
+
+	fresh, err := svc.Refresh(context.Background(), pair.RefreshToken)
+	if err != nil {
+		t.Fatalf("Refresh with current token_version should succeed, got %v", err)
+	}
+	if fresh.AccessToken == "" || fresh.RefreshToken == "" {
+		t.Fatal("Refresh 应返回非空令牌对")
+	}
+}
+
+func TestLoginWritesLastLoginAt(t *testing.T) {
+	db := testDB(t)
+	user := newTestUser(t, db, "login-touch")
+	svc, _ := authSvc(db)
+
+	const pw = "Abcdef12"
+	hash, err := password.Hash(pw)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if err := db.Model(user).Update("password_hash", hash).Error; err != nil {
+		t.Fatalf("set password hash: %v", err)
+	}
+
+	if _, err := svc.Login(context.Background(), LoginRequest{Account: *user.Phone, Password: pw}); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	var stored model.User
+	if err := db.First(&stored, "id = ?", user.ID).Error; err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if stored.LastLoginAt == nil {
+		t.Fatal("登录成功后 last_login_at 应被写入，实际仍为 NULL")
+	}
+}

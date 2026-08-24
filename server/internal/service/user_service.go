@@ -128,6 +128,12 @@ func (s *UserService) Login(ctx context.Context, req LoginRequest) (*AuthResult,
 		return nil, ErrUserBanned
 	}
 
+	// 记录本次登录时间，写失败不阻塞登录
+	if err := s.repo.TouchLastLogin(ctx, user.ID); err != nil {
+		s.logger.Warn("更新 last_login_at 失败",
+			zap.String("user_id", user.ID.String()), zap.Error(err))
+	}
+
 	s.logger.Info("User logged in", zap.String("user_id", user.ID.String()))
 
 	return s.buildAuthResult(*user, "web")
@@ -184,18 +190,29 @@ func (s *UserService) UpdateProfile(
 //
 // 滑动会话（轮换）策略：access 与 refresh 都重新签发、各自重置 TTL，
 // 持续活跃的用户永不掉线。旧 refresh 在剩余有效期内仍可用（无服务端存储）。
+//
+// 这里是 token_version 的两个校验点之一（另一个是 WS 建连）：本方法本来就要
+// FindByID，因此补上封禁与版本校验是零额外 I/O。
 func (s *UserService) Refresh(ctx context.Context, refreshToken string) (*jwt.TokenPair, error) {
 	claims, err := s.jwtGen.Validate(refreshToken)
 	if err != nil || claims.TokenUse != "refresh" {
 		return nil, ErrInvalidRefresh
 	}
 
-	// 用户被注销/封禁后 refresh 立即失效
 	user, err := s.repo.FindByID(ctx, claims.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("find user: %w", err)
 	}
+	// 账号已注销
 	if user == nil {
+		return nil, ErrInvalidRefresh
+	}
+	// 封禁用户不得续期
+	if user.Status == model.UserStatusDisabled {
+		return nil, ErrUserBanned
+	}
+	// 改密后 token_version 递增，早先签发的 refresh 令牌随即失效
+	if claims.TokenVersion != user.TokenVersion {
 		return nil, ErrInvalidRefresh
 	}
 
