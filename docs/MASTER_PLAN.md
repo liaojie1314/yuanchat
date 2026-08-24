@@ -275,23 +275,65 @@ yuanchat/
 
 **图例**：🔴 数据丢失/安全风险，必须优先 · 🟡 影响体验或可维护性 · ⚪ 增强项
 
-#### 1. A8 — auth 补全与安全加固（已有 spec + plan，待执行）
+#### 1. A8 — auth 补全与安全加固（**执行中，未合并**）
 
 设计：[`specs/2026-08-23-auth-completion-design.md`](superpowers/specs/2026-08-23-auth-completion-design.md)
 执行：[`plans/2026-08-23-auth-completion.md`](superpowers/plans/2026-08-23-auth-completion.md)（18 Task）
+分支：`feature/auth-completion`（自 dev @ `03baf6a` 切出，**9 个 commit，尚未合回 dev**）
+过程记录：`.superpowers/sdd/2026-08-23-auth-completion/`（ledger `progress.md`、裁决 `rulings.md`、批次报告 `batch-1-report.md` / `batch-2-report.md`、批 1 评审 `batch-1-review.md`）
 
-| 级别 | 条目                                                                                                         |
-| ---- | ------------------------------------------------------------------------------------------------------------ |
-| 🔴   | 忘记密码是**假链路**：三处 `setTimeout(r,500)` 占位（`ForgotPasswordPage.tsx:43,61,85`），后端零端点         |
-| 🔴   | 扫码登录是**假链路**：`let s = 31337` 拼假二维码（web `:44`/desktop `:50`），`scanning`/`confirmed` 是死状态 |
-| 🔴   | 登录无账号级失败锁定：`LimitByIP` 是进程内按 IP 计数，换 IP 即可绕过撞库                                     |
-| 🔴   | 后端无密码复杂度校验（仅 `min=8`），绕过前端即可设 `12345678`                                                |
-| 🔴   | 无会话吊销机制：改密后旧 token 仍有效（本批次加 `users.token_version` + JWT `tv`）                           |
-| 🟡   | `POST /auth/logout` 路由不存在，但前端 `authStore.ts:184` 一直在调，404 被 catch 吞掉                        |
-| 🟡   | `Refresh` 不校验封禁与 token 版本，注释却写着「校验用户状态」（说谎注释）                                    |
-| 🟡   | 注册无「确认密码」与服务条款勾选                                                                             |
-| 🟡   | 桌面端 `tauri.conf.json` 是 `"csp": null`；nginx HSTS 仍被注释                                               |
-| 🟡   | 4 个 auth 页在 web/desktop 各写一份，共 1657 行重复（下沉到 `packages/ui/src/auth/`）                        |
+> ⚠️ **plan 的代码块不可照抄**：pre-flight 证实它引用了不存在的包与符号（`response` 包、`internal/dto`、`jwt.Manager`、`model.UserStatusBanned`）、用了 slog（本仓 zap-only）、含编译不过的笔误，多处确切数值与 spec 相反。已正式降级为「意图草图」。
+> **权威顺序：spec > `rulings.md` > 仓库真实代码 > plan（最低）。**
+
+**已完成（Task 1-8，纯后端）**：`go build` + `go vet` + `go test -race ./...` 全绿，12 包通过、0 SKIP。
+
+| 状态 | 条目                                                                                                                                                 |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ✅   | 会话吊销：`users.token_version`（迁移 **014**）+ JWT `tv` 声明，`Refresh` 与 WS 建连校验（fail-closed）                                              |
+| ✅   | 后端密码复杂度：`ValidatePasswordStrength`（8-64 **字节** / 大小写 / 数字 / 不含空白），注册路径已接                                                 |
+| ✅   | `POST /auth/logout` 补齐，返 204 空体，**不递增 `token_version`**（无 device 表时会误踢该用户全部设备）                                              |
+| ✅   | `Refresh` 补封禁 + 令牌版本校验，封禁返 403/40301；登录写 `last_login_at`；说谎注释已改                                                              |
+| ✅   | `CodeSender` 抽象 + `LogSender`，未知 provider **启动即 FATAL**（已实测）；Sender 经 `router.Setup` 末位参数注入                                     |
+| ✅   | 忘记密码**后端**三段式链路（`AuthService` + `AuthHandler`）：发码 → 校码换一次性 `reset_ticket`（`GetDel` 单次消费）→ 改密并原子自增 `token_version` |
+
+**未完成（Task 9-18）**——下个会话从这里接：
+
+| 级别 | 条目                                                                                                                                                                                                                                                             |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🔴   | **Task 9** 登录无账号级失败锁定：`LimitByIP` 是进程内按 IP 计数，换 IP 即可绕过撞库（RED 测试草稿已停放，见下）                                                                                                                                                  |
+| 🔴   | **Task 10** 扫码登录后端状态机（`pending → scanned → confirmed`，`confirmed` 换令牌须单次消费）未做                                                                                                                                                              |
+| 🟡   | **Task 11** 8 条新路由的真断言冒烟未做（用户决策 D3：**不引 swaggo**，Swagger 记债给 B7）                                                                                                                                                                        |
+| 🔴   | **Task 12** `packages/shared/src/api/client.ts` 的 `doFetch` 在 `res.json()` 前**未 gate 204** → spec 的 3 个 204 端点前端必抛 `SyntaxError`；顺带既有 bug：`contacts.ts` 的 `removeFriend`(:158) 与 `unblockUser`(:204) 打的就是 204 端点，**现在成功也抛异常** |
+| 🔴   | **Task 13/15** 忘记密码与扫码登录**前端仍是假链路**：`ForgotPasswordPage.tsx` 三处 `setTimeout(r,500)` 假请求；`QrLoginPage.tsx` 过期是写死的 `setTimeout(…,60000)`（须改用服务端返回的过期字段）                                                                |
+| 🟡   | **Task 14** 前端密码规则未统一到 spec（见下「已定裁决」C1）                                                                                                                                                                                                      |
+| 🟡   | **Task 16** 安卓扫码入口（聊天页 `+` 菜单，新 key `auth.scanQrCode`）——**需 USB 真机调试**，`adb` 在 `/home/liaojie1314/env/Android/Sdk/platform-tools/adb`（不在 PATH）。**禁止 `tauri android init`**（会摧毁 `MainActivity.kt` 的软键盘适配）                 |
+| 🟡   | **Task 17** MSW mock + E2E 未做（也是批 2↔批 3 契约错配的兜底检查）                                                                                                                                                                                              |
+| 🟡   | **Task 18** 桌面 `tauri.conf.json` 仍是 `"csp": null`；nginx HSTS 仍被注释（用户决策 D2：**一条 CSP 同时列 dev localhost + 生产域名**，不做构建期分支）                                                                                                          |
+| 🟡   | 注册无「确认密码」与服务条款勾选                                                                                                                                                                                                                                 |
+| 🟡   | 4 个 auth 页在 web/desktop 各写一份共 1657 行重复——批 3 验收要求是**重构去重**（两个 Page 变薄壳），不是新建                                                                                                                                                     |
+| 🔴   | **全分支终审未做**：用户已决定取消逐批评审、改为完成后统一终审一次。批 1 过了评审（0 blocker），**Task 8 及之后的代码未经任何评审**                                                                                                                              |
+
+**执行注意（下个会话必读，不看会踩）**：
+
+| 事项                                                                                                                                                                                                                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **API 环境不稳**：本机到 API 之间有代理拦改响应（`request-id present but not Anthropic-issued`、流停摆 30s+），长跑 agent 已连死 4 次。对策：**单次派发不超过 1-2 个 Task**，且强制「一个 Task 一到绿立刻 commit + 立刻追写报告」，否则整轮工作全丢        |
+| **契约对齐**：`batch-2-report.md` 的「契约实况」一节记录了 Task 8 端点的**实际**请求/响应字段与错误码，前端必须按它写，不要只按 spec 猜                                                                                                                    |
+| **i18n 门禁**：`pnpm check:i18n` 基线 506 keys × 4 locale，A8 完成后应为 **516**（+9 新 key，−1 `validation.passwordSpecial`，+2 密码规则 key）。locale 是**扁平点号 key**；`auth.qrExpired` / `qrScanned` / `qrRefresh` **已存在**（plan 声称新增是错的） |
+| **孤儿产物**：批 2 Task 9 的 RED 测试草稿已移出源码树，停放在 `.superpowers/sdd/2026-08-23-auth-completion/orphan-task9-login_lockout_test.go.txt`。它期望 `NewAuthService` 多收一个 `*UserService`（当前签名 5 参），说明登录锁定要复用 `UserService`     |
+| **前端依赖待验证**：扫码页候选库 `qrcode.react@4.2.0`（批 3 装过，已回滚）。引入前**必须确认产物不含 `?.` / `??`**——`build.target=es2019`，旧 WebView(Chrome 74) 会白屏                                                                                    |
+| **迁移号**：A8 占 **014**（已落地）。`verification_codes` 表在 `001_baseline.sql` 就有（**无 `user_id` 列**，目标方是 `target`），Task 8 只写审计行、未新增迁移。**015 属 H1b，不许抢**                                                                    |
+| **不要顺手统一路由前缀**：`/users/login`、`/users/register` 保持不动，改了会打断前端登录                                                                                                                                                                   |
+| **不要照抄 `handler/captcha.go`**：它有先删再比、`rand.IntN`、key 无命名空间三个缺陷。Task 8 的 `auth_service.go` 是正确范式（比对成功才删、`crypto/rand`、key 带 `auth:pwd:` 命名空间、发送失败回滚已发的码）                                             |
+
+**已定裁决（沿用，不要重开讨论）**：
+
+| 编号 | 裁决                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| C1   | 前后端密码规则**统一到 spec 的 5 条**：前端 `validatePassword` **删掉「特殊字符」**（连同 `validation.ts:47` 与 `__tests__/validation.test.ts:41`），**加**「≤64 字节」+「不含空白」；长度按**字节**算（`new TextEncoder().encode(pw).length`，Chrome 38+ 可用），**不能用 `.length`**；四份 locale **删** `validation.passwordSpecial`（不删会被 check:i18n 判死键）、**加** `passwordMaxLength` + `passwordNoWhitespace`。理由：后端从来没强制过特殊字符，非 web 客户端一直能注册 `Abcdef12`，那条前端规则是装饰性的、不是安全控制 |
+| D1   | cursor-glow 用 `pointer: fine` 统一启用（`AuthShell` 内部 `matchMedia`，**不接 `isDesktop` prop**——`packages/ui` 组件断点一律内部 `useBreakpoint()` 推导）                                                                                                                                                                                                                                                                                                                                                                           |
+| D3   | Task 11 降为「真断言冒烟」，不引 swaggo、不建 `server/docs/`。注：`@Summary` / `@Router` 注解注释是本仓既有约定（16 个 handler 共 50 处），**允许写注解，禁止引依赖**                                                                                                                                                                                                                                                                                                                                                                |
+| —    | `token_version` **只在** `UserService.Refresh` 与 WS `ServeWS` 校验，**`AuthRequired` 中间件里绝不加**（spec 明确用「每请求不查库」换 ≤15 分钟残留窗口）                                                                                                                                                                                                                                                                                                                                                                             |
 
 **A8 主动留债**（本批次明确不做，做完后仍留在本清单）：
 
@@ -302,6 +344,7 @@ yuanchat/
 | ⚪   | 多设备会话管理与「单设备登出」：无 device/session 表，`logout` 只能全量踢或不踢，本批次选不踢                                               |
 | ⚪   | 真实短信/邮件 provider：本批次只有 `LogSender`，`codesender.provider` 留了扩展位                                                            |
 | ⚪   | `verification_codes` 表只写审计不读，无审计查询入口                                                                                         |
+| ⚪   | Swagger 文档：Task 11 按 D3 不引 swaggo，**记债给 B7** 统一补                                                                               |
 
 #### 2. H1b — 贴纸商城与投稿发布（已有 plan，待执行）
 
@@ -316,15 +359,15 @@ yuanchat/
 
 #### 3. 既有代码的真实缺陷（无 plan，可随手批次收口）
 
-| 级别 | 位置                             | 问题                                                                       |
-| ---- | -------------------------------- | -------------------------------------------------------------------------- |
-| 🟡   | `handler/captcha.go:83-90`       | `Validate` 先 `Del` 再比较 → 用户输错一次验证码即被作废，只能重新获取      |
-| 🟡   | `handler/captcha.go:52`          | captcha id 用 `math/rand/v2` 的 `rand.IntN(1000000)` → 会碰撞且非加密安全  |
-| 🟡   | `middleware/ratelimit.go:92-107` | 令牌桶是**进程内** map + mutex，多实例部署时各限各的，形同失效             |
-| 🟡   | `.husky/` 钩子不跑 `tsc`         | 幽灵依赖与类型错误只在 CI 暴露（pnpm 本地提升掩盖）                        |
-| 🟡   | `deploy/docker-compose.yml`      | minio / certbot / prometheus 三个镜像未钉版本号，仍是 `latest`             |
-| ⚪   | `internal/testutil/` 不存在      | handler 包涉及 Redis 的用例被 `t.Skipf` 跳过（A8 Task 1 先建最小夹具）     |
-| ⚪   | 消息分发 `Dispatcher`            | 进程内 Hub，多实例需换分布式实现；presence 已可切 `presence.backend=redis` |
+| 级别 | 位置                                | 问题                                                                                                                                         |
+| ---- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🟡   | `handler/captcha.go:83-90`          | `Validate` 先 `Del` 再比较 → 用户输错一次验证码即被作废，只能重新获取                                                                        |
+| 🟡   | `handler/captcha.go:52`             | captcha id 用 `math/rand/v2` 的 `rand.IntN(1000000)` → 会碰撞且非加密安全                                                                    |
+| 🟡   | `middleware/ratelimit.go:92-107`    | 令牌桶是**进程内** map + mutex，多实例部署时各限各的，形同失效                                                                               |
+| 🟡   | `.husky/` 钩子不跑 `tsc`            | 幽灵依赖与类型错误只在 CI 暴露（pnpm 本地提升掩盖）                                                                                          |
+| 🟡   | `deploy/docker-compose.yml`         | minio / certbot / prometheus 三个镜像未钉版本号，仍是 `latest`                                                                               |
+| ⚪   | `handler` 包 Redis 用例仍 `t.Skipf` | A8 已建 `internal/testutil.NewRedis(t) (*redis.Client, *miniredis.Miniredis)`（返回句柄供 `FastForward`），但 `handler` 包既有用例还没改用它 |
+| ⚪   | 消息分发 `Dispatcher`               | 进程内 Hub，多实例需换分布式实现；presence 已可切 `presence.backend=redis`                                                                   |
 
 #### 4. J 泳道 — 用户体验与无障碍（新增，未立项）
 
