@@ -13,6 +13,7 @@ import (
 	"github.com/yuanchat/server/internal/config"
 	"github.com/yuanchat/server/internal/database"
 	"github.com/yuanchat/server/internal/logger"
+	"github.com/yuanchat/server/internal/pkg/codesender"
 	"github.com/yuanchat/server/internal/redis"
 	"github.com/yuanchat/server/internal/router"
 	"github.com/yuanchat/server/internal/storage"
@@ -47,6 +48,13 @@ func main() {
 		zap.String("env", cfg.Server.Env),
 		zap.String("version", "1.0.0"),
 	)
+
+	// 2.1 校验验证码下发通道配置：provider 为未知值时启动即失败。
+	// 绝不静默退回日志通道——生产环境那样等于验证码永远发不出去，而且不会有人发现。
+	// 发码链路接入后，这里构造出的 Sender 将传给 router.Setup。
+	if _, err := codesender.New(cfg.CodeSender.Provider, zapLogger); err != nil {
+		zapLogger.Fatal("Invalid codesender provider", zap.Error(err))
+	}
 
 	// 3. 连接数据库
 	zapLogger.Info("Connecting to PostgreSQL...")

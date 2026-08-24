@@ -111,3 +111,8 @@ push:
   vapid_private_key: ""
   subject: "mailto:admin@yuanchat.example.com"
   ttl: 86400
+
+codesender:
+  # 验证码下发通道。log = 打码后写日志（开发/测试）。
+  # 填未知值时进程启动即失败，不会静默退回 log 通道。
+  provider: log

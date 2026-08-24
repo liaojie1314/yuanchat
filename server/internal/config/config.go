@@ -22,6 +22,7 @@ type Config struct {
 	Moderation ModerationConfig `mapstructure:"moderation"`
 	Presence   PresenceConfig   `mapstructure:"presence"`
 	Push       PushConfig       `mapstructure:"push"`
+	CodeSender CodeSenderConfig `mapstructure:"codesender"`
 }
 
 type ServerConfig struct {
@@ -113,6 +114,13 @@ type PushConfig struct {
 	TTL             int    `mapstructure:"ttl"`     // 推送服务保留秒数
 }
 
+// CodeSenderConfig 验证码下发通道配置。
+//
+// provider 为未知值时进程启动即失败：静默退回日志通道等于验证码永远发不出去。
+type CodeSenderConfig struct {
+	Provider string `mapstructure:"provider"` // log（写日志，开发/测试用）| 后续接入服务商时扩展
+}
+
 // PresenceConfig 在线状态后端配置。
 type PresenceConfig struct {
 	Backend string `mapstructure:"backend"` // local（单实例，默认）| redis（多实例 Pub/Sub）
@@ -145,6 +153,10 @@ func Load(configPath string) (*Config, error) {
 	// 设置默认配置文件路径
 	v.SetConfigFile(configPath)
 	v.SetConfigType("yaml")
+
+	// 配置文件里没写 codesender 段时退回日志通道；
+	// 显式写了未知值仍会在启动时失败（见 CodeSenderConfig）。
+	v.SetDefault("codesender.provider", "log")
 
 	// 环境变量支持: SERVER_PORT=9090 覆盖 server.port
 	v.SetEnvPrefix("YUANCHAT")
