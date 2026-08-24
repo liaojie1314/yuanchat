@@ -107,6 +107,21 @@ func (r *UserRepository) TokenVersion(ctx context.Context, id uuid.UUID) (int, e
 	return versions[0], nil
 }
 
+// UpdatePasswordAndBumpTokenVersion 原子更新密码哈希并令 token_version 自增，
+// 使该用户全部既有令牌立即失效。
+//
+// token_version 交给数据库自增而非「读出来 +1 再写回」：后者在并发改密下会丢掉一次递增，
+// 让本该被吊销的令牌继续可用。
+func (r *UserRepository) UpdatePasswordAndBumpTokenVersion(ctx context.Context, id string, passwordHash string) error {
+	return r.db.WithContext(ctx).Model(&model.User{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"password_hash": passwordHash,
+			"token_version": gorm.Expr("token_version + 1"),
+			"updated_at":    time.Now(),
+		}).Error
+}
+
 // TouchLastLogin 把用户的 last_login_at 更新为当前时间。
 func (r *UserRepository) TouchLastLogin(ctx context.Context, id uuid.UUID) error {
 	return r.db.WithContext(ctx).Model(&model.User{}).

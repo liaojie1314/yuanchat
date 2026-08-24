@@ -1,10 +1,14 @@
 package router
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,12 +17,49 @@ import (
 	"github.com/yuanchat/server/internal/config"
 	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/pkg/jwt"
+	"github.com/yuanchat/server/internal/pkg/password"
+	"github.com/yuanchat/server/internal/testutil"
 	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 	"gorm.io/gorm/schema"
 )
+
+// recordingSender 是验证码下发通道的测试替身：只把码记下来，不真的发。
+//
+// 用例据此断言「码确实被下发」并拿到明文码继续走后续步骤，
+// 这是唯一不靠猜数字就能跑通三段式链路的办法。
+type recordingSender struct {
+	mu     sync.Mutex
+	calls  int
+	target string
+	code   string
+}
+
+func (s *recordingSender) Send(_ context.Context, target, code string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls++
+	s.target, s.code = target, code
+	return nil
+}
+
+// last 返回下发次数与最近一次的目标、验证码。
+func (s *recordingSender) last() (int, string, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls, s.target, s.code
+}
+
+// postJSON 向引擎发一个 JSON 请求，返回响应记录器。
+func postJSON(r *gin.Engine, target string, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, target, bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
 
 // authTestConfig 仅够让 Setup 跑通接线的最小配置（不含 DB / Redis / MinIO）。
 func authTestConfig() *config.Config {
@@ -39,7 +80,7 @@ func authTestConfig() *config.Config {
 func authTestEngine(t *testing.T) (*gin.Engine, string) {
 	t.Helper()
 	cfg := authTestConfig()
-	r, _ := Setup(nil, nil, nil, cfg, zap.NewNop())
+	r, _ := Setup(nil, nil, nil, cfg, zap.NewNop(), &recordingSender{})
 
 	gen := jwt.NewGenerator(cfg.JWT.Secret, cfg.JWT.AccessTokenTTL, cfg.JWT.RefreshTokenTTL)
 	pair, err := gen.GeneratePair(uuid.New(), "web", 0)
@@ -108,7 +149,7 @@ func newBannedUser(t *testing.T, db *gorm.DB) *model.User {
 func TestRefreshBannedUserReturns403(t *testing.T) {
 	db := authTestDB(t)
 	cfg := authTestConfig()
-	r, _ := Setup(db, nil, nil, cfg, zap.NewNop())
+	r, _ := Setup(db, nil, nil, cfg, zap.NewNop(), &recordingSender{})
 
 	user := newBannedUser(t, db)
 	gen := jwt.NewGenerator(cfg.JWT.Secret, cfg.JWT.AccessTokenTTL, cfg.JWT.RefreshTokenTTL)
@@ -125,6 +166,118 @@ func TestRefreshBannedUserReturns403(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403, body=%s", w.Code, w.Body.String())
+	}
+}
+
+// newResetUser 建一个已知明文密码的一次性用户，用后删除。
+func newResetUser(t *testing.T, db *gorm.DB, plain string) *model.User {
+	t.Helper()
+	hash, err := password.Hash(plain)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	phone := fmt.Sprintf("197%08d", time.Now().UnixNano()%100000000)
+	user := &model.User{
+		ID:           uuid.New(),
+		Phone:        &phone,
+		PasswordHash: hash,
+		ShortID:      time.Now().UnixNano() % 1_000_000_000,
+		Nickname:     "reset-flow",
+		Status:       model.UserStatusNormal,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Exec("DELETE FROM verification_codes WHERE target = ?", phone)
+		db.Unscoped().Delete(user)
+	})
+	return user
+}
+
+// TestForgotPasswordFlowChangesPassword 三段式链路走完后，新密码能登录、旧密码不能。
+//
+// 这是本条链路的核心验收：此前三个 handler 都是前端 setTimeout 假实现，
+// 走完显示「重置成功」而密码根本没动。
+func TestForgotPasswordFlowChangesPassword(t *testing.T) {
+	const oldPassword = "Oldpass123"
+	const newPassword = "Newpass456"
+
+	db := authTestDB(t)
+	rdb, _ := testutil.NewRedis(t)
+	sender := &recordingSender{}
+	cfg := authTestConfig()
+	r, _ := Setup(db, rdb, nil, cfg, zap.NewNop(), sender)
+
+	user := newResetUser(t, db, oldPassword)
+	phone := *user.Phone
+
+	// 第一段：发码
+	if w := postJSON(r, "/api/v1/auth/password/otp", `{"phone":"`+phone+`"}`); w.Code != http.StatusNoContent {
+		t.Fatalf("otp status = %d, want 204, body=%s", w.Code, w.Body.String())
+	}
+	calls, target, code := sender.last()
+	if calls != 1 || target != phone {
+		t.Fatalf("下发记录 = (%d, %q), want (1, %q)", calls, target, phone)
+	}
+	if len(code) != 6 {
+		t.Fatalf("验证码 = %q, 期望 6 位", code)
+	}
+
+	// 第二段：校验换票
+	w := postJSON(r, "/api/v1/auth/password/verify", `{"phone":"`+phone+`","code":"`+code+`"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("verify status = %d, want 200, body=%s", w.Code, w.Body.String())
+	}
+	var verified struct {
+		Data struct {
+			ResetTicket string `json:"reset_ticket"`
+			ExpiresIn   int    `json:"expires_in"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &verified); err != nil {
+		t.Fatalf("解析 verify 响应: %v", err)
+	}
+	if verified.Data.ResetTicket == "" {
+		t.Fatal("verify 未返回 reset_ticket")
+	}
+	if verified.Data.ExpiresIn != 300 {
+		t.Fatalf("expires_in = %d, want 300", verified.Data.ExpiresIn)
+	}
+
+	// 第三段：改密
+	body := `{"reset_ticket":"` + verified.Data.ResetTicket + `","new_password":"` + newPassword + `"}`
+	if w := postJSON(r, "/api/v1/auth/password/reset", body); w.Code != http.StatusNoContent {
+		t.Fatalf("reset status = %d, want 204, body=%s", w.Code, w.Body.String())
+	}
+
+	// 旧密码必须失效，否则「重置成功」依旧是假的
+	if w := postJSON(r, "/api/v1/users/login", `{"account":"`+phone+`","password":"`+oldPassword+`"}`); w.Code != http.StatusUnauthorized {
+		t.Fatalf("旧密码登录 status = %d, want 401, body=%s", w.Code, w.Body.String())
+	}
+	if w := postJSON(r, "/api/v1/users/login", `{"account":"`+phone+`","password":"`+newPassword+`"}`); w.Code != http.StatusOK {
+		t.Fatalf("新密码登录 status = %d, want 200, body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestForgotPasswordOtpUnknownPhoneReturns204 未注册手机号也返回 204 且不下发，
+// 否则该端点就成了「这个号码注册过没有」的枚举器。
+func TestForgotPasswordOtpUnknownPhoneReturns204(t *testing.T) {
+	db := authTestDB(t)
+	rdb, _ := testutil.NewRedis(t)
+	sender := &recordingSender{}
+	cfg := authTestConfig()
+	r, _ := Setup(db, rdb, nil, cfg, zap.NewNop(), sender)
+
+	w := postJSON(r, "/api/v1/auth/password/otp", `{"phone":"19900000000"}`)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204, body=%s", w.Code, w.Body.String())
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("204 不应带响应体，got %q", w.Body.String())
+	}
+	if calls, _, _ := sender.last(); calls != 0 {
+		t.Fatalf("下发次数 = %d, 未注册手机号不应下发", calls)
 	}
 }
 

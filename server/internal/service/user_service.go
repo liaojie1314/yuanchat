@@ -28,9 +28,8 @@ var (
 
 // 密码复杂度校验失败时回给前端的 i18n key（按 R7 约定放进响应 message 字段）。
 //
-// 前 4 个键复用 packages/design-system 既有的 validation.password*；
-// MaxLength / NoWhitespace 两条规则前端 validatePassword 里没有，
-// 因此 UI 不可能触发，只有绕过前端直连接口才会命中——那种调用方不需要本地化文案。
+// 六条规则与前端 validatePassword 一一对应，都能由用户在 UI 上触发，
+// 四个 locale 均有对应文案。后端独立再校验一遍，是因为前端校验可被绕过。
 const (
 	msgPasswordMinLength    = "validation.passwordMinLength"
 	msgPasswordMaxLength    = "validation.passwordMaxLength"

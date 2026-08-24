@@ -49,10 +49,12 @@ func main() {
 		zap.String("version", "1.0.0"),
 	)
 
-	// 2.1 校验验证码下发通道配置：provider 为未知值时启动即失败。
+	// 2.1 构造验证码下发通道：provider 为未知值时启动即失败。
 	// 绝不静默退回日志通道——生产环境那样等于验证码永远发不出去，而且不会有人发现。
-	// 发码链路接入后，这里构造出的 Sender 将传给 router.Setup。
-	if _, err := codesender.New(cfg.CodeSender.Provider, zapLogger); err != nil {
+	// 构造放在 main 而非 router.Setup 里，是因为 Setup 不返回 error，
+	// 在里面构造只能 panic，拿不到这里的启动期 Fatal。
+	sender, err := codesender.New(cfg.CodeSender.Provider, zapLogger)
+	if err != nil {
 		zapLogger.Fatal("Invalid codesender provider", zap.Error(err))
 	}
 
@@ -97,7 +99,7 @@ func main() {
 	}
 
 	// 5. 设置路由 + WebSocket 网关
-	r, wsHandler := router.Setup(db, rdb, st, cfg, zapLogger)
+	r, wsHandler := router.Setup(db, rdb, st, cfg, zapLogger, sender)
 
 	// 6. 启动 HTTP 服务器
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
