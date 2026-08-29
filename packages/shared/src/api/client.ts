@@ -7,6 +7,7 @@
  * - token 临近过期时先静默刷新（tokenManager 单飞行）
  * - 401 时兜底刷新并重试原请求一次，仍失败才抛错
  * - 统一解析后端 `ApiResponse` 信封，code !== 0 时抛出 ApiError
+ * - 204 无响应体的端点直接得到 `undefined`，不进 JSON 解析
  * - BASE URL 由各 app 的 .env（VITE_API_BASE_URL）配置
  */
 import { ensureFreshToken, forceRefresh } from "./tokenManager";
@@ -66,6 +67,11 @@ async function doFetch<T>(path: string, init: RequestInit, token: string | null)
         status: res.status,
       },
     );
+  }
+  // 204 没有响应体，解析 JSON 会抛 SyntaxError；只放行 204 是安全的：
+  // 后端全部错误路径（含限流 429）都吐 { code, message } 信封，唯一的空体来源是 c.Status(204)
+  if (res.status === 204) {
+    return undefined as T;
   }
   const json = (await res.json()) as ApiResponse<T>;
   if (json.code !== 0) {
