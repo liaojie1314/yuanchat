@@ -87,7 +87,7 @@
 - **桌面 + 移动**：Tauri 2（Rust 内核 + WebView，同一套 React UI 全平台复用）
 - **后端**：Go 1.25 + Gin + GORM + gorilla/websocket + MinIO SDK（单进程双端口：REST :8085 + WS :8086，另有 Prometheus :9090）
 - **存储**：PostgreSQL 16 + Redis 7 + MinIO（S3 兼容，用于图片/文件/语音/头像）
-- **测试**：vitest（前端 465）+ go test（集成测试 -race）+ Playwright E2E（58）
+- **测试**：vitest（前端 526）+ go test（13 包，集成测试 -race）+ Playwright E2E（63）
 - **发版**：release-it + GitHub Actions（tag 触发 5 平台并行打包）
 
 ## 快速开始
@@ -163,6 +163,7 @@ pnpm release:dry        # 模拟运行，看会做什么
 - **分支策略**：详见 [`AGENTS.md`](AGENTS.md)
 - **CI 门禁**：push 到 `dev` 分支、以及目标为 `dev` 的 PR 触发 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
   （i18n 完整性门禁 + 前端 test + web/desktop 双端 tsc、Playwright E2E（mock 模式）、后端 go vet/test + `internal/ws` 的 -race）
+- **推远程前先本地跑通 CI**：同一批检查在本地全绿才推 `dev`，前端测试用 `LANG=C.UTF-8 pnpm test` 对齐 runner 语言环境（详见 [`AGENTS.md`](AGENTS.md) 第 14 条）
 
 ## License
 

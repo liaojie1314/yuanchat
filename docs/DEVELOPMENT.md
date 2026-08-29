@@ -567,6 +567,13 @@ npx tauri android build --aab --split-per-abi --target aarch64
 | `pnpm --filter @yuanchat/ui test`              | 仅运行 UI 组件测试                       |
 | `pnpm --filter @yuanchat/design-system test`   | 仅运行设计系统测试                       |
 
+> **本地自测要对齐 CI 的语言环境**：`LANG=C.UTF-8 pnpm test`。
+> Node 21 起 `globalThis.navigator` 内置，`navigator.language` 取自宿主 ICU 语言环境 ——
+> 中文机器报 `zh-CN`，GitHub Ubuntu runner 报 `en-US`。用到 `detectLocale()`、`Intl`、
+> `toLocaleString()` 的用例若不自己打桩，就会「本地全绿、远程报错」。
+> 测试里需要固定语言时，在 `vi.hoisted()` 里 `Object.defineProperty(globalThis, "navigator", …)` 钉死，
+> 别依赖跑测机器的系统语言（范例：`packages/shared/src/__tests__/themeStoreLocaleBoot.test.ts`）。
+
 #### 覆盖率报告
 
 ```

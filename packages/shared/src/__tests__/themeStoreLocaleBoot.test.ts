@@ -47,6 +47,15 @@ vi.hoisted(() => {
     configurable: true,
     value: { localStorage: fakeStorage, matchMedia: () => ({ matches: false }) },
   });
+  // Node 21 起 globalThis 自带 navigator，且 navigator.language 取自宿主 ICU 语言环境
+  // （中文机器报 zh-CN，Ubuntu runner 报 en-US）。不把它钉死，下面那条
+  // 「初始语言来自系统探测」的断言就会随跑测机器的系统语言变来变去。
+  // 选 ja-JP 而非 en-US：en-US 同时是 detectLocale 的兜底分支，桩失效时断言仍会通过；
+  // ja-JP 只可能由这个桩产生，真实 runner 不会报 ja。
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { language: "ja-JP" },
+  });
 });
 
 // 两个 import 的先后就是真实启动顺序：i18n 先初始化（只看得到系统语言），
@@ -63,8 +72,8 @@ describe("冷启动语言恢复", () => {
   });
 
   it("i18n 初始语言来自系统探测，与持久化值无关（证明恢复确实发生过）", () => {
-    // 测试环境 navigator 缺省 → detectLocale() 落到 zh-CN，
-    // 若没有恢复逻辑，上一条断言看到的就会是 zh-CN
-    expect(i18n.options.lng).toBe("zh-CN");
+    // 桩把 navigator.language 钉在 ja-JP → detectLocale() 得 ja-JP；
+    // 持久化值是 ko-KR，若没有恢复逻辑，上一条断言看到的就会是这里的 ja-JP
+    expect(i18n.options.lng).toBe("ja-JP");
   });
 });
