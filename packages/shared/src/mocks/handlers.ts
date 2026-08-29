@@ -113,6 +113,28 @@ function generateCaptchaSvg(): string {
 }
 
 // ========================================
+// A8 认证补全链路的 Mock 常量与可变状态
+// ========================================
+
+/** 唯一被接受的验证码；其余一律回 auth.otpWrong 且不消耗验证码 */
+const MOCK_OTP_CODE = "123456";
+/** 该手机号用于演示 60 秒冷却分支 */
+const MOCK_COOLDOWN_PHONE = "13800138001";
+const MOCK_RESET_TICKET = "mock-reset-ticket";
+const MOCK_QR_TOKEN = "mock-qr-token";
+/** 轮询密钥：只在建会话响应里给出，不进二维码内容 */
+const MOCK_QR_POLL_SECRET = "mock-qr-poll-secret";
+/** 会话存活秒数，与服务端 expires_in 同义（秒） */
+const MOCK_QR_TTL_SECONDS = 120;
+
+/** 票据是否已被消费，用于验证单次消费语义 */
+let mockResetTicketUsed = false;
+/** 轮询次数，驱动 pending → scanned → confirmed 的状态推进 */
+let mockQrPollCount = 0;
+/** 令牌是否已被取走，取走后会话即销毁（再轮询回 404） */
+let mockQrTokensClaimed = false;
+
+// ========================================
 // 辅助函数
 // ========================================
 
@@ -563,6 +585,151 @@ export const handlers = [
     const messageId = String(params.messageId);
     mockFavorites = mockFavorites.filter((f) => f.message_id !== messageId);
     return apiOk({ message: "removed" });
+  }),
+
+  // ==================================================
+  // A8 认证补全链路
+  // ==================================================
+
+  // --------------------------------------------------
+  // 改密第 1 步 — 下发验证码
+  // POST /api/v1/auth/password/otp
+  // 未注册手机号与已注册的响应完全一致（同 204、同空体），避免暴露注册状态
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/auth/password/otp", async ({ request }) => {
+    await delay(300);
+    const body = (await request.json()) as { phone?: string };
+    if (!body.phone) {
+      return apiError(400, "auth.otpRequired");
+    }
+    if (body.phone === MOCK_COOLDOWN_PHONE) {
+      return HttpResponse.json({ code: 429, message: "auth.sendFailed" }, { status: 429 });
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // --------------------------------------------------
+  // 改密第 2 步 — 校验验证码换一次性票据
+  // POST /api/v1/auth/password/verify
+  // 码错不消耗验证码，用户可原地重输
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/auth/password/verify", async ({ request }) => {
+    await delay(300);
+    const body = (await request.json()) as { phone?: string; code?: string };
+    if (!body.phone || !body.code) {
+      return apiError(400, "auth.otpRequired");
+    }
+    if (body.code !== MOCK_OTP_CODE) {
+      return apiError(400, "auth.otpWrong");
+    }
+    return apiOk({ reset_ticket: MOCK_RESET_TICKET, expires_in: 300 });
+  }),
+
+  // --------------------------------------------------
+  // 改密第 3 步 — 用票据设置新密码
+  // POST /api/v1/auth/password/reset
+  // 票据单次消费；弱密码被拒时票据不消耗
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/auth/password/reset", async ({ request }) => {
+    await delay(300);
+    const body = (await request.json()) as { reset_ticket?: string; new_password?: string };
+    if (!body.reset_ticket || !body.new_password) {
+      return apiError(400, "auth.resetFailed");
+    }
+    if (body.reset_ticket !== MOCK_RESET_TICKET || mockResetTicketUsed) {
+      return apiError(400, "auth.resetFailed");
+    }
+    if (!/[a-z]/.test(body.new_password)) {
+      return apiError(400, "validation.passwordLowercase");
+    }
+    mockResetTicketUsed = true;
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // --------------------------------------------------
+  // 扫码登录 — 建会话（被扫端，公开）
+  // POST /api/v1/auth/qr/session
+  // poll_secret 只在此处下发，绝不进 qr_payload
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/auth/qr/session", async () => {
+    await delay(200);
+    mockQrPollCount = 0;
+    mockQrTokensClaimed = false;
+    return apiOk({
+      qr_token: MOCK_QR_TOKEN,
+      qr_payload: "yuanchat://login?t=" + MOCK_QR_TOKEN,
+      expires_in: MOCK_QR_TTL_SECONDS,
+      poll_secret: MOCK_QR_POLL_SECRET,
+    });
+  }),
+
+  // --------------------------------------------------
+  // 扫码登录 — 轮询（被扫端，公开但必须带 X-Qr-Poll-Secret）
+  // GET /api/v1/auth/qr/:token
+  // 前两次 pending/scanned，第三次 confirmed 并交出令牌；令牌只能取走一次
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/auth/qr/:token", async ({ params, request }) => {
+    await delay(120);
+    if (request.headers.get("X-Qr-Poll-Secret") !== MOCK_QR_POLL_SECRET) {
+      return HttpResponse.json({ code: 403, message: "auth.qrFailed" }, { status: 403 });
+    }
+    if (String(params.token) !== MOCK_QR_TOKEN || mockQrTokensClaimed) {
+      return HttpResponse.json({ code: 404, message: "auth.qrExpired" }, { status: 404 });
+    }
+
+    mockQrPollCount += 1;
+    const remaining = Math.max(0, MOCK_QR_TTL_SECONDS - mockQrPollCount * 2);
+    if (mockQrPollCount === 1) {
+      return apiOk({ status: "pending", expires_in: remaining });
+    }
+    if (mockQrPollCount === 2) {
+      return apiOk({ status: "scanned", expires_in: remaining });
+    }
+
+    mockQrTokensClaimed = true;
+    return apiOk({
+      status: "confirmed",
+      expires_in: 0,
+      tokens: {
+        access_token: "mock-qr-access-token",
+        refresh_token: "mock-qr-refresh-token",
+        expires_in: 900,
+      },
+    });
+  }),
+
+  // --------------------------------------------------
+  // 扫码登录 — 扫描（扫码端，需 Bearer 令牌）
+  // POST /api/v1/auth/qr/:token/scan
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/auth/qr/:token/scan", async ({ params }) => {
+    await delay(150);
+    if (String(params.token) !== MOCK_QR_TOKEN) {
+      return HttpResponse.json({ code: 404, message: "auth.qrExpired" }, { status: 404 });
+    }
+    return apiOk({ nickname: MOCK_USER.nickname, avatar_url: MOCK_USER.avatar_url });
+  }),
+
+  // --------------------------------------------------
+  // 扫码登录 — 确认（扫码端，需 Bearer 令牌）
+  // POST /api/v1/auth/qr/:token/confirm
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/auth/qr/:token/confirm", async ({ params }) => {
+    await delay(150);
+    if (String(params.token) !== MOCK_QR_TOKEN) {
+      return HttpResponse.json({ code: 404, message: "auth.qrExpired" }, { status: 404 });
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // --------------------------------------------------
+  // 退出登录
+  // POST /api/v1/auth/logout
+  // 服务端不吊销令牌，客户端删本地令牌即为登出
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/auth/logout", async () => {
+    await delay(100);
+    return new HttpResponse(null, { status: 204 });
   }),
 
   // --------------------------------------------------
