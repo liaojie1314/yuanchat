@@ -4,9 +4,11 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"github.com/yuanchat/server/internal/pkg/jwt"
 	"github.com/yuanchat/server/internal/repository"
 	"github.com/yuanchat/server/internal/service"
 	"github.com/yuanchat/server/internal/testutil"
@@ -28,7 +30,9 @@ func newPasswordResetEngine(t *testing.T) (*gin.Engine, *redis.Client) {
 	svc := service.NewAuthService(
 		repository.NewUserRepository(nil),
 		repository.NewVerificationCodeRepository(nil),
-		rdb, noopSender{}, zap.NewNop(),
+		rdb, noopSender{},
+		jwt.NewGenerator("handler-auth-test-secret", time.Hour, 24*time.Hour),
+		zap.NewNop(),
 	)
 	h := NewAuthHandler(svc, zap.NewNop())
 

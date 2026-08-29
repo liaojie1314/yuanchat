@@ -1,4 +1,4 @@
-// Package service 的 auth 部分负责忘记密码链路与账号级登录防护。
+// Package service 的 auth 部分负责忘记密码链路、账号级登录防护与扫码登录。
 package service
 
 import (
@@ -15,6 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/pkg/codesender"
+	"github.com/yuanchat/server/internal/pkg/jwt"
 	"github.com/yuanchat/server/internal/pkg/password"
 	"github.com/yuanchat/server/internal/repository"
 	"go.uber.org/zap"
@@ -37,7 +38,7 @@ var (
 	ErrTicketInvalid = errors.New("invalid reset ticket")
 )
 
-// AuthService 编排忘记密码的三段式流程与账号级登录防护。
+// AuthService 编排忘记密码的三段式流程、账号级登录防护与扫码登录状态机。
 //
 // 与 UserService 分开是因为本服务依赖 Redis 与验证码下发通道，
 // 而注册 / 登录 / 资料那条链路不需要它们。
@@ -46,18 +47,23 @@ type AuthService struct {
 	codes  *repository.VerificationCodeRepository
 	rdb    *redis.Client
 	sender codesender.Sender
+	jwtGen *jwt.Generator
 	logger *zap.Logger
 }
 
-// NewAuthService 构造忘记密码与登录防护服务。
+// NewAuthService 构造忘记密码、登录防护与扫码登录服务。
+//
+// jwtGen 是扫码确认时签发令牌用的签发器，与登录链路共用同一个实例，
+// 否则扫码换出的令牌会用另一把密钥签名，其他端一律验不过。
 func NewAuthService(
 	repo *repository.UserRepository,
 	codes *repository.VerificationCodeRepository,
 	rdb *redis.Client,
 	sender codesender.Sender,
+	jwtGen *jwt.Generator,
 	logger *zap.Logger,
 ) *AuthService {
-	return &AuthService{repo: repo, codes: codes, rdb: rdb, sender: sender, logger: logger}
+	return &AuthService{repo: repo, codes: codes, rdb: rdb, sender: sender, jwtGen: jwtGen, logger: logger}
 }
 
 // Redis 键一律带 auth:pwd: 命名空间，避免与既有 captcha 的裸键混在一起。

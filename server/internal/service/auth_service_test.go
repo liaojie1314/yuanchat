@@ -10,6 +10,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/yuanchat/server/internal/model"
+	"github.com/yuanchat/server/internal/pkg/jwt"
 	"github.com/yuanchat/server/internal/pkg/password"
 	"github.com/yuanchat/server/internal/repository"
 	"github.com/yuanchat/server/internal/testutil"
@@ -61,7 +62,9 @@ func newAuthFixture(t *testing.T) *authFixture {
 	svc := NewAuthService(
 		repository.NewUserRepository(db),
 		repository.NewVerificationCodeRepository(db),
-		rdb, sender, zap.NewNop(),
+		rdb, sender,
+		jwt.NewGenerator("auth-fixture-secret", time.Hour, 24*time.Hour),
+		zap.NewNop(),
 	)
 	return &authFixture{svc: svc, rdb: rdb, mr: mr, db: db, sender: sender}
 }

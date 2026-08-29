@@ -56,7 +56,7 @@ func Setup(
 	sidGen := shortid.NewGenerator(db)
 
 	userSvc := service.NewUserService(userRepo, jwtGen, sidGen, rdb, logger)
-	authSvc := service.NewAuthService(userRepo, repository.NewVerificationCodeRepository(db), rdb, sender, logger)
+	authSvc := service.NewAuthService(userRepo, repository.NewVerificationCodeRepository(db), rdb, sender, jwtGen, logger)
 	msgSvc := service.NewMessageService(msgRepo, convRepo, userRepo, reactionRepo, blocklistRepo, logger)
 	convSvc := service.NewConversationService(convRepo, msgRepo, contactRepo, userRepo, logger)
 	contactSvc := service.NewContactService(contactRepo, userRepo, logger)
