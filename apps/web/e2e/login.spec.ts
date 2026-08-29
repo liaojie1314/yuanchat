@@ -39,15 +39,15 @@ test.describe("Login Flow", () => {
     await expect(page.getByText("密码长度至少 8 位")).toBeVisible();
   });
 
-  test("shows error for weak password (missing special char)", async ({ page }) => {
+  test("shows error for weak password (contains whitespace)", async ({ page }) => {
     await loginPage.yuanchatIdInput.fill("testuser");
-    await loginPage.passwordInput.fill("Abc12345");
+    await loginPage.passwordInput.fill("Abcdef 12");
     await loginPage.loginButton.click();
-    await expect(page.getByText("密码需包含特殊字符")).toBeVisible();
+    await expect(page.getByText("密码不能包含空白字符")).toBeVisible();
   });
 
   test("shows error for wrong credentials", async ({ page }) => {
-    // 使用满足客户端校验的密码（8+ 位、大小写+数字+特殊字符），
+    // 使用满足客户端校验的密码（8-64 字节、含大小写与数字、无空白），
     // 但 MSW mock 将此密码视为错误凭据
     await loginPage.login("testuser", "Wrong@1234");
     await expect(page.getByText("账号或密码错误")).toBeVisible();

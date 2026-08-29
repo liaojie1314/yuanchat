@@ -35,10 +35,56 @@ describe("validatePassword", () => {
     expect(r.errors).toContain("validation.passwordDigit");
   });
 
-  it("rejects password without special character", () => {
-    const r = validatePassword("Abc12345");
+  it("accepts a password without special character", () => {
+    const r = validatePassword("Abcdef12");
+    expect(r.valid).toBe(true);
+    expect(r.errors).not.toContain("validation.passwordSpecial");
+  });
+
+  it("accepts a password of exactly 8 bytes", () => {
+    expect(validatePassword("Abcdefg1").valid).toBe(true);
+  });
+
+  it("accepts a password of exactly 64 bytes", () => {
+    const pw = "Aa1".repeat(21) + "A";
+    expect(new TextEncoder().encode(pw).length).toBe(64);
+    expect(validatePassword(pw).valid).toBe(true);
+  });
+
+  it("rejects a password of 65 bytes", () => {
+    const pw = "Aa1".repeat(21) + "Aa";
+    expect(new TextEncoder().encode(pw).length).toBe(65);
+    const r = validatePassword(pw);
     expect(r.valid).toBe(false);
-    expect(r.errors).toContain("validation.passwordSpecial");
+    expect(r.errors).toContain("validation.passwordMaxLength");
+  });
+
+  it("measures length in bytes, not UTF-16 code units", () => {
+    // 22 个汉字 = 22 个字符但 66 字节，按字符算会放行、被 bcrypt 静默截断
+    const pw = "密".repeat(22);
+    expect(pw.length).toBe(22);
+    expect(new TextEncoder().encode(pw).length).toBe(66);
+    expect(validatePassword(pw).errors).toContain("validation.passwordMaxLength");
+  });
+
+  it("accepts a multi-byte password within 64 bytes", () => {
+    const pw = "Aa1" + "密码密码";
+    expect(new TextEncoder().encode(pw).length).toBe(15);
+    expect(validatePassword(pw).valid).toBe(true);
+  });
+
+  it("rejects password containing a space", () => {
+    const r = validatePassword("Abcdef 12");
+    expect(r.valid).toBe(false);
+    expect(r.errors).toContain("validation.passwordNoWhitespace");
+  });
+
+  it("rejects password containing a tab", () => {
+    expect(validatePassword("Abcdef\t12").errors).toContain("validation.passwordNoWhitespace");
+  });
+
+  it("rejects password containing a newline", () => {
+    expect(validatePassword("Abcdef\n12").errors).toContain("validation.passwordNoWhitespace");
   });
 
   it("returns multiple errors for a weak password", () => {
