@@ -43,8 +43,8 @@ func (e *qrEnv) bearerFor(t *testing.T, user *model.User) string {
 	return pair.AccessToken
 }
 
-// newQRSession 建一个扫码会话，返回其一次性凭据。
-func (e *qrEnv) newQRSession(t *testing.T, deviceID string) string {
+// newQRSession 建一个扫码会话，返回其一次性凭据与只交给发起端的轮询密钥。
+func (e *qrEnv) newQRSession(t *testing.T, deviceID string) (string, string) {
 	t.Helper()
 	w := postJSON(e.r, "/api/v1/auth/qr/session", `{"device_id":"`+deviceID+`"}`)
 	if w.Code != http.StatusOK {
@@ -52,9 +52,10 @@ func (e *qrEnv) newQRSession(t *testing.T, deviceID string) string {
 	}
 	var created struct {
 		Data struct {
-			QRToken   string `json:"qr_token"`
-			QRPayload string `json:"qr_payload"`
-			ExpiresIn int    `json:"expires_in"`
+			QRToken    string `json:"qr_token"`
+			QRPayload  string `json:"qr_payload"`
+			ExpiresIn  int    `json:"expires_in"`
+			PollSecret string `json:"poll_secret"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
@@ -66,7 +67,14 @@ func (e *qrEnv) newQRSession(t *testing.T, deviceID string) string {
 	if created.Data.QRPayload != "yuanchat://login?t="+created.Data.QRToken {
 		t.Fatalf("qr_payload = %q", created.Data.QRPayload)
 	}
-	return created.Data.QRToken
+	if created.Data.PollSecret == "" {
+		t.Fatalf("session 未返回 poll_secret: %s", w.Body.String())
+	}
+	// 密钥只回给发起端；进了二维码内容，绑定发起方就失效了
+	if strings.Contains(created.Data.QRPayload, created.Data.PollSecret) {
+		t.Fatalf("qr_payload 里出现了 poll_secret: %s", w.Body.String())
+	}
+	return created.Data.QRToken, created.Data.PollSecret
 }
 
 // postAuthed 发一个带 Bearer 令牌的 POST；token 为空表示匿名请求。
@@ -80,9 +88,12 @@ func postAuthed(r *gin.Engine, token, target string) *httptest.ResponseRecorder 
 	return w
 }
 
-// getPath 发一个匿名 GET。
-func getPath(r *gin.Engine, target string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodGet, target, nil)
+// getPoll 发一次轮询请求；pollSecret 为空表示不带 X-Qr-Poll-Secret 请求头。
+func getPoll(r *gin.Engine, qrToken, pollSecret string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/qr/"+qrToken, nil)
+	if pollSecret != "" {
+		req.Header.Set("X-Qr-Poll-Secret", pollSecret)
+	}
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	return w
@@ -97,10 +108,10 @@ func TestQRLoginFlowLogsInScannedUser(t *testing.T) {
 	user := newResetUser(t, env.db, "Qrpass123")
 	bearer := env.bearerFor(t, user)
 
-	qrToken := env.newQRSession(t, "desktop")
+	qrToken, pollSecret := env.newQRSession(t, "desktop")
 
 	// 未被扫时只回 pending
-	w := getPath(env.r, "/api/v1/auth/qr/"+qrToken)
+	w := getPoll(env.r, qrToken, pollSecret)
 	if w.Code != http.StatusOK {
 		t.Fatalf("poll status = %d, want 200, body=%s", w.Code, w.Body.String())
 	}
@@ -118,7 +129,7 @@ func TestQRLoginFlowLogsInScannedUser(t *testing.T) {
 	}
 
 	// 已扫未确认时仍不得下发令牌
-	w = getPath(env.r, "/api/v1/auth/qr/"+qrToken)
+	w = getPoll(env.r, qrToken, pollSecret)
 	if !strings.Contains(w.Body.String(), `"status":"scanned"`) {
 		t.Fatalf("poll body = %s, want status scanned", w.Body.String())
 	}
@@ -136,7 +147,7 @@ func TestQRLoginFlowLogsInScannedUser(t *testing.T) {
 	}
 
 	// 被扫端取走令牌
-	w = getPath(env.r, "/api/v1/auth/qr/"+qrToken)
+	w = getPoll(env.r, qrToken, pollSecret)
 	if w.Code != http.StatusOK {
 		t.Fatalf("poll status = %d, want 200, body=%s", w.Code, w.Body.String())
 	}
@@ -177,7 +188,59 @@ func TestQRLoginFlowLogsInScannedUser(t *testing.T) {
 	}
 
 	// 令牌只能取一次
-	if w := getPath(env.r, "/api/v1/auth/qr/"+qrToken); w.Code != http.StatusNotFound {
+	if w := getPoll(env.r, qrToken, pollSecret); w.Code != http.StatusNotFound {
+		t.Fatalf("第二次轮询 status = %d, want 404, body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestQRPollRequiresPollSecret 轮询必须带 X-Qr-Poll-Secret，缺了或错了都拿不到令牌。
+//
+// 这条守的是「公共场合拍到二维码的人抢先取走令牌」那个攻击：
+// 他手上只有 qr_token，没有建会话时才回给发起端的密钥。
+func TestQRPollRequiresPollSecret(t *testing.T) {
+	env := newQREnv(t)
+	user := newResetUser(t, env.db, "Qrpass123")
+	bearer := env.bearerFor(t, user)
+	qrToken, pollSecret := env.newQRSession(t, "web")
+
+	// 缺密钥：连状态都不给
+	w := getPoll(env.r, qrToken, "")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("缺密钥 status = %d, want 403, body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "auth.qrFailed") {
+		t.Fatalf("body = %s, want auth.qrFailed", w.Body.String())
+	}
+
+	if w := postAuthed(env.r, bearer, "/api/v1/auth/qr/"+qrToken+"/scan"); w.Code != http.StatusOK {
+		t.Fatalf("scan status = %d, want 200, body=%s", w.Code, w.Body.String())
+	}
+	if w := postAuthed(env.r, bearer, "/api/v1/auth/qr/"+qrToken+"/confirm"); w.Code != http.StatusNoContent {
+		t.Fatalf("confirm status = %d, want 204, body=%s", w.Code, w.Body.String())
+	}
+
+	// 已确认后仍然一样：错密钥拿不到令牌，也毁不掉令牌
+	w = getPoll(env.r, qrToken, "wrong-poll-secret")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("错密钥 status = %d, want 403, body=%s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "access_token") {
+		t.Fatalf("403 响应泄露了令牌: %s", w.Body.String())
+	}
+	w = getPoll(env.r, qrToken, "")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("缺密钥 status = %d, want 403, body=%s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "access_token") {
+		t.Fatalf("403 响应泄露了令牌: %s", w.Body.String())
+	}
+
+	// 发起端持正确密钥仍能取走，且只有一次
+	w = getPoll(env.r, qrToken, pollSecret)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "access_token") {
+		t.Fatalf("持正确密钥 status = %d body = %s, want 200 + tokens", w.Code, w.Body.String())
+	}
+	if w := getPoll(env.r, qrToken, pollSecret); w.Code != http.StatusNotFound {
 		t.Fatalf("第二次轮询 status = %d, want 404, body=%s", w.Code, w.Body.String())
 	}
 }
@@ -187,7 +250,7 @@ func TestQRLoginFlowLogsInScannedUser(t *testing.T) {
 // 少了鉴权，任何人拿到二维码里的 token 就能给自己授权登录别人的账号。
 func TestQRScanRequiresAuth(t *testing.T) {
 	env := newQREnv(t)
-	qrToken := env.newQRSession(t, "web")
+	qrToken, _ := env.newQRSession(t, "web")
 
 	if w := postAuthed(env.r, "", "/api/v1/auth/qr/"+qrToken+"/scan"); w.Code != http.StatusUnauthorized {
 		t.Fatalf("匿名 scan status = %d, want 401, body=%s", w.Code, w.Body.String())
@@ -201,7 +264,7 @@ func TestQRScanRequiresAuth(t *testing.T) {
 func TestQRConfirmWithoutScanReturns409(t *testing.T) {
 	env := newQREnv(t)
 	user := newResetUser(t, env.db, "Qrpass123")
-	qrToken := env.newQRSession(t, "web")
+	qrToken, _ := env.newQRSession(t, "web")
 
 	w := postAuthed(env.r, env.bearerFor(t, user), "/api/v1/auth/qr/"+qrToken+"/confirm")
 	if w.Code != http.StatusConflict {
@@ -217,7 +280,7 @@ func TestQRConfirmByAnotherUserReturns403(t *testing.T) {
 	env := newQREnv(t)
 	scanner := newResetUser(t, env.db, "Qrpass123")
 	attacker := newResetUser(t, env.db, "Qrpass456")
-	qrToken := env.newQRSession(t, "web")
+	qrToken, _ := env.newQRSession(t, "web")
 
 	if w := postAuthed(env.r, env.bearerFor(t, scanner),
 		"/api/v1/auth/qr/"+qrToken+"/scan"); w.Code != http.StatusOK {
@@ -237,14 +300,14 @@ func TestQRConfirmByAnotherUserReturns403(t *testing.T) {
 func TestQRBannedScannerReturns403(t *testing.T) {
 	env := newQREnv(t)
 	banned := newBannedUser(t, env.db)
-	qrToken := env.newQRSession(t, "web")
+	qrToken, pollSecret := env.newQRSession(t, "web")
 
 	w := postAuthed(env.r, env.bearerFor(t, banned), "/api/v1/auth/qr/"+qrToken+"/scan")
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403, body=%s", w.Code, w.Body.String())
 	}
 
-	if w := getPath(env.r, "/api/v1/auth/qr/"+qrToken); !strings.Contains(w.Body.String(), `"status":"pending"`) {
+	if w := getPoll(env.r, qrToken, pollSecret); !strings.Contains(w.Body.String(), `"status":"pending"`) {
 		t.Fatalf("被封禁用户推进了状态: %s", w.Body.String())
 	}
 }

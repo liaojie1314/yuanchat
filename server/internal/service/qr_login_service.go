@@ -6,6 +6,7 @@ package service
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"strconv"
@@ -32,6 +33,7 @@ const (
 const (
 	qrTTL           = 120 * time.Second
 	qrTokenBytes    = 32
+	qrSecretBytes   = 32
 	qrPayloadPrefix = "yuanchat://login?t="
 )
 
@@ -49,6 +51,7 @@ var (
 	ErrQRBadState  = errors.New("qr session state mismatch")
 	ErrQRWrongUser = errors.New("qr session belongs to another user")
 	ErrQRBadDevice = errors.New("unsupported qr device id")
+	ErrQRBadSecret = errors.New("qr poll secret mismatch")
 )
 
 // QRSession 是创建扫码会话后交给被扫端的内容。
@@ -59,6 +62,11 @@ type QRSession struct {
 	QRPayload string `json:"qr_payload"`
 	// ExpiresIn 会话剩余有效期秒数，前端倒计时以此初始化
 	ExpiresIn int `json:"expires_in"`
+	// PollSecret 轮询凭据，只交给发起端，绝不进 QRPayload
+	//
+	// 二维码里明文带着 QRToken，被拍照即泄露；没有这个密钥，
+	// 拍到二维码的人就无法在受害者确认的那一刻抢先取走令牌。
+	PollSecret string `json:"poll_secret"`
 }
 
 // QRPollResult 是被扫端轮询的结果。
@@ -79,6 +87,9 @@ type QRScanResult struct {
 
 // qrKey 拼接带命名空间的会话键。
 func qrKey(qrToken string) string { return "auth:qr:" + qrToken }
+
+// qrFieldPollSecret 是会话 Hash 里存放轮询密钥的字段名。
+const qrFieldPollSecret = "poll_secret"
 
 // qrAdvance 原子地校验会话状态与归属再推进，附带写入任意字段。
 //
@@ -122,12 +133,13 @@ redis.call('DEL', KEYS[1])
 return {st, '0', at, rt, ei}
 `)
 
-// CreateQRSession 创建扫码会话，返回二维码内容与有效期。
+// CreateQRSession 创建扫码会话，返回二维码内容、有效期与只交给发起端的轮询密钥。
 //
 // deviceID 是被扫端声明的平台标识（web / desktop），空串按 web 处理；
 // 换出的令牌用它当 did，因为扫码登录的设备是被扫端而不是扫码端。
-// qrToken 是 32 字节密码学随机数：它是这条链路的唯一凭据，猜中即等于窃取一次登录，
+// qrToken 是 32 字节密码学随机数：它是这条链路的公开凭据，猜中即等于窃取一次登录，
 // 因此绝不能用可预测的自增或 math/rand。
+// pollSecret 同规格随机数，但只出现在响应里、不进二维码：轮询取令牌必须同时持有它。
 func (s *AuthService) CreateQRSession(ctx context.Context, deviceID string) (*QRSession, error) {
 	if deviceID == "" {
 		deviceID = "web"
@@ -140,12 +152,17 @@ func (s *AuthService) CreateQRSession(ctx context.Context, deviceID string) (*QR
 	if err != nil {
 		return nil, fmt.Errorf("generate qr token: %w", err)
 	}
+	pollSecret, err := randomToken(qrSecretBytes)
+	if err != nil {
+		return nil, fmt.Errorf("generate qr poll secret: %w", err)
+	}
 
 	pipe := s.rdb.TxPipeline()
 	pipe.HSet(ctx, qrKey(qrToken),
 		"status", string(QRPending),
 		"user_id", "",
 		"device_id", deviceID,
+		qrFieldPollSecret, pollSecret,
 	)
 	pipe.Expire(ctx, qrKey(qrToken), qrTTL)
 	if _, err := pipe.Exec(ctx); err != nil {
@@ -153,16 +170,31 @@ func (s *AuthService) CreateQRSession(ctx context.Context, deviceID string) (*QR
 	}
 
 	return &QRSession{
-		QRToken:   qrToken,
-		QRPayload: qrPayloadPrefix + qrToken,
-		ExpiresIn: int(qrTTL.Seconds()),
+		QRToken:    qrToken,
+		QRPayload:  qrPayloadPrefix + qrToken,
+		ExpiresIn:  int(qrTTL.Seconds()),
+		PollSecret: pollSecret,
 	}, nil
 }
 
 // PollQRSession 查询会话状态；状态为 confirmed 时取走令牌并销毁会话。
 //
+// pollSecret 必须与建会话时下发给发起端的密钥一致，否则连状态都不返回：
+// 二维码可以被拍照，密钥不会，所以它才是「轮询者就是发起方」的唯一证明。
 // 会话不存在与已过期返回同一个错误：区分二者会让攻击者能探测某个码是否曾经存在。
-func (s *AuthService) PollQRSession(ctx context.Context, qrToken string) (*QRPollResult, error) {
+func (s *AuthService) PollQRSession(ctx context.Context, qrToken, pollSecret string) (*QRPollResult, error) {
+	want, err := s.rdb.HGet(ctx, qrKey(qrToken), qrFieldPollSecret).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil, ErrQRNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read qr poll secret: %w", err)
+	}
+	// 定长比较，不用 == ：逐字节短路会把密钥的正确前缀长度泄露成响应时间
+	if subtle.ConstantTimeCompare([]byte(want), []byte(pollSecret)) != 1 {
+		return nil, ErrQRBadSecret
+	}
+
 	vals, err := qrClaim.Run(ctx, s.rdb, []string{qrKey(qrToken)}, string(QRConfirmed)).StringSlice()
 	if errors.Is(err, redis.Nil) {
 		return nil, ErrQRNotFound

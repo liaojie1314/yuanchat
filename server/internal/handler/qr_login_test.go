@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,6 +47,46 @@ func newQRLoginEngine(t *testing.T) (*gin.Engine, *redis.Client) {
 	return r, rdb
 }
 
+// doPoll 发一次轮询请求；pollSecret 为空表示完全不带 X-Qr-Poll-Secret 请求头。
+//
+// 密钥走请求头而不是 query，是为了不让它进 access log。
+func doPoll(t *testing.T, r *gin.Engine, qrToken, pollSecret string) (*httptest.ResponseRecorder, apiResp) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/qr/"+qrToken, nil)
+	if pollSecret != "" {
+		req.Header.Set("X-Qr-Poll-Secret", pollSecret)
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	var resp apiResp
+	if w.Body.Len() > 0 {
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response %q: %v", w.Body.String(), err)
+		}
+	}
+	return w, resp
+}
+
+// newConfirmedSession 预置一个已确认的会话，返回其凭据与轮询密钥。
+func newConfirmedSession(t *testing.T, rdb *redis.Client) (string, string) {
+	t.Helper()
+	const qrToken = "confirmed-session-token"
+	const pollSecret = "confirmed-session-poll-secret"
+	if err := rdb.HSet(t.Context(), "auth:qr:"+qrToken,
+		"status", "confirmed",
+		"user_id", testUserID.String(),
+		"device_id", "web",
+		"poll_secret", pollSecret,
+		"access_token", "header.access.sig",
+		"refresh_token", "header.refresh.sig",
+		"token_expires_in", "900",
+	).Err(); err != nil {
+		t.Fatalf("预置已确认会话: %v", err)
+	}
+	return qrToken, pollSecret
+}
+
 // TestQRSessionReturnsPayloadAndExpiresIn 建会话必须回二维码内容与有效期。
 //
 // expires_in 是前端倒计时的唯一来源，缺了它页面只能继续写死 60 秒。
@@ -64,6 +107,14 @@ func TestQRSessionReturnsPayloadAndExpiresIn(t *testing.T) {
 	}
 	if expiresIn, _ := resp.Data["expires_in"].(float64); expiresIn != 120 {
 		t.Fatalf("expires_in = %v, want 120", resp.Data["expires_in"])
+	}
+	pollSecret, _ := resp.Data["poll_secret"].(string)
+	if pollSecret == "" {
+		t.Fatalf("未返回 poll_secret: %s", w.Body.String())
+	}
+	// 密钥只回给发起端，绝不能出现在二维码内容里
+	if payload, _ := resp.Data["qr_payload"].(string); strings.Contains(payload, pollSecret) {
+		t.Fatalf("qr_payload 里出现了 poll_secret: %s", w.Body.String())
 	}
 }
 
@@ -95,7 +146,7 @@ func TestQRSessionRequiresJSONBody(t *testing.T) {
 func TestQRPollUnknownTokenReturns404(t *testing.T) {
 	r, _ := newQRLoginEngine(t)
 
-	w, resp := doJSON(t, r, http.MethodGet, "/api/v1/auth/qr/forged-token", nil)
+	w, resp := doPoll(t, r, "forged-token", "irrelevant-secret")
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404, body=%s", w.Code, w.Body.String())
 	}
@@ -112,7 +163,7 @@ func TestQRPollOverlongTokenReturns404(t *testing.T) {
 		long += "a"
 	}
 
-	w, _ := doJSON(t, r, http.MethodGet, "/api/v1/auth/qr/"+long, nil)
+	w, _ := doPoll(t, r, long, "irrelevant-secret")
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404, body=%s", w.Code, w.Body.String())
 	}
@@ -124,8 +175,9 @@ func TestQRPollPendingReturnsCountdown(t *testing.T) {
 
 	_, created := doJSON(t, r, http.MethodPost, "/api/v1/auth/qr/session", map[string]string{})
 	qrToken, _ := created.Data["qr_token"].(string)
+	pollSecret, _ := created.Data["poll_secret"].(string)
 
-	w, resp := doJSON(t, r, http.MethodGet, "/api/v1/auth/qr/"+qrToken, nil)
+	w, resp := doPoll(t, r, qrToken, pollSecret)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
 	}
@@ -143,20 +195,9 @@ func TestQRPollPendingReturnsCountdown(t *testing.T) {
 // TestQRPollConfirmedReturnsTokensOnce 已确认的会话只能换出一套令牌，第二次是 404。
 func TestQRPollConfirmedReturnsTokensOnce(t *testing.T) {
 	r, rdb := newQRLoginEngine(t)
-	const qrToken = "confirmed-session-token"
-	ctx := t.Context()
-	if err := rdb.HSet(ctx, "auth:qr:"+qrToken,
-		"status", "confirmed",
-		"user_id", testUserID.String(),
-		"device_id", "web",
-		"access_token", "header.access.sig",
-		"refresh_token", "header.refresh.sig",
-		"token_expires_in", "900",
-	).Err(); err != nil {
-		t.Fatalf("预置已确认会话: %v", err)
-	}
+	qrToken, pollSecret := newConfirmedSession(t, rdb)
 
-	w, resp := doJSON(t, r, http.MethodGet, "/api/v1/auth/qr/"+qrToken, nil)
+	w, resp := doPoll(t, r, qrToken, pollSecret)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
 	}
@@ -171,12 +212,58 @@ func TestQRPollConfirmedReturnsTokensOnce(t *testing.T) {
 		t.Fatalf("tokens.expires_in = %v, want 900", tokens["expires_in"])
 	}
 
-	w2, resp2 := doJSON(t, r, http.MethodGet, "/api/v1/auth/qr/"+qrToken, nil)
+	w2, resp2 := doPoll(t, r, qrToken, pollSecret)
 	if w2.Code != http.StatusNotFound {
 		t.Fatalf("第二次轮询 status = %d, want 404, body=%s", w2.Code, w2.Body.String())
 	}
 	if resp2.Message != "auth.qrExpired" {
 		t.Fatalf("message = %q, want auth.qrExpired", resp2.Message)
+	}
+}
+
+// TestQRPollWithoutSecretHeaderReturns403 缺 X-Qr-Poll-Secret 请求头一律 403，且不吐令牌。
+//
+// 拍到二维码的人只有 qr_token；这条断言的就是他既拿不到令牌，
+// 也不能靠一次轮询把发起端的令牌销毁掉。
+func TestQRPollWithoutSecretHeaderReturns403(t *testing.T) {
+	r, rdb := newQRLoginEngine(t)
+	qrToken, pollSecret := newConfirmedSession(t, rdb)
+
+	w, resp := doPoll(t, r, qrToken, "")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403, body=%s", w.Code, w.Body.String())
+	}
+	if resp.Message != "auth.qrFailed" {
+		t.Fatalf("message = %q, want auth.qrFailed", resp.Message)
+	}
+	if strings.Contains(w.Body.String(), "access_token") {
+		t.Fatalf("403 响应泄露了令牌: %s", w.Body.String())
+	}
+
+	// 令牌还在，发起端仍能取走
+	ok, okResp := doPoll(t, r, qrToken, pollSecret)
+	if ok.Code != http.StatusOK {
+		t.Fatalf("持正确密钥 status = %d, want 200, body=%s", ok.Code, ok.Body.String())
+	}
+	if tokens, _ := okResp.Data["tokens"].(map[string]any); tokens == nil {
+		t.Fatalf("持正确密钥必须取到令牌: %s", ok.Body.String())
+	}
+}
+
+// TestQRPollWithWrongSecretHeaderReturns403 密钥不匹配同样 403 且不吐令牌。
+func TestQRPollWithWrongSecretHeaderReturns403(t *testing.T) {
+	r, rdb := newQRLoginEngine(t)
+	qrToken, _ := newConfirmedSession(t, rdb)
+
+	w, resp := doPoll(t, r, qrToken, "not-the-right-secret")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403, body=%s", w.Code, w.Body.String())
+	}
+	if resp.Message != "auth.qrFailed" {
+		t.Fatalf("message = %q, want auth.qrFailed", resp.Message)
+	}
+	if strings.Contains(w.Body.String(), "access_token") {
+		t.Fatalf("403 响应泄露了令牌: %s", w.Body.String())
 	}
 }
 

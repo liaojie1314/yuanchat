@@ -18,6 +18,11 @@ import (
 // 免得把任意长度的字符串拼进 Redis 键。
 const qrTokenMaxLen = 64
 
+// qrPollSecretHeader 是轮询密钥的请求头名。
+//
+// 走请求头而不是 query，是为了不让密钥落进 access log 与浏览器历史。
+const qrPollSecretHeader = "X-Qr-Poll-Secret"
+
 // CreateQRSessionRequest 是创建扫码会话的请求体。
 //
 // DeviceID 是被扫端自报的平台标识，换出的令牌用它当 device_id；
@@ -55,12 +60,17 @@ func (h *AuthHandler) CreateQRSession(c *gin.Context) {
 
 // PollQRSession 查询会话状态，状态为 confirmed 时返回令牌对并销毁会话。
 //
+// 必须带 X-Qr-Poll-Secret：该密钥只在建会话的响应里给过发起端，
+// 二维码里没有它，因此拍到二维码的人无法抢先取走令牌。
+//
 //	@Summary		轮询扫码会话状态
 //	@Tags			auth
 //	@Produce		json
-//	@Param			token	path		string	true	"会话凭据"
-//	@Success		200		{object}	Response
-//	@Failure		404		{object}	Response
+//	@Param			token				path		string	true	"会话凭据"
+//	@Param			X-Qr-Poll-Secret	header		string	true	"建会话时下发的轮询密钥"
+//	@Success		200					{object}	Response
+//	@Failure		403					{object}	Response
+//	@Failure		404					{object}	Response
 //	@Router			/api/v1/auth/qr/{token} [get]
 func (h *AuthHandler) PollQRSession(c *gin.Context) {
 	qrToken := c.Param("token")
@@ -69,7 +79,7 @@ func (h *AuthHandler) PollQRSession(c *gin.Context) {
 		return
 	}
 
-	res, err := h.svc.PollQRSession(c.Request.Context(), qrToken)
+	res, err := h.svc.PollQRSession(c.Request.Context(), qrToken, c.GetHeader(qrPollSecretHeader))
 	if err != nil {
 		h.qrError(c, err)
 		return
@@ -145,11 +155,14 @@ func (h *AuthHandler) ConfirmQRSession(c *gin.Context) {
 // qrError 把扫码链路的哨兵错误映射成状态码与 i18n key。
 //
 // 会话不存在与已过期共用 404 + auth.qrExpired：区分二者等于给出「这个码曾经存在」的探针。
+// 轮询密钥不匹配是 403：它与状态机无关，只说明请求方不是建会话的那一端。
 // 封禁沿用登录与续期既有的 403 + 40301 + "account banned"，不另造一套。
 func (h *AuthHandler) qrError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrQRNotFound):
 		Error(c, http.StatusNotFound, 404, "auth.qrExpired")
+	case errors.Is(err, service.ErrQRBadSecret):
+		Error(c, http.StatusForbidden, 403, "auth.qrFailed")
 	case errors.Is(err, service.ErrQRBadState):
 		Error(c, http.StatusConflict, 409, "auth.qrBadState")
 	case errors.Is(err, service.ErrQRWrongUser):

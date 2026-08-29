@@ -81,7 +81,7 @@ func TestQRSessionCreatesPendingSessionWithTTL(t *testing.T) {
 		t.Fatalf("会话 TTL = %v, want ≈120s", d)
 	}
 
-	got, err := f.svc.PollQRSession(ctx, sess.QRToken)
+	got, err := f.svc.PollQRSession(ctx, sess.QRToken, sess.PollSecret)
 	if err != nil {
 		t.Fatalf("轮询失败: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestQRHappyPathIssuesTokensForScanner(t *testing.T) {
 		t.Fatalf("确认授权失败: %v", err)
 	}
 
-	got, err := f.svc.PollQRSession(ctx, sess.QRToken)
+	got, err := f.svc.PollQRSession(ctx, sess.QRToken, sess.PollSecret)
 	if err != nil {
 		t.Fatalf("轮询失败: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestQRSessionDefaultsDeviceToWeb(t *testing.T) {
 	if err := f.svc.ConfirmQRSession(ctx, sess.QRToken, user.ID); err != nil {
 		t.Fatalf("确认授权失败: %v", err)
 	}
-	got, err := f.svc.PollQRSession(ctx, sess.QRToken)
+	got, err := f.svc.PollQRSession(ctx, sess.QRToken, sess.PollSecret)
 	if err != nil {
 		t.Fatalf("轮询失败: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestQRScannedPollDoesNotLeakTokens(t *testing.T) {
 		t.Fatalf("标记已扫失败: %v", err)
 	}
 
-	got, err := f.svc.PollQRSession(ctx, sess.QRToken)
+	got, err := f.svc.PollQRSession(ctx, sess.QRToken, sess.PollSecret)
 	if err != nil {
 		t.Fatalf("轮询失败: %v", err)
 	}
@@ -262,10 +262,10 @@ func TestQRTokensCanBeClaimedOnlyOnce(t *testing.T) {
 		t.Fatalf("确认授权失败: %v", err)
 	}
 
-	if _, err := f.svc.PollQRSession(ctx, sess.QRToken); err != nil {
+	if _, err := f.svc.PollQRSession(ctx, sess.QRToken, sess.PollSecret); err != nil {
 		t.Fatalf("首次取走令牌失败: %v", err)
 	}
-	if _, err := f.svc.PollQRSession(ctx, sess.QRToken); !errors.Is(err, ErrQRNotFound) {
+	if _, err := f.svc.PollQRSession(ctx, sess.QRToken, sess.PollSecret); !errors.Is(err, ErrQRNotFound) {
 		t.Fatalf("err = %v, want ErrQRNotFound（会话应已被消费）", err)
 	}
 	if n, err := f.rdb.Exists(ctx, "auth:qr:"+sess.QRToken).Result(); err != nil || n != 0 {
@@ -343,7 +343,7 @@ func TestQRExpiredSessionIsNotFound(t *testing.T) {
 	sess, _ := f.svc.CreateQRSession(ctx, "web")
 	f.mr.FastForward(121 * time.Second)
 
-	if _, err := f.svc.PollQRSession(ctx, sess.QRToken); !errors.Is(err, ErrQRNotFound) {
+	if _, err := f.svc.PollQRSession(ctx, sess.QRToken, sess.PollSecret); !errors.Is(err, ErrQRNotFound) {
 		t.Fatalf("poll err = %v, want ErrQRNotFound", err)
 	}
 	if _, err := f.svc.ScanQRSession(ctx, sess.QRToken, user.ID); !errors.Is(err, ErrQRNotFound) {
@@ -382,7 +382,7 @@ func TestQRUnknownTokenIsNotFound(t *testing.T) {
 	user := newTestUser(t, f.db, "qr-forged")
 	const forged = "not-a-real-qr-token"
 
-	if _, err := f.svc.PollQRSession(ctx, forged); !errors.Is(err, ErrQRNotFound) {
+	if _, err := f.svc.PollQRSession(ctx, forged, "irrelevant-secret"); !errors.Is(err, ErrQRNotFound) {
 		t.Fatalf("poll err = %v, want ErrQRNotFound", err)
 	}
 	if _, err := f.svc.ScanQRSession(ctx, forged, user.ID); !errors.Is(err, ErrQRNotFound) {
@@ -404,7 +404,7 @@ func TestQRBannedUserCannotScan(t *testing.T) {
 	if _, err := f.svc.ScanQRSession(ctx, sess.QRToken, user.ID); !errors.Is(err, ErrUserBanned) {
 		t.Fatalf("err = %v, want ErrUserBanned", err)
 	}
-	got, err := f.svc.PollQRSession(ctx, sess.QRToken)
+	got, err := f.svc.PollQRSession(ctx, sess.QRToken, sess.PollSecret)
 	if err != nil {
 		t.Fatalf("轮询失败: %v", err)
 	}
@@ -428,7 +428,7 @@ func TestQRBannedAfterScanCannotConfirm(t *testing.T) {
 	if err := f.svc.ConfirmQRSession(ctx, sess.QRToken, user.ID); !errors.Is(err, ErrUserBanned) {
 		t.Fatalf("err = %v, want ErrUserBanned", err)
 	}
-	got, err := f.svc.PollQRSession(ctx, sess.QRToken)
+	got, err := f.svc.PollQRSession(ctx, sess.QRToken, sess.PollSecret)
 	if err != nil {
 		t.Fatalf("轮询失败: %v", err)
 	}
@@ -472,7 +472,138 @@ func TestQRSessionKeyLayout(t *testing.T) {
 	if vals["scanned_at"] == "" {
 		t.Fatal("scanned_at 未写入")
 	}
+	if vals["poll_secret"] != sess.PollSecret {
+		t.Fatalf("poll_secret = %q, want %q（轮询密钥必须存进会话才能比对）", vals["poll_secret"], sess.PollSecret)
+	}
 	if strings.Contains(vals["access_token"], ".") {
 		t.Fatalf("未确认的会话不应存在令牌: %q", vals["access_token"])
+	}
+}
+
+// TestQRSessionIssuesPollSecretOutsideThePayload 轮询密钥只回给发起端，绝不进二维码内容。
+//
+// 二维码里明文带着 qr_token，被拍照即泄露；密钥若也编进 qr_payload，
+// 绑定发起方这件事就完全失效了。
+func TestQRSessionIssuesPollSecretOutsideThePayload(t *testing.T) {
+	f := newQRFixture(t)
+	ctx := context.Background()
+
+	seen := make(map[string]struct{}, 16)
+	for i := 0; i < 16; i++ {
+		sess, err := f.svc.CreateQRSession(ctx, "web")
+		if err != nil {
+			t.Fatalf("创建会话失败: %v", err)
+		}
+		raw, err := base64.RawURLEncoding.DecodeString(sess.PollSecret)
+		if err != nil {
+			t.Fatalf("poll_secret 不是 base64url(RawURL): %v", err)
+		}
+		if len(raw) != 32 {
+			t.Fatalf("poll_secret 解码后 = %d 字节, want 32", len(raw))
+		}
+		if strings.Contains(sess.PollSecret, "=") {
+			t.Fatalf("poll_secret 含填充字符: %q", sess.PollSecret)
+		}
+		if strings.Contains(sess.QRPayload, sess.PollSecret) {
+			t.Fatalf("qr_payload 里出现了轮询密钥: payload=%q secret=%q", sess.QRPayload, sess.PollSecret)
+		}
+		if sess.QRPayload != qrPayloadPrefix+sess.QRToken {
+			t.Fatalf("qr_payload = %q, want %q", sess.QRPayload, qrPayloadPrefix+sess.QRToken)
+		}
+		if _, dup := seen[sess.PollSecret]; dup {
+			t.Fatalf("poll_secret 重复: %q", sess.PollSecret)
+		}
+		seen[sess.PollSecret] = struct{}{}
+	}
+}
+
+// TestQRPollWithoutSecretCannotClaimTokens 缺密钥的轮询拿不到令牌，且不会把令牌毁掉。
+//
+// 这条正是「拍到二维码的人抢先取走令牌」那个攻击的直接反例：
+// 攻击者只有 qr_token，既取不走令牌，也不能让发起端取不到。
+func TestQRPollWithoutSecretCannotClaimTokens(t *testing.T) {
+	f := newQRFixture(t)
+	ctx := context.Background()
+	user := newTestUser(t, f.db, "qr-nosecret")
+
+	sess, err := f.svc.CreateQRSession(ctx, "web")
+	if err != nil {
+		t.Fatalf("创建会话失败: %v", err)
+	}
+	if _, err := f.svc.ScanQRSession(ctx, sess.QRToken, user.ID); err != nil {
+		t.Fatalf("标记已扫失败: %v", err)
+	}
+	if err := f.svc.ConfirmQRSession(ctx, sess.QRToken, user.ID); err != nil {
+		t.Fatalf("确认授权失败: %v", err)
+	}
+
+	got, err := f.svc.PollQRSession(ctx, sess.QRToken, "")
+	if !errors.Is(err, ErrQRBadSecret) {
+		t.Fatalf("err = %v, want ErrQRBadSecret", err)
+	}
+	if got != nil {
+		t.Fatalf("缺密钥时不得返回任何结果: %+v", got)
+	}
+
+	// 会话必须还在：否则攻击者一次无密钥轮询就能把发起端的令牌销毁
+	ok, err := f.svc.PollQRSession(ctx, sess.QRToken, sess.PollSecret)
+	if err != nil {
+		t.Fatalf("持正确密钥轮询失败: %v", err)
+	}
+	if ok.Tokens == nil || ok.Tokens.AccessToken == "" {
+		t.Fatalf("持正确密钥必须取到令牌: %+v", ok)
+	}
+}
+
+// TestQRPollWithWrongSecretCannotClaimTokens 密钥不匹配一律拒绝，正确密钥仍只能取一次。
+func TestQRPollWithWrongSecretCannotClaimTokens(t *testing.T) {
+	f := newQRFixture(t)
+	ctx := context.Background()
+	user := newTestUser(t, f.db, "qr-wrongsecret")
+
+	sess, err := f.svc.CreateQRSession(ctx, "web")
+	if err != nil {
+		t.Fatalf("创建会话失败: %v", err)
+	}
+	// 另一个会话的密钥：长度与格式都合法，只是不属于这个会话
+	other, err := f.svc.CreateQRSession(ctx, "web")
+	if err != nil {
+		t.Fatalf("创建对照会话失败: %v", err)
+	}
+	if _, err := f.svc.ScanQRSession(ctx, sess.QRToken, user.ID); err != nil {
+		t.Fatalf("标记已扫失败: %v", err)
+	}
+	if err := f.svc.ConfirmQRSession(ctx, sess.QRToken, user.ID); err != nil {
+		t.Fatalf("确认授权失败: %v", err)
+	}
+
+	if _, err := f.svc.PollQRSession(ctx, sess.QRToken, other.PollSecret); !errors.Is(err, ErrQRBadSecret) {
+		t.Fatalf("err = %v, want ErrQRBadSecret", err)
+	}
+
+	if _, err := f.svc.PollQRSession(ctx, sess.QRToken, sess.PollSecret); err != nil {
+		t.Fatalf("持正确密钥轮询失败: %v", err)
+	}
+	// 单次消费语义不能因为加了密钥校验而丢掉
+	if _, err := f.svc.PollQRSession(ctx, sess.QRToken, sess.PollSecret); !errors.Is(err, ErrQRNotFound) {
+		t.Fatalf("err = %v, want ErrQRNotFound（令牌只能取一次）", err)
+	}
+}
+
+// TestQRPollWithWrongSecretHidesPendingStatus 密钥不匹配时连状态都不给，避免二维码持有者观察进度。
+func TestQRPollWithWrongSecretHidesPendingStatus(t *testing.T) {
+	f := newQRFixture(t)
+	ctx := context.Background()
+
+	sess, err := f.svc.CreateQRSession(ctx, "web")
+	if err != nil {
+		t.Fatalf("创建会话失败: %v", err)
+	}
+	got, err := f.svc.PollQRSession(ctx, sess.QRToken, "wrong-secret")
+	if !errors.Is(err, ErrQRBadSecret) {
+		t.Fatalf("err = %v, want ErrQRBadSecret", err)
+	}
+	if got != nil {
+		t.Fatalf("密钥不匹配时不得回状态: %+v", got)
 	}
 }
