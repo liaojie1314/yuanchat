@@ -10,6 +10,7 @@ import (
 	"github.com/yuanchat/server/internal/config"
 	"github.com/yuanchat/server/internal/handler"
 	"github.com/yuanchat/server/internal/middleware"
+	"github.com/yuanchat/server/internal/pkg/codesender"
 	"github.com/yuanchat/server/internal/pkg/jwt"
 	"github.com/yuanchat/server/internal/pkg/shortid"
 	"github.com/yuanchat/server/internal/repository"
@@ -23,7 +24,16 @@ import (
 // Setup 接线全部依赖，返回 Gin 引擎与 WebSocket handler
 // （后者在 main 里由独立监听器提供服务）。
 // st 为对象存储句柄，可能为 nil（MinIO 不可达时），文件相关端点据此降级为 503。
-func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Config, logger *zap.Logger) (*gin.Engine, *ws.Handler) {
+// sender 为验证码下发通道，由 main 按配置构造后传入——通道选择错误必须在进程启动时
+// 就失败，而不是等到有人点「发送验证码」才在 Setup 里 panic。
+func Setup(
+	db *gorm.DB,
+	rdb *redis.Client,
+	st *storage.Storage,
+	cfg *config.Config,
+	logger *zap.Logger,
+	sender codesender.Sender,
+) (*gin.Engine, *ws.Handler) {
 	if cfg.Server.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -45,7 +55,8 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	blocklistRepo := repository.NewBlocklistRepository(db)
 	sidGen := shortid.NewGenerator(db)
 
-	userSvc := service.NewUserService(userRepo, jwtGen, sidGen, logger)
+	userSvc := service.NewUserService(userRepo, jwtGen, sidGen, rdb, logger)
+	authSvc := service.NewAuthService(userRepo, repository.NewVerificationCodeRepository(db), rdb, sender, jwtGen, logger)
 	msgSvc := service.NewMessageService(msgRepo, convRepo, userRepo, reactionRepo, blocklistRepo, logger)
 	convSvc := service.NewConversationService(convRepo, msgRepo, contactRepo, userRepo, logger)
 	contactSvc := service.NewContactService(contactRepo, userRepo, logger)
@@ -66,9 +77,10 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	healthH := handler.NewHealthHandler()
 	captchaH := handler.NewCaptchaHandler(rdb)
 	userH := handler.NewUserHandler(userSvc, captchaH, logger)
+	authH := handler.NewAuthHandler(authSvc, logger)
 
 	hub := ws.NewHub(cfg.WebSocket.MaxConnectionsPerUser, logger)
-	wsH := ws.NewHandler(hub, msgSvc, jwtGen, cfg.WebSocket, cfg.Server.IsProduction(), logger)
+	wsH := ws.NewHandler(hub, msgSvc, jwtGen, cfg.WebSocket, cfg.Server.IsProduction(), logger, userRepo)
 	msgH := handler.NewMessageHandler(msgSvc, hub, logger)
 	contactH := handler.NewContactHandler(contactSvc, hub, logger)
 	convH := handler.NewConversationHandler(convSvc, hub, logger)
@@ -186,6 +198,32 @@ func Setup(db *gorm.DB, rdb *redis.Client, st *storage.Storage, cfg *config.Conf
 	// VAPID 公钥：前端 pushManager.subscribe 前拉取，无需鉴权
 	api.GET("/push/public-key", pushH.PublicKey)
 	api.POST("/auth/refresh", middleware.LimitByIP(20, 40), userH.Refresh)
+	// 登出只需鉴权（前端 authStore 一直在调，此前 404 被 try/catch 吞掉）
+	api.POST("/auth/logout", middleware.AuthRequired(cfg.JWT), userH.Logout)
+
+	// 忘记密码三段式：三个端点各有各的滥用面，限流额度分别给，不共用一条
+	password := api.Group("/auth/password")
+	{
+		// 发码要过短信/网关成本，额度压到最低
+		password.POST("/otp", middleware.LimitByIP(3, 5), authH.SendResetCode)
+		// 校验是唯一的爆破入口，IP 限流之外还有手机号维度的失败计数兜底
+		password.POST("/verify", middleware.LimitByIP(10, 20), authH.VerifyResetCode)
+		password.POST("/reset", middleware.LimitByIP(5, 10), authH.ResetPassword)
+		// 登录态改密：凭当前密码而非短信验证码，因此只需鉴权 + 与 reset 同档的限流
+		password.POST("/change", middleware.AuthRequired(cfg.JWT), middleware.LimitByIP(5, 10), authH.ChangePassword)
+	}
+
+	// 扫码登录：被扫端建会话并轮询，扫码端（已登录）标记已扫并确认授权
+	qr := api.Group("/auth/qr")
+	{
+		// 建会话额度不能太紧：前端「刷新二维码」连点即触发，用户会看到死循环的 429
+		qr.POST("/session", middleware.LimitByIP(3, 5), authH.CreateQRSession)
+		// 轮询频率高：前端 2 秒一次，120 秒的会话最多 60 次，额度留一倍余量
+		qr.GET("/:token", middleware.LimitByIP(30, 60), authH.PollQRSession)
+		// 扫码端必须已登录：它是用自己的身份为被扫端授权
+		qr.POST("/:token/scan", middleware.AuthRequired(cfg.JWT), authH.ScanQRSession)
+		qr.POST("/:token/confirm", middleware.AuthRequired(cfg.JWT), authH.ConfirmQRSession)
+	}
 
 	users := api.Group("/users")
 	{

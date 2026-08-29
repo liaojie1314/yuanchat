@@ -21,6 +21,7 @@ type User struct {
 	Birthday     *time.Time     `json:"birthday,omitempty"`
 	Status       int16          `gorm:"type:smallint;default:1" json:"status"`
 	Role         int16          `gorm:"type:smallint;default:0" json:"role"`
+	TokenVersion int            `gorm:"type:int;not null;default:0" json:"-"` // 令牌吊销版本号，改密时递增使旧令牌失效
 	LastLoginAt  *time.Time     `json:"last_login_at,omitempty"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`

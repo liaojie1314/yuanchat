@@ -42,6 +42,12 @@ func (h *UserHandler) Register(c *gin.Context) {
 		Nickname: req.Nickname,
 	})
 	if err != nil {
+		// 弱密码：message 里回 i18n key，前端据此展示对应规则文案
+		var weak *service.WeakPasswordError
+		if errors.As(err, &weak) {
+			BadRequest(c, weak.MessageKey)
+			return
+		}
 		if errors.Is(err, service.ErrDuplicateUser) {
 			Error(c, http.StatusConflict, 409, "phone or email already registered")
 			return
@@ -72,6 +78,11 @@ func (h *UserHandler) Login(c *gin.Context) {
 		Password: req.Password,
 	})
 	if err != nil {
+		// 账号级锁定：错误码走 message 里的 i18n key，前端据此出「账号已锁定」文案
+		if errors.Is(err, service.ErrAccountLocked) {
+			Error(c, http.StatusTooManyRequests, 429, "auth.accountLocked")
+			return
+		}
 		if errors.Is(err, service.ErrUserNotFound) || errors.Is(err, service.ErrInvalidPassword) {
 			Unauthorized(c, "invalid account or password")
 			return
@@ -107,6 +118,10 @@ func (h *UserHandler) Refresh(c *gin.Context) {
 			Unauthorized(c, "invalid or expired refresh token")
 			return
 		}
+		if errors.Is(err, service.ErrUserBanned) {
+			Error(c, http.StatusForbidden, 40301, "account banned")
+			return
+		}
 		h.logger.Error("refresh failed", zap.Error(err))
 		InternalError(c, "refresh failed")
 		return
@@ -117,6 +132,23 @@ func (h *UserHandler) Refresh(c *gin.Context) {
 		"refresh_token": pair.RefreshToken,
 		"expires_in":    pair.ExpiresIn,
 	})
+}
+
+// Logout 结束当前会话。
+//
+// 服务端不保存会话状态，因此这里不吊销任何令牌：客户端删除本地令牌即为登出。
+// 特别地，不递增 token_version——那会把该用户所有设备一并踢下线，属意外行为；
+// 全量吊销只发生在改密。真正的单设备吊销要等有了 device/session 表再做。
+//
+// 端点本身仍挂在 AuthRequired 之后：匿名请求返回 401，前端据此区分「未登录」与「已登出」。
+//
+//	@Summary		退出登录
+//	@Tags			auth
+//	@Security		BearerAuth
+//	@Success		204
+//	@Router			/api/v1/auth/logout [post]
+func (h *UserHandler) Logout(c *gin.Context) {
+	c.Status(http.StatusNoContent)
 }
 
 // GetProfile 返回当前用户的个人资料。

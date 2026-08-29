@@ -34,6 +34,13 @@ const GOPATH_FALLBACK = "/home/liaojie1314/env/go/GOPATH";
 
 const APP_PORTS = { web: 5173, desktop: 1420, android: 1420 };
 const SERVER_PORTS = [8085, 8086];
+/**
+ * 真机需要反向转发的端口：REST / WS 之外还有 MinIO(9002)。
+ * 预签名 URL 与头像直链里写的是 localhost:9002，不转发的话手机上所有图片、
+ * 语音、头像都拿不到（表现为空白占位，不报错），排查起来很费时间。
+ * 注意 9002 不进 SERVER_PORTS —— dev:stop 不该去杀 docker 起的 MinIO。
+ */
+const REVERSE_PORTS = [...SERVER_PORTS, 9002];
 
 // ========================================
 // 参数解析
@@ -198,8 +205,8 @@ function startAndroid() {
     process.exit(1);
   }
   if (!mock) {
-    // 真实模式：把设备的 localhost:8085/8086 反向转发到宿主机后端
-    for (const port of SERVER_PORTS) {
+    // 真实模式：把设备的 localhost:8085/8086/9002 反向转发到宿主机后端与对象存储
+    for (const port of REVERSE_PORTS) {
       const r = spawnSync("adb", ["reverse", `tcp:${port}`, `tcp:${port}`], { stdio: "ignore" });
       log("infra", r.status === 0 ? `adb reverse tcp:${port} ✔` : `adb reverse tcp:${port} 失败（请确认设备已连接）`);
     }

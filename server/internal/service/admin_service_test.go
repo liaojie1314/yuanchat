@@ -13,6 +13,7 @@ import (
 	"github.com/yuanchat/server/internal/pkg/password"
 	"github.com/yuanchat/server/internal/pkg/shortid"
 	"github.com/yuanchat/server/internal/repository"
+	"github.com/yuanchat/server/internal/testutil"
 	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -37,6 +38,12 @@ func adminTestDB(t *testing.T) *gorm.DB {
 	if err != nil || sqlDB.Ping() != nil {
 		t.Skip("dev postgres unavailable, skip integration test")
 	}
+	// 每个用例开一个连接池，因此必须限量并在结束时关闭：dev 库 max_connections = 100，
+	// 池子只开不关时全量 -race 跑到后半程会撞 53300（too many clients），
+	// 集成用例被迫跳过，看起来像「库不可达」，实际是自己把连接耗光了
+	sqlDB.SetMaxOpenConns(4)
+	sqlDB.SetMaxIdleConns(2)
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	if err := db.AutoMigrate(&model.AdminActionLog{}); err != nil {
 		t.Fatalf("migrate admin_action_logs: %v", err)
 	}
@@ -174,10 +181,12 @@ func TestBannedUserCannotLogin(t *testing.T) {
 		"status":        model.UserStatusDisabled,
 	})
 
+	rdb, _ := testutil.NewRedis(t)
 	userSvc := NewUserService(
 		repository.NewUserRepository(db),
 		jwt.NewGenerator("test-secret", time.Minute, time.Hour),
 		shortid.NewGenerator(db),
+		rdb,
 		zap.NewNop(),
 	)
 	_, err = userSvc.Login(ctx, LoginRequest{Account: *user.Phone, Password: plainPwd})

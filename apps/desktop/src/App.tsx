@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   isPermissionGranted,
   requestPermission,
@@ -9,6 +10,8 @@ import { MainLayout, AppErrorBoundary } from "@yuanchat/ui";
 import { setNotifier, useAuthStore, useKeyboardAwareViewport } from "@yuanchat/shared";
 import { TitleBar } from "./components/TitleBar";
 import { useIsMobile } from "./hooks/useIsMobile";
+import { EXIT_CONFIRM_MS, useAndroidBack } from "./hooks/useAndroidBack";
+import { ExitHint } from "./components/ExitHint";
 
 const ChatPage = lazy(() => import("./pages/ChatPage").then((m) => ({ default: m.ChatPage })));
 const ContactsPage = lazy(() =>
@@ -49,6 +52,9 @@ void (async () => {
 
 function App() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  // 安卓系统返回键交由前端决定语义，见 useAndroidBack 的说明
+  const exitHintSeq = useAndroidBack();
+  const { t } = useTranslation();
   const isMobile = useIsMobile();
 
   // 移动端软键盘弹出时把内容顶起（桌面端 / 旧 WebView 自动降级为无操作）
@@ -85,6 +91,13 @@ function App() {
   if (!isAuthenticated) {
     return (
       <AppErrorBoundary>
+        {exitHintSeq > 0 && (
+          <ExitHint
+            key={exitHintSeq}
+            text={t("common.pressAgainToExit")}
+            durationMs={EXIT_CONFIRM_MS}
+          />
+        )}
         <Suspense fallback={null}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
@@ -100,6 +113,13 @@ function App() {
 
   return (
     <AppErrorBoundary>
+      {exitHintSeq > 0 && (
+        <ExitHint
+          key={exitHintSeq}
+          text={t("common.pressAgainToExit")}
+          durationMs={EXIT_CONFIRM_MS}
+        />
+      )}
       <Suspense fallback={null}>
         <Routes>
           <Route element={<MainLayout titleBar={isMobile ? undefined : <TitleBar />} />}>

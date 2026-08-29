@@ -22,7 +22,7 @@ func TestA7RoutesRegistered(t *testing.T) {
 	cfg.WebSocket.MaxConnectionsPerUser = 1
 	cfg.Presence.Backend = "local"
 
-	r, _ := Setup(nil, nil, nil, cfg, zap.NewNop())
+	r, _ := Setup(nil, nil, nil, cfg, zap.NewNop(), &recordingSender{})
 
 	want := map[string]bool{
 		"DELETE /api/v1/conversations/:id/messages":    false,

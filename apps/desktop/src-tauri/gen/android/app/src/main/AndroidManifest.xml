@@ -9,6 +9,13 @@
     <!-- required=false：没有麦克风的设备（部分 TV / 模拟器）照样能装，只是录不了音 -->
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
+    <!-- 扫码登录。barcode-scanner 插件在原生层用 CameraX 取景，
+         权限由插件的 requestPermissions 在运行时申请，清单里不声明则直接被系统拒绝 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- required=false：无摄像头设备（部分 TV / 模拟器）仍可安装，只是扫不了码 -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 

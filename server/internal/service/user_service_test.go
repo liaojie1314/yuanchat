@@ -6,10 +6,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
+	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/pkg/jwt"
 	"github.com/yuanchat/server/internal/pkg/password"
+	"github.com/yuanchat/server/internal/repository"
+	"github.com/yuanchat/server/internal/testutil"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // ========================================
@@ -112,7 +118,7 @@ func TestErrorConstants(t *testing.T) {
 // （合法 refresh 的完整链路由 E2E 覆盖）。
 func refreshSvc(accessTTL, refreshTTL time.Duration) (*UserService, *jwt.Generator) {
 	gen := jwt.NewGenerator("test-secret", accessTTL, refreshTTL)
-	return NewUserService(nil, gen, nil, zap.NewNop()), gen
+	return NewUserService(nil, gen, nil, nil, zap.NewNop()), gen
 }
 
 func TestRefreshRejectsGarbageToken(t *testing.T) {
@@ -127,7 +133,7 @@ func TestRefreshRejectsGarbageToken(t *testing.T) {
 func TestRefreshRejectsAccessTokenAsRefresh(t *testing.T) {
 	svc, gen := refreshSvc(time.Minute, time.Hour)
 
-	pair, err := gen.GeneratePair(uuid.New(), "web")
+	pair, err := gen.GeneratePair(uuid.New(), "web", 0)
 	if err != nil {
 		t.Fatalf("generate pair: %v", err)
 	}
@@ -142,7 +148,7 @@ func TestRefreshRejectsAccessTokenAsRefresh(t *testing.T) {
 func TestRefreshRejectsExpiredRefreshToken(t *testing.T) {
 	svc, gen := refreshSvc(time.Minute, -time.Minute) // refresh 签发即过期
 
-	pair, err := gen.GeneratePair(uuid.New(), "web")
+	pair, err := gen.GeneratePair(uuid.New(), "web", 0)
 	if err != nil {
 		t.Fatalf("generate pair: %v", err)
 	}
@@ -158,7 +164,7 @@ func TestRefreshRejectsTamperedSignature(t *testing.T) {
 
 	// 用另一个 secret 签发的 refresh token
 	otherGen := jwt.NewGenerator("other-secret", time.Minute, time.Hour)
-	pair, err := otherGen.GeneratePair(uuid.New(), "web")
+	pair, err := otherGen.GeneratePair(uuid.New(), "web", 0)
 	if err != nil {
 		t.Fatalf("generate pair: %v", err)
 	}
@@ -169,7 +175,106 @@ func TestRefreshRejectsTamperedSignature(t *testing.T) {
 	}
 }
 
-// 说明：UserService.Register() / Login() / Profile() 的完整集成测试需要一个测试用
-// PostgreSQL 库，或把 UserService 改成依赖 repository 接口而非具体的
-// *repository.UserRepository。密码哈希、JWT 签发与校验这几段逻辑已由各自所在包
-//（pkg/password、pkg/jwt）的单元测试覆盖。
+// 说明：以上用例全部在令牌校验阶段返回，不触达 repo。下面几条需要真实用户行，
+// 因此走包内既有的 testDB / newTestUser 集成夹具（库不可达时自动 skip）。
+
+// authSvc 构造接真实 repo 的 UserService 与配套 JWT 生成器。
+func authSvc(t *testing.T, db *gorm.DB) (*UserService, *jwt.Generator) {
+	t.Helper()
+	svc, gen, _, _ := authSvcWithRedis(t, db)
+	return svc, gen
+}
+
+// authSvcWithRedis 在 authSvc 之上额外交出 Redis 客户端与 miniredis 句柄，
+// 供需要断言计数器或推进时间的用例使用。构造只有这一处，避免各用例各拼一份依赖。
+func authSvcWithRedis(t *testing.T, db *gorm.DB) (*UserService, *jwt.Generator, *redis.Client, *miniredis.Miniredis) {
+	t.Helper()
+	gen := jwt.NewGenerator("test-secret", time.Minute, time.Hour)
+	rdb, mr := testutil.NewRedis(t)
+	return NewUserService(repository.NewUserRepository(db), gen, nil, rdb, zap.NewNop()), gen, rdb, mr
+}
+
+func TestRefreshRejectsBannedUser(t *testing.T) {
+	db := testDB(t)
+	user := newTestUser(t, db, "refresh-banned")
+	svc, gen := authSvc(t, db)
+
+	pair, err := gen.GeneratePair(user.ID, "web", user.TokenVersion)
+	if err != nil {
+		t.Fatalf("generate pair: %v", err)
+	}
+
+	if err := db.Model(user).Update("status", model.UserStatusDisabled).Error; err != nil {
+		t.Fatalf("disable user: %v", err)
+	}
+
+	if _, err := svc.Refresh(context.Background(), pair.RefreshToken); !errors.Is(err, ErrUserBanned) {
+		t.Fatalf("expected ErrUserBanned, got %v", err)
+	}
+}
+
+func TestRefreshRejectsStaleTokenVersion(t *testing.T) {
+	db := testDB(t)
+	user := newTestUser(t, db, "refresh-stale-tv")
+	svc, gen := authSvc(t, db)
+
+	pair, err := gen.GeneratePair(user.ID, "web", user.TokenVersion)
+	if err != nil {
+		t.Fatalf("generate pair: %v", err)
+	}
+
+	// 模拟改密：token_version 递增后，早先签发的 refresh 令牌应立即失效
+	if err := db.Model(user).Update("token_version", user.TokenVersion+1).Error; err != nil {
+		t.Fatalf("bump token_version: %v", err)
+	}
+
+	if _, err := svc.Refresh(context.Background(), pair.RefreshToken); !errors.Is(err, ErrInvalidRefresh) {
+		t.Fatalf("expected ErrInvalidRefresh, got %v", err)
+	}
+}
+
+func TestRefreshAcceptsCurrentTokenVersion(t *testing.T) {
+	db := testDB(t)
+	user := newTestUser(t, db, "refresh-ok-tv")
+	svc, gen := authSvc(t, db)
+
+	pair, err := gen.GeneratePair(user.ID, "web", user.TokenVersion)
+	if err != nil {
+		t.Fatalf("generate pair: %v", err)
+	}
+
+	fresh, err := svc.Refresh(context.Background(), pair.RefreshToken)
+	if err != nil {
+		t.Fatalf("Refresh with current token_version should succeed, got %v", err)
+	}
+	if fresh.AccessToken == "" || fresh.RefreshToken == "" {
+		t.Fatal("Refresh 应返回非空令牌对")
+	}
+}
+
+func TestLoginWritesLastLoginAt(t *testing.T) {
+	db := testDB(t)
+	user := newTestUser(t, db, "login-touch")
+	svc, _ := authSvc(t, db)
+
+	const pw = "Abcdef12"
+	hash, err := password.Hash(pw)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if err := db.Model(user).Update("password_hash", hash).Error; err != nil {
+		t.Fatalf("set password hash: %v", err)
+	}
+
+	if _, err := svc.Login(context.Background(), LoginRequest{Account: *user.Phone, Password: pw}); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	var stored model.User
+	if err := db.First(&stored, "id = ?", user.ID).Error; err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if stored.LastLoginAt == nil {
+		t.Fatal("登录成功后 last_login_at 应被写入，实际仍为 NULL")
+	}
+}

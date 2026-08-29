@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
+	"unicode"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/pkg/jwt"
 	"github.com/yuanchat/server/internal/pkg/password"
@@ -22,18 +25,88 @@ var (
 	ErrUserNotFound    = errors.New("user not found")
 	ErrInvalidRefresh  = errors.New("invalid or expired refresh token")
 	ErrUserBanned      = errors.New("user is banned")
+	ErrWeakPassword    = errors.New("weak password")
+	ErrAccountLocked   = errors.New("account locked by too many failed logins")
 )
+
+// 密码复杂度校验失败时回给前端的 i18n key（按 R7 约定放进响应 message 字段）。
+//
+// 六条规则与前端 validatePassword 一一对应，都能由用户在 UI 上触发，
+// 四个 locale 均有对应文案。后端独立再校验一遍，是因为前端校验可被绕过。
+const (
+	msgPasswordMinLength    = "validation.passwordMinLength"
+	msgPasswordMaxLength    = "validation.passwordMaxLength"
+	msgPasswordLowercase    = "validation.passwordLowercase"
+	msgPasswordUppercase    = "validation.passwordUppercase"
+	msgPasswordDigit        = "validation.passwordDigit"
+	msgPasswordNoWhitespace = "validation.passwordNoWhitespace"
+)
+
+// WeakPasswordError 表示密码不满足复杂度要求，并携带命中规则的 i18n key。
+type WeakPasswordError struct {
+	// MessageKey 命中的规则对应的 i18n key，如 validation.passwordDigit
+	MessageKey string
+}
+
+func (e *WeakPasswordError) Error() string { return "weak password: " + e.MessageKey }
+
+// Unwrap 让调用方可以只判哨兵：errors.Is(err, ErrWeakPassword)。
+func (e *WeakPasswordError) Unwrap() error { return ErrWeakPassword }
+
+// ValidatePasswordStrength 校验密码复杂度：长度 8-64、同时含小写 / 大写 / 数字、不含空白字符。
+//
+// 注册与改密两条路径共用，否则绕过前端直连接口即可把密码设成 12345678。
+// 长度按字节计而非字符：bcrypt 只取前 72 字节，按字符放行会让多字节密码被静默截断。
+//
+// 规则以 spec / constraints 为准，与前端 validatePassword 并不完全等价——
+// 前端另有「必须含特殊字符」且不限上限、不禁空白，两侧差异见批次报告。
+func ValidatePasswordStrength(pw string) error {
+	if len(pw) < 8 {
+		return &WeakPasswordError{MessageKey: msgPasswordMinLength}
+	}
+	if len(pw) > 64 {
+		return &WeakPasswordError{MessageKey: msgPasswordMaxLength}
+	}
+
+	var hasLower, hasUpper, hasDigit bool
+	for _, r := range pw {
+		switch {
+		case unicode.IsSpace(r):
+			return &WeakPasswordError{MessageKey: msgPasswordNoWhitespace}
+		case unicode.IsLower(r):
+			hasLower = true
+		case unicode.IsUpper(r):
+			hasUpper = true
+		case unicode.IsDigit(r):
+			hasDigit = true
+		}
+	}
+	switch {
+	case !hasLower:
+		return &WeakPasswordError{MessageKey: msgPasswordLowercase}
+	case !hasUpper:
+		return &WeakPasswordError{MessageKey: msgPasswordUppercase}
+	case !hasDigit:
+		return &WeakPasswordError{MessageKey: msgPasswordDigit}
+	}
+	return nil
+}
 
 // UserService 负责注册、登录与个人资料相关的业务逻辑。
 type UserService struct {
 	repo   *repository.UserRepository
 	jwtGen *jwt.Generator
 	sidGen *shortid.Generator
+	rdb    *redis.Client
 	logger *zap.Logger
 }
 
-func NewUserService(repo *repository.UserRepository, jwtGen *jwt.Generator, sidGen *shortid.Generator, logger *zap.Logger) *UserService {
-	return &UserService{repo: repo, jwtGen: jwtGen, sidGen: sidGen, logger: logger}
+// NewUserService 构造用户服务。
+//
+// rdb 承载账号级登录失败计数，Login 无条件依赖它：
+// 不接 Redis 就没有撞库防护，因此这里不做「未注入即跳过」的降级。
+func NewUserService(repo *repository.UserRepository, jwtGen *jwt.Generator, sidGen *shortid.Generator, rdb *redis.Client, logger *zap.Logger) *UserService {
+	return &UserService{repo: repo, jwtGen: jwtGen, sidGen: sidGen, rdb: rdb, logger: logger}
 }
 
 // RegisterRequest 是注册新账号的入参。
@@ -61,6 +134,11 @@ type AuthResult struct {
 
 // Register 创建新账号并返回 JWT 令牌。
 func (s *UserService) Register(ctx context.Context, req RegisterRequest) (*AuthResult, error) {
+	// 密码复杂度：handler 的 binding 只管 8-64 长度，弱密码要在此拦下
+	if err := ValidatePasswordStrength(req.Password); err != nil {
+		return nil, err
+	}
+
 	// 生成短号
 	shortID, err := s.sidGen.Next(ctx)
 	if err != nil {
@@ -100,11 +178,48 @@ func (s *UserService) Register(ctx context.Context, req RegisterRequest) (*AuthR
 	return s.buildAuthResult(*user, "web")
 }
 
+// 账号级登录失败锁定的阈值与窗口，取自设计文档，改动直接影响安全边界。
+const (
+	loginFailMax = 5
+	loginFailTTL = 15 * time.Minute
+)
+
+// loginFailKey 返回账号维度的登录失败计数键。
+//
+// 键一律带 auth: 命名空间，避免与既有 captcha 的裸键混在一起；
+// 账号统一转小写，否则邮箱换个大小写就换到另一个计数器上，锁定形同虚设。
+func loginFailKey(account string) string {
+	return "auth:login:fail:" + strings.ToLower(account)
+}
+
+// bumpLoginFailure 递增账号的失败计数。
+//
+// 写失败只记日志不阻断：此时凭据本来就是错的，不该把 Redis 故障变成另一种响应。
+func (s *UserService) bumpLoginFailure(ctx context.Context, key string) {
+	if _, err := incrWithTTL(ctx, s.rdb, key, loginFailTTL); err != nil {
+		s.logger.Warn("递增登录失败计数失败", zap.Error(err))
+	}
+}
+
 // Login 用「手机号 / 邮箱 + 密码」认证用户并返回 JWT 令牌。
+//
+// 连续失败达 loginFailMax 次的账号在 loginFailTTL 内一律拒绝，登录成功则清零计数。
 func (s *UserService) Login(ctx context.Context, req LoginRequest) (*AuthResult, error) {
+	// 账号维度的失败锁定：middleware.LimitByIP 只按 IP 计数且限流器是进程内的，
+	// 攻击者换 IP 即可对同一账号无限撞密码。判断排在查库与密码校验之前——
+	// bcrypt 故意很慢，锁定期还去跑它等于替攻击者承担 CPU 开销。
+	failKey := loginFailKey(req.Account)
+	fails, err := s.rdb.Get(ctx, failKey).Int()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return nil, fmt.Errorf("read login fail counter: %w", err)
+	}
+	if fails >= loginFailMax {
+		s.logger.Warn("账号连续登录失败已达上限，拒绝登录", zap.Int("fails", fails))
+		return nil, ErrAccountLocked
+	}
+
 	// 按手机号或邮箱查用户
 	var user *model.User
-	var err error
 
 	if strings.Contains(req.Account, "@") {
 		user, err = s.repo.FindByEmail(ctx, req.Account)
@@ -115,17 +230,33 @@ func (s *UserService) Login(ctx context.Context, req LoginRequest) (*AuthResult,
 		return nil, fmt.Errorf("find user: %w", err)
 	}
 	if user == nil {
+		// 未注册账号同样计数：只对已注册账号计数的话，
+		// 「第 6 次是锁定还是凭据错误」就成了账号是否存在的探针
+		s.bumpLoginFailure(ctx, failKey)
 		return nil, ErrUserNotFound
 	}
 
 	// 校验密码
 	if !password.Verify(user.PasswordHash, req.Password) {
+		s.bumpLoginFailure(ctx, failKey)
 		return nil, ErrInvalidPassword
 	}
 
 	// 封禁用户拒绝登录
 	if user.Status == model.UserStatusDisabled {
 		return nil, ErrUserBanned
+	}
+
+	// 登录成功清零计数：不清零则历史失败会一直累积，
+	// 攒够阈值后用户某天用正确密码登录也会开局即锁
+	if err := s.rdb.Del(ctx, failKey).Err(); err != nil {
+		s.logger.Warn("清零登录失败计数失败", zap.Error(err))
+	}
+
+	// 记录本次登录时间，写失败不阻塞登录
+	if err := s.repo.TouchLastLogin(ctx, user.ID); err != nil {
+		s.logger.Warn("更新 last_login_at 失败",
+			zap.String("user_id", user.ID.String()), zap.Error(err))
 	}
 
 	s.logger.Info("User logged in", zap.String("user_id", user.ID.String()))
@@ -184,22 +315,33 @@ func (s *UserService) UpdateProfile(
 //
 // 滑动会话（轮换）策略：access 与 refresh 都重新签发、各自重置 TTL，
 // 持续活跃的用户永不掉线。旧 refresh 在剩余有效期内仍可用（无服务端存储）。
+//
+// 这里是 token_version 的两个校验点之一（另一个是 WS 建连）：本方法本来就要
+// FindByID，因此补上封禁与版本校验是零额外 I/O。
 func (s *UserService) Refresh(ctx context.Context, refreshToken string) (*jwt.TokenPair, error) {
 	claims, err := s.jwtGen.Validate(refreshToken)
 	if err != nil || claims.TokenUse != "refresh" {
 		return nil, ErrInvalidRefresh
 	}
 
-	// 用户被注销/封禁后 refresh 立即失效
 	user, err := s.repo.FindByID(ctx, claims.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("find user: %w", err)
 	}
+	// 账号已注销
 	if user == nil {
 		return nil, ErrInvalidRefresh
 	}
+	// 封禁用户不得续期
+	if user.Status == model.UserStatusDisabled {
+		return nil, ErrUserBanned
+	}
+	// 改密后 token_version 递增，早先签发的 refresh 令牌随即失效
+	if claims.TokenVersion != user.TokenVersion {
+		return nil, ErrInvalidRefresh
+	}
 
-	pair, err := s.jwtGen.GeneratePair(claims.UserID, claims.DeviceID)
+	pair, err := s.jwtGen.GeneratePair(claims.UserID, claims.DeviceID, user.TokenVersion)
 	if err != nil {
 		return nil, fmt.Errorf("generate tokens: %w", err)
 	}
@@ -207,7 +349,7 @@ func (s *UserService) Refresh(ctx context.Context, refreshToken string) (*jwt.To
 }
 
 func (s *UserService) buildAuthResult(user model.User, deviceID string) (*AuthResult, error) {
-	pair, err := s.jwtGen.GeneratePair(user.ID, deviceID)
+	pair, err := s.jwtGen.GeneratePair(user.ID, deviceID, user.TokenVersion)
 	if err != nil {
 		return nil, fmt.Errorf("generate tokens: %w", err)
 	}

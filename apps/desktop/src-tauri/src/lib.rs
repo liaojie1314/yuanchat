@@ -50,6 +50,10 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init());
 
+    // 原生条码扫描只有移动端有实现（桌面端 Cargo.toml 里就没引这个依赖）
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
+
     builder
         .setup(|app| {
             // Windows（WebView2）与 macOS（WKWebView）由 wry 自行处理授权请求，

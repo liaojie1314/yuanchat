@@ -4,11 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/yuanchat/server/internal/config"
 	"github.com/yuanchat/server/internal/model"
+	"github.com/yuanchat/server/internal/pkg/jwt"
+	"go.uber.org/zap"
 )
 
 // decodeErr 从 client.send 取出一帧并断言为 error 帧，返回其 payload。
@@ -273,5 +279,77 @@ func TestBuildContentStickerMissingFields(t *testing.T) {
 	}
 	if e := decodeErr(t, c); e.Code != 400 {
 		t.Fatalf("unexpected error frame: %+v", e)
+	}
+}
+
+// ========================================
+// ServeWS —— token_version 建连校验
+// ========================================
+
+// fakeVersions 是 TokenVersionReader 的测试替身，返回固定版本号或固定错误。
+type fakeVersions struct {
+	v   int
+	err error
+}
+
+func (f *fakeVersions) TokenVersion(_ context.Context, _ uuid.UUID) (int, error) {
+	return f.v, f.err
+}
+
+// newServeWSFixture 构造一个可直接调用 ServeWS 的 Handler 与配套令牌签发器。
+func newServeWSFixture(t *testing.T, versions TokenVersionReader) (*Handler, *jwt.Generator) {
+	t.Helper()
+	gen := jwt.NewGenerator("ws-test-secret", 15*time.Minute, 7*24*time.Hour)
+	hub := NewHub(4, zap.NewNop())
+	h := NewHandler(hub, nil, gen, config.WebSocketConfig{}, false, zap.NewNop(), versions)
+	return h, gen
+}
+
+// serveWS 用 httptest 直接驱动 ServeWS，返回响应记录器。
+// 记录器不实现 http.Hijacker，因此一旦执行到协议升级就必然失败；
+// 这些用例只关心升级之前的鉴权判定，故足够。
+func serveWS(h *Handler, token string) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/ws?token="+token, nil)
+	h.ServeWS(rec, req)
+	return rec
+}
+
+func TestServeWSRejectsStaleTokenVersion(t *testing.T) {
+	// 令牌签发时 tv=0，库中已是 1（模拟改密后）
+	h, gen := newServeWSFixture(t, &fakeVersions{v: 1})
+	pair, err := gen.GeneratePair(uuid.New(), "web", 0)
+	if err != nil {
+		t.Fatalf("generate pair: %v", err)
+	}
+
+	if rec := serveWS(h, pair.AccessToken); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestServeWSRejectsWhenVersionLookupFails(t *testing.T) {
+	// 读不到版本号时必须拒绝建连（fail closed），不能放行
+	h, gen := newServeWSFixture(t, &fakeVersions{err: errors.New("db down")})
+	pair, err := gen.GeneratePair(uuid.New(), "web", 0)
+	if err != nil {
+		t.Fatalf("generate pair: %v", err)
+	}
+
+	if rec := serveWS(h, pair.AccessToken); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestServeWSAcceptsCurrentTokenVersion(t *testing.T) {
+	// 版本一致时不得因该校验被拒；后续升级在 httptest 下失败属预期
+	h, gen := newServeWSFixture(t, &fakeVersions{v: 3})
+	pair, err := gen.GeneratePair(uuid.New(), "web", 3)
+	if err != nil {
+		t.Fatalf("generate pair: %v", err)
+	}
+
+	if rec := serveWS(h, pair.AccessToken); rec.Code == http.StatusUnauthorized {
+		t.Fatal("版本一致的 access 令牌不应被 token_version 校验拒绝")
 	}
 }

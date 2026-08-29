@@ -15,12 +15,14 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ChevronRight, LogOut, ShieldCheck, Palette, Info, User, ArrowLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useAuthStore, useBreakpoint } from "@yuanchat/shared";
+import { registerBackInterceptor, useAuthStore, useBreakpoint } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
 import { ProfileEditView } from "./ProfileEditView";
 import { AccountSection, AppearanceSection, AboutSection } from "./SettingsSections";
 import { APP_VERSION } from "./settingsUtils";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { ChangePasswordDialog } from "./auth/ChangePasswordDialog";
 
 /** 设置内容区视图 */
 type SettingsView = "index" | "profile" | "account" | "appearance" | "about";
@@ -57,6 +59,29 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
   // 桌面/平板默认选中个人资料；移动端从 index 列表开始
   const [view, setView] = useState<SettingsView>("profile");
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [changePwdOpen, setChangePwdOpen] = useState(false);
+
+  // 安卓返回键：手机端子页是组件内部状态而非路由，不拦截的话按返回会被当成
+  // 「已在 /settings 根页面」而走退出应用流程，用户预期是先退回设置列表。
+  // 改密弹窗开着时先关弹窗，再退子页。
+  useEffect(() => {
+    if (!isMobile) return;
+    return registerBackInterceptor(() => {
+      if (changePwdOpen) {
+        setChangePwdOpen(false);
+        return true;
+      }
+      if (confirmLogout) {
+        setConfirmLogout(false);
+        return true;
+      }
+      if (view !== "index") {
+        setView("index");
+        return true;
+      }
+      return false;
+    });
+  }, [isMobile, changePwdOpen, confirmLogout, view]);
 
   // 移动端首屏应落在 index；断点切回桌面时确保有选中项
   useEffect(() => {
@@ -71,7 +96,12 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
       case "account":
         return (
           <MobileHeader show={isMobile} title={t("settings.account")} onBack={onBack}>
-            <AccountSection phone={user?.phone} email={user?.email} shortId={user?.shortId} />
+            <AccountSection
+              phone={user?.phone}
+              email={user?.email}
+              shortId={user?.shortId}
+              onChangePassword={() => setChangePwdOpen(true)}
+            />
           </MobileHeader>
         );
       case "appearance":
@@ -133,28 +163,14 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
     </button>
   );
 
-  /** 退出登录：行内两按钮确认态（仅移动端渲染；桌面端走左侧导航栏） */
-  const logoutBlock = confirmLogout ? (
-    <div className="flex flex-col gap-2 px-1">
-      <p className="text-body-sm text-on-surface-variant text-center">
-        {t("settings.logoutConfirm")}
-      </p>
-      <div className="flex gap-2">
-        <button
-          onClick={() => void logout()}
-          className="text-label-lg bg-error text-error-on flex-1 rounded-lg py-2.5 font-medium"
-        >
-          {t("common.confirm")}
-        </button>
-        <button
-          onClick={() => setConfirmLogout(false)}
-          className="text-label-lg border-outline-variant text-on-surface flex-1 rounded-lg border py-2.5 font-medium"
-        >
-          {t("common.cancel")}
-        </button>
-      </div>
-    </div>
-  ) : (
+  /**
+   * 退出登录入口（仅移动端渲染；桌面端走左侧导航栏）
+   *
+   * 确认走 ConfirmDialog 而不是行内展开两个按钮：退出是破坏性动作，
+   * 与全局其他破坏性操作（删好友、清空记录）保持同一种确认形态，
+   * 也避免行内展开把下方内容顶动。
+   */
+  const logoutBlock = (
     <button
       onClick={() => setConfirmLogout(true)}
       className="text-error hover:bg-error/10 text-label-lg flex w-full items-center justify-center gap-2 rounded-lg py-2.5 font-medium transition-colors"
@@ -164,12 +180,30 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
     </button>
   );
 
+  const logoutDialog = (
+    <ConfirmDialog
+      open={confirmLogout}
+      title={t("settings.logout")}
+      message={t("settings.logoutConfirm")}
+      confirmLabel={t("common.confirm")}
+      danger
+      onConfirm={() => {
+        setConfirmLogout(false);
+        void logout();
+      }}
+      onCancel={() => setConfirmLogout(false)}
+    />
+  );
+
   // ── 手机端：index 全屏列表 ↔ 子页栈式 ──
   if (isMobile) {
     if (view !== "index") {
       return (
         <div className="bg-surface flex min-h-0 flex-1 flex-col overflow-y-auto px-4">
           {renderContent(() => setView("index"))}
+          {/* 改密入口在「账号与安全」子页里，弹窗必须同屏挂载，
+              否则点了没反应、退回列表才看到 */}
+          <ChangePasswordDialog open={changePwdOpen} onClose={() => setChangePwdOpen(false)} />
         </div>
       );
     }
@@ -194,6 +228,8 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
         <p className="text-label-sm text-on-surface-variant mt-auto pt-4 text-center">
           {t("settings.version")} {APP_VERSION}
         </p>
+        {logoutDialog}
+        <ChangePasswordDialog open={changePwdOpen} onClose={() => setChangePwdOpen(false)} />
       </div>
     );
   }

@@ -19,20 +19,27 @@ export interface ValidationResult {
 /**
  * 密码强度校验
  *
- * 要求：
- * - 至少 8 个字符
+ * 要求（与后端 ValidatePasswordStrength 同一套规则）：
+ * - 长度 8-64 **字节**
  * - 至少包含 1 个大写字母 (A-Z)
  * - 至少包含 1 个小写字母 (a-z)
  * - 至少包含 1 个数字 (0-9)
- * - 至少包含 1 个特殊字符 (!@#$%^&*()_+-=[]{}|;':",./<>?`~)
+ * - 不含任何空白字符（空格 / 制表符 / 换行等）
+ *
+ * 长度按字节而非字符计：后端用 bcrypt，只取前 72 字节，
+ * 按 UTF-16 码元长度放行会让多字节密码在前端通过、被后端拒或被静默截断。
  *
  * @returns 校验结果，errors 为 i18n key 列表
  */
 export function validatePassword(password: string): ValidationResult {
   const errors: string[] = [];
+  const byteLength = new TextEncoder().encode(password).length;
 
-  if (password.length < 8) {
+  if (byteLength < 8) {
     errors.push("validation.passwordMinLength");
+  }
+  if (byteLength > 64) {
+    errors.push("validation.passwordMaxLength");
   }
   if (!/[A-Z]/.test(password)) {
     errors.push("validation.passwordUppercase");
@@ -43,8 +50,8 @@ export function validatePassword(password: string): ValidationResult {
   if (!/[0-9]/.test(password)) {
     errors.push("validation.passwordDigit");
   }
-  if (!/[!@#$%^&*()_+\-=[\]{}|;':",./<>?`~]/.test(password)) {
-    errors.push("validation.passwordSpecial");
+  if (/\s/.test(password)) {
+    errors.push("validation.passwordNoWhitespace");
   }
 
   return { valid: errors.length === 0, errors };
