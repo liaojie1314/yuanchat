@@ -64,5 +64,10 @@ export { SafetyNumberDialog } from "./SafetyNumberDialog";
 export { E2EESection } from "./E2EESection";
 export { InConversationSearch } from "./InConversationSearch";
 
+// 认证组件
+export { ForgotPasswordScreen } from "./auth/ForgotPasswordScreen";
+export type { ForgotPasswordScreenProps } from "./auth/ForgotPasswordScreen";
+export { mapAuthError } from "./auth/mapAuthError";
+
 // 错误边界
 export { AppErrorBoundary } from "./AppErrorBoundary";
