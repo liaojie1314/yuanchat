@@ -113,7 +113,7 @@ export function AccountSection({
   phone?: string;
   email?: string;
   shortId?: number;
-  /** 进入改密链路；不传则该入口保持禁用（宿主未提供路由时不该给出死按钮） */
+  /** 进入改密链路；不传则该入口保持禁用（宿主未提供实现时不该给出死按钮） */
   onChangePassword?: () => void;
 }) {
   const { t } = useTranslation();

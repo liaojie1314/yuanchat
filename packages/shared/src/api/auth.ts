@@ -215,3 +215,20 @@ export async function scanQr(qrToken: string): Promise<QrScanIdentity> {
 export async function confirmQr(qrToken: string): Promise<void> {
   await apiPost<void>("/api/v1/auth/qr/" + encodeURIComponent(qrToken) + "/confirm", {});
 }
+
+/**
+ * 修改密码（登录态，凭当前密码）
+ *
+ * @param oldPassword - 当前密码
+ * @param newPassword - 新密码
+ * @remarks 成功是 204 空响应，且该用户 `token_version` 递增 ——
+ *   **包括当前设备在内**所有既有令牌立即失效，调用方必须随即清掉本地登录态。
+ *   当前密码错误抛 400 `auth.oldPasswordWrong`；新密码不合复杂度抛 400 并把命中规则的
+ *   i18n key 放在 `message`；账号被封禁抛 403。
+ */
+export async function changePassword(oldPassword: string, newPassword: string): Promise<void> {
+  await apiPost<void>("/api/v1/auth/password/change", {
+    old_password: oldPassword,
+    new_password: newPassword,
+  });
+}

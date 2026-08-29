@@ -18,9 +18,16 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { KeyRound, ArrowLeft, Check } from "lucide-react";
-import { sendResetCode, verifyResetCode, resetPassword, useAuthStore } from "@yuanchat/shared";
+import { KeyRound, Check } from "lucide-react";
+import {
+  sendResetCode,
+  verifyResetCode,
+  resetPassword,
+  useAuthStore,
+  useBreakpoint,
+} from "@yuanchat/shared";
 import { validatePassword, validatePhone } from "@yuanchat/shared/utils";
+import { cn } from "@yuanchat/shared/utils";
 import { Button } from "../Button";
 import { Input } from "../Input";
 import { mapAuthError } from "./mapAuthError";
@@ -59,6 +66,7 @@ function formatDuration(totalSeconds: number): string {
  */
 export function ForgotPasswordScreen({ topSlot, onDone }: ForgotPasswordScreenProps) {
   const { t } = useTranslation();
+  const isMobile = useBreakpoint() === "mobile";
   const [step, setStep] = useState<Step>(1);
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
@@ -191,9 +199,18 @@ export function ForgotPasswordScreen({ topSlot, onDone }: ForgotPasswordScreenPr
       {topSlot}
 
       <div className="relative flex flex-1 flex-col overflow-y-auto">
-        <div className="relative m-auto w-full max-w-md px-5 py-8">
-          {/* 磨砂玻璃卡片 */}
-          <div className="rounded-lg border border-white/60 bg-white/70 px-10 py-12 shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl">
+        <div
+          className={cn("relative m-auto w-full max-w-md", isMobile ? "px-6 py-6" : "px-5 py-8")}
+        >
+          {/* 磨砂玻璃卡片：手机端整块去掉边框/底色/阴影 ——
+              窄屏上卡片几乎顶满屏宽，边框与内外双层留白只剩视觉噪音 */}
+          <div
+            className={cn(
+              isMobile
+                ? ""
+                : "rounded-lg border border-white/60 bg-white/70 px-10 py-12 shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl",
+            )}
+          >
             {/* Logo */}
             <div className="mb-6 text-center">
               <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-lg text-white shadow-lg">
@@ -367,18 +384,16 @@ export function ForgotPasswordScreen({ topSlot, onDone }: ForgotPasswordScreenPr
                     <button
                       type="button"
                       onClick={onDone}
-                      className="text-on-surface-variant hover:text-primary inline-flex items-center gap-1.5 hover:opacity-80"
+                      className="text-on-surface-variant hover:text-primary hover:opacity-80"
                     >
-                      <ArrowLeft size={14} />
                       {t("auth.backToLogin")}
                     </button>
                   ) : (
                     <Link
                       to="/login"
                       replace
-                      className="text-on-surface-variant hover:text-primary inline-flex items-center gap-1.5 hover:opacity-80"
+                      className="text-on-surface-variant hover:text-primary hover:opacity-80"
                     >
-                      <ArrowLeft size={14} />
                       {t("auth.backToLogin")}
                     </Link>
                   )}

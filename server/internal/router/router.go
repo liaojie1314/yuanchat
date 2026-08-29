@@ -209,6 +209,8 @@ func Setup(
 		// 校验是唯一的爆破入口，IP 限流之外还有手机号维度的失败计数兜底
 		password.POST("/verify", middleware.LimitByIP(10, 20), authH.VerifyResetCode)
 		password.POST("/reset", middleware.LimitByIP(5, 10), authH.ResetPassword)
+		// 登录态改密：凭当前密码而非短信验证码，因此只需鉴权 + 与 reset 同档的限流
+		password.POST("/change", middleware.AuthRequired(cfg.JWT), middleware.LimitByIP(5, 10), authH.ChangePassword)
 	}
 
 	// 扫码登录：被扫端建会话并轮询，扫码端（已登录）标记已扫并确认授权

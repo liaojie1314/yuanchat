@@ -56,8 +56,6 @@ function App() {
             <Route path="/contacts" element={<ContactsPage />} />
             <Route path="/favorites" element={<FavoritesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
-            {/* 登录态下也要能进改密链路：设置页的「修改密码」跳这里 */}
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="*" element={<Navigate to="/chat" replace />} />
           </Route>
         </Routes>

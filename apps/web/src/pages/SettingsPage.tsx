@@ -6,17 +6,9 @@
  * Web 端特有的「浏览器通知」开关通过 aboutExtra 槽注入
  * （桌面端走原生通知，Tauri WebView 无 Push API）。
  */
-import { useNavigate } from "react-router-dom";
 import { SettingsScreen } from "@yuanchat/ui";
 import { PushToggle } from "../components/PushToggle";
 
 export function SettingsPage() {
-  const navigate = useNavigate();
-  return (
-    <SettingsScreen
-      aboutExtra={<PushToggle />}
-      // 改密复用忘记密码那条三段式链路：同一组端点，登录态与否都能走
-      onChangePassword={() => navigate("/forgot-password")}
-    />
-  );
+  return <SettingsScreen aboutExtra={<PushToggle />} />;
 }

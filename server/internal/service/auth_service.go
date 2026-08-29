@@ -256,3 +256,50 @@ func randomToken(n int) (string, error) {
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
+
+// ErrOldPasswordWrong 表示改密时提供的当前密码不正确。
+var ErrOldPasswordWrong = errors.New("old password is incorrect")
+
+// ChangePassword 校验当前密码后改密（登录态直接改，不走短信验证码）。
+//
+// 与三段式重置的区别只在凭据来源：那条链路用短信验证码证明手机号归属，
+// 这条用当前密码证明本人在场。收尾完全一致 —— 同样递增 token_version，
+// 因此改密后该用户所有设备（含当前设备）的既有令牌立即失效，调用方需要重新登录。
+//
+// 当前密码错误返回 ErrOldPasswordWrong；新密码不合复杂度返回 *WeakPasswordError；
+// 账号被封禁返回 ErrUserBanned。三者都不会写库。
+func (s *AuthService) ChangePassword(ctx context.Context, userID, oldPassword, newPassword string) error {
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		return ErrUserNotFound
+	}
+	user, err := s.repo.FindByID(ctx, uid)
+	if err != nil {
+		return fmt.Errorf("find user: %w", err)
+	}
+	if user == nil {
+		return ErrUserNotFound
+	}
+	if user.Status == model.UserStatusDisabled {
+		return ErrUserBanned
+	}
+	// 先验旧密码再验新密码强度：否则「旧密码填错 + 新密码太弱」时会先暴露强度规则，
+	// 等于给不知道旧密码的人提供了一个可用的探针
+	if !password.Verify(user.PasswordHash, oldPassword) {
+		return ErrOldPasswordWrong
+	}
+	if err := ValidatePasswordStrength(newPassword); err != nil {
+		return err
+	}
+
+	hash, err := password.Hash(newPassword)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+	if err := s.repo.UpdatePasswordAndBumpTokenVersion(ctx, userID, hash); err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+
+	s.logger.Info("密码已修改，该用户旧令牌全部失效", zap.String("user_id", userID))
+	return nil
+}

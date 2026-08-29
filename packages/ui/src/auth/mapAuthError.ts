@@ -34,6 +34,8 @@ const PASSTHROUGH_KEYS = new Set([
   "auth.qrExpired",
   "auth.qrFailed",
   "auth.qrWrongUser",
+  "auth.oldPasswordWrong",
+  "auth.changePasswordFailed",
   "validation.passwordMinLength",
   "validation.passwordMaxLength",
   "validation.passwordNoWhitespace",

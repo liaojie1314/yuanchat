@@ -72,6 +72,8 @@ export type { QrLoginScreenProps } from "./auth/QrLoginScreen";
 export { mapAuthError } from "./auth/mapAuthError";
 export { ScanQrEntry } from "./auth/ScanQrEntry";
 export { parseLoginQr } from "./auth/parseLoginQr";
+export { ChangePasswordDialog } from "./auth/ChangePasswordDialog";
+export type { ChangePasswordDialogProps } from "./auth/ChangePasswordDialog";
 export type { ScanQrEntryProps, ScanFn } from "./auth/ScanQrEntry";
 
 // 错误边界

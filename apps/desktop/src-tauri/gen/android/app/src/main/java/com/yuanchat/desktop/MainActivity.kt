@@ -2,6 +2,7 @@ package com.yuanchat.desktop
 
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.View
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
@@ -16,10 +17,7 @@ class MainActivity : TauriActivity() {
   /** 最近一次量到的顶部安全区高度（CSS px），WebView 晚于 inset 回调创建时用它补发 */
   private var safeAreaTopCssPx = 0f
 
-  // 关掉 Tauri 自带的返回处理。它只看 WebView.canGoBack()，而本应用的路由跳转大量用
-  // replace（守卫重定向、登录后进主界面），WebView 历史长度恒为 1 —— 于是每次按返回键
-  // 都直接退出应用，表现为「系统返回键完全不可用，只能点界面上的返回」。
-  // 改为把返回键交给前端：它才知道当前有没有弹窗、相机取景或组件内部栈要先收起。
+  // TauriActivity 本身已把它设为 false，这里显式重申：返回语义完全由前端决定。
   override val handleBackNavigation: Boolean = false
 
   override fun onWebViewCreate(webView: WebView) {
@@ -103,6 +101,25 @@ class MainActivity : TauriActivity() {
   }
 
   /**
+   * 在 WebView 之前拦下返回键。
+   *
+   * 关键点：`android.webkit.WebView` 自己会处理 KEYCODE_BACK —— 有历史就 `goBack()`
+   * 并把事件吞掉，只有无历史可退时才漏给 Activity 的 OnBackPressedDispatcher。
+   * 于是「在设置页按返回跳回上一个访问过的标签页」正是 WebView 在做 history.back()，
+   * 我们注册的 dispatcher 回调根本没被调用（这也是最初「返回只会退出应用」的另一半原因：
+   * 那种情形下 WebView 恰好没有历史）。
+   *
+   * 按键路径必须在 dispatchKeyEvent 这一层截断；手势返回在部分机型上走 dispatcher，
+   * 因此两条路都保留，各自汇到同一个 handleBack()。DOWN 与 UP 都要吞，
+   * 只在 UP 时执行，避免长按重复触发。
+   */
+  override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    if (event.keyCode != KeyEvent.KEYCODE_BACK) return super.dispatchKeyEvent(event)
+    if (event.action == KeyEvent.ACTION_UP) handleBack()
+    return true
+  }
+
+  /**
    * 返回键委托给前端。
    *
    * 前端 window.__androidBack__ 同步返回是否已消费本次返回：
@@ -113,20 +130,29 @@ class MainActivity : TauriActivity() {
     onBackPressedDispatcher.addCallback(
       this,
       object : OnBackPressedCallback(true) {
-        override fun handleOnBackPressed() {
-          val target = webView
-          if (target == null) {
-            finish()
-            return
-          }
-          target.evaluateJavascript(
-            "(function(){try{return window.__androidBack__?window.__androidBack__():false}" +
-              "catch(e){return false}})()",
-          ) { result ->
-            if (result != "true") finish()
-          }
-        }
+        override fun handleOnBackPressed() = handleBack()
       },
     )
+  }
+
+  /**
+   * 问前端要不要消费这次返回。
+   *
+   * 前端 window.__androidBack__ 同步返回 true 表示它收起了弹窗 / 相机 / 内部栈，
+   * 或做了路由回退；返回 false 表示已在根页面且确认过退出意图，此时才 finish。
+   * 前端还没挂上处理器（首帧之前）时按原样退出，与改动前行为一致。
+   */
+  private fun handleBack() {
+    val target = webView
+    if (target == null) {
+      finish()
+      return
+    }
+    target.evaluateJavascript(
+      "(function(){try{return window.__androidBack__?window.__androidBack__():false}" +
+        "catch(e){return false}})()",
+    ) { result ->
+      if (result != "true") finish()
+    }
   }
 }

@@ -386,3 +386,98 @@ func TestResetPasswordRevokesExistingRefreshToken(t *testing.T) {
 		t.Fatalf("err = %v, want ErrInvalidRefresh（改密后旧 refresh 必须失效）", err)
 	}
 }
+
+// knownPassword 是改密用例里「当前密码」的明文。
+//
+// newTestUser 写的 password_hash 是占位字符串 "x"，不是 bcrypt 哈希，
+// 因此凡是要验旧密码的用例都得先落一个真实哈希。
+const knownPassword = "Zxcvbn99"
+
+// setKnownPassword 给测试用户写入 knownPassword 的真实哈希。
+func (f *authFixture) setKnownPassword(t *testing.T, user *model.User) {
+	t.Helper()
+	hash, err := password.Hash(knownPassword)
+	if err != nil {
+		t.Fatalf("哈希密码: %v", err)
+	}
+	if err := f.db.Model(&model.User{}).Where("id = ?", user.ID).
+		Update("password_hash", hash).Error; err != nil {
+		t.Fatalf("写入密码哈希: %v", err)
+	}
+}
+
+// TestChangePasswordRequiresCorrectOldPassword 旧密码错误时既不改密也不动 token_version。
+//
+// 这是登录态改密唯一的身份凭据，判错就等于把改密入口敞开给拿到 access 令牌的任何人。
+func TestChangePasswordRequiresCorrectOldPassword(t *testing.T) {
+	f := newAuthFixture(t)
+	user, _ := f.seedResetUser(t, "chpwd-wrong")
+	f.setKnownPassword(t, user)
+	ctx := context.Background()
+
+	err := f.svc.ChangePassword(ctx, user.ID.String(), "WrongOld9", "Abcdef12")
+	if !errors.Is(err, ErrOldPasswordWrong) {
+		t.Fatalf("err = %v, want ErrOldPasswordWrong", err)
+	}
+
+	var fresh model.User
+	if err := f.db.First(&fresh, "id = ?", user.ID).Error; err != nil {
+		t.Fatalf("重读用户: %v", err)
+	}
+	if fresh.TokenVersion != user.TokenVersion {
+		t.Fatalf("token_version = %d, want %d（旧密码错误不该吊销任何令牌）",
+			fresh.TokenVersion, user.TokenVersion)
+	}
+	if password.Verify(fresh.PasswordHash, "Abcdef12") {
+		t.Fatal("旧密码错误却把新密码写进去了")
+	}
+}
+
+// TestChangePasswordRejectsWeakNewPassword 新密码不合复杂度时被拒且不写库。
+func TestChangePasswordRejectsWeakNewPassword(t *testing.T) {
+	f := newAuthFixture(t)
+	user, _ := f.seedResetUser(t, "chpwd-weak")
+	f.setKnownPassword(t, user)
+	ctx := context.Background()
+
+	err := f.svc.ChangePassword(ctx, user.ID.String(), knownPassword, "12345678")
+	if !errors.Is(err, ErrWeakPassword) {
+		t.Fatalf("err = %v, want ErrWeakPassword", err)
+	}
+
+	var fresh model.User
+	if err := f.db.First(&fresh, "id = ?", user.ID).Error; err != nil {
+		t.Fatalf("重读用户: %v", err)
+	}
+	if fresh.TokenVersion != user.TokenVersion {
+		t.Fatalf("token_version = %d, want %d", fresh.TokenVersion, user.TokenVersion)
+	}
+}
+
+// TestChangePasswordSucceedsAndRevokesTokens 正确旧密码可改密，且递增 token_version。
+func TestChangePasswordSucceedsAndRevokesTokens(t *testing.T) {
+	f := newAuthFixture(t)
+	user, _ := f.seedResetUser(t, "chpwd-ok")
+	f.setKnownPassword(t, user)
+	ctx := context.Background()
+
+	if err := f.svc.ChangePassword(ctx, user.ID.String(), knownPassword, "Abcdef12"); err != nil {
+		t.Fatalf("改密: %v", err)
+	}
+
+	var fresh model.User
+	if err := f.db.First(&fresh, "id = ?", user.ID).Error; err != nil {
+		t.Fatalf("重读用户: %v", err)
+	}
+	if fresh.TokenVersion != user.TokenVersion+1 {
+		t.Fatalf("token_version = %d, want %d（改密必须吊销全部旧令牌）",
+			fresh.TokenVersion, user.TokenVersion+1)
+	}
+	if !password.Verify(fresh.PasswordHash, "Abcdef12") {
+		t.Fatal("新密码无法通过校验，密码未真正写入")
+	}
+	// 旧密码必须失效，否则改密等于没改
+	if password.Verify(fresh.PasswordHash, knownPassword) {
+		t.Fatal("旧密码改密后仍然有效")
+	}
+}

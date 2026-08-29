@@ -11,10 +11,9 @@
  * 刻意不用 `navigate(-1)`：本应用的重定向大量使用 `replace`，history 里往往没有可回退的条目，
  * `navigate(-1)` 会静默无效。非根页面直接回到聊天页，行为确定。
  */
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useTranslation } from "react-i18next";
-import { runBackInterceptors, showToast, useAuthStore } from "@yuanchat/shared";
+import { runBackInterceptors, useAuthStore } from "@yuanchat/shared";
 
 /** 挂在 window 上供原生侧调用的返回处理器 */
 interface AndroidBackWindow {
@@ -29,21 +28,25 @@ interface AndroidBackWindow {
  */
 const TAB_ROOTS = ["/chat", "/contacts", "/favorites", "/settings"];
 
-/** 两次返回键之间的确认窗口 */
-const EXIT_CONFIRM_MS = 2000;
+/** 两次返回键之间的确认窗口，与提示浮层的存活时间一致 */
+export const EXIT_CONFIRM_MS = 2000;
 
 /**
  * 接管安卓返回键
  *
+ * @returns 退出提示的触发序号：每次需要显示提示时递增，0 表示尚未提示过。
+ *   调用方把它作为提示组件的 key，即可让同一提示重复出现。
  * @remarks 只需在应用根组件挂一次。桌面端挂了也无副作用（没有原生侧调用它）。
  */
-export function useAndroidBack(): void {
+export function useAndroidBack(): number {
   const navigate = useNavigate();
   const location = useLocation();
-  const { t } = useTranslation();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   /** 上一次在根页面按返回键的时间戳，用于两段式退出确认 */
   const lastExitPressRef = useRef(0);
+  const [hintSeq, setHintSeq] = useState(0);
+
+  const showHint = useCallback(() => setHintSeq((n) => n + 1), []);
 
   useEffect(() => {
     const w = window as AndroidBackWindow;
@@ -65,7 +68,7 @@ export function useAndroidBack(): void {
       const now = Date.now();
       if (now - lastExitPressRef.current > EXIT_CONFIRM_MS) {
         lastExitPressRef.current = now;
-        showToast("info", t("common.pressAgainToExit"));
+        showHint();
         return true;
       }
       lastExitPressRef.current = 0;
@@ -75,5 +78,7 @@ export function useAndroidBack(): void {
     return () => {
       delete w.__androidBack__;
     };
-  }, [navigate, location.pathname, isAuthenticated, t]);
+  }, [navigate, location.pathname, isAuthenticated, showHint]);
+
+  return hintSeq;
 }
