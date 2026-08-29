@@ -53,7 +53,7 @@
   "settings.saved": "保存しました",
   "settings.saveFailed": "保存に失敗しました。再試行してください",
   "settings.changePassword": "パスワードを変更",
-  "settings.changePasswordHint": "SMS 認証コードで再設定します。全端末で再ログインが必要になります",
+  "settings.changePasswordHint": "現在のパスワードを入力して変更します。全端末で再ログインが必要になります",
   "settings.brandTagline": "軽くて速い、信頼できるインスタントメッセンジャー",
   "settings.officialSite": "公式サイト",
   "settings.sourceCode": "ソースコード",

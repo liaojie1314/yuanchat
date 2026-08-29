@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import {
   isMockEnabled,
   useBreakpoint,
+  registerBackInterceptor,
   useContactStore,
   useConversationStore,
   useResizable,
@@ -58,6 +59,23 @@ export function ContactsScreen() {
       void loadRequests();
     }
   }, [loadFriends, loadRequests]);
+
+  // 安卓返回键：手机端的好友详情/新朋友/黑名单是组件内部栈而非路由，
+  // 不拦截的话按返回会被当成「已在 /contacts 根页面」而走退出应用流程。
+  useEffect(() => {
+    if (bp !== "mobile") return;
+    return registerBackInterceptor(() => {
+      if (addOpen) {
+        setAddOpen(false);
+        return true;
+      }
+      if (view.kind !== "empty") {
+        setView({ kind: "empty" });
+        return true;
+      }
+      return false;
+    });
+  }, [bp, addOpen, view.kind]);
 
   /** 跳转聊天页并激活会话 */
   const goChat = (conversationId: string) => {

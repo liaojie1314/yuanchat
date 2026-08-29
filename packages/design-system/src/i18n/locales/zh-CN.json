@@ -53,7 +53,7 @@
   "settings.saved": "已保存",
   "settings.saveFailed": "保存失败，请重试",
   "settings.changePassword": "修改密码",
-  "settings.changePasswordHint": "通过手机号验证码重设，重设后所有设备需重新登录",
+  "settings.changePasswordHint": "输入当前密码即可修改，修改后所有设备需重新登录",
   "settings.brandTagline": "轻量、快速、值得信赖的即时通讯",
   "settings.officialSite": "官方网站",
   "settings.sourceCode": "源代码仓库",

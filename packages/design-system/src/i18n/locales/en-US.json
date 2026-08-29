@@ -53,7 +53,7 @@
   "settings.saved": "Saved",
   "settings.saveFailed": "Save failed, please retry",
   "settings.changePassword": "Change password",
-  "settings.changePasswordHint": "Reset via SMS code; all devices will need to sign in again",
+  "settings.changePasswordHint": "Enter your current password to change it; all devices will need to sign in again",
   "settings.brandTagline": "Lightweight, fast, trustworthy IM",
   "settings.officialSite": "Official site",
   "settings.sourceCode": "Source code",

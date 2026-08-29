@@ -53,7 +53,7 @@
   "settings.saved": "저장됨",
   "settings.saveFailed": "저장에 실패했습니다. 다시 시도해 주세요",
   "settings.changePassword": "비밀번호 변경",
-  "settings.changePasswordHint": "SMS 인증번호로 재설정하며, 모든 기기에서 다시 로그인해야 합니다",
+  "settings.changePasswordHint": "현재 비밀번호를 입력해 변경하며, 모든 기기에서 다시 로그인해야 합니다",
   "settings.brandTagline": "가볍고 빠르며 신뢰할 수 있는 메신저",
   "settings.officialSite": "공식 웹사이트",
   "settings.sourceCode": "소스 코드",

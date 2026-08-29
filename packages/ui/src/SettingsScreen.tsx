@@ -15,7 +15,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ChevronRight, LogOut, ShieldCheck, Palette, Info, User, ArrowLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useAuthStore, useBreakpoint } from "@yuanchat/shared";
+import { registerBackInterceptor, useAuthStore, useBreakpoint } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
 import { ProfileEditView } from "./ProfileEditView";
@@ -60,6 +60,28 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
   const [view, setView] = useState<SettingsView>("profile");
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [changePwdOpen, setChangePwdOpen] = useState(false);
+
+  // 安卓返回键：手机端子页是组件内部状态而非路由，不拦截的话按返回会被当成
+  // 「已在 /settings 根页面」而走退出应用流程，用户预期是先退回设置列表。
+  // 改密弹窗开着时先关弹窗，再退子页。
+  useEffect(() => {
+    if (!isMobile) return;
+    return registerBackInterceptor(() => {
+      if (changePwdOpen) {
+        setChangePwdOpen(false);
+        return true;
+      }
+      if (confirmLogout) {
+        setConfirmLogout(false);
+        return true;
+      }
+      if (view !== "index") {
+        setView("index");
+        return true;
+      }
+      return false;
+    });
+  }, [isMobile, changePwdOpen, confirmLogout, view]);
 
   // 移动端首屏应落在 index；断点切回桌面时确保有选中项
   useEffect(() => {
@@ -179,6 +201,9 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
       return (
         <div className="bg-surface flex min-h-0 flex-1 flex-col overflow-y-auto px-4">
           {renderContent(() => setView("index"))}
+          {/* 改密入口在「账号与安全」子页里，弹窗必须同屏挂载，
+              否则点了没反应、退回列表才看到 */}
+          <ChangePasswordDialog open={changePwdOpen} onClose={() => setChangePwdOpen(false)} />
         </div>
       );
     }
