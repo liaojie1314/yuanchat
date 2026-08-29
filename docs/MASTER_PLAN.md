@@ -337,14 +337,15 @@ yuanchat/
 
 **A8 期间沉淀的注意事项（后续批次仍适用）**：
 
-| 事项                                                                                                                                                                                                              |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **本地跑 E2E 前先确认没有残留 dev server**：Playwright 的 `reuseExistingServer` 会接管已在 5173 的进程，若那个进程是用 `VITE_ENABLE_MOCK=false` 起的，63 条用例会齐刷刷 30s 超时，看起来像代码全坏                |
-| **`--safe-area-top` 由原生下发**：`.app-screen` 用它留出状态栏高度，`ToastHost` 的顶部偏移也叠了它。新增全屏浮层若贴顶，必须一并叠加，否则会压在系统时间/信号图标上                                               |
-| **安卓返回键走前端拦截栈**：`registerBackInterceptor` 注册的拦截器倒序执行（后注册在更上层）。新增手机端「组件内部栈」（子页、抽屉、全屏弹层）必须注册拦截器，否则按返回会被当成「已在标签根页面」而触发退出应用  |
-| **不要照抄 `handler/captcha.go`**：它有先删再比、`rand.IntN`、key 无命名空间三个缺陷。`internal/service/auth_service.go` 是正确范式（比对成功才删、`crypto/rand`、key 带 `auth:` 命名空间、发送失败回滚已发的码） |
-| **新增自定义请求头必须同步 CORS**：`middleware/cors.go` 的 `Allow-Headers` 要逐个列出，浏览器预检不接受通配。`internal/middleware/cors_test.go` 已钉住现有四个头                                                  |
-| **i18n 占位符是 `%{var}`**（Rails 风格，见 `i18n/index.ts` 的 `interpolation.prefix`），写成 i18next 默认的 `{{var}}` 不会插值、直接把字面量上屏                                                                  |
+| 事项                                                                                                                                                                                                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **本地跑 E2E 前先确认没有残留 dev server**：Playwright 的 `reuseExistingServer` 会接管已在 5173 的进程，若那个进程是用 `VITE_ENABLE_MOCK=false` 起的，63 条用例会齐刷刷 30s 超时，看起来像代码全坏                                                                     |
+| **`--safe-area-top` 由原生下发**：`.app-screen` 用它留出状态栏高度，`ToastHost` 的顶部偏移也叠了它。新增全屏浮层若贴顶，必须一并叠加，否则会压在系统时间/信号图标上                                                                                                    |
+| **安卓返回键走前端拦截栈**：`registerBackInterceptor` 注册的拦截器倒序执行（后注册在更上层）。新增手机端「组件内部栈」（子页、抽屉、全屏弹层）必须注册拦截器，否则按返回会被当成「已在标签根页面」而触发退出应用                                                       |
+| **不要照抄 `handler/captcha.go`**：它有先删再比、`rand.IntN`、key 无命名空间三个缺陷。`internal/service/auth_service.go` 是正确范式（比对成功才删、`crypto/rand`、key 带 `auth:` 命名空间、发送失败回滚已发的码）                                                      |
+| **测试禁止依赖宿主语言环境**：Node 21 起 `navigator.language` 取自宿主 ICU locale（中文机器 `zh-CN`、GitHub runner `en-US`），依赖它的用例会「本地全绿、远程报错」。要固定语言就在 `vi.hoisted()` 里打 `navigator` 桩；本地自测用 `LANG=C.UTF-8 pnpm test` 对齐 runner |
+| **新增自定义请求头必须同步 CORS**：`middleware/cors.go` 的 `Allow-Headers` 要逐个列出，浏览器预检不接受通配。`internal/middleware/cors_test.go` 已钉住现有四个头                                                                                                       |
+| **i18n 占位符是 `%{var}`**（Rails 风格，见 `i18n/index.ts` 的 `interpolation.prefix`），写成 i18next 默认的 `{{var}}` 不会插值、直接把字面量上屏                                                                                                                       |
 
 **已定裁决（沿用，不要重开讨论）**：
 
