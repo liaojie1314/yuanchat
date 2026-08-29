@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/pkg/jwt"
 	"github.com/yuanchat/server/internal/pkg/password"
@@ -24,6 +26,7 @@ var (
 	ErrInvalidRefresh  = errors.New("invalid or expired refresh token")
 	ErrUserBanned      = errors.New("user is banned")
 	ErrWeakPassword    = errors.New("weak password")
+	ErrAccountLocked   = errors.New("account locked by too many failed logins")
 )
 
 // 密码复杂度校验失败时回给前端的 i18n key（按 R7 约定放进响应 message 字段）。
@@ -94,11 +97,16 @@ type UserService struct {
 	repo   *repository.UserRepository
 	jwtGen *jwt.Generator
 	sidGen *shortid.Generator
+	rdb    *redis.Client
 	logger *zap.Logger
 }
 
-func NewUserService(repo *repository.UserRepository, jwtGen *jwt.Generator, sidGen *shortid.Generator, logger *zap.Logger) *UserService {
-	return &UserService{repo: repo, jwtGen: jwtGen, sidGen: sidGen, logger: logger}
+// NewUserService 构造用户服务。
+//
+// rdb 承载账号级登录失败计数，Login 无条件依赖它：
+// 不接 Redis 就没有撞库防护，因此这里不做「未注入即跳过」的降级。
+func NewUserService(repo *repository.UserRepository, jwtGen *jwt.Generator, sidGen *shortid.Generator, rdb *redis.Client, logger *zap.Logger) *UserService {
+	return &UserService{repo: repo, jwtGen: jwtGen, sidGen: sidGen, rdb: rdb, logger: logger}
 }
 
 // RegisterRequest 是注册新账号的入参。
@@ -170,11 +178,48 @@ func (s *UserService) Register(ctx context.Context, req RegisterRequest) (*AuthR
 	return s.buildAuthResult(*user, "web")
 }
 
+// 账号级登录失败锁定的阈值与窗口，取自设计文档，改动直接影响安全边界。
+const (
+	loginFailMax = 5
+	loginFailTTL = 15 * time.Minute
+)
+
+// loginFailKey 返回账号维度的登录失败计数键。
+//
+// 键一律带 auth: 命名空间，避免与既有 captcha 的裸键混在一起；
+// 账号统一转小写，否则邮箱换个大小写就换到另一个计数器上，锁定形同虚设。
+func loginFailKey(account string) string {
+	return "auth:login:fail:" + strings.ToLower(account)
+}
+
+// bumpLoginFailure 递增账号的失败计数。
+//
+// 写失败只记日志不阻断：此时凭据本来就是错的，不该把 Redis 故障变成另一种响应。
+func (s *UserService) bumpLoginFailure(ctx context.Context, key string) {
+	if _, err := incrWithTTL(ctx, s.rdb, key, loginFailTTL); err != nil {
+		s.logger.Warn("递增登录失败计数失败", zap.Error(err))
+	}
+}
+
 // Login 用「手机号 / 邮箱 + 密码」认证用户并返回 JWT 令牌。
+//
+// 连续失败达 loginFailMax 次的账号在 loginFailTTL 内一律拒绝，登录成功则清零计数。
 func (s *UserService) Login(ctx context.Context, req LoginRequest) (*AuthResult, error) {
+	// 账号维度的失败锁定：middleware.LimitByIP 只按 IP 计数且限流器是进程内的，
+	// 攻击者换 IP 即可对同一账号无限撞密码。判断排在查库与密码校验之前——
+	// bcrypt 故意很慢，锁定期还去跑它等于替攻击者承担 CPU 开销。
+	failKey := loginFailKey(req.Account)
+	fails, err := s.rdb.Get(ctx, failKey).Int()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return nil, fmt.Errorf("read login fail counter: %w", err)
+	}
+	if fails >= loginFailMax {
+		s.logger.Warn("账号连续登录失败已达上限，拒绝登录", zap.Int("fails", fails))
+		return nil, ErrAccountLocked
+	}
+
 	// 按手机号或邮箱查用户
 	var user *model.User
-	var err error
 
 	if strings.Contains(req.Account, "@") {
 		user, err = s.repo.FindByEmail(ctx, req.Account)
@@ -185,17 +230,27 @@ func (s *UserService) Login(ctx context.Context, req LoginRequest) (*AuthResult,
 		return nil, fmt.Errorf("find user: %w", err)
 	}
 	if user == nil {
+		// 未注册账号同样计数：只对已注册账号计数的话，
+		// 「第 6 次是锁定还是凭据错误」就成了账号是否存在的探针
+		s.bumpLoginFailure(ctx, failKey)
 		return nil, ErrUserNotFound
 	}
 
 	// 校验密码
 	if !password.Verify(user.PasswordHash, req.Password) {
+		s.bumpLoginFailure(ctx, failKey)
 		return nil, ErrInvalidPassword
 	}
 
 	// 封禁用户拒绝登录
 	if user.Status == model.UserStatusDisabled {
 		return nil, ErrUserBanned
+	}
+
+	// 登录成功清零计数：不清零则历史失败会一直累积，
+	// 攒够阈值后用户某天用正确密码登录也会开局即锁
+	if err := s.rdb.Del(ctx, failKey).Err(); err != nil {
+		s.logger.Warn("清零登录失败计数失败", zap.Error(err))
 	}
 
 	// 记录本次登录时间，写失败不阻塞登录

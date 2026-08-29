@@ -14,7 +14,7 @@ import (
 // 而非 (nil, nil)——后者会让 GetPublicProfile 对 nil user 解引用 panic。
 func TestProfile_NotFoundForUnknownUser(t *testing.T) {
 	db := testDB(t)
-	svc := NewUserService(repository.NewUserRepository(db), nil, nil, zap.NewNop())
+	svc := NewUserService(repository.NewUserRepository(db), nil, nil, nil, zap.NewNop())
 
 	user, err := svc.Profile(context.Background(), uuid.New())
 	if !errors.Is(err, ErrUserNotFound) {
@@ -26,7 +26,7 @@ func TestProfile_NotFoundForUnknownUser(t *testing.T) {
 func TestProfile_ReturnsPublicFields(t *testing.T) {
 	db := testDB(t)
 	u := newTestUser(t, db, "资料查询")
-	svc := NewUserService(repository.NewUserRepository(db), nil, nil, zap.NewNop())
+	svc := NewUserService(repository.NewUserRepository(db), nil, nil, nil, zap.NewNop())
 
 	got, err := svc.Profile(context.Background(), u.ID)
 	if err != nil {
@@ -40,7 +40,7 @@ func TestProfile_ReturnsPublicFields(t *testing.T) {
 func TestUpdateProfile_PersistsFields(t *testing.T) {
 	db := testDB(t)
 	user := newTestUser(t, db, "改名前")
-	svc := NewUserService(repository.NewUserRepository(db), nil, nil, zap.NewNop())
+	svc := NewUserService(repository.NewUserRepository(db), nil, nil, nil, zap.NewNop())
 
 	nick := "改名后"
 	bio := "新签名"

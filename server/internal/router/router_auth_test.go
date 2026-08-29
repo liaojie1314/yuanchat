@@ -303,3 +303,44 @@ func TestLogoutRequiresAuth(t *testing.T) {
 		t.Fatalf("status = %d, want 401, body=%s", w.Code, w.Body.String())
 	}
 }
+
+// TestLoginLocksAccountAfterFiveFailures 同一账号连错 5 次后，
+// 第 6 次即使密码正确也必须是 429 + auth.accountLocked。
+//
+// 这是账号级锁定的端到端契约：middleware.LimitByIP 只按 IP 计数且是进程内的，
+// 攻击者换 IP 即可对同一账号无限撞密码，这条用例守的正是那个洞。
+func TestLoginLocksAccountAfterFiveFailures(t *testing.T) {
+	const goodPassword = "Lockpass123"
+	const badPassword = "Wrongpass99"
+
+	db := authTestDB(t)
+	rdb, _ := testutil.NewRedis(t)
+	cfg := authTestConfig()
+	r, _ := Setup(db, rdb, nil, cfg, zap.NewNop(), &recordingSender{})
+
+	user := newResetUser(t, db, goodPassword)
+	phone := *user.Phone
+
+	for i := 0; i < 5; i++ {
+		w := postJSON(r, "/api/v1/users/login", `{"account":"`+phone+`","password":"`+badPassword+`"}`)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("第 %d 次错误密码 status = %d, want 401, body=%s", i+1, w.Code, w.Body.String())
+		}
+	}
+
+	w := postJSON(r, "/api/v1/users/login", `{"account":"`+phone+`","password":"`+goodPassword+`"}`)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("锁定后 status = %d, want 429, body=%s", w.Code, w.Body.String())
+	}
+	var locked struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &locked); err != nil {
+		t.Fatalf("解析锁定响应: %v", err)
+	}
+	// 前端按 message 里的 i18n key 出文案（错误码走 message 不走 code）
+	if locked.Message != "auth.accountLocked" {
+		t.Fatalf("message = %q, want auth.accountLocked", locked.Message)
+	}
+}

@@ -364,7 +364,7 @@ func TestResetPasswordRejectsExpiredTicket(t *testing.T) {
 func TestResetPasswordRevokesExistingRefreshToken(t *testing.T) {
 	f := newAuthFixture(t)
 	user, phone := f.seedResetUser(t, "reset-revoke")
-	userSvc, gen := authSvc(f.db)
+	userSvc, gen := authSvc(t, f.db)
 	ctx := context.Background()
 
 	pair, err := gen.GeneratePair(user.ID, "web", user.TokenVersion)

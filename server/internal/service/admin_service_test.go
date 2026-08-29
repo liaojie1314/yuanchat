@@ -13,6 +13,7 @@ import (
 	"github.com/yuanchat/server/internal/pkg/password"
 	"github.com/yuanchat/server/internal/pkg/shortid"
 	"github.com/yuanchat/server/internal/repository"
+	"github.com/yuanchat/server/internal/testutil"
 	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -174,10 +175,12 @@ func TestBannedUserCannotLogin(t *testing.T) {
 		"status":        model.UserStatusDisabled,
 	})
 
+	rdb, _ := testutil.NewRedis(t)
 	userSvc := NewUserService(
 		repository.NewUserRepository(db),
 		jwt.NewGenerator("test-secret", time.Minute, time.Hour),
 		shortid.NewGenerator(db),
+		rdb,
 		zap.NewNop(),
 	)
 	_, err = userSvc.Login(ctx, LoginRequest{Account: *user.Phone, Password: plainPwd})

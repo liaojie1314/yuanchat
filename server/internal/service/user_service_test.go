@@ -6,11 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/pkg/jwt"
 	"github.com/yuanchat/server/internal/pkg/password"
 	"github.com/yuanchat/server/internal/repository"
+	"github.com/yuanchat/server/internal/testutil"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -115,7 +118,7 @@ func TestErrorConstants(t *testing.T) {
 // （合法 refresh 的完整链路由 E2E 覆盖）。
 func refreshSvc(accessTTL, refreshTTL time.Duration) (*UserService, *jwt.Generator) {
 	gen := jwt.NewGenerator("test-secret", accessTTL, refreshTTL)
-	return NewUserService(nil, gen, nil, zap.NewNop()), gen
+	return NewUserService(nil, gen, nil, nil, zap.NewNop()), gen
 }
 
 func TestRefreshRejectsGarbageToken(t *testing.T) {
@@ -176,15 +179,25 @@ func TestRefreshRejectsTamperedSignature(t *testing.T) {
 // 因此走包内既有的 testDB / newTestUser 集成夹具（库不可达时自动 skip）。
 
 // authSvc 构造接真实 repo 的 UserService 与配套 JWT 生成器。
-func authSvc(db *gorm.DB) (*UserService, *jwt.Generator) {
+func authSvc(t *testing.T, db *gorm.DB) (*UserService, *jwt.Generator) {
+	t.Helper()
+	svc, gen, _, _ := authSvcWithRedis(t, db)
+	return svc, gen
+}
+
+// authSvcWithRedis 在 authSvc 之上额外交出 Redis 客户端与 miniredis 句柄，
+// 供需要断言计数器或推进时间的用例使用。构造只有这一处，避免各用例各拼一份依赖。
+func authSvcWithRedis(t *testing.T, db *gorm.DB) (*UserService, *jwt.Generator, *redis.Client, *miniredis.Miniredis) {
+	t.Helper()
 	gen := jwt.NewGenerator("test-secret", time.Minute, time.Hour)
-	return NewUserService(repository.NewUserRepository(db), gen, nil, zap.NewNop()), gen
+	rdb, mr := testutil.NewRedis(t)
+	return NewUserService(repository.NewUserRepository(db), gen, nil, rdb, zap.NewNop()), gen, rdb, mr
 }
 
 func TestRefreshRejectsBannedUser(t *testing.T) {
 	db := testDB(t)
 	user := newTestUser(t, db, "refresh-banned")
-	svc, gen := authSvc(db)
+	svc, gen := authSvc(t, db)
 
 	pair, err := gen.GeneratePair(user.ID, "web", user.TokenVersion)
 	if err != nil {
@@ -203,7 +216,7 @@ func TestRefreshRejectsBannedUser(t *testing.T) {
 func TestRefreshRejectsStaleTokenVersion(t *testing.T) {
 	db := testDB(t)
 	user := newTestUser(t, db, "refresh-stale-tv")
-	svc, gen := authSvc(db)
+	svc, gen := authSvc(t, db)
 
 	pair, err := gen.GeneratePair(user.ID, "web", user.TokenVersion)
 	if err != nil {
@@ -223,7 +236,7 @@ func TestRefreshRejectsStaleTokenVersion(t *testing.T) {
 func TestRefreshAcceptsCurrentTokenVersion(t *testing.T) {
 	db := testDB(t)
 	user := newTestUser(t, db, "refresh-ok-tv")
-	svc, gen := authSvc(db)
+	svc, gen := authSvc(t, db)
 
 	pair, err := gen.GeneratePair(user.ID, "web", user.TokenVersion)
 	if err != nil {
@@ -242,7 +255,7 @@ func TestRefreshAcceptsCurrentTokenVersion(t *testing.T) {
 func TestLoginWritesLastLoginAt(t *testing.T) {
 	db := testDB(t)
 	user := newTestUser(t, db, "login-touch")
-	svc, _ := authSvc(db)
+	svc, _ := authSvc(t, db)
 
 	const pw = "Abcdef12"
 	hash, err := password.Hash(pw)

@@ -55,7 +55,7 @@ func Setup(
 	blocklistRepo := repository.NewBlocklistRepository(db)
 	sidGen := shortid.NewGenerator(db)
 
-	userSvc := service.NewUserService(userRepo, jwtGen, sidGen, logger)
+	userSvc := service.NewUserService(userRepo, jwtGen, sidGen, rdb, logger)
 	authSvc := service.NewAuthService(userRepo, repository.NewVerificationCodeRepository(db), rdb, sender, logger)
 	msgSvc := service.NewMessageService(msgRepo, convRepo, userRepo, reactionRepo, blocklistRepo, logger)
 	convSvc := service.NewConversationService(convRepo, msgRepo, contactRepo, userRepo, logger)

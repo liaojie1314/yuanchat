@@ -78,6 +78,11 @@ func (h *UserHandler) Login(c *gin.Context) {
 		Password: req.Password,
 	})
 	if err != nil {
+		// 账号级锁定：错误码走 message 里的 i18n key，前端据此出「账号已锁定」文案
+		if errors.Is(err, service.ErrAccountLocked) {
+			Error(c, http.StatusTooManyRequests, 429, "auth.accountLocked")
+			return
+		}
 		if errors.Is(err, service.ErrUserNotFound) || errors.Is(err, service.ErrInvalidPassword) {
 			Unauthorized(c, "invalid account or password")
 			return
