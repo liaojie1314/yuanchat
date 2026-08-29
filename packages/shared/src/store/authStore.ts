@@ -111,6 +111,8 @@ interface AuthState {
   ) => Promise<void>;
   /** 登出（异步：先调 API 再清本地状态） */
   logout: () => Promise<void>;
+  /** 只清本地登录态，不调服务端；用于服务端令牌已失效的场景（如改密后 token_version 递增） */
+  clearSession: () => void;
   /** 更新我的资料并同步本地 user（设置页保存用） */
   updateProfile: (patch: ProfilePatch) => Promise<void>;
 }
@@ -121,7 +123,7 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       user: null,
       accessToken: null,
       refreshToken: null,
@@ -185,6 +187,16 @@ export const useAuthStore = create<AuthState>()(
         } catch {
           // 即使服务端调用失败也清除本地状态
         }
+        get().clearSession();
+      },
+
+      /**
+       * 清空本地登录态（纯本地，不发请求）
+       *
+       * 服务端已经让令牌失效的场景用它：改密会把 token_version +1，
+       * 此时再调 logout 只会拿 401，本地状态却必须立刻清干净。
+       */
+      clearSession: () => {
         set({
           user: null,
           accessToken: null,
@@ -244,13 +256,7 @@ setRefreshHandler({
       return data.access_token;
     } catch {
       // refresh 也失效：清登录态，路由守卫自动回登录页
-      useAuthStore.setState({
-        user: null,
-        accessToken: null,
-        refreshToken: null,
-        expiresAt: null,
-        isAuthenticated: false,
-      });
+      useAuthStore.getState().clearSession();
       return null;
     }
   },

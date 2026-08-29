@@ -108,6 +108,36 @@ describe("authStore", () => {
     });
   });
 
+  describe("clearSession", () => {
+    it("同步清空令牌与登录态，且不调服务端登出接口", () => {
+      let logoutCalls = 0;
+      server.use(
+        http.post("http://localhost:8085/api/v1/auth/logout", () => {
+          logoutCalls += 1;
+          return HttpResponse.json({ code: 0, message: "ok", data: null });
+        }),
+      );
+      useAuthStore.setState({
+        user: { id: "1", nickname: "Test" },
+        accessToken: "token-123",
+        refreshToken: "refresh-123",
+        expiresAt: Date.now() + 60_000,
+        isAuthenticated: true,
+      });
+
+      useAuthStore.getState().clearSession();
+
+      const state = useAuthStore.getState();
+      expect(state.isAuthenticated).toBe(false);
+      expect(state.user).toBeNull();
+      expect(state.accessToken).toBeNull();
+      expect(state.refreshToken).toBeNull();
+      expect(state.expiresAt).toBeNull();
+      // 改密后服务端令牌已失效，再打 logout 只会拿 401，因此这里必须是纯本地清理
+      expect(logoutCalls).toBe(0);
+    });
+  });
+
   describe("loginWithPassword", () => {
     it("sets auth state on successful login", async () => {
       await useAuthStore.getState().loginWithPassword("testuser", "password123");

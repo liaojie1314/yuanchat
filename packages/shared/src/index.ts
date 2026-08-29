@@ -8,6 +8,7 @@ export * from "./store/presenceStore";
 export * from "./store/toastStore";
 export * from "./store/resetStores";
 export * from "./api/client";
+export * from "./api/auth";
 export * from "./api/chat";
 export * from "./api/contacts";
 export * from "./api/users";
