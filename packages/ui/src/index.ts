@@ -70,6 +70,9 @@ export type { ForgotPasswordScreenProps } from "./auth/ForgotPasswordScreen";
 export { QrLoginScreen } from "./auth/QrLoginScreen";
 export type { QrLoginScreenProps } from "./auth/QrLoginScreen";
 export { mapAuthError } from "./auth/mapAuthError";
+export { ScanQrEntry } from "./auth/ScanQrEntry";
+export { parseLoginQr } from "./auth/parseLoginQr";
+export type { ScanQrEntryProps, ScanFn } from "./auth/ScanQrEntry";
 
 // 错误边界
 export { AppErrorBoundary } from "./AppErrorBoundary";

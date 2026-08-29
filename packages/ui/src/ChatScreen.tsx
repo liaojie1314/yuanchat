@@ -15,9 +15,16 @@
  *
  * 未选中会话时聊天区显示空状态引导。
  *
+ * 扫码登录入口只在宿主注入 `scan` 时出现：扫码要原生相机，只有移动端有实现。
+ * 组件自身不做端判定，由宿主决定传不传。
+ *
+ * @param scan - 原生条码扫描实现（移动端注入）；不传则「+」菜单里没有「扫一扫」
+ *
  * @example
- * // apps/web 与 apps/desktop 的 ChatPage 直接渲染
+ * // apps/web 的 ChatPage：无扫码能力
  * <ChatScreen />
+ * // apps/desktop 的 ChatPage：Android 上注入 barcode-scanner
+ * <ChatScreen scan={scanWithNativeCamera} />
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageSquare } from "lucide-react";
@@ -41,6 +48,7 @@ import { AddContactModal } from "./AddContactModal";
 import { ChatDetail } from "./ChatDetail";
 import { ChatWindow } from "./ChatWindow";
 import { ConversationList } from "./ConversationList";
+import { ScanQrEntry, type ScanFn } from "./auth/ScanQrEntry";
 import { CreateGroupModal } from "./CreateGroupModal";
 import { MembersView } from "./MembersView";
 import { ResizeHandle } from "./ResizeHandle";
@@ -55,13 +63,15 @@ const MOCK_MEMBERS: ConversationMember[] = [
   { userId: "m5", nickname: "我", avatarUrl: null, role: 0 },
 ];
 
-export function ChatScreen() {
+export function ChatScreen({ scan }: { scan?: ScanFn } = {}) {
   const { t } = useTranslation();
   const bp = useBreakpoint();
   const activeId = useConversationStore((s) => s.activeId);
   const setActive = useConversationStore((s) => s.setActive);
 
   const [showDetail, setShowDetail] = useState(false);
+  /** 扫码登录流程是否进行中；仅在宿主注入了原生扫码能力时可能为 true */
+  const [scanActive, setScanActive] = useState(false);
   const [detailView, setDetailView] = useState<"info" | "members">("info");
   // 资料页目标用户（点消息头像进入，null 表示未打开）
   const [profileTarget, setProfileTarget] = useState<{
@@ -147,6 +157,7 @@ export function ChatScreen() {
     <>
       <CreateGroupModal open={groupOpen} onClose={() => setGroupOpen(false)} />
       <AddContactModal open={addOpen} onClose={() => setAddOpen(false)} />
+      {scan && <ScanQrEntry scan={scan} active={scanActive} onClose={() => setScanActive(false)} />}
     </>
   );
 
@@ -190,7 +201,11 @@ export function ChatScreen() {
     );
 
   const list = (
-    <ConversationList onNewGroup={() => setGroupOpen(true)} onAddContact={() => setAddOpen(true)} />
+    <ConversationList
+      onNewGroup={() => setGroupOpen(true)}
+      onAddContact={() => setAddOpen(true)}
+      onScanQr={scan ? () => setScanActive(true) : undefined}
+    />
   );
 
   // ── 手机端：栈式单屏 ──

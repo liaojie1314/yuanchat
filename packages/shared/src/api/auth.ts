@@ -173,3 +173,45 @@ export async function pollQrSession(qrToken: string, pollSecret: string): Promis
       : undefined,
   };
 }
+
+/** 扫码端登记扫描后拿到的「我是谁」，用于确认页展示 */
+export interface QrScanIdentity {
+  nickname: string;
+  /** 未设置头像时为 null */
+  avatarUrl: string | null;
+}
+
+/** 后端 scan 响应体（snake_case） */
+interface QrScanIdentityDTO {
+  nickname: string;
+  avatar_url: string | null;
+}
+
+/**
+ * 登记扫描（扫码端，需已登录）
+ *
+ * @param qrToken - 从二维码内容里解析出的会话凭据
+ * @returns 当前登录账号的昵称与头像，供确认页展示「将以此账号登录」
+ * @remarks 把会话从 `pending` 推进到 `scanned`，此步**不签发任何令牌**。
+ *   会话不存在或已过期抛 404 `auth.qrExpired`；已被扫过或已确认抛 409 `auth.qrBadState`；
+ *   账号被封禁抛 403（`message` 是中间件既有的 `account banned`，不是 i18n key）。
+ */
+export async function scanQr(qrToken: string): Promise<QrScanIdentity> {
+  const dto = await apiPost<QrScanIdentityDTO>(
+    "/api/v1/auth/qr/" + encodeURIComponent(qrToken) + "/scan",
+    {},
+  );
+  return { nickname: dto.nickname, avatarUrl: dto.avatar_url };
+}
+
+/**
+ * 确认登录（扫码端，需已登录）
+ *
+ * @param qrToken - 与 `scanQr` 同一个会话凭据
+ * @remarks 令牌在这一步签发并写进会话，由被扫端下一次轮询取走，因此**必须先 `scanQr` 再确认**：
+ *   未扫描直接确认抛 409 `auth.qrBadState`。确认者与扫描者必须是同一账号，否则抛 403
+ *   `auth.qrWrongUser`。成功是 204 空响应。
+ */
+export async function confirmQr(qrToken: string): Promise<void> {
+  await apiPost<void>("/api/v1/auth/qr/" + encodeURIComponent(qrToken) + "/confirm", {});
+}

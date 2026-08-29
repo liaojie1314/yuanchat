@@ -15,12 +15,14 @@
  * @param hideHeader - 隐藏标题栏（移动端由外层 app bar 承担标题时使用）
  * @param onNewGroup - 顶部「+」下拉「发起群聊」回调（由 ChatScreen 挂 CreateGroupModal）
  * @param onAddContact - 顶部「+」下拉「添加好友」回调（由 ChatScreen 挂 AddContactModal）
+ * @param onScanQr - 顶部「+」下拉「扫一扫」回调；只有具备原生扫码能力的端会传，
+ *   不传则该菜单项不渲染（组件自身不做端判定）
  *
  * @example
  * <ConversationList />
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, Plus, Bell, BellOff, Pin, PinOff, Users, UserPlus } from "lucide-react";
+import { Search, Plus, Bell, BellOff, Pin, PinOff, Users, UserPlus, ScanLine } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { applyConversationSetting, useConversationStore } from "@yuanchat/shared";
 import type { Conversation } from "@yuanchat/shared";
@@ -85,10 +87,12 @@ export function ConversationList({
   hideHeader = false,
   onNewGroup,
   onAddContact,
+  onScanQr,
 }: {
   hideHeader?: boolean;
   onNewGroup?: () => void;
   onAddContact?: () => void;
+  onScanQr?: () => void;
 }) {
   const { t } = useTranslation();
   const conversations = useConversationStore((s) => s.conversations);
@@ -241,6 +245,16 @@ export function ConversationList({
                       onAddContact?.();
                     }}
                   />
+                  {onScanQr && (
+                    <MenuItem
+                      icon={<ScanLine size={17} />}
+                      label={t("auth.scanQrCode")}
+                      onClick={() => {
+                        setShowMenu(false);
+                        onScanQr();
+                      }}
+                    />
+                  )}
                 </div>
               </>
             )}
