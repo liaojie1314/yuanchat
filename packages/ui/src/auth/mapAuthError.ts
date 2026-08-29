@@ -18,7 +18,12 @@ import { ApiError } from "@yuanchat/shared";
 /**
  * 后端可能直接回给前端的 i18n key 白名单
  *
- * 改密链路的错误 key + 密码复杂度六条规则（后端把命中规则的 key 放进 message）。
+ * 改密链路的错误 key + 密码复杂度六条规则（后端把命中规则的 key 放进 message）
+ * + 扫码登录的错误 key。
+ *
+ * 刻意**不含** `auth.qrBadState`（409，扫码状态机违例）：它对用户而言与通用失败是同一个动作
+ * ——刷新二维码重来，分两句文案没有信息增益。不进白名单即落到调用方的兜底 key，
+ * 扫码屏传的兜底正是 `auth.qrFailed`，因此它显示的就是「扫码失败」那句，locale 也少一个键。
  */
 const PASSTHROUGH_KEYS = new Set([
   "auth.otpRequired",
@@ -26,6 +31,9 @@ const PASSTHROUGH_KEYS = new Set([
   "auth.sendFailed",
   "auth.resetFailed",
   "auth.accountLocked",
+  "auth.qrExpired",
+  "auth.qrFailed",
+  "auth.qrWrongUser",
   "validation.passwordMinLength",
   "validation.passwordMaxLength",
   "validation.passwordNoWhitespace",

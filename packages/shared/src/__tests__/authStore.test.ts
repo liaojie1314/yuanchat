@@ -138,6 +138,55 @@ describe("authStore", () => {
     });
   });
 
+  describe("sessionFromTokens", () => {
+    it("用扫码换出的令牌建立登录态，并拉 /users/me 补齐资料", async () => {
+      server.use(
+        http.get("http://localhost:8085/api/v1/users/me", () =>
+          HttpResponse.json({
+            code: 0,
+            message: "ok",
+            data: { id: "u-1", nickname: "扫码的人", short_id: 10001, gender: 1 },
+          }),
+        ),
+      );
+
+      await useAuthStore
+        .getState()
+        .sessionFromTokens({ accessToken: "at-1", refreshToken: "rt-1", expiresIn: 3600 });
+
+      const state = useAuthStore.getState();
+      expect(state.accessToken).toBe("at-1");
+      expect(state.refreshToken).toBe("rt-1");
+      expect(state.isAuthenticated).toBe(true);
+      expect(state.user?.nickname).toBe("扫码的人");
+      // 过期时刻按令牌寿命算，而不是别处那个同名的会话剩余秒数
+      expect((state.expiresAt as number) - Date.now()).toBeGreaterThan(3000_000);
+    });
+
+    it("拉资料失败时不留半个登录态：清干净并把错误抛给调用方", async () => {
+      // 刻意用 500 而不是 401：401 会触发 client 的静默刷新兜底，
+      // 刷新失败时 tokenManager 自己就会清登录态，那样这条用例就测不到本方法的清理了
+      server.use(
+        http.get("http://localhost:8085/api/v1/users/me", () =>
+          HttpResponse.json({ code: 500, message: "failed to get profile" }, { status: 500 }),
+        ),
+      );
+
+      await expect(
+        useAuthStore
+          .getState()
+          .sessionFromTokens({ accessToken: "at-1", refreshToken: "rt-1", expiresIn: 3600 }),
+      ).rejects.toBeTruthy();
+
+      const state = useAuthStore.getState();
+      // 留着令牌但没有 user，界面会顶着一个没有昵称头像的空账号
+      expect(state.isAuthenticated).toBe(false);
+      expect(state.accessToken).toBeNull();
+      expect(state.refreshToken).toBeNull();
+      expect(state.user).toBeNull();
+    });
+  });
+
   describe("loginWithPassword", () => {
     it("sets auth state on successful login", async () => {
       await useAuthStore.getState().loginWithPassword("testuser", "password123");

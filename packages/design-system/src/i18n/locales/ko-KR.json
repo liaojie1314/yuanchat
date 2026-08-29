@@ -141,6 +141,8 @@
   "auth.qrConfirmOnPhone": "휴대폰에서 로그인을 확인하세요",
   "auth.qrHint": "YuanChat을 열고 '스캔'을 탭하여 로그인하세요",
   "auth.qrRefresh": "QR 코드 새로 고침",
+  "auth.qrFailed": "QR 로그인에 실패했습니다. QR 코드를 새로 고치세요",
+  "auth.qrWrongUser": "스캔한 계정으로 로그인을 확인하세요",
   "auth.backToPasswordLogin": "비밀번호 로그인으로 돌아가기",
   "validation.passwordMinLength": "비밀번호는 8자 이상이어야 합니다",
   "validation.passwordMaxLength": "비밀번호는 64바이트 이하여야 합니다",

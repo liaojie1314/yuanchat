@@ -67,6 +67,8 @@ export { InConversationSearch } from "./InConversationSearch";
 // 认证组件
 export { ForgotPasswordScreen } from "./auth/ForgotPasswordScreen";
 export type { ForgotPasswordScreenProps } from "./auth/ForgotPasswordScreen";
+export { QrLoginScreen } from "./auth/QrLoginScreen";
+export type { QrLoginScreenProps } from "./auth/QrLoginScreen";
 export { mapAuthError } from "./auth/mapAuthError";
 
 // 错误边界

@@ -141,6 +141,8 @@
   "auth.qrConfirmOnPhone": "Confirm the sign-in on your phone",
   "auth.qrHint": "Open YuanChat and tap Scan to sign in",
   "auth.qrRefresh": "Refresh QR code",
+  "auth.qrFailed": "QR sign-in failed, please refresh the code",
+  "auth.qrWrongUser": "Confirm with the account that scanned the code",
   "auth.backToPasswordLogin": "Back to password sign in",
   "validation.passwordMinLength": "Password must be at least 8 characters",
   "validation.passwordMaxLength": "Password must be at most 64 bytes",

@@ -13,6 +13,7 @@
  * 1. loginWithPassword() → POST /api/v1/users/login → 存储 token
  * 2. registerWithPassword() → POST /api/v1/users/register → 存储 token
  * 3. logout() → POST /api/v1/auth/logout → 清空所有状态
+ * 4. sessionFromTokens() → 已签发的令牌对（扫码登录）→ 存储 token 并拉 GET /users/me 补资料
  *
  * @example
  * ```tsx
@@ -23,7 +24,7 @@
  */
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { apiPost, setTokenProvider } from "../api/client";
+import { apiGet, apiPost, setTokenProvider } from "../api/client";
 import { setRefreshHandler } from "../api/tokenManager";
 import { updateMyProfile } from "../api/users";
 import type { ProfilePatch } from "../api/users";
@@ -66,11 +67,24 @@ interface LoginResponse {
   expires_in: number;
 }
 
-/** POST /api/v1/auth/refresh 响应（无 user） */
+/** 后端 POST /api/v1/auth/refresh 响应（无 user） */
 interface RefreshResponse {
   access_token: string;
   refresh_token: string;
   expires_in: number;
+}
+
+/**
+ * 已签发的令牌对
+ *
+ * 扫码登录由手机端确认、服务端签发，被扫端只是把令牌取回来，
+ * 因此需要一个不带账号密码的登录态入口。
+ */
+export interface TokenPair {
+  accessToken: string;
+  refreshToken: string;
+  /** access 令牌寿命（秒） */
+  expiresIn: number;
 }
 
 /** expires_in（秒）→ 本地过期时刻（Unix ms） */
@@ -113,6 +127,8 @@ interface AuthState {
   logout: () => Promise<void>;
   /** 只清本地登录态，不调服务端；用于服务端令牌已失效的场景（如改密后 token_version 递增） */
   clearSession: () => void;
+  /** 用已经签发好的令牌对建立登录态（扫码登录换出的令牌走这里，不带用户资料） */
+  sessionFromTokens: (tokens: TokenPair) => Promise<void>;
   /** 更新我的资料并同步本地 user（设置页保存用） */
   updateProfile: (patch: ProfilePatch) => Promise<void>;
 }
@@ -204,6 +220,29 @@ export const useAuthStore = create<AuthState>()(
           expiresAt: null,
           isAuthenticated: false,
         });
+      },
+
+      /**
+       * 用已经签发好的令牌对建立登录态
+       *
+       * 扫码登录的令牌由手机端确认、服务端签发，被扫端只把它取回来，
+       * 因此拿不到登录接口那份 user JSON —— 令牌先落地，再用它拉一次
+       * `GET /users/me` 补齐资料。资料拉取失败时不留半个登录态：
+       * 清干净并把错误抛给调用方，否则界面会顶着一个没有昵称头像的空账号。
+       */
+      sessionFromTokens: async (tokens: TokenPair) => {
+        set({
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          expiresAt: expiryOf(tokens.expiresIn),
+        });
+        try {
+          const dto = await apiGet<UserDTO>("/api/v1/users/me");
+          set({ user: mapUser(dto), isAuthenticated: true });
+        } catch (e) {
+          get().clearSession();
+          throw e;
+        }
       },
 
       /** 更新我的资料并同步本地 user（设置页保存用） */

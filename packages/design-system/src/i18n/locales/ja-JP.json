@@ -141,6 +141,8 @@
   "auth.qrConfirmOnPhone": "スマートフォンでサインインを確認してください",
   "auth.qrHint": "YuanChat を開き「スキャン」をタップしてサインイン",
   "auth.qrRefresh": "QR コードを更新",
+  "auth.qrFailed": "QR サインインに失敗しました。QR コードを更新してください",
+  "auth.qrWrongUser": "スキャンしたアカウントで確認してください",
   "auth.backToPasswordLogin": "パスワードでのサインインに戻る",
   "validation.passwordMinLength": "パスワードは 8 文字以上にしてください",
   "validation.passwordMaxLength": "パスワードは 64 バイト以内にしてください",
