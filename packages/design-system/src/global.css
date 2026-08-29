@@ -463,6 +463,12 @@
      桌面端 / 旧 WebView 下 --app-height 恒为 100vh，等价于原 h-screen。 */
   .app-screen {
     height: var(--app-height, 100vh);
+
+    /* 顶部安全区：安卓侧（MainActivity）把状态栏实测高度下发成 --safe-area-top，
+       WebView 因此可以铺到状态栏之下，而本容器的背景（含深色模式）一直延伸上去，
+       内容再靠这条 padding 避开状态栏文字 —— 即沉浸式状态栏。
+       Web 与桌面端没有下发该变量，回退 0，行为与改造前一致。 */
+    padding-top: var(--safe-area-top, env(safe-area-inset-top, 0));
   }
 }
 

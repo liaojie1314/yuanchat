@@ -22,7 +22,7 @@ import {
   Sun,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useThemeStore } from "@yuanchat/shared";
+import { useBreakpoint, useThemeStore } from "@yuanchat/shared";
 import { SUPPORTED_LOCALES } from "@yuanchat/design-system/i18n";
 import { cn } from "@yuanchat/shared/utils";
 import { copyText } from "./copyText";
@@ -30,7 +30,15 @@ import { E2EESection } from "./E2EESection";
 import { APP_VERSION, maskPhone } from "./settingsUtils";
 
 /** 分组标题 + 副标（页面级） */
+/**
+ * 子页标题块
+ *
+ * 移动端整块不渲染：那里的标题已由 MobileHeader 的顶栏承担，再画一遍就是同屏两个标题，
+ * 而描述又与上一级列表项里的说明逐字相同，属纯重复。桌面/平板没有顶栏，仍需要它。
+ */
 function SectionHeader({ title, desc }: { title: string; desc?: string }) {
+  const bp = useBreakpoint();
+  if (bp === "mobile") return null;
   return (
     <div className="mb-4">
       <h2 className="text-title-lg text-on-surface font-semibold">{title}</h2>
@@ -100,10 +108,13 @@ export function AccountSection({
   phone,
   email,
   shortId,
+  onChangePassword,
 }: {
   phone?: string;
   email?: string;
   shortId?: number;
+  /** 进入改密链路；不传则该入口保持禁用（宿主未提供路由时不该给出死按钮） */
+  onChangePassword?: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -127,15 +138,26 @@ export function AccountSection({
           />
         )}
         <button
-          disabled
-          className="text-on-surface-variant flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left opacity-60"
+          type="button"
+          disabled={onChangePassword === undefined}
+          onClick={onChangePassword}
+          className={cn(
+            "flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left",
+            onChangePassword === undefined
+              ? "text-on-surface-variant opacity-60"
+              : "hover:bg-surface-container-high",
+          )}
         >
           <span className="bg-surface-container-high flex h-9 w-9 shrink-0 items-center justify-center rounded-lg">
             <Key size={18} />
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-body-md text-on-surface">{t("settings.changePassword")}</p>
-            <p className="text-label-sm text-on-surface-variant mt-0.5">{t("common.comingSoon")}</p>
+            <p className="text-label-sm text-on-surface-variant mt-0.5">
+              {onChangePassword === undefined
+                ? t("common.comingSoon")
+                : t("settings.changePasswordHint")}
+            </p>
           </div>
         </button>
       </InfoCard>

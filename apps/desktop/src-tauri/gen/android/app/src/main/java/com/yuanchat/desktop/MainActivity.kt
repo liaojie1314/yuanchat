@@ -3,11 +3,30 @@ package com.yuanchat.desktop
 import android.os.Build
 import android.os.Bundle
 import android.view.View
+import android.webkit.WebView
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
+  /** WebView 引用：返回键委托与安全区下发都要用它 */
+  private var webView: WebView? = null
+
+  /** 最近一次量到的顶部安全区高度（CSS px），WebView 晚于 inset 回调创建时用它补发 */
+  private var safeAreaTopCssPx = 0f
+
+  // 关掉 Tauri 自带的返回处理。它只看 WebView.canGoBack()，而本应用的路由跳转大量用
+  // replace（守卫重定向、登录后进主界面），WebView 历史长度恒为 1 —— 于是每次按返回键
+  // 都直接退出应用，表现为「系统返回键完全不可用，只能点界面上的返回」。
+  // 改为把返回键交给前端：它才知道当前有没有弹窗、相机取景或组件内部栈要先收起。
+  override val handleBackNavigation: Boolean = false
+
+  override fun onWebViewCreate(webView: WebView) {
+    this.webView = webView
+    pushSafeAreaTop()
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     // edge-to-edge 只在 Android 11（API 30）及以上启用。
     // IME 的 inset 是 Android 11 才有的能力，更早的系统上
@@ -19,6 +38,8 @@ class MainActivity : TauriActivity() {
     val edgeToEdge = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
     if (edgeToEdge) enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+
+    registerBackHandler()
     if (!edgeToEdge) return
 
     // 软键盘适配：targetSdk 35+ 的 Android 15 强制 edge-to-edge，旧的
@@ -28,9 +49,12 @@ class MainActivity : TauriActivity() {
     // 内容区随之变矮 → WebView 的 visualViewport.height 收缩 →
     // 前端 useKeyboardAwareViewport 据此把 --app-height 改小、内容上移。
     //
-    // 顶部/左右同样要留出系统栏与刘海的高度：edge-to-edge 下 WebView 铺满整块屏幕，
-    // 不减掉这些区域，页面标题栏就会压在状态栏文字下面。取系统实测值而非写死数值，
-    // 才能覆盖刘海屏、挖孔屏、横屏等各种机型差异。
+    // 顶部**刻意不再** padding：那样会在状态栏位置留出一条窗口底色的空白，与应用背景
+    // 断开，就是「没有沉浸式状态栏」的观感。改为让 WebView 铺到状态栏之下，
+    // 把实测高度作为 --safe-area-top 下发给前端，由 .app-screen 自己留出内边距 ——
+    // 应用背景（含深色模式）因此一直延伸到状态栏后面。
+    // 左右仍按系统值 padding：刘海屏横屏时那是真正不可绘制的区域，
+    // 交给 CSS 反而要多下发两个变量、收益为零。
     val content = findViewById<View>(android.R.id.content)
     ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
       val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
@@ -38,12 +62,71 @@ class MainActivity : TauriActivity() {
       val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
       view.setPadding(
         maxOf(bars.left, cutout.left),
-        maxOf(bars.top, cutout.top),
+        0,
         maxOf(bars.right, cutout.right),
         // 键盘弹起时用键盘高度，否则保留系统栏高度，避免内容被导航栏遮挡
         maxOf(ime, bars.bottom),
       )
+
+      // inset 是物理像素，CSS 像素要除以 density，否则高分屏上会多留出两三倍的空白
+      val density = resources.displayMetrics.density
+      safeAreaTopCssPx = maxOf(bars.top, cutout.top) / density
+      pushSafeAreaTop()
       insets
     }
+  }
+
+  /**
+   * 把顶部安全区高度写进 CSS 自定义属性。
+   *
+   * 与 --app-height 同一套路：原生量、前端用。
+   *
+   * 必须重试：inset 回调与 onWebViewCreate 都发生在页面加载之前，那时 document 还是
+   * about:blank，写进去的自定义属性会随文档被替换而丢失（实测表现为状态栏与内容重叠）。
+   * 因此这里要等到真实文档就位（协议不是 about: 且已过 loading 阶段）才算写成功，
+   * 否则每 250ms 重试，最多 ~5 秒。写成功后不再重试；旋转屏幕、显示切换会再次触发
+   * inset 回调，届时重新写入。
+   */
+  private fun pushSafeAreaTop(retries: Int = 20) {
+    val target = webView ?: return
+    val value = "%.2f".format(safeAreaTopCssPx)
+    target.evaluateJavascript(
+      "(function(){" +
+        "if(location.protocol==='about:'||document.readyState==='loading')return 'retry';" +
+        "document.documentElement.style.setProperty('--safe-area-top','${value}px');" +
+        "return 'ok'})()",
+    ) { result ->
+      if (result != "\"ok\"" && retries > 0) {
+        target.postDelayed({ pushSafeAreaTop(retries - 1) }, 250)
+      }
+    }
+  }
+
+  /**
+   * 返回键委托给前端。
+   *
+   * 前端 window.__androidBack__ 同步返回是否已消费本次返回：
+   * true 表示它收起了弹窗 / 相机 / 内部栈或做了路由回退；false 表示已在根路由，
+   * 此时才退出应用。前端还没挂上处理器时按原样退出，与改动前行为一致。
+   */
+  private fun registerBackHandler() {
+    onBackPressedDispatcher.addCallback(
+      this,
+      object : OnBackPressedCallback(true) {
+        override fun handleOnBackPressed() {
+          val target = webView
+          if (target == null) {
+            finish()
+            return
+          }
+          target.evaluateJavascript(
+            "(function(){try{return window.__androidBack__?window.__androidBack__():false}" +
+              "catch(e){return false}})()",
+          ) { result ->
+            if (result != "true") finish()
+          }
+        }
+      },
+    )
   }
 }

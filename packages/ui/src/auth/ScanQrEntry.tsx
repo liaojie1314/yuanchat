@@ -20,7 +20,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { scanQr, confirmQr, type QrScanIdentity } from "@yuanchat/shared";
+import { scanQr, confirmQr, registerBackInterceptor, type QrScanIdentity } from "@yuanchat/shared";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { mapAuthError } from "./mapAuthError";
 import { parseLoginQr } from "./parseLoginQr";
@@ -31,6 +31,13 @@ export type ScanFn = () => Promise<string | null>;
 export interface ScanQrEntryProps {
   /** 由宿主 app 注入的原生扫描实现 */
   scan: ScanFn;
+  /**
+   * 由宿主 app 注入的取消扫描实现
+   *
+   * 相机取景期间前端界面是透明的，用户唯一的退出手段就是系统返回键；
+   * 不注入的话按返回会穿透到路由层甚至退出应用，相机也留在开着的状态。
+   */
+  cancelScan?: () => void;
   /** 置为 true 时开始一次扫码；流程结束后宿主应重置为 false */
   active: boolean;
   /** 流程结束（成功、失败或用户取消）时回调，宿主据此把 `active` 复位 */
@@ -42,7 +49,7 @@ export interface ScanQrEntryProps {
  *
  * @param props - 见 {@link ScanQrEntryProps}
  */
-export function ScanQrEntry({ scan, active, onClose }: ScanQrEntryProps) {
+export function ScanQrEntry({ scan, cancelScan, active, onClose }: ScanQrEntryProps) {
   const { t } = useTranslation();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<{ token: string; who: QrScanIdentity } | null>(null);
@@ -87,6 +94,22 @@ export function ScanQrEntry({ scan, active, onClose }: ScanQrEntryProps) {
       cancelled = true;
     };
   }, [active, scan, onClose, t]);
+
+  // 安卓返回键：相机取景中按返回应当取消扫描并关掉相机，确认框开着时按返回等于放弃确认。
+  // 两者都不拦的话返回会穿透到路由层，相机还留在开着的状态。
+  useEffect(() => {
+    if (!active && pending === null) return;
+    return registerBackInterceptor(() => {
+      if (pending !== null) {
+        setPending(null);
+        onClose();
+        return true;
+      }
+      cancelScan?.();
+      onClose();
+      return true;
+    });
+  }, [active, pending, cancelScan, onClose]);
 
   async function handleConfirm() {
     const current = pending;

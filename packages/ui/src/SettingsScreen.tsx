@@ -47,7 +47,14 @@ const NAV_GROUPS: {
   { view: "about", icon: Info, labelKey: "settings.about", descKey: "settings.aboutDesc" },
 ];
 
-export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) {
+export function SettingsScreen({
+  aboutExtra,
+  onChangePassword,
+}: {
+  aboutExtra?: ReactNode;
+  /** 进入改密链路（宿主提供路由跳转）；不传则「修改密码」保持禁用 */
+  onChangePassword?: () => void;
+} = {}) {
   const { t } = useTranslation();
   const bp = useBreakpoint();
   const user = useAuthStore((s) => s.user);
@@ -71,7 +78,12 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
       case "account":
         return (
           <MobileHeader show={isMobile} title={t("settings.account")} onBack={onBack}>
-            <AccountSection phone={user?.phone} email={user?.email} shortId={user?.shortId} />
+            <AccountSection
+              phone={user?.phone}
+              email={user?.email}
+              shortId={user?.shortId}
+              onChangePassword={onChangePassword}
+            />
           </MobileHeader>
         );
       case "appearance":

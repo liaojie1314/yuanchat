@@ -12,9 +12,14 @@
  */
 import { ChatScreen } from "@yuanchat/ui";
 import { useIsMobile } from "../hooks/useIsMobile";
-import { scanWithNativeCamera } from "../lib/nativeScan";
+import { scanWithNativeCamera, cancelNativeScan } from "../lib/nativeScan";
 
 export function ChatPage() {
   const isMobile = useIsMobile();
-  return <ChatScreen scan={isMobile ? scanWithNativeCamera : undefined} />;
+  return (
+    <ChatScreen
+      scan={isMobile ? scanWithNativeCamera : undefined}
+      cancelScan={isMobile ? cancelNativeScan : undefined}
+    />
+  );
 }

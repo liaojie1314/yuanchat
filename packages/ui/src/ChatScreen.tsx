@@ -19,6 +19,7 @@
  * 组件自身不做端判定，由宿主决定传不传。
  *
  * @param scan - 原生条码扫描实现（移动端注入）；不传则「+」菜单里没有「扫一扫」
+ * @param cancelScan - 取消原生扫描；返回键要靠它关掉相机取景
  *
  * @example
  * // apps/web 的 ChatPage：无扫码能力
@@ -44,6 +45,7 @@ import {
 } from "@yuanchat/shared";
 import type { ConversationMember } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
+import { registerBackInterceptor } from "@yuanchat/shared";
 import { AddContactModal } from "./AddContactModal";
 import { ChatDetail } from "./ChatDetail";
 import { ChatWindow } from "./ChatWindow";
@@ -63,7 +65,7 @@ const MOCK_MEMBERS: ConversationMember[] = [
   { userId: "m5", nickname: "我", avatarUrl: null, role: 0 },
 ];
 
-export function ChatScreen({ scan }: { scan?: ScanFn } = {}) {
+export function ChatScreen({ scan, cancelScan }: { scan?: ScanFn; cancelScan?: () => void } = {}) {
   const { t } = useTranslation();
   const bp = useBreakpoint();
   const activeId = useConversationStore((s) => s.activeId);
@@ -153,11 +155,45 @@ export function ChatScreen({ scan }: { scan?: ScanFn } = {}) {
       .catch(() => showToast("error", t("common.opFailed")));
   };
 
+  // 安卓系统返回键：手机端的会话/详情是组件内部栈而非路由，
+  // 不拦截的话按返回会一路退到根路由甚至退出应用，与用户预期（回上一层）不符。
+  // 桌面/平板不注册：那里的详情面板是并排显示的，没有「上一层」的语义。
+  useEffect(() => {
+    if (bp !== "mobile") return;
+    return registerBackInterceptor(() => {
+      if (profileTarget !== null) {
+        setProfileTarget(null);
+        if (!detailWasOpen.current) setShowDetail(false);
+        return true;
+      }
+      if (detailView === "members") {
+        setDetailView("info");
+        return true;
+      }
+      if (showDetail) {
+        setShowDetail(false);
+        return true;
+      }
+      if (activeId) {
+        setActive(null);
+        return true;
+      }
+      return false;
+    });
+  }, [bp, profileTarget, detailView, showDetail, activeId, setActive]);
+
   const modals = (
     <>
       <CreateGroupModal open={groupOpen} onClose={() => setGroupOpen(false)} />
       <AddContactModal open={addOpen} onClose={() => setAddOpen(false)} />
-      {scan && <ScanQrEntry scan={scan} active={scanActive} onClose={() => setScanActive(false)} />}
+      {scan && (
+        <ScanQrEntry
+          scan={scan}
+          cancelScan={cancelScan}
+          active={scanActive}
+          onClose={() => setScanActive(false)}
+        />
+      )}
     </>
   );
 

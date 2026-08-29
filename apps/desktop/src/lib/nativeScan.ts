@@ -12,6 +12,7 @@
  */
 import {
   scan as nativeScan,
+  cancel as nativeCancel,
   checkPermissions,
   requestPermissions,
   openAppSettings,
@@ -45,4 +46,17 @@ export async function scanWithNativeCamera(): Promise<string | null> {
     // 插件在用户按返回键取消时以异常形式结束，等同于「没扫」
     return null;
   }
+}
+
+/**
+ * 取消正在进行的扫描并关闭相机取景
+ *
+ * @remarks 供返回键处理调用。相机取景期间 WebView 是透明的，
+ *   不调这个的话相机会一直开着、`scan()` 的 promise 也不会落地。
+ *   刻意 fire-and-forget：调用方（返回键拦截器）必须同步返回，等不了 promise。
+ */
+export function cancelNativeScan(): void {
+  void nativeCancel().catch(() => {
+    // 没有进行中的扫描时插件会报错，对调用方无意义
+  });
 }

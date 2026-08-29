@@ -9,6 +9,7 @@ import { MainLayout, AppErrorBoundary } from "@yuanchat/ui";
 import { setNotifier, useAuthStore, useKeyboardAwareViewport } from "@yuanchat/shared";
 import { TitleBar } from "./components/TitleBar";
 import { useIsMobile } from "./hooks/useIsMobile";
+import { useAndroidBack } from "./hooks/useAndroidBack";
 
 const ChatPage = lazy(() => import("./pages/ChatPage").then((m) => ({ default: m.ChatPage })));
 const ContactsPage = lazy(() =>
@@ -49,6 +50,8 @@ void (async () => {
 
 function App() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  // 安卓系统返回键交由前端决定语义，见 useAndroidBack 的说明
+  useAndroidBack();
   const isMobile = useIsMobile();
 
   // 移动端软键盘弹出时把内容顶起（桌面端 / 旧 WebView 自动降级为无操作）
@@ -108,6 +111,8 @@ function App() {
             <Route path="/contacts" element={<ContactsPage />} />
             <Route path="/favorites" element={<FavoritesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            {/* 登录态下也要能进改密链路：设置页的「修改密码」跳这里 */}
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="*" element={<Navigate to="/chat" replace />} />
           </Route>
         </Routes>
