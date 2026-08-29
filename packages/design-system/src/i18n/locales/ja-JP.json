@@ -144,7 +144,7 @@
   "auth.scanQrCode": "スキャン",
   "auth.qrNotOurs": "元聊のログイン QR コードではありません",
   "auth.qrConfirmTitle": "ログインの確認",
-  "auth.qrConfirmMessage": "「{{nickname}}」として別の端末でログインします",
+  "auth.qrConfirmMessage": "「%{nickname}」として別の端末でログインします",
   "auth.qrConfirmLogin": "ログインを確認",
   "auth.qrFailed": "QR サインインに失敗しました。QR コードを更新してください",
   "auth.qrWrongUser": "スキャンしたアカウントで確認してください",

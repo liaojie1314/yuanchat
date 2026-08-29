@@ -144,7 +144,7 @@
   "auth.scanQrCode": "扫一扫",
   "auth.qrNotOurs": "这不是元聊的登录二维码",
   "auth.qrConfirmTitle": "确认登录",
-  "auth.qrConfirmMessage": "将以「{{nickname}}」的身份在另一台设备上登录",
+  "auth.qrConfirmMessage": "将以「%{nickname}」的身份在另一台设备上登录",
   "auth.qrConfirmLogin": "确认登录",
   "auth.qrFailed": "扫码登录失败，请刷新二维码",
   "auth.qrWrongUser": "请用扫码的那个账号确认登录",

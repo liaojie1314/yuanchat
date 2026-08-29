@@ -144,7 +144,7 @@
   "auth.scanQrCode": "Scan QR code",
   "auth.qrNotOurs": "This is not a YuanChat login QR code",
   "auth.qrConfirmTitle": "Confirm login",
-  "auth.qrConfirmMessage": "Sign in on the other device as “{{nickname}}”",
+  "auth.qrConfirmMessage": "Sign in on the other device as “%{nickname}”",
   "auth.qrConfirmLogin": "Confirm login",
   "auth.qrFailed": "QR sign-in failed, please refresh the code",
   "auth.qrWrongUser": "Confirm with the account that scanned the code",
