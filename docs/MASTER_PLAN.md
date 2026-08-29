@@ -275,11 +275,11 @@ yuanchat/
 
 **图例**：🔴 数据丢失/安全风险，必须优先 · 🟡 影响体验或可维护性 · ⚪ 增强项
 
-#### 1. A8 — auth 补全与安全加固（**执行中，未合并**）
+#### 1. A8 — auth 补全与安全加固（**已完成，已合回 dev**）
 
 设计：[`specs/2026-08-23-auth-completion-design.md`](superpowers/specs/2026-08-23-auth-completion-design.md)
 执行：[`plans/2026-08-23-auth-completion.md`](superpowers/plans/2026-08-23-auth-completion.md)（18 Task）
-分支：`feature/auth-completion`（自 dev @ `03baf6a` 切出，**9 个 commit，尚未合回 dev**）
+分支：`feature/auth-completion`（自 dev @ `03baf6a` 切出，31 个 commit，`--no-ff` 合回 dev）
 过程记录：`.superpowers/sdd/2026-08-23-auth-completion/`（ledger `progress.md`、裁决 `rulings.md`、批次报告 `batch-1-report.md` / `batch-2-report.md`、批 1 评审 `batch-1-review.md`）
 
 > ⚠️ **plan 的代码块不可照抄**：pre-flight 证实它引用了不存在的包与符号（`response` 包、`internal/dto`、`jwt.Manager`、`model.UserStatusBanned`）、用了 slog（本仓 zap-only）、含编译不过的笔误，多处确切数值与 spec 相反。已正式降级为「意图草图」。
@@ -296,35 +296,55 @@ yuanchat/
 | ✅   | `CodeSender` 抽象 + `LogSender`，未知 provider **启动即 FATAL**（已实测）；Sender 经 `router.Setup` 末位参数注入                                     |
 | ✅   | 忘记密码**后端**三段式链路（`AuthService` + `AuthHandler`）：发码 → 校码换一次性 `reset_ticket`（`GetDel` 单次消费）→ 改密并原子自增 `token_version` |
 
-**未完成（Task 9-18）**——下个会话从这里接：
+**Task 9-18 全部完成**（含真机实测）：
 
-| 级别 | 条目                                                                                                                                                                                                                                                             |
-| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 🔴   | **Task 9** 登录无账号级失败锁定：`LimitByIP` 是进程内按 IP 计数，换 IP 即可绕过撞库（RED 测试草稿已停放，见下）                                                                                                                                                  |
-| 🔴   | **Task 10** 扫码登录后端状态机（`pending → scanned → confirmed`，`confirmed` 换令牌须单次消费）未做                                                                                                                                                              |
-| 🟡   | **Task 11** 8 条新路由的真断言冒烟未做（用户决策 D3：**不引 swaggo**，Swagger 记债给 B7）                                                                                                                                                                        |
-| 🔴   | **Task 12** `packages/shared/src/api/client.ts` 的 `doFetch` 在 `res.json()` 前**未 gate 204** → spec 的 3 个 204 端点前端必抛 `SyntaxError`；顺带既有 bug：`contacts.ts` 的 `removeFriend`(:158) 与 `unblockUser`(:204) 打的就是 204 端点，**现在成功也抛异常** |
-| 🔴   | **Task 13/15** 忘记密码与扫码登录**前端仍是假链路**：`ForgotPasswordPage.tsx` 三处 `setTimeout(r,500)` 假请求；`QrLoginPage.tsx` 过期是写死的 `setTimeout(…,60000)`（须改用服务端返回的过期字段）                                                                |
-| 🟡   | **Task 14** 前端密码规则未统一到 spec（见下「已定裁决」C1）                                                                                                                                                                                                      |
-| 🟡   | **Task 16** 安卓扫码入口（聊天页 `+` 菜单，新 key `auth.scanQrCode`）——**需 USB 真机调试**，`adb` 在 `/home/liaojie1314/env/Android/Sdk/platform-tools/adb`（不在 PATH）。**禁止 `tauri android init`**（会摧毁 `MainActivity.kt` 的软键盘适配）                 |
-| 🟡   | **Task 17** MSW mock + E2E 未做（也是批 2↔批 3 契约错配的兜底检查）                                                                                                                                                                                              |
-| 🟡   | **Task 18** 桌面 `tauri.conf.json` 仍是 `"csp": null`；nginx HSTS 仍被注释（用户决策 D2：**一条 CSP 同时列 dev localhost + 生产域名**，不做构建期分支）                                                                                                          |
-| 🟡   | 注册无「确认密码」与服务条款勾选                                                                                                                                                                                                                                 |
-| 🟡   | 4 个 auth 页在 web/desktop 各写一份共 1657 行重复——批 3 验收要求是**重构去重**（两个 Page 变薄壳），不是新建                                                                                                                                                     |
-| 🔴   | **全分支终审未做**：用户已决定取消逐批评审、改为完成后统一终审一次。批 1 过了评审（0 blocker），**Task 8 及之后的代码未经任何评审**                                                                                                                              |
+| 状态 | 条目                                                                                                                                                                                                                                             |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ✅   | **Task 9** 账号级登录失败锁定（`auth:login:fail:{标识}`，5 次锁 15 分钟）。未注册号同样计数 —— 否则「已注册 429 / 未注册 401」就是一个用户枚举探针                                                                                               |
+| ✅   | **Task 10** 扫码登录状态机 `pending → scanned → confirmed`，令牌在 confirm 签发、poll 用 Lua 原子取走即销毁                                                                                                                                      |
+| ✅   | **加固（超出 plan）** 轮询绑定发起方：`poll_secret` 只随建会话响应下发、不进二维码，轮询须带 `X-Qr-Poll-Secret` 并做常量时间比较。否则拍到屏幕的人可抢先取走令牌                                                                                 |
+| ✅   | **Task 11** 8 条新路由的真断言冒烟（按 D3 未引 swaggo）                                                                                                                                                                                          |
+| ✅   | **Task 12** `doFetch` 在 `res.json()` 前短路 204；顺带修好 `deleteFriend` / `unblockUser` 两个既有 bug（打 204 端点却总抛 `SyntaxError`）                                                                                                        |
+| ✅   | **Task 13** 忘记密码页接真接口并下沉共享组件：`ForgotPasswordPage` web 273 → 6 行、desktop 279 → 44 行                                                                                                                                           |
+| ✅   | **Task 14** 前端密码规则统一到 spec 五条，长度按字节（`TextEncoder`）；删 `validation.passwordSpecial`                                                                                                                                           |
+| ✅   | **Task 15** 扫码页接真接口并下沉：`QrLoginPage` 172/175 → 6/38 行，删掉写死的 60 秒过期，倒计时用服务端 `expires_in` 校准                                                                                                                        |
+| ✅   | **Task 16** Android 原生扫码（`tauri-plugin-barcode-scanner` 2.4.5，权限名取自 crate 自带 `permissions/autogenerated/reference.md`，写进新建的 `capabilities/mobile.json`）。`parseLoginQr` 只接受 `yuanchat://login?t=`，其余判为非本应用二维码 |
+| ✅   | **Task 17** MSW 补齐 8 个端点 + 忘记密码/扫码两个 E2E spec                                                                                                                                                                                       |
+| ✅   | **Task 18** 桌面 CSP 由 `null` 改为白名单（`script-src 'self'`，另加 `object-src 'none'` / `base-uri 'self'` / `frame-ancestors 'none'`）；nginx HSTS 启用 `max-age=31536000; includeSubDomains`（按 brief 不加 `preload`）                      |
+| ✅   | **超出 plan 的补齐**：登录态改密 `POST /auth/password/change`（凭当前密码，先验旧密码再验新密码强度）+ 设置页改密弹窗；CORS 放行 `X-Qr-Poll-Secret`；安卓返回键与沉浸式状态栏（见下）                                                            |
 
-**执行注意（下个会话必读，不看会踩）**：
+**真机与真后端实测结论**（不只是单测）：
 
-| 事项                                                                                                                                                                                                                                                       |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **API 环境不稳**：本机到 API 之间有代理拦改响应（`request-id present but not Anthropic-issued`、流停摆 30s+），长跑 agent 已连死 4 次。对策：**单次派发不超过 1-2 个 Task**，且强制「一个 Task 一到绿立刻 commit + 立刻追写报告」，否则整轮工作全丢        |
-| **契约对齐**：`batch-2-report.md` 的「契约实况」一节记录了 Task 8 端点的**实际**请求/响应字段与错误码，前端必须按它写，不要只按 spec 猜                                                                                                                    |
-| **i18n 门禁**：`pnpm check:i18n` 基线 506 keys × 4 locale，A8 完成后应为 **516**（+9 新 key，−1 `validation.passwordSpecial`，+2 密码规则 key）。locale 是**扁平点号 key**；`auth.qrExpired` / `qrScanned` / `qrRefresh` **已存在**（plan 声称新增是错的） |
-| **孤儿产物**：批 2 Task 9 的 RED 测试草稿已移出源码树，停放在 `.superpowers/sdd/2026-08-23-auth-completion/orphan-task9-login_lockout_test.go.txt`。它期望 `NewAuthService` 多收一个 `*UserService`（当前签名 5 参），说明登录锁定要复用 `UserService`     |
-| **前端依赖待验证**：扫码页候选库 `qrcode.react@4.2.0`（批 3 装过，已回滚）。引入前**必须确认产物不含 `?.` / `??`**——`build.target=es2019`，旧 WebView(Chrome 74) 会白屏                                                                                    |
-| **迁移号**：A8 占 **014**（已落地）。`verification_codes` 表在 `001_baseline.sql` 就有（**无 `user_id` 列**，目标方是 `target`），Task 8 只写审计行、未新增迁移。**015 属 H1b，不许抢**                                                                    |
-| **不要顺手统一路由前缀**：`/users/login`、`/users/register` 保持不动，改了会打断前端登录                                                                                                                                                                   |
-| **不要照抄 `handler/captcha.go`**：它有先删再比、`rand.IntN`、key 无命名空间三个缺陷。Task 8 的 `auth_service.go` 是正确范式（比对成功才删、`crypto/rand`、key 带 `auth:pwd:` 命名空间、发送失败回滚已发的码）                                             |
+| 项                  | 结论                                                                                                                    |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| curl 打真后端 27 项 | 登录/登出/改密三段式/登录锁定/扫码状态机全部符合契约；验证码日志已打码（`code=7****0`），要从 Redis 读真码才能续跑      |
+| Playwright 打真后端 | dev 与生产构建各 14/15（唯一「失败」是测试脚本自己 `localStorage.clear()` 造成的 WS 400，正常登录与登出路径零 4xx/5xx） |
+| 生产构建产物        | 21 个 JS 文件**零** `?.` / `??`，es2019 底线守住                                                                        |
+| Android 真机        | 扫码登录全链路走通（用户确认）；相机权限弹框正常；返回键与沉浸式状态栏见下                                              |
+| 桌面端 Tauri        | 新 CSP 下正常启动，真实会话数据加载，CSP 拦截日志 0 行                                                                  |
+
+**过程中发现并修掉的既有缺陷**（非 A8 引入）：
+
+| 缺陷                                          | 说明                                                                                                                                                                                                               |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| CORS 缺 `X-Qr-Poll-Secret`                    | 浏览器预检直接拦死扫码轮询。Go 单测走 httptest 不做预检、MSW 在网络层之前拦截，两者都发现不了 —— 只有真浏览器打真后端才暴露。已补 `middleware` 首个测试文件钉住四个自定义头                                        |
+| WebView 抢吃返回键                            | `android.webkit.WebView` 自己处理 KEYCODE_BACK（有历史就 `goBack()` 并吞掉），因此系统返回键在应用内一路失效、只在无历史时漏给 Activity 表现为「直接退出」。已在 `dispatchKeyEvent` 层截断并委托前端拦截栈         |
+| 状态栏不沉浸                                  | 原本把状态栏高度作为 padding 加在内容视图上，留下一条与应用背景断开的空白。改为 WebView 铺到状态栏之下 + 原生下发 `--safe-area-top`；下发必须重试到真实文档就位（inset 回调早于页面加载，写在 about:blank 上会丢） |
+| 测试夹具连接池只开不关                        | 全量跑撞 `53300 too many clients`，11 个用例静默变 SKIP。已限量 4/2 + `t.Cleanup` 关闭                                                                                                                             |
+| `APP_VERSION` 手抄常量                        | 停在 `0.1.0` 与实际发版脱节，改读构建期注入的 `__APP_VERSION__`                                                                                                                                                    |
+| `apps/web` 依赖缺失                           | `@sentry/vite-plugin`、`vite-plugin-pwa` 声明了但没装，dev server 起不来（`pnpm install --frozen-lockfile` 恢复，lockfile 零改动）                                                                                 |
+| `packages/shared` / `packages/ui` 无 tsconfig | 两个包的 `typecheck` 脚本一直跑不了，即从未被单独类型检查（两端 app 的 tsc 会传递覆盖）。**未修，见下方留债**                                                                                                      |
+
+**A8 期间沉淀的注意事项（后续批次仍适用）**：
+
+| 事项                                                                                                                                                                                                              |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **本地跑 E2E 前先确认没有残留 dev server**：Playwright 的 `reuseExistingServer` 会接管已在 5173 的进程，若那个进程是用 `VITE_ENABLE_MOCK=false` 起的，63 条用例会齐刷刷 30s 超时，看起来像代码全坏                |
+| **`--safe-area-top` 由原生下发**：`.app-screen` 用它留出状态栏高度，`ToastHost` 的顶部偏移也叠了它。新增全屏浮层若贴顶，必须一并叠加，否则会压在系统时间/信号图标上                                               |
+| **安卓返回键走前端拦截栈**：`registerBackInterceptor` 注册的拦截器倒序执行（后注册在更上层）。新增手机端「组件内部栈」（子页、抽屉、全屏弹层）必须注册拦截器，否则按返回会被当成「已在标签根页面」而触发退出应用  |
+| **不要照抄 `handler/captcha.go`**：它有先删再比、`rand.IntN`、key 无命名空间三个缺陷。`internal/service/auth_service.go` 是正确范式（比对成功才删、`crypto/rand`、key 带 `auth:` 命名空间、发送失败回滚已发的码） |
+| **新增自定义请求头必须同步 CORS**：`middleware/cors.go` 的 `Allow-Headers` 要逐个列出，浏览器预检不接受通配。`internal/middleware/cors_test.go` 已钉住现有四个头                                                  |
+| **i18n 占位符是 `%{var}`**（Rails 风格，见 `i18n/index.ts` 的 `interpolation.prefix`），写成 i18next 默认的 `{{var}}` 不会插值、直接把字面量上屏                                                                  |
 
 **已定裁决（沿用，不要重开讨论）**：
 
@@ -337,14 +357,20 @@ yuanchat/
 
 **A8 主动留债**（本批次明确不做，做完后仍留在本清单）：
 
-| 级别 | 条目                                                                                                                                        |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| 🟡   | `/auth/*` 与 `/users/login`、`/users/register` 前缀不统一——统一是破坏性变更，需前后端同版发布                                               |
-| 🟡   | `AuthRequired` 中间件不校验 `token_version`（它当前零 IO；加校验需先给版本号做 Redis 缓存），改密后 access token 仍有最长 15 分钟残余有效期 |
-| ⚪   | 多设备会话管理与「单设备登出」：无 device/session 表，`logout` 只能全量踢或不踢，本批次选不踢                                               |
-| ⚪   | 真实短信/邮件 provider：本批次只有 `LogSender`，`codesender.provider` 留了扩展位                                                            |
-| ⚪   | `verification_codes` 表只写审计不读，无审计查询入口                                                                                         |
-| ⚪   | Swagger 文档：Task 11 按 D3 不引 swaggo，**记债给 B7** 统一补                                                                               |
+| 级别 | 条目                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🟡   | `/auth/*` 与 `/users/login`、`/users/register` 前缀不统一——统一是破坏性变更，需前后端同版发布                                                                                                                                                                                                                                                                                                                                                           |
+| 🟡   | `AuthRequired` 中间件不校验 `token_version`（它当前零 IO；加校验需先给版本号做 Redis 缓存），改密后 access token 仍有最长 15 分钟残余有效期                                                                                                                                                                                                                                                                                                             |
+| ⚪   | 多设备会话管理与「单设备登出」：无 device/session 表，`logout` 只能全量踢或不踢，本批次选不踢                                                                                                                                                                                                                                                                                                                                                           |
+| ⚪   | 真实短信/邮件 provider：本批次只有 `LogSender`，`codesender.provider` 留了扩展位                                                                                                                                                                                                                                                                                                                                                                        |
+| ⚪   | `verification_codes` 表只写审计不读，无审计查询入口                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ⚪   | Swagger 文档：Task 11 按 D3 不引 swaggo，**记债给 B7** 统一补                                                                                                                                                                                                                                                                                                                                                                                           |
+| 🔴   | **生产环境对象存储不可达**：`YUANCHAT_MINIO_ENDPOINT` 在 `docker-compose.prod.yml` 里是内网主机名 `minio:9000`，而预签名 URL 与头像直链直接用该值，浏览器/客户端无法解析 → 生产图片、语音、头像全拿不到。修法：加 `DOMAIN_STORAGE` 子域 + nginx server 块 + 一个「对外端点」配置项（与 `Endpoint` 分开），并同步把该域名加进桌面端 CSP 的 `img-src` / `media-src` / `connect-src`。**A8 的 CSP 刻意只列真实可达主机，没有用 `https:` 通配去掩盖这个洞** |
+| 🟡   | `/auth/password/otp` 未校验图形码（spec `:203` 的请求体含 `captcha_id` / `captcha_answer`）。单号轰炸已被 60s 冷却按死、枚举已被「未注册号响应完全相同」按死，图形码真正防的是跨 IP 喷洒造成的**短信成本**，而当前 provider 是 `LogSender`、喷洒零成本 —— 因此与「真实短信 provider」同批实现。注意补它会**改请求体**（多两个必填字段），属破坏性变更，前后端须同版发布                                                                                 |
+| ⚪   | 扫码会话缺 `canceled` 终态（spec §7 提及）：用户当前只能关页面或等 120 秒过期，无安全影响                                                                                                                                                                                                                                                                                                                                                               |
+| ⚪   | `scan` / `confirm` 两端点未加 `LimitByIP`（spec 未给额度，未自造数值）。两者都要 Bearer 令牌，滥用面已受限，待有真实流量数据再定                                                                                                                                                                                                                                                                                                                        |
+| ⚪   | `packages/shared` 与 `packages/ui` 没有 `tsconfig.json`，两个包的 `typecheck` 脚本一直跑不了（两端 app 的 `tsc` 会传递覆盖到它们的源码，故并非完全没检查）。与「`.husky/` 不跑 tsc」同源                                                                                                                                                                                                                                                                |
+| ⚪   | 改密后当前设备也会被登出（`token_version` 全量递增）。若要保留当前会话，需在改密响应里下发新令牌对                                                                                                                                                                                                                                                                                                                                                      |
 
 #### 2. H1b — 贴纸商城与投稿发布（已有 plan，待执行）
 
