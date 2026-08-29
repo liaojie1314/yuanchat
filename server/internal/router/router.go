@@ -211,6 +211,18 @@ func Setup(
 		password.POST("/reset", middleware.LimitByIP(5, 10), authH.ResetPassword)
 	}
 
+	// 扫码登录：被扫端建会话并轮询，扫码端（已登录）标记已扫并确认授权
+	qr := api.Group("/auth/qr")
+	{
+		// 建会话额度不能太紧：前端「刷新二维码」连点即触发，用户会看到死循环的 429
+		qr.POST("/session", middleware.LimitByIP(3, 5), authH.CreateQRSession)
+		// 轮询频率高：前端 2 秒一次，120 秒的会话最多 60 次，额度留一倍余量
+		qr.GET("/:token", middleware.LimitByIP(30, 60), authH.PollQRSession)
+		// 扫码端必须已登录：它是用自己的身份为被扫端授权
+		qr.POST("/:token/scan", middleware.AuthRequired(cfg.JWT), authH.ScanQRSession)
+		qr.POST("/:token/confirm", middleware.AuthRequired(cfg.JWT), authH.ConfirmQRSession)
+	}
+
 	users := api.Group("/users")
 	{
 		users.POST("/register", middleware.LimitByIP(5, 10), userH.Register)
