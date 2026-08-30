@@ -11,7 +11,7 @@
  * @param fallbackKey - 包内首张贴纸对象键（可空；预签名按需换取）
  * @param rounded - 圆角风格；默认 rounded-lg，详情页大图可用 none
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sticker } from "lucide-react";
 import { cn } from "@yuanchat/shared/utils";
 import { StickerThumb } from "./StickerThumb";
@@ -28,10 +28,18 @@ export function StickerPackCover({
   const [state, setState] = useState<"loading" | "loaded" | "error">(
     coverUrl ? "loading" : "error",
   );
+  const imgRef = useRef<HTMLImageElement>(null);
 
   // coverUrl 变化（编辑换封面 / 列表复用组件）时重置回加载态
   useEffect(() => {
     setState(coverUrl ? "loading" : "error");
+  }, [coverUrl]);
+
+  // 缓存命中时图片可能在 onLoad 挂上前就 complete 了（列表→详情必现），
+  // 挂载后补查一次 complete，避免封面永远停在占位态
+  useEffect(() => {
+    const el = imgRef.current;
+    if (el && el.complete && el.naturalWidth > 0) setState("loaded");
   }, [coverUrl]);
 
   return (
@@ -58,6 +66,7 @@ export function StickerPackCover({
       )}
       {coverUrl && state !== "error" && (
         <img
+          ref={imgRef}
           src={coverUrl}
           alt=""
           width={256}
