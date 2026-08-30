@@ -200,7 +200,7 @@ func TestListMarket(t *testing.T) {
 	newTestPackSticker(t, db, official.ID, 3)
 	newTestPackSticker(t, db, official.ID, 4)
 
-	rows, err := repo.ListMarket(ctx, nil, 10)
+	rows, err := repo.ListMarket(ctx, nil, 100) // 大窗口：-race 下其他包的用例会并行写入同一开发库，避免本用例的包被挤出窗口
 	if err != nil {
 		t.Fatalf("ListMarket: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestListMarket(t *testing.T) {
 
 	// 游标：before=official.created_at → 只剩 old
 	cursor := official.CreatedAt
-	after, err := repo.ListMarket(ctx, &cursor, 10)
+	after, err := repo.ListMarket(ctx, &cursor, 100)
 	if err != nil {
 		t.Fatalf("ListMarket with cursor: %v", err)
 	}

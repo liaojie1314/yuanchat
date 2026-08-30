@@ -89,8 +89,9 @@ func TestStickerMarketCursorAndAdded(t *testing.T) {
 	if idx(all, p2.ID) == -1 || idx(all, p1.ID) == -1 || idx(all, p2.ID) > idx(all, p1.ID) {
 		t.Fatalf("market order should be created_at DESC, p2 before p1")
 	}
-	if next != "" {
-		t.Fatalf("next_cursor should be empty on the last page, got %q", next)
+	// -race 下其他包的用例会并行写入同一开发库：仅当窗口未满时才断言没有下一页
+	if len(items) < 50 && next != "" {
+		t.Fatalf("next_cursor should be empty when fewer than one page, got %q", next)
 	}
 
 	// limit=1 逐页翻完（开发库里还有 seed 出的更早的公开包，游标必须能走到底）：

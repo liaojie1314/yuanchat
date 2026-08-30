@@ -167,7 +167,7 @@ func TestMarketEndpoint(t *testing.T) {
 	}
 
 	packRouterState.current = alice.ID
-	w, resp := doPackJSON(t, r, http.MethodGet, "/api/v1/sticker-packs/market", nil)
+	w, resp := doPackJSON(t, r, http.MethodGet, "/api/v1/sticker-packs/market?limit=50", nil)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%v", w.Code, resp)
 	}
@@ -208,11 +208,12 @@ func TestMarketEndpoint(t *testing.T) {
 	if !found {
 		t.Fatalf("pack %s missing from market response (%d packs)", p1.ID, len(packs))
 	}
-	// 该用例的包在最后一页附近不成立时也应终止：limit 大于总数 → next_cursor 为 null
+	// 端点按 limit（默认 20）分页：仅当窗口未满时才断言 next_cursor 为 null
+	// （-race 下其他包的用例会并行写入同一开发库，可能把窗口填满）
 	if _, ok := data["next_cursor"]; !ok {
 		t.Fatal("next_cursor key must always be present (null when no more pages)")
 	}
-	if data["next_cursor"] != nil {
+	if len(packs) < 50 && data["next_cursor"] != nil {
 		t.Fatalf("next_cursor should be null when fewer than one page, got %v", data["next_cursor"])
 	}
 }
