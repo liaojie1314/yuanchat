@@ -136,13 +136,6 @@ func (r *StickerRepository) ListMine(ctx context.Context, ownerID uuid.UUID, bef
 	return rows, q.Find(&rows).Error
 }
 
-// ListPacks 按 sort 升序列出全部表情包（当前仅官方包）。
-func (r *StickerRepository) ListPacks(ctx context.Context) ([]model.StickerPack, error) {
-	var rows []model.StickerPack
-	err := r.db.WithContext(ctx).Order("sort ASC, created_at ASC").Find(&rows).Error
-	return rows, err
-}
-
 // ListVisible 列出「我的表情包」= 官方包 + 当前用户已添加的包（EmojiPicker 数据源）。
 //
 // 有意不过滤 is_public / taken_down：下架（taken_down）只从商城撤展示，

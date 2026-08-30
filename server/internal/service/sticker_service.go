@@ -73,6 +73,30 @@ var ErrTooManyStickers = errors.New("too many favorited stickers")
 // ErrInvalidCursor 分页游标格式非法（须为 RFC3339 时间串）。
 var ErrInvalidCursor = errors.New("invalid cursor")
 
+// ErrPackNotFound 表情包不存在（已被删除或 ID 错误）。
+var ErrPackNotFound = errors.New("sticker pack not found")
+
+// ErrPackNotAvailable 表情包不可添加（已下架或未公开进商城）。
+var ErrPackNotAvailable = errors.New("sticker pack not available")
+
+// ErrNotPackOwner 仅发布者本人可编辑/删除自己发布的表情包。
+var ErrNotPackOwner = errors.New("not the pack owner")
+
+// ErrInvalidPackName 包名非法（空白或超出 varchar(64) 容量）。
+var ErrInvalidPackName = errors.New("invalid pack name")
+
+// ErrInvalidCoverKey 封面对象键必须来自 sticker-covers/ 前缀的服务端签发键。
+var ErrInvalidCoverKey = errors.New("cover must be an uploaded sticker cover")
+
+// ErrPublishLimitExceeded 发布数已达每用户上限（发布新包被拒；编辑既有包不受影响）。
+var ErrPublishLimitExceeded = errors.New("publish limit exceeded")
+
+// ErrInvalidStickerSources 发布请求未携带任何贴纸来源（空包发布无意义）。
+var ErrInvalidStickerSources = errors.New("sticker sources must not be empty")
+
+// ErrTooManyPackStickers 单包含贴纸数已达上限。
+var ErrTooManyPackStickers = errors.New("too many stickers in this pack")
+
 // objectChecker 判断对象是否存在（由 storage.Storage 实现）。
 // 取接口而非具体类型：MinIO 不可达时 router 注入 nil，服务降级为跳过存在性校验。
 type objectChecker interface {
@@ -235,10 +259,12 @@ type PackDTO struct {
 	Stickers []model.Sticker   `json:"stickers"`
 }
 
-// ListPacks 列出全部官方表情包及其贴纸（当前仅官方来源，公共只读）。
-// 两次查询（包 + 批量取贴纸）后在内存分组，避免逐包查询的 N+1。
-func (s *StickerService) ListPacks(ctx context.Context) ([]PackDTO, error) {
-	packs, err := s.repo.ListPacks(ctx)
+// ListPacks 列出「我的表情包」= 官方包 + 当前用户已添加的包，含各自全部贴纸。
+// H1 时仅返回官方包；商城上线后语义扩展为官方 + 已添加（返回结构不变，
+// EmojiPicker 无需改动即可展示已添加的包）。两次查询（包 + 批量取贴纸）
+// 后在内存分组，避免逐包查询的 N+1。
+func (s *StickerService) ListPacks(ctx context.Context, userID uuid.UUID) ([]PackDTO, error) {
+	packs, err := s.repo.ListVisible(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list packs: %w", err)
 	}
@@ -273,4 +299,188 @@ func (s *StickerService) ListPacks(ctx context.Context) ([]PackDTO, error) {
 		result[i] = PackDTO{Pack: p, Stickers: stickers}
 	}
 	return result, nil
+}
+
+// ---------- 表情商城（浏览 / 添加 / 移除） ----------
+
+const (
+	// defaultMarketPageSize / maxMarketPageSize 商城列表分页尺寸。
+	defaultMarketPageSize = 20
+	maxMarketPageSize     = 50
+)
+
+// PackSummary 商城列表与我发布的列表共用的包摘要字段（前后端契约的公共投影）。
+// OwnerName 为 nil 表示官方包或发布者已注销。
+type PackSummary struct {
+	ID           uuid.UUID `json:"id"`
+	Name         string    `json:"name"`
+	CoverURL     *string   `json:"cover_url"`
+	OwnerName    *string   `json:"owner_name"`
+	IsOfficial   bool      `json:"is_official"`
+	StickerCount int64     `json:"sticker_count"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// MarketPackDTO 商城列表项。
+type MarketPackDTO struct {
+	PackSummary
+	Added bool `json:"added"`
+}
+
+// packSummaryOf 把仓库投影转成对外契约摘要。
+func packSummaryOf(r repository.PackWithMeta) PackSummary {
+	return PackSummary{
+		ID:           r.ID,
+		Name:         r.Name,
+		CoverURL:     r.CoverURL,
+		OwnerName:    r.OwnerName,
+		IsOfficial:   r.IsOfficial,
+		StickerCount: r.StickerCount,
+		CreatedAt:    r.CreatedAt,
+	}
+}
+
+// Market 商城列表：公开未下架的包按发布时间倒序游标分页，附带当前用户是否已添加
+// （批量查询，防 N+1）。
+//
+// cursor 为上一页响应的 next_cursor（RFC3339；取 created_at < cursor）。
+// nextCursor 还有下一页时为最后一条的 created_at，否则为空串（handler 置 null）。
+func (s *StickerService) Market(ctx context.Context, userID uuid.UUID, cursor string, limit int) ([]MarketPackDTO, string, error) {
+	if limit <= 0 {
+		limit = defaultMarketPageSize
+	}
+	if limit > maxMarketPageSize {
+		limit = maxMarketPageSize
+	}
+	var before *time.Time
+	if cursor != "" {
+		t, err := time.Parse(time.RFC3339, cursor)
+		if err != nil {
+			return nil, "", fmt.Errorf("%w: %v", ErrInvalidCursor, err)
+		}
+		before = &t
+	}
+	// 多取一条判断 hasMore，避免为"还有没有下一页"单独发一次 COUNT
+	rows, err := s.repo.ListMarket(ctx, before, limit+1)
+	if err != nil {
+		return nil, "", fmt.Errorf("list market: %w", err)
+	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	ids := make([]uuid.UUID, len(rows))
+	for i, r := range rows {
+		ids[i] = r.ID
+	}
+	added, err := s.repo.IsAddedBatch(ctx, userID, ids)
+	if err != nil {
+		return nil, "", fmt.Errorf("check added batch: %w", err)
+	}
+	items := make([]MarketPackDTO, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, MarketPackDTO{PackSummary: packSummaryOf(r), Added: added[r.ID]})
+	}
+	var nextCursor string
+	if hasMore && len(rows) > 0 {
+		// RFC3339Nano 保证微秒精度往返无损（Parse(time.RFC3339) 接受小数秒）
+		nextCursor = rows[len(rows)-1].CreatedAt.Format(time.RFC3339Nano)
+	}
+	return items, nextCursor, nil
+}
+
+// StickerItemDTO 包详情/发布响应里的贴纸条目。
+type StickerItemDTO struct {
+	ID        uuid.UUID `json:"id"`
+	ObjectKey string    `json:"object_key"`
+	Width     int       `json:"width"`
+	Height    int       `json:"height"`
+}
+
+// PackDetailInfo 包详情的元信息。不返回 taken_down：下架包仅对已添加者保留展示，
+// 普通用户无从进入详情，无需感知下架状态。
+type PackDetailInfo struct {
+	ID           uuid.UUID `json:"id"`
+	Name         string    `json:"name"`
+	CoverURL     *string   `json:"cover_url"`
+	IsOfficial   bool      `json:"is_official"`
+	OwnerName    *string   `json:"owner_name"`
+	IsOwner      bool      `json:"is_owner"`
+	Flagged      bool      `json:"flagged"`
+	StickerCount int64     `json:"sticker_count"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// PackDetailDTO 包详情：元信息 + 全部贴纸 + 当前用户是否已添加。
+type PackDetailDTO struct {
+	Pack     PackDetailInfo   `json:"pack"`
+	Stickers []StickerItemDTO `json:"stickers"`
+	Added    bool             `json:"added"`
+}
+
+// PackDetail 包详情。已下架的包也返回（下架只从商城撤展示，已添加者保留入口）。
+func (s *StickerService) PackDetail(ctx context.Context, userID, packID uuid.UUID) (*PackDetailDTO, error) {
+	meta, err := s.repo.GetPackMeta(ctx, packID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrPackNotFound
+		}
+		return nil, fmt.Errorf("get pack meta: %w", err)
+	}
+	stickers, err := s.repo.ListByPackIDs(ctx, []uuid.UUID{packID})
+	if err != nil {
+		return nil, fmt.Errorf("list pack stickers: %w", err)
+	}
+	added, err := s.repo.IsAddedBatch(ctx, userID, []uuid.UUID{packID})
+	if err != nil {
+		return nil, fmt.Errorf("check added batch: %w", err)
+	}
+	items := make([]StickerItemDTO, 0, len(stickers))
+	for _, st := range stickers {
+		items = append(items, StickerItemDTO{
+			ID: st.ID, ObjectKey: st.ObjectKey, Width: st.Width, Height: st.Height,
+		})
+	}
+	return &PackDetailDTO{
+		Pack: PackDetailInfo{
+			ID:           meta.ID,
+			Name:         meta.Name,
+			CoverURL:     meta.CoverURL,
+			IsOfficial:   meta.IsOfficial,
+			OwnerName:    meta.OwnerName,
+			IsOwner:      meta.OwnerID != nil && *meta.OwnerID == userID,
+			Flagged:      meta.Flagged,
+			StickerCount: meta.StickerCount,
+			CreatedAt:    meta.CreatedAt,
+		},
+		Stickers: items,
+		Added:    added[packID],
+	}, nil
+}
+
+// AddPack 把一个表情包加入「我的表情包」列表，幂等：重复添加不报错也不重复落行。
+// 已下架或未公开的包拒绝添加；已添加者不受其后下架影响（见 ListVisible）。
+func (s *StickerService) AddPack(ctx context.Context, userID, packID uuid.UUID) error {
+	meta, err := s.repo.GetPackMeta(ctx, packID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrPackNotFound
+		}
+		return fmt.Errorf("get pack meta: %w", err)
+	}
+	if meta.TakenDown || !(meta.IsPublic || meta.IsOfficial) {
+		return ErrPackNotAvailable
+	}
+	if _, err := s.repo.AddUserPack(ctx, userID, packID); err != nil {
+		return fmt.Errorf("add user pack: %w", err)
+	}
+	return nil
+}
+
+// RemovePack 把一个表情包移出「我的表情包」列表（幂等，不影响包本身与包内贴纸）。
+func (s *StickerService) RemovePack(ctx context.Context, userID, packID uuid.UUID) error {
+	if err := s.repo.RemoveUserPack(ctx, userID, packID); err != nil {
+		return fmt.Errorf("remove user pack: %w", err)
+	}
+	return nil
 }
