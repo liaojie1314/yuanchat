@@ -33,6 +33,11 @@ test.describe("Authenticated Navigation", () => {
     await expect(page).toHaveURL(/\/favorites/);
   });
 
+  test("sticker market page is accessible", async ({ page }) => {
+    await page.goto("/stickers");
+    await expect(page).toHaveURL(/\/stickers/);
+  });
+
   test("settings page is accessible", async ({ page }) => {
     await page.goto("/settings");
     await expect(page).toHaveURL(/\/settings/);
@@ -48,6 +53,10 @@ test.describe("Authenticated Navigation", () => {
     // 点击我的收藏
     await page.getByRole("link", { name: "我的收藏" }).first().click();
     await expect(page).toHaveURL(/\/favorites/);
+
+    // 点击表情商城（桌面侧栏第 5 项）
+    await page.getByRole("link", { name: "表情商城" }).first().click();
+    await expect(page).toHaveURL(/\/stickers/);
 
     // 点击设置
     await page.getByRole("link", { name: "设置" }).first().click();
