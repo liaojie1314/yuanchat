@@ -52,6 +52,16 @@ export { NewFriendsView } from "./NewFriendsView";
 export { FavoritesView } from "./FavoritesView";
 export { AddContactModal } from "./AddContactModal";
 
+// 表情商城组件与页面
+export { StickerThumb } from "./StickerThumb";
+export { StickerPackCover } from "./StickerPackCover";
+export { StickerSourcePicker } from "./StickerSourcePicker";
+export { StickerMarketView } from "./StickerMarketView";
+export { StickerPackDetailView } from "./StickerPackDetailView";
+export { StickerPublishView } from "./StickerPublishView";
+export { StickerPackEditView } from "./StickerPackEditView";
+export { StickerMineView } from "./StickerMineView";
+
 // 设置组件
 export { SettingsScreen } from "./SettingsScreen";
 export { ProfileEditView } from "./ProfileEditView";

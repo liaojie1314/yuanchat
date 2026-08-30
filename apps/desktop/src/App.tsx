@@ -33,6 +33,21 @@ const QrLoginPage = lazy(() =>
 const FavoritesPage = lazy(() =>
   import("./pages/FavoritesPage").then((m) => ({ default: m.FavoritesPage })),
 );
+const StickersPage = lazy(() =>
+  import("./pages/StickersPage").then((m) => ({ default: m.StickersPage })),
+);
+const StickerPackDetailPage = lazy(() =>
+  import("./pages/StickerPackDetailPage").then((m) => ({ default: m.StickerPackDetailPage })),
+);
+const StickerPublishPage = lazy(() =>
+  import("./pages/StickerPublishPage").then((m) => ({ default: m.StickerPublishPage })),
+);
+const StickerPackEditPage = lazy(() =>
+  import("./pages/StickerPackEditPage").then((m) => ({ default: m.StickerPackEditPage })),
+);
+const StickerMinePage = lazy(() =>
+  import("./pages/StickerMinePage").then((m) => ({ default: m.StickerMinePage })),
+);
 
 // 模块级一次性注册：权限就绪后把 Tauri 通知注入 shared 抽象
 // （receive 帧只在主窗口出现，子窗口注册无害；非 Tauri 环境 catch 静默）
@@ -127,6 +142,13 @@ function App() {
             <Route path="/chat/:conversationId" element={<ChatPage />} />
             <Route path="/contacts" element={<ContactsPage />} />
             <Route path="/favorites" element={<FavoritesPage />} />
+            {/* 静态段（publish/mine）须在 :packId 之前声明：React Router 静态段优先级
+                更高，顺序书写仅为可读性——商城路由是本项目的 URL 列表→详情首例 */}
+            <Route path="/stickers" element={<StickersPage />} />
+            <Route path="/stickers/publish" element={<StickerPublishPage />} />
+            <Route path="/stickers/mine" element={<StickerMinePage />} />
+            <Route path="/stickers/:packId" element={<StickerPackDetailPage />} />
+            <Route path="/stickers/:packId/edit" element={<StickerPackEditPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/chat" replace />} />
           </Route>

@@ -16,17 +16,12 @@
  */
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { ImageOff, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { cn } from "@yuanchat/shared/utils";
-import {
-  listMyStickers,
-  listStickerPacks,
-  removeSticker,
-  getDownloadUrl,
-  showToast,
-} from "@yuanchat/shared";
+import { listMyStickers, listStickerPacks, removeSticker, showToast } from "@yuanchat/shared";
 import type { StickerItem, StickerPackItem } from "@yuanchat/shared";
 import { EMOJI_CATEGORIES } from "./emojiData";
+import { StickerThumb } from "./StickerThumb";
 
 /** localStorage key：最近使用 emoji（JSON string[]） */
 const RECENT_KEY = "yuanchat-recent-emojis";
@@ -379,43 +374,4 @@ function CategoryTab({
       {label}
     </button>
   );
-}
-
-/**
- * 贴纸缩略图。
- *
- * 签名失败或对象不存在（如 seed 未成功上传时留下的行）都会走 error 分支显示破图图标，
- * 而不是渲染成一个可点击的空白格——空白格会被点击并发出一条双端永久不可见的贴纸消息。
- */
-function StickerThumb({ objectKey }: { objectKey: string }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let alive = true;
-    getDownloadUrl(objectKey)
-      .then((u) => {
-        if (alive) setUrl(u);
-      })
-      .catch(() => {
-        if (alive) setFailed(true);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [objectKey]);
-
-  if (failed) {
-    return (
-      <ImageOff size={18} strokeWidth={1.25} className="text-on-surface-variant" aria-hidden />
-    );
-  }
-  return url ? (
-    <img
-      src={url}
-      alt=""
-      onError={() => setFailed(true)}
-      className="h-full w-full object-contain"
-    />
-  ) : null;
 }
