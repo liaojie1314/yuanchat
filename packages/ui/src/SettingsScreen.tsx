@@ -13,8 +13,18 @@
  * 语言/主题切换即时生效；移动端退出登录点击弹行内确认态（不做全局 Dialog）。
  */
 import { useEffect, useState, type ReactNode } from "react";
-import { ChevronRight, LogOut, ShieldCheck, Palette, Info, User, ArrowLeft } from "lucide-react";
+import {
+  ChevronRight,
+  LogOut,
+  ShieldCheck,
+  Palette,
+  Info,
+  User,
+  ArrowLeft,
+  Sticker,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { registerBackInterceptor, useAuthStore, useBreakpoint } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
@@ -51,6 +61,7 @@ const NAV_GROUPS: {
 
 export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const bp = useBreakpoint();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
@@ -223,6 +234,13 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
               onClick={() => setView(g.view)}
             />
           ))}
+          {/* 表情商城：移动端底栏保持 4 项，商城从设置页与收藏页进入 */}
+          <MobileNavRow
+            icon={Sticker}
+            label={t("settings.stickerMarket")}
+            desc={t("settings.stickerMarketDesc")}
+            onClick={() => navigate("/stickers")}
+          />
         </div>
         <div className="mb-4">{logoutBlock}</div>
         <p className="text-label-sm text-on-surface-variant mt-auto pt-4 text-center">
