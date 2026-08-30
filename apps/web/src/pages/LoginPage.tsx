@@ -76,7 +76,7 @@ export function LoginPage() {
 
       <div className="relative m-auto w-full max-w-md px-5 py-8">
         {/* 磨砂玻璃卡片 */}
-        <div className="rounded-lg border border-white/60 bg-white/70 px-10 py-12 shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl">
+        <div className="rounded-lg border border-white/60 bg-white/70 px-10 py-12 shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl dark:border-white/10 dark:bg-surface-container/70">
           {/* Logo */}
           <div className="mb-8 text-center">
             <div className="brand-gradient glow-brand mb-4 inline-flex h-16 w-16 items-center justify-center rounded-lg text-white shadow-lg">

@@ -154,7 +154,7 @@ export function QrLoginScreen({ topSlot, onLoggedIn }: QrLoginScreenProps) {
       <div className="relative flex flex-1 flex-col overflow-y-auto">
         <div className="relative m-auto w-full max-w-md px-5 py-8">
           {/* 磨砂玻璃卡片 */}
-          <div className="rounded-lg border border-white/60 bg-white/70 px-10 py-12 text-center shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl">
+          <div className="dark:bg-surface-container/70 rounded-lg border border-white/60 bg-white/70 px-10 py-12 text-center shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl dark:border-white/10">
             {/* 标题 */}
             <div className="mb-8">
               <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-lg text-white shadow-lg">
