@@ -472,7 +472,7 @@ export function ChatWindow({
                           : undefined
                       }
                       onAddSticker={
-                        // 只对已确认的图片消息提供"添加到表情"（收藏走 REST，需服务端 id）
+                        // 只对已确认的图片/贴纸消息提供「添加到表情」（收藏走 REST，需服务端 id）
                         isServerConfirmed(msg) && msg.kind === "image" && msg.image?.key
                           ? () =>
                               void handleAddSticker(
@@ -480,7 +480,14 @@ export function ChatWindow({
                                 msg.image!.width,
                                 msg.image!.height,
                               )
-                          : undefined
+                          : isServerConfirmed(msg) && msg.kind === "sticker" && !!msg.sticker?.key
+                            ? () =>
+                                void handleAddSticker(
+                                  msg.sticker!.key!,
+                                  msg.sticker!.width ?? 0,
+                                  msg.sticker!.height ?? 0,
+                                )
+                            : undefined
                       }
                       onReport={
                         // 只能举报别人的已确认消息

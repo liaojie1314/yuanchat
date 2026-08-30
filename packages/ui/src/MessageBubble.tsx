@@ -582,7 +582,7 @@ export function MessageBubble({
                       <Star size={15} /> {t("chat.message.favorite")}
                     </button>
                   )}
-                  {onAddSticker && msg.kind === "image" && (
+                  {onAddSticker && (msg.kind === "image" || msg.kind === "sticker") && (
                     <button
                       role="menuitem"
                       onClick={handleAddSticker}
