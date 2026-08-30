@@ -35,6 +35,8 @@
   "settings.notifications": "通知",
   "settings.privacy": "隐私",
   "settings.about": "关于",
+  "settings.stickerMarket": "表情商城",
+  "settings.stickerMarketDesc": "浏览并添加表情包，或发布自己的表情包",
   "settings.logout": "退出登录",
   "settings.profile": "个人资料",
   "settings.account": "账号与安全",

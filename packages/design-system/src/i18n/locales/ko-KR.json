@@ -35,6 +35,8 @@
   "settings.notifications": "알림",
   "settings.privacy": "개인정보",
   "settings.about": "정보",
+  "settings.stickerMarket": "스티커 마켓",
+  "settings.stickerMarketDesc": "스티커 팩 탐색, 추가 및 게시",
   "settings.logout": "로그아웃",
   "settings.profile": "프로필",
   "settings.account": "계정 및 보안",

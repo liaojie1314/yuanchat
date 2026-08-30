@@ -35,6 +35,8 @@
   "settings.notifications": "Notifications",
   "settings.privacy": "Privacy",
   "settings.about": "About",
+  "settings.stickerMarket": "Sticker Market",
+  "settings.stickerMarketDesc": "Browse and add sticker packs, or publish your own",
   "settings.logout": "Sign Out",
   "settings.profile": "Profile",
   "settings.account": "Account & Security",

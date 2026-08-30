@@ -336,13 +336,15 @@ func (s *StickerService) ListPacks(ctx context.Context, userID uuid.UUID) ([]Pac
 // PackSummary 商城列表与我发布的列表共用的包摘要字段（前后端契约的公共投影）。
 // OwnerName 为 nil 表示官方包或发布者已注销。
 type PackSummary struct {
-	ID           uuid.UUID `json:"id"`
-	Name         string    `json:"name"`
-	CoverURL     *string   `json:"cover_url"`
-	OwnerName    *string   `json:"owner_name"`
-	IsOfficial   bool      `json:"is_official"`
-	StickerCount int64     `json:"sticker_count"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID       uuid.UUID `json:"id"`
+	Name     string    `json:"name"`
+	CoverURL *string   `json:"cover_url"`
+	// FirstStickerKey 包内最早一张贴纸的对象键；封面缺失时前端回退展示（可 null）。
+	FirstStickerKey *string   `json:"first_sticker_key"`
+	OwnerName       *string   `json:"owner_name"`
+	IsOfficial      bool      `json:"is_official"`
+	StickerCount    int64     `json:"sticker_count"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // MarketPackDTO 商城列表项。
@@ -354,13 +356,14 @@ type MarketPackDTO struct {
 // packSummaryOf 把仓库投影转成对外契约摘要。
 func packSummaryOf(r repository.PackWithMeta) PackSummary {
 	return PackSummary{
-		ID:           r.ID,
-		Name:         r.Name,
-		CoverURL:     r.CoverURL,
-		OwnerName:    r.OwnerName,
-		IsOfficial:   r.IsOfficial,
-		StickerCount: r.StickerCount,
-		CreatedAt:    r.CreatedAt,
+		ID:              r.ID,
+		Name:            r.Name,
+		CoverURL:        r.CoverURL,
+		FirstStickerKey: r.FirstStickerKey,
+		OwnerName:       r.OwnerName,
+		IsOfficial:      r.IsOfficial,
+		StickerCount:    r.StickerCount,
+		CreatedAt:       r.CreatedAt,
 	}
 }
 
@@ -424,15 +427,17 @@ type StickerItemDTO struct {
 // PackDetailInfo 包详情的元信息。不返回 taken_down：下架包仅对已添加者保留展示，
 // 普通用户无从进入详情，无需感知下架状态。
 type PackDetailInfo struct {
-	ID           uuid.UUID `json:"id"`
-	Name         string    `json:"name"`
-	CoverURL     *string   `json:"cover_url"`
-	IsOfficial   bool      `json:"is_official"`
-	OwnerName    *string   `json:"owner_name"`
-	IsOwner      bool      `json:"is_owner"`
-	Flagged      bool      `json:"flagged"`
-	StickerCount int64     `json:"sticker_count"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID       uuid.UUID `json:"id"`
+	Name     string    `json:"name"`
+	CoverURL *string   `json:"cover_url"`
+	// FirstStickerKey 包内最早一张贴纸对象键；封面缺失时前端回退展示（可 null）。
+	FirstStickerKey *string   `json:"first_sticker_key"`
+	IsOfficial      bool      `json:"is_official"`
+	OwnerName       *string   `json:"owner_name"`
+	IsOwner         bool      `json:"is_owner"`
+	Flagged         bool      `json:"flagged"`
+	StickerCount    int64     `json:"sticker_count"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // PackDetailDTO 包详情：元信息 + 全部贴纸 + 当前用户是否已添加。
@@ -467,15 +472,16 @@ func (s *StickerService) PackDetail(ctx context.Context, userID, packID uuid.UUI
 	}
 	return &PackDetailDTO{
 		Pack: PackDetailInfo{
-			ID:           meta.ID,
-			Name:         meta.Name,
-			CoverURL:     meta.CoverURL,
-			IsOfficial:   meta.IsOfficial,
-			OwnerName:    meta.OwnerName,
-			IsOwner:      meta.OwnerID != nil && *meta.OwnerID == userID,
-			Flagged:      meta.Flagged,
-			StickerCount: meta.StickerCount,
-			CreatedAt:    meta.CreatedAt,
+			ID:              meta.ID,
+			Name:            meta.Name,
+			CoverURL:        meta.CoverURL,
+			FirstStickerKey: meta.FirstStickerKey,
+			IsOfficial:      meta.IsOfficial,
+			OwnerName:       meta.OwnerName,
+			IsOwner:         meta.OwnerID != nil && *meta.OwnerID == userID,
+			Flagged:         meta.Flagged,
+			StickerCount:    meta.StickerCount,
+			CreatedAt:       meta.CreatedAt,
 		},
 		Stickers: items,
 		Added:    added[packID],

@@ -35,6 +35,8 @@
   "settings.notifications": "通知",
   "settings.privacy": "プライバシー",
   "settings.about": "このアプリについて",
+  "settings.stickerMarket": "スタンプマーケット",
+  "settings.stickerMarketDesc": "スタンプパックの閲覧・追加・公開",
   "settings.logout": "サインアウト",
   "settings.profile": "プロフィール",
   "settings.account": "アカウントとセキュリティ",

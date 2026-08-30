@@ -130,7 +130,11 @@ export function StickerMineView() {
                 className="hover:bg-surface-container-low flex items-center gap-3 px-4 py-3"
               >
                 <Link to={"/stickers/" + pack.id} className="shrink-0">
-                  <StickerPackCover coverUrl={pack.cover_url} className="h-14 w-14" />
+                  <StickerPackCover
+                    coverUrl={pack.cover_url}
+                    fallbackKey={pack.first_sticker_key}
+                    className="h-14 w-14"
+                  />
                 </Link>
                 <div className="min-w-0 flex-1">
                   <Link to={"/stickers/" + pack.id}>

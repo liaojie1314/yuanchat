@@ -36,6 +36,8 @@ export interface StickerPackSummary {
   id: string;
   name: string;
   cover_url?: string | null;
+  /** 包内最早一张贴纸的对象键；封面缺失时卡片回退展示（服务端可不下发）。 */
+  first_sticker_key?: string | null;
   owner_name?: string | null;
   is_official: boolean;
   sticker_count: number;
@@ -56,6 +58,8 @@ export interface MyPackItem extends StickerPackSummary {
 export interface PackDetailInfo {
   id: string;
   name: string;
+  /** 包内最早一张贴纸对象键；封面缺失时回退展示（服务端可不下发）。 */
+  first_sticker_key?: string | null;
   cover_url?: string | null;
   is_official: boolean;
   owner_name?: string | null;

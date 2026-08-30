@@ -35,9 +35,14 @@ function MarketCard({ pack }: { pack: MarketPackItem }) {
   return (
     <Link
       to={"/stickers/" + pack.id}
-      className="bg-surface-container-low shadow-elevation-1 hover:shadow-elevation-2 relative block overflow-hidden rounded-lg transition-shadow"
+      className="bg-surface-container-low shadow-elevation-1 hover:shadow-elevation-2 relative block overflow-hidden rounded-lg transition-all hover:-translate-y-0.5"
     >
-      <StickerPackCover coverUrl={pack.cover_url} />
+      <div className="relative">
+        <StickerPackCover coverUrl={pack.cover_url} fallbackKey={pack.first_sticker_key} />
+        <span className="bg-surface-container-high/80 text-on-surface-variant text-label-sm absolute bottom-1.5 left-1.5 rounded-full px-1.5 py-0.5 tabular-nums">
+          {pack.sticker_count}
+        </span>
+      </div>
       {pack.added && (
         <span className="bg-primary text-on-primary text-label-sm absolute top-1.5 right-1.5 rounded-full px-2 py-0.5 font-medium">
           {t("sticker.market.added")}
@@ -47,9 +52,6 @@ function MarketCard({ pack }: { pack: MarketPackItem }) {
         <p className="text-body-md text-on-surface truncate font-medium">{pack.name}</p>
         <p className="text-body-sm text-on-surface-variant mt-0.5 truncate">
           {packOwnerText(pack, t)}
-        </p>
-        <p className="text-body-sm text-on-surface-variant truncate">
-          {t("sticker.market.stickerCount", { count: pack.sticker_count })}
         </p>
       </div>
     </Link>
@@ -137,7 +139,7 @@ export function StickerMarketView() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {state === "loading" && (
           <div
-            className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5"
+            className="mx-auto grid w-full max-w-6xl grid-cols-2 gap-3 p-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
             data-testid="market-skeleton"
           >
             {Array.from({ length: SKELETON_COUNT }, (_, i) => (
@@ -169,7 +171,7 @@ export function StickerMarketView() {
 
         {state === "done" && packs.length > 0 && (
           <>
-            <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            <div className="mx-auto grid w-full max-w-6xl grid-cols-2 gap-3 p-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
               {packs.map((pack) => (
                 <MarketCard key={pack.id} pack={pack} />
               ))}

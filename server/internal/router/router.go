@@ -71,6 +71,8 @@ func Setup(
 	// 与 fileH 的 503 降级策略一致，不因存储不可达而整条链路 500）
 	if st != nil {
 		stickerSvc.SetObjectChecker(st)
+		// 封面对象键 → 公共 URL 映射：缺失时发布会静默丢封面（对象已传但无 URL 可落库）
+		stickerSvc.SetPublicURL(st.PublicURL)
 	}
 	stickerH := handler.NewStickerHandler(stickerSvc, logger)
 

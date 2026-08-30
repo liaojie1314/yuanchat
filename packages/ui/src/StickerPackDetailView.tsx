@@ -169,7 +169,11 @@ export function StickerPackDetailView({ packId }: { packId: string }) {
           <div className="p-4">
             {/* 概要区 */}
             <div className="flex gap-4">
-              <StickerPackCover coverUrl={detail.pack.cover_url} className="h-24 w-24" />
+              <StickerPackCover
+                coverUrl={detail.pack.cover_url}
+                fallbackKey={detail.pack.first_sticker_key}
+                className="h-24 w-24"
+              />
               <div className="min-w-0 flex-1">
                 <h2 className="text-title-lg text-on-surface truncate font-semibold">
                   {detail.pack.name}
