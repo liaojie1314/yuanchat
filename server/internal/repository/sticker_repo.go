@@ -288,6 +288,12 @@ func (r *StickerRepository) DeletePackOfOwner(ctx context.Context, ownerID, pack
 	return nil
 }
 
+// AddStickerToPack 插入一条包内贴纸行（owner_id 为 NULL，不占用 (owner_id, content_hash)
+// 唯一键，同一内容可同时存在于多个包与多人的收藏）。
+func (r *StickerRepository) AddStickerToPack(ctx context.Context, st *model.Sticker) error {
+	return r.db.WithContext(ctx).Create(st).Error
+}
+
 // RemovePackSticker 从指定包中移除一张贴纸（仅包所有者可操作，不校验"至少保留一张"）。
 // pack_id 进 WHERE；未命中（贴纸不在该包）返回 gorm.ErrRecordNotFound。
 func (r *StickerRepository) RemovePackSticker(ctx context.Context, packID, stickerID uuid.UUID) error {

@@ -359,3 +359,262 @@ func TestAddRemovePackEndpoint(t *testing.T) {
 		t.Fatal("pack should no longer be added after DELETE")
 	}
 }
+
+// ---------- 自主发布与编辑管理端点 ----------
+
+// newPackEngineFull 全量路由引擎（含发布/管理端点，注册顺序与 router.go 一致），
+// 注入确定性的 publicURL 便于断言封面 URL。
+func newPackEngineFull(svc *service.StickerService) *gin.Engine {
+	svc.SetPublicURL(func(k string) string { return "http://minio:9000/yuanchat/" + k })
+	h := NewStickerHandler(svc, zap.NewNop())
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set("user_id", packRouterState.current)
+		c.Next()
+	})
+	g := r.Group("/api/v1")
+	g.GET("/sticker-packs", h.ListPacks)
+	g.GET("/sticker-packs/market", h.Market)
+	g.GET("/sticker-packs/mine", h.ListMyPacks)
+	g.POST("/sticker-packs", h.Publish)
+	g.GET("/sticker-packs/:id", h.PackDetail)
+	g.PATCH("/sticker-packs/:id", h.UpdatePack)
+	g.DELETE("/sticker-packs/:id", h.DeleteMinePack)
+	g.POST("/sticker-packs/:id/add", h.AddPack)
+	g.DELETE("/sticker-packs/:id/add", h.RemovePack)
+	g.POST("/sticker-packs/:id/stickers", h.AddPackSticker)
+	g.DELETE("/sticker-packs/:id/stickers/:stickerId", h.RemovePackSticker)
+	return r
+}
+
+// TestPublishEndpoint 发布端点：upload 来源 + sticker-covers 封面 → 详情响应；
+// 包名/来源校验失败 → 400。
+func TestPublishEndpoint(t *testing.T) {
+	db := packTestDB(t)
+	svc := service.NewStickerService(repository.NewStickerRepository(db), zap.NewNop())
+	r := newPackEngineFull(svc)
+
+	alice := newPackTestUser(t, db, "发布端点")
+	packRouterState.current = alice.ID
+	const hash = "5b6642cf4331eb911b475ea8fb19d09cbc073c73b55a10134928984daee7fc41"
+	body := gin.H{
+		"name":              "端点发布包",
+		"cover_object_key":  "sticker-covers/2026/08/cafebabe.png",
+		"cover_width":       300,
+		"cover_height":      300,
+		"sticker_sources": []gin.H{
+			{"source": "upload", "object_key": "images/2026/08/abcd1234.png", "width": 96, "height": 96, "content_hash": hash},
+		},
+	}
+	w, resp := doPackJSON(t, r, http.MethodPost, "/api/v1/sticker-packs", body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%v", w.Code, resp)
+	}
+	detail := packData(t, resp)
+	pk := detail["pack"].(map[string]any)
+	if pk["name"] != "端点发布包" || pk["is_owner"] != true || pk["is_official"] != false {
+		t.Fatalf("published pack fields wrong: %v", pk)
+	}
+	if pk["cover_url"] != "http://minio:9000/yuanchat/sticker-covers/2026/08/cafebabe.png" {
+		t.Fatalf("cover_url should be public URL, got %v", pk["cover_url"])
+	}
+	if detail["added"] != false {
+		t.Fatalf("publish response added should be false, got %v", detail["added"])
+	}
+	if len(detail["stickers"].([]any)) != 1 {
+		t.Fatalf("want 1 sticker, got %v", detail["stickers"])
+	}
+	packID := pk["id"].(string)
+
+	// 包名缺失 / 来源为空 → 400
+	w, _ = doPackJSON(t, r, http.MethodPost, "/api/v1/sticker-packs", gin.H{
+		"name": "没有贴纸的包", "sticker_sources": []gin.H{},
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("empty sources status = %d, want 400", w.Code)
+	}
+	w, _ = doPackJSON(t, r, http.MethodPost, "/api/v1/sticker-packs", gin.H{
+		"name": "错误来源", "sticker_sources": []gin.H{{"source": "steal"}},
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("bad source status = %d, want 400", w.Code)
+	}
+
+	// 发布成功后包真实入库且公开
+	var count int64
+	db.Model(&model.StickerPack{}).Where("id = ? AND is_public = TRUE AND owner_id = ?", packID, alice.ID).Count(&count)
+	if count != 1 {
+		t.Fatal("published pack should be public and owned in DB")
+	}
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM stickers WHERE pack_id = ?`, packID)
+		db.Unscoped().Delete(&model.StickerPack{}, "id = ?", packID)
+	})
+}
+
+// TestPublishEndpointLimit 达发布上限（20）后 → 400。
+func TestPublishEndpointLimit(t *testing.T) {
+	db := packTestDB(t)
+	svc := service.NewStickerService(repository.NewStickerRepository(db), zap.NewNop())
+	r := newPackEngineFull(svc)
+
+	alice := newPackTestUser(t, db, "发布满仓")
+	rows := make([]model.StickerPack, 0, 20)
+	for i := 0; i < 20; i++ {
+		owner := alice.ID
+		rows = append(rows, model.StickerPack{Name: fmt.Sprintf("满仓-%d-%s", i, uuid.NewString()[:8]), OwnerID: &owner, IsPublic: true})
+	}
+	if err := db.CreateInBatches(rows, 50).Error; err != nil {
+		t.Fatalf("seed packs: %v", err)
+	}
+	t.Cleanup(func() { db.Exec(`DELETE FROM sticker_packs WHERE owner_id = ?`, alice.ID) })
+
+	packRouterState.current = alice.ID
+	const hash = "5b6642cf4331eb911b475ea8fb19d09cbc073c73b55a10134928984daee7fc41"
+	w, _ := doPackJSON(t, r, http.MethodPost, "/api/v1/sticker-packs", gin.H{
+		"name": "超限包",
+		"sticker_sources": []gin.H{
+			{"source": "upload", "object_key": "images/2026/08/abcd1234.png", "width": 96, "height": 96, "content_hash": hash},
+		},
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("over limit status = %d, want 400", w.Code)
+	}
+}
+
+// TestUpdatePackEndpoint 编辑端点：本人 200、他人 403、不存在 404。
+func TestUpdatePackEndpoint(t *testing.T) {
+	db := packTestDB(t)
+	svc := service.NewStickerService(repository.NewStickerRepository(db), zap.NewNop())
+	r := newPackEngineFull(svc)
+
+	owner := newPackTestUser(t, db, "编辑端点主")
+	stranger := newPackTestUser(t, db, "编辑端点客")
+	pack := seedPackRow(t, db, func(p *model.StickerPack) { p.OwnerID = &owner.ID; p.IsPublic = true })
+
+	packRouterState.current = stranger.ID
+	w, _ := doPackJSON(t, r, http.MethodPatch, "/api/v1/sticker-packs/"+pack.ID.String(), gin.H{"name": "抢改"})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("stranger patch status = %d, want 403", w.Code)
+	}
+
+	packRouterState.current = owner.ID
+	w, resp := doPackJSON(t, r, http.MethodPatch, "/api/v1/sticker-packs/"+pack.ID.String(), gin.H{"name": "端点改名"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("owner patch status = %d body=%v", w.Code, resp)
+	}
+	if pk := packData(t, resp)["pack"].(map[string]any); pk["name"] != "端点改名" {
+		t.Fatalf("rename not reflected: %v", pk)
+	}
+
+	w, _ = doPackJSON(t, r, http.MethodPatch, "/api/v1/sticker-packs/"+uuid.New().String(), gin.H{"name": "无"})
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("missing pack patch status = %d, want 404", w.Code)
+	}
+}
+
+// TestMyPacksEndpoint 我发布的端点：is_owner 恒 true。
+func TestMyPacksEndpoint(t *testing.T) {
+	db := packTestDB(t)
+	svc := service.NewStickerService(repository.NewStickerRepository(db), zap.NewNop())
+	r := newPackEngineFull(svc)
+
+	owner := newPackTestUser(t, db, "我的发布端点")
+	seedPackRow(t, db, func(p *model.StickerPack) { p.OwnerID = &owner.ID; p.IsPublic = true })
+
+	packRouterState.current = owner.ID
+	w, resp := doPackJSON(t, r, http.MethodGet, "/api/v1/sticker-packs/mine", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	raw, _ := json.Marshal(packData(t, resp)["packs"])
+	var packs []map[string]any
+	if err := json.Unmarshal(raw, &packs); err != nil {
+		t.Fatalf("unmarshal packs: %v", err)
+	}
+	found := false
+	for _, p := range packs {
+		if p["name"] != nil && len(packs) > 0 {
+			if isOwner, ok := p["is_owner"].(bool); ok && isOwner {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("mine list should contain an is_owner=true pack, got %v", packs)
+	}
+}
+
+// TestDeleteMineEndpoint 删除端点：本人 200 且包消失、他人 403、不存在 404。
+func TestDeleteMineEndpoint(t *testing.T) {
+	db := packTestDB(t)
+	svc := service.NewStickerService(repository.NewStickerRepository(db), zap.NewNop())
+	r := newPackEngineFull(svc)
+
+	owner := newPackTestUser(t, db, "删除端点主")
+	stranger := newPackTestUser(t, db, "删除端点客")
+	pack := seedPackRow(t, db, func(p *model.StickerPack) { p.OwnerID = &owner.ID; p.IsPublic = true })
+
+	packRouterState.current = stranger.ID
+	w, _ := doPackJSON(t, r, http.MethodDelete, "/api/v1/sticker-packs/"+pack.ID.String(), nil)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("stranger delete status = %d, want 403", w.Code)
+	}
+
+	packRouterState.current = owner.ID
+	w, resp := doPackJSON(t, r, http.MethodDelete, "/api/v1/sticker-packs/"+pack.ID.String(), nil)
+	if w.Code != http.StatusOK || packData(t, resp)["message"] != "deleted" {
+		t.Fatalf("owner delete: status=%d resp=%v", w.Code, resp)
+	}
+	var count int64
+	db.Model(&model.StickerPack{}).Where("id = ?", pack.ID).Count(&count)
+	if count != 0 {
+		t.Fatal("pack should be gone")
+	}
+	w, _ = doPackJSON(t, r, http.MethodDelete, "/api/v1/sticker-packs/"+pack.ID.String(), nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("second delete status = %d, want 404", w.Code)
+	}
+}
+
+// TestAddRemovePackStickerEndpoint 包内贴纸端点：本人追加/移除 200、他人 403。
+func TestAddRemovePackStickerEndpoint(t *testing.T) {
+	db := packTestDB(t)
+	svc := service.NewStickerService(repository.NewStickerRepository(db), zap.NewNop())
+	r := newPackEngineFull(svc)
+
+	owner := newPackTestUser(t, db, "包贴纸端点主")
+	stranger := newPackTestUser(t, db, "包贴纸端点客")
+	pack := seedPackRow(t, db, func(p *model.StickerPack) { p.OwnerID = &owner.ID; p.IsPublic = true })
+	const hash = "5b6642cf4331eb911b475ea8fb19d09cbc073c73b55a10134928984daee7fc41"
+
+	packRouterState.current = stranger.ID
+	w, _ := doPackJSON(t, r, http.MethodPost, "/api/v1/sticker-packs/"+pack.ID.String()+"/stickers", gin.H{
+		"source": "upload", "object_key": "images/2026/08/abcd1234.png", "width": 96, "height": 96, "content_hash": hash,
+	})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("stranger add sticker status = %d, want 403", w.Code)
+	}
+
+	packRouterState.current = owner.ID
+	w, _ = doPackJSON(t, r, http.MethodPost, "/api/v1/sticker-packs/"+pack.ID.String()+"/stickers", gin.H{
+		"source": "upload", "object_key": "images/2026/08/abcd1234.png", "width": 96, "height": 96, "content_hash": hash,
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("owner add sticker status = %d", w.Code)
+	}
+	var st model.Sticker
+	if err := db.First(&st, "pack_id = ?", pack.ID).Error; err != nil {
+		t.Fatalf("sticker should be in pack: %v", err)
+	}
+
+	w, _ = doPackJSON(t, r, http.MethodDelete, "/api/v1/sticker-packs/"+pack.ID.String()+"/stickers/"+st.ID.String(), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("owner remove sticker status = %d", w.Code)
+	}
+	var count int64
+	db.Model(&model.Sticker{}).Where("id = ?", st.ID).Count(&count)
+	if count != 0 {
+		t.Fatal("sticker should be removed")
+	}
+}

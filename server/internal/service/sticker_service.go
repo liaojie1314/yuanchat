@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/model"
@@ -27,6 +29,11 @@ var stickerObjectKeyPattern = regexp.MustCompile(`^images/[0-9]{4}/[0-9]{2}/[0-9
 // 原实现只比长度，64 个中文/控制字符也会入库。
 var stickerHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
+// packCoverObjectKeyPattern 表情包封面对象键：必须来自 sticker-covers/ 前缀
+// （该前缀走桶级公共读，与贴纸本体的 images/ 私有通道语义不同——封面在商城
+// 列表页高频重复渲染，不能逐包签发预签名 URL）。
+var packCoverObjectKeyPattern = regexp.MustCompile(`^sticker-covers/[0-9]{4}/[0-9]{2}/[0-9a-f-]+\.[a-z0-9]+$`)
+
 const (
 	// maxObjectKeyLen object_key 列宽（varchar(255)）。正则的 [0-9a-f-]+ 是无界的，
 	// 单靠形态校验仍能过来一个 300 字符的合法形态 key，撞列宽后变成可控 500。
@@ -47,6 +54,17 @@ const (
 	// packStickerSoftCap ListPacks 一次下发贴纸的软上限：超过只记日志不截断
 	// （静默截断会让"少了几张"无从排查），供 H1b 上线前作为加分页的信号。
 	packStickerSoftCap = 2000
+	// maxPublishedPacksPerUser 单用户可发布表情包数量上限（防滥用的运营护栏，
+	// 常量非配置项）。达上限后拒绝发布新包，编辑既有包不受影响。
+	maxPublishedPacksPerUser = 20
+	// maxPackStickers 单包贴纸数量上限，量级沿用收藏上限（H1 既有口径），
+	// 防止一个包被无限追加贴纸后在商城/详情端点刷出超载荷响应。
+	maxPackStickers = maxStickerFavorites
+	// maxPackNameLen 包名长度上限（列宽 varchar(64)，PG 按字符计）。
+	maxPackNameLen = 64
+	// defaultMarketPageSize / maxMarketPageSize 商城列表分页尺寸。
+	defaultMarketPageSize = 20
+	maxMarketPageSize     = 50
 )
 
 // ErrInvalidObjectKey 贴纸来源必须是服务端签发的图片对象键（images/ 前缀 + 规范形态）。
@@ -103,11 +121,17 @@ type objectChecker interface {
 	ObjectExists(ctx context.Context, objectKey string) (bool, error)
 }
 
-// StickerService 表情收藏（个人）+ 官方表情包（公共只读）。
+// StickerService 表情收藏（个人）、表情包商城与自主发布。
 type StickerService struct {
 	repo   *repository.StickerRepository
 	st     objectChecker
 	logger *zap.Logger
+	// moderation 包名敏感词审核（router 注入，nil 表示跳过审核）。
+	// 与消息审核共享同一实例（无状态，可安全复用）。
+	moderation *ModerationService
+	// publicURL 把 sticker-covers/ 对象键转成公共访问 URL（由 storage.Storage.PublicURL
+	// 注入）。nil 时（MinIO 不可达）发布仍可进行，只是不落封面 URL。
+	publicURL func(objectKey string) string
 }
 
 func NewStickerService(repo *repository.StickerRepository, logger *zap.Logger) *StickerService {
@@ -116,6 +140,12 @@ func NewStickerService(repo *repository.StickerRepository, logger *zap.Logger) *
 
 // SetObjectChecker 注入对象存在性检查（router 装配时调用；nil 表示跳过该校验）。
 func (s *StickerService) SetObjectChecker(st objectChecker) { s.st = st }
+
+// SetModeration 注入敏感词审核服务（与消息审核共享同一实例）。
+func (s *StickerService) SetModeration(m *ModerationService) { s.moderation = m }
+
+// SetPublicURL 注入对象键到公共 URL 的映射（封面公共读通道）。
+func (s *StickerService) SetPublicURL(fn func(objectKey string) string) { s.publicURL = fn }
 
 // Add 把一张已上传的图片收藏为个人贴纸。幂等：同一用户对同一内容（contentHash）
 // 重复收藏返回既有行，不新增（收藏列表不会因反复点击同张图而重复）。
@@ -303,12 +333,6 @@ func (s *StickerService) ListPacks(ctx context.Context, userID uuid.UUID) ([]Pac
 
 // ---------- 表情商城（浏览 / 添加 / 移除） ----------
 
-const (
-	// defaultMarketPageSize / maxMarketPageSize 商城列表分页尺寸。
-	defaultMarketPageSize = 20
-	maxMarketPageSize     = 50
-)
-
 // PackSummary 商城列表与我发布的列表共用的包摘要字段（前后端契约的公共投影）。
 // OwnerName 为 nil 表示官方包或发布者已注销。
 type PackSummary struct {
@@ -483,4 +507,336 @@ func (s *StickerService) RemovePack(ctx context.Context, userID, packID uuid.UUI
 		return fmt.Errorf("remove user pack: %w", err)
 	}
 	return nil
+}
+
+// ---------- 自主发布与编辑管理 ----------
+
+// StickerSource 发布/追加贴纸时的单张来源：
+//   - collection：从本人收藏复制（sticker_id 必须属于本人收藏）；
+//     新行指向同一 MinIO 对象（object_key 复用），原收藏不受影响。
+//   - upload：直传的新贴纸（object_key 须为 images/ 前缀的服务端签发键）。
+type StickerSource struct {
+	Source      string    `json:"source"`
+	StickerID   uuid.UUID `json:"sticker_id"`
+	ObjectKey   string    `json:"object_key"`
+	Width       int       `json:"width"`
+	Height      int       `json:"height"`
+	ContentHash string    `json:"content_hash"`
+}
+
+// PublishInput 发布新表情包的入参。
+// cover_width/cover_height 供前端按需展示，服务端不落库（表无对应列）。
+type PublishInput struct {
+	Name           string
+	CoverObjectKey string
+	CoverWidth     int
+	CoverHeight    int
+	StickerSources []StickerSource
+}
+
+// UpdatePackInput 编辑已发布包的入参；空串字段表示不修改。
+type UpdatePackInput struct {
+	Name           string
+	CoverObjectKey string
+	CoverWidth     int
+	CoverHeight    int
+}
+
+// MyPackDTO 「我发布的」列表项（added 字段省略，is_owner 恒为 true）。
+type MyPackDTO struct {
+	PackSummary
+	IsOwner bool `json:"is_owner"`
+}
+
+// normalizePackName 包名去首尾空白；空白或超出 varchar(64) 容量（PG 按字符计）
+// 报 ErrInvalidPackName。
+func normalizePackName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || utf8.RuneCountInString(name) > maxPackNameLen {
+		return "", ErrInvalidPackName
+	}
+	return name, nil
+}
+
+// flagPackName 包名敏感词打标：命中返回 true。与消息审核同范式——
+// 只标记不拦截，包照常发布（进 admin 审核队列）。
+func (s *StickerService) flagPackName(name string) bool {
+	if s.moderation == nil {
+		return false
+	}
+	if hit := s.moderation.Check(name); hit != "" {
+		s.logger.Info("sticker pack name flagged by moderation",
+			zap.String("word", hit))
+		return true
+	}
+	return false
+}
+
+// coverPublicURL 校验封面对象键（sticker-covers/ 前缀 + 规范形态 + 对象真实存在）
+// 并转成公共 URL。键非法报 ErrInvalidCoverKey；对象缺失报 ErrStickerObjectMissing。
+func (s *StickerService) coverPublicURL(ctx context.Context, objectKey string) (*string, error) {
+	if len(objectKey) > maxObjectKeyLen || !packCoverObjectKeyPattern.MatchString(objectKey) {
+		return nil, ErrInvalidCoverKey
+	}
+	// 与收藏贴纸同口径：PresignPut/公共 URL 不校验存在性，
+	// 缺了这一步会把指向空对象的封面写进库，渲染 404 且坏数据长期存活
+	if s.st != nil {
+		exists, err := s.st.ObjectExists(ctx, objectKey)
+		if err != nil {
+			return nil, fmt.Errorf("stat cover object: %w", err)
+		}
+		if !exists {
+			return nil, ErrStickerObjectMissing
+		}
+	}
+	if s.publicURL == nil {
+		// MinIO 不可达（checker 也未注入）：发布不因封面降级失败，只是无封面
+		s.logger.Warn("public URL fn not configured; publishing pack without cover",
+			zap.String("object_key", objectKey))
+		return nil, nil
+	}
+	url := s.publicURL(objectKey)
+	return &url, nil
+}
+
+// buildStickersFromSources 逐条按来源分流构造待插入的贴纸行
+// （PackID 由调用方在插入时回填；发布产出的行 owner_id 恒为 NULL，
+// 发布者注销时不会波及包内容）。
+func (s *StickerService) buildStickersFromSources(ctx context.Context, userID uuid.UUID, sources []StickerSource) ([]model.Sticker, error) {
+	out := make([]model.Sticker, 0, len(sources))
+	for _, src := range sources {
+		switch src.Source {
+		case "collection":
+			// 复制本人收藏：贴纸不存在与"不属于本人"一并按不存在处理，不泄漏他人收藏的存在性
+			fav, err := s.repo.FindOwned(ctx, userID, src.StickerID)
+			if err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return nil, ErrStickerNotFound
+				}
+				return nil, fmt.Errorf("find owned sticker: %w", err)
+			}
+			out = append(out, model.Sticker{
+				ObjectKey:   fav.ObjectKey,
+				Width:       fav.Width,
+				Height:      fav.Height,
+				ContentHash: fav.ContentHash,
+			})
+		case "upload":
+			// 直传新贴纸：与个人收藏 Add 同一套校验口径（键形态、hash、尺寸、对象在库）
+			if len(src.ObjectKey) > maxObjectKeyLen || !stickerObjectKeyPattern.MatchString(src.ObjectKey) {
+				return nil, ErrInvalidObjectKey
+			}
+			if !stickerHashPattern.MatchString(src.ContentHash) {
+				return nil, ErrInvalidContentHash
+			}
+			if src.Width <= 0 || src.Height <= 0 || src.Width > maxStickerEdge || src.Height > maxStickerEdge {
+				return nil, ErrInvalidStickerSize
+			}
+			if s.st != nil {
+				exists, err := s.st.ObjectExists(ctx, src.ObjectKey)
+				if err != nil {
+					return nil, fmt.Errorf("stat sticker object: %w", err)
+				}
+				if !exists {
+					return nil, ErrStickerObjectMissing
+				}
+			}
+			out = append(out, model.Sticker{
+				ObjectKey:   src.ObjectKey,
+				Width:       src.Width,
+				Height:      src.Height,
+				ContentHash: src.ContentHash,
+			})
+		default:
+			return nil, ErrInvalidStickerSources
+		}
+	}
+	return out, nil
+}
+
+// Publish 发布一个公开的表情包（一步创建即公开，无草稿态）。
+//
+// 约束：
+//   - 本人已发布包数达 maxPublishedPacksPerUser 时拒绝（ErrPublishLimitExceeded）；
+//   - 包名过敏感词，命中置 flagged=true 但不阻塞发布（同 messages.flagged 范式）；
+//   - 包与全部贴纸行在同一事务内创建（PublishPack），要么整包可见，要么不存在；
+//   - 贴纸来源逐条分流：collection 复制本人收藏（新行、同一对象），upload 直传建行。
+//
+// 返回创建后的包详情（is_owner=true，added=false——发布不等于添加）。
+func (s *StickerService) Publish(ctx context.Context, userID uuid.UUID, in PublishInput) (*PackDetailDTO, error) {
+	name, err := normalizePackName(in.Name)
+	if err != nil {
+		return nil, err
+	}
+	if len(in.StickerSources) == 0 {
+		return nil, ErrInvalidStickerSources
+	}
+	if len(in.StickerSources) > maxPackStickers {
+		return nil, ErrTooManyPackStickers
+	}
+	var coverURL *string
+	if in.CoverObjectKey != "" {
+		if coverURL, err = s.coverPublicURL(ctx, in.CoverObjectKey); err != nil {
+			return nil, err
+		}
+	}
+	// 发布数量上限：达上限拒绝新包（编辑既有包不受影响）
+	n, err := s.repo.CountPacksByOwner(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("count packs by owner: %w", err)
+	}
+	if n >= maxPublishedPacksPerUser {
+		return nil, ErrPublishLimitExceeded
+	}
+	stickers, err := s.buildStickersFromSources(ctx, userID, in.StickerSources)
+	if err != nil {
+		return nil, err
+	}
+	pack := &model.StickerPack{
+		Name:     name,
+		CoverURL: coverURL,
+		OwnerID:  &userID,
+		IsPublic: true,
+		Flagged:  s.flagPackName(name),
+	}
+	if err := s.repo.PublishPack(ctx, pack, stickers); err != nil {
+		return nil, fmt.Errorf("publish pack: %w", err)
+	}
+	return s.PackDetail(ctx, userID, pack.ID)
+}
+
+// UpdatePack 编辑本人发布的包（改名/换封面）。
+// 改名同样过敏感词：命中把 flagged 重新置位（包保持可见，进审核队列）。
+func (s *StickerService) UpdatePack(ctx context.Context, userID, packID uuid.UUID, in UpdatePackInput) (*PackDetailDTO, error) {
+	// 先区分 404（不存在）与 403（存在但非本人）；实际更新仍带 owner_id 条件
+	meta, err := s.repo.GetPackMeta(ctx, packID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrPackNotFound
+		}
+		return nil, fmt.Errorf("get pack meta: %w", err)
+	}
+	if meta.OwnerID == nil || *meta.OwnerID != userID {
+		return nil, ErrNotPackOwner
+	}
+	updates := map[string]any{}
+	if in.Name != "" {
+		name, err := normalizePackName(in.Name)
+		if err != nil {
+			return nil, err
+		}
+		updates["name"] = name
+		if s.flagPackName(name) {
+			updates["flagged"] = true
+		}
+	}
+	if in.CoverObjectKey != "" {
+		coverURL, err := s.coverPublicURL(ctx, in.CoverObjectKey)
+		if err != nil {
+			return nil, err
+		}
+		// coverURL 为 nil（存储降级）时不覆盖既有封面
+		if coverURL != nil {
+			updates["cover_url"] = *coverURL
+		}
+	}
+	if len(updates) > 0 {
+		if err := s.repo.UpdatePackOfOwner(ctx, userID, packID, updates); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				// 前置校验与更新之间包被并发删除
+				return nil, ErrPackNotFound
+			}
+			return nil, fmt.Errorf("update pack: %w", err)
+		}
+	}
+	return s.PackDetail(ctx, userID, packID)
+}
+
+// AddPackSticker 给本人发布的包追加一张贴纸（来源分流同 Publish）。
+// 单包贴纸数达 maxPackStickers 时拒绝。
+func (s *StickerService) AddPackSticker(ctx context.Context, userID, packID uuid.UUID, src StickerSource) error {
+	meta, err := s.repo.GetPackMeta(ctx, packID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrPackNotFound
+		}
+		return fmt.Errorf("get pack meta: %w", err)
+	}
+	if meta.OwnerID == nil || *meta.OwnerID != userID {
+		return ErrNotPackOwner
+	}
+	m, err := s.repo.CountStickersByPack(ctx, packID)
+	if err != nil {
+		return fmt.Errorf("count stickers: %w", err)
+	}
+	if m >= maxPackStickers {
+		return ErrTooManyPackStickers
+	}
+	rows, err := s.buildStickersFromSources(ctx, userID, []StickerSource{src})
+	if err != nil {
+		return err
+	}
+	rows[0].PackID = &packID
+	if err := s.repo.AddStickerToPack(ctx, &rows[0]); err != nil {
+		return fmt.Errorf("add pack sticker: %w", err)
+	}
+	return nil
+}
+
+// RemovePackSticker 从本人发布的包中移除一张贴纸。
+// 不校验"至少保留一张"——空包允许存在，由前端引导用户；不校验即不做伪校验。
+func (s *StickerService) RemovePackSticker(ctx context.Context, userID, packID, stickerID uuid.UUID) error {
+	meta, err := s.repo.GetPackMeta(ctx, packID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrPackNotFound
+		}
+		return fmt.Errorf("get pack meta: %w", err)
+	}
+	if meta.OwnerID == nil || *meta.OwnerID != userID {
+		return ErrNotPackOwner
+	}
+	if err := s.repo.RemovePackSticker(ctx, packID, stickerID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrStickerNotFound
+		}
+		return fmt.Errorf("remove pack sticker: %w", err)
+	}
+	return nil
+}
+
+// DeleteMine 删除本人发布的包。stickers 与 user_sticker_packs 由外键级联清理——
+// 发布者主动撤回内容，已添加者的表情面板中该包随之消失（与"注销保留"是两种场景）。
+func (s *StickerService) DeleteMine(ctx context.Context, userID, packID uuid.UUID) error {
+	meta, err := s.repo.GetPackMeta(ctx, packID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrPackNotFound
+		}
+		return fmt.Errorf("get pack meta: %w", err)
+	}
+	if meta.OwnerID == nil || *meta.OwnerID != userID {
+		return ErrNotPackOwner
+	}
+	if err := s.repo.DeletePackOfOwner(ctx, userID, packID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// 前置校验与删除之间包被并发删除
+			return ErrPackNotFound
+		}
+		return fmt.Errorf("delete pack: %w", err)
+	}
+	return nil
+}
+
+// ListMinePacks 列出当前用户发布的全部表情包（is_owner 恒 true）。
+func (s *StickerService) ListMinePacks(ctx context.Context, userID uuid.UUID) ([]MyPackDTO, error) {
+	rows, err := s.repo.ListPublishedBy(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list my packs: %w", err)
+	}
+	items := make([]MyPackDTO, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, MyPackDTO{PackSummary: packSummaryOf(r), IsOwner: true})
+	}
+	return items, nil
 }

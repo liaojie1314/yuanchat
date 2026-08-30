@@ -22,9 +22,15 @@ func TestStickerPackRoutesRegistered(t *testing.T) {
 	want := []route{
 		{"GET", "/api/v1/sticker-packs", "ListPacks"},
 		{"GET", "/api/v1/sticker-packs/market", "Market"},
+		{"GET", "/api/v1/sticker-packs/mine", "ListMyPacks"},
+		{"POST", "/api/v1/sticker-packs", "Publish"},
 		{"GET", "/api/v1/sticker-packs/:id", "PackDetail"},
+		{"PATCH", "/api/v1/sticker-packs/:id", "UpdatePack"},
+		{"DELETE", "/api/v1/sticker-packs/:id", "DeleteMinePack"},
 		{"POST", "/api/v1/sticker-packs/:id/add", "AddPack"},
 		{"DELETE", "/api/v1/sticker-packs/:id/add", "RemovePack"},
+		{"POST", "/api/v1/sticker-packs/:id/stickers", "AddPackSticker"},
+		{"DELETE", "/api/v1/sticker-packs/:id/stickers/:stickerId", "RemovePackSticker"},
 	}
 	got := make(map[string]string, len(r.Routes()))
 	for _, ri := range r.Routes() {

@@ -300,3 +300,395 @@ func TestStickerListPacksExtended(t *testing.T) {
 		}
 	}
 }
+
+// ---------- 自主发布与编辑管理 ----------
+
+// seedFavorite 建一条本人收藏贴纸（发布 collection 来源的前置数据）。
+func seedFavorite(t *testing.T, db *gorm.DB, ownerID uuid.UUID, objectKey string, seq int64) *model.Sticker {
+	t.Helper()
+	owner := ownerID
+	st := &model.Sticker{
+		OwnerID:     &owner,
+		ObjectKey:   objectKey,
+		Width:       96,
+		Height:      96,
+		ContentHash: fmt.Sprintf("%064x", time.Now().UnixNano()+seq),
+	}
+	if err := db.Create(st).Error; err != nil {
+		t.Fatalf("create favorite: %v", err)
+	}
+	t.Cleanup(func() { db.Unscoped().Delete(st) })
+	return st
+}
+
+// TestStickerPublishCollectionCopy 从收藏发布：复制出新行（新 id、pack_id 指向新包、
+// owner_id 置 NULL、object_key 复用同一对象），原收藏不受影响。
+func TestStickerPublishCollectionCopy(t *testing.T) {
+	db := testDB(t)
+	migrateSvcStickerTables(t, db)
+	svc := newStickerSvc(db)
+	ctx := context.Background()
+
+	alice := newTestUser(t, db, "pub-copy")
+	fav := seedFavorite(t, db, alice.ID, "images/2026/08/copy.png", 1)
+
+	detail, err := svc.Publish(ctx, alice.ID, PublishInput{
+		Name: "复制发布包",
+		StickerSources: []StickerSource{
+			{Source: "collection", StickerID: fav.ID},
+		},
+	})
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if !detail.Pack.IsOwner || detail.Added {
+		t.Fatalf("publish response should be is_owner=true added=false, got %+v", detail.Pack)
+	}
+	if detail.Pack.OwnerName == nil || *detail.Pack.OwnerName != alice.Nickname {
+		t.Fatalf("owner_name should be publisher, got %v", detail.Pack.OwnerName)
+	}
+	if len(detail.Stickers) != 1 || detail.Stickers[0].ObjectKey != "images/2026/08/copy.png" {
+		t.Fatalf("pack stickers wrong: %+v", detail.Stickers)
+	}
+	if detail.Stickers[0].ID == fav.ID {
+		t.Fatal("publish must copy into a NEW sticker row, not reuse the favorite's id")
+	}
+	// 原收藏仍在（还是 alice 的、pack_id 为空）
+	var original model.Sticker
+	if err := db.First(&original, "id = ?", fav.ID).Error; err != nil {
+		t.Fatalf("original favorite must survive: %v", err)
+	}
+	if original.PackID != nil {
+		t.Fatal("original favorite must not be moved into the pack")
+	}
+	// 新行 owner_id 为 NULL、pack_id 指向新包
+	var copied model.Sticker
+	if err := db.First(&copied, "id = ?", detail.Stickers[0].ID).Error; err != nil {
+		t.Fatalf("load copied row: %v", err)
+	}
+	if copied.OwnerID != nil || copied.PackID == nil || *copied.PackID != detail.Pack.ID {
+		t.Fatalf("copied row should be pack-owned with NULL owner: %+v", copied)
+	}
+	// 发布即公开
+	var pack model.StickerPack
+	db.First(&pack, "id = ?", detail.Pack.ID)
+	if !pack.IsPublic || pack.OwnerID == nil || *pack.OwnerID != alice.ID {
+		t.Fatalf("published pack should be public and owned: %+v", pack)
+	}
+}
+
+// TestStickerPublishUploadSource upload 来源：校验键形态/hash/尺寸，入库 owner_id 为 NULL。
+func TestStickerPublishUploadSource(t *testing.T) {
+	db := testDB(t)
+	migrateSvcStickerTables(t, db)
+	svc := newStickerSvc(db)
+	alice := newTestUser(t, db, "pub-upload")
+	ctx := context.Background()
+
+	const hash = "5b6642cf4331eb911b475ea8fb19d09cbc073c73b55a10134928984daee7fc41"
+	badCases := []struct {
+		name    string
+		src     StickerSource
+		wantErr error
+	}{
+		{"非 images 前缀", StickerSource{Source: "upload", ObjectKey: "files/2026/08/a.pdf", Width: 96, Height: 96, ContentHash: hash}, ErrInvalidObjectKey},
+		{"hash 非法", StickerSource{Source: "upload", ObjectKey: "images/2026/08/a.png", Width: 96, Height: 96, ContentHash: "short"}, ErrInvalidContentHash},
+		{"尺寸非法", StickerSource{Source: "upload", ObjectKey: "images/2026/08/a.png", Width: -1, Height: 96, ContentHash: hash}, ErrInvalidStickerSize},
+	}
+	for _, tc := range badCases {
+		if _, err := svc.Publish(ctx, alice.ID, PublishInput{Name: "上传包", StickerSources: []StickerSource{tc.src}}); !errors.Is(err, tc.wantErr) {
+			t.Fatalf("%s: want %v, got %v", tc.name, tc.wantErr, err)
+		}
+	}
+	// 未知来源类型
+	if _, err := svc.Publish(ctx, alice.ID, PublishInput{
+		Name:           "来源包",
+		StickerSources: []StickerSource{{Source: "unknown"}},
+	}); !errors.Is(err, ErrInvalidStickerSources) {
+		t.Fatalf("unknown source should be ErrInvalidStickerSources, got %v", err)
+	}
+	// 空来源
+	if _, err := svc.Publish(ctx, alice.ID, PublishInput{Name: "空包"}); !errors.Is(err, ErrInvalidStickerSources) {
+		t.Fatalf("empty sources should be ErrInvalidStickerSources, got %v", err)
+	}
+	// 合法 upload：对象存在性校验默认跳过（checker 未注入），行入库且 owner_id 为空
+	detail, err := svc.Publish(ctx, alice.ID, PublishInput{
+		Name: "上传包",
+		StickerSources: []StickerSource{
+			{Source: "upload", ObjectKey: "images/2026/08/deadbeef.png", Width: 64, Height: 64, ContentHash: hash},
+		},
+	})
+	if err != nil {
+		t.Fatalf("publish upload: %v", err)
+	}
+	if len(detail.Stickers) != 1 {
+		t.Fatalf("want 1 sticker, got %d", len(detail.Stickers))
+	}
+	var row model.Sticker
+	db.First(&row, "id = ?", detail.Stickers[0].ID)
+	if row.OwnerID != nil || row.PackID == nil {
+		t.Fatalf("upload row should be pack-owned with NULL owner: %+v", row)
+	}
+}
+
+// TestStickerPublishGuards 封面键必须属 sticker-covers/；发布数达上限拒绝；包名敏感词打标不阻塞。
+func TestStickerPublishGuards(t *testing.T) {
+	db := testDB(t)
+	migrateSvcStickerTables(t, db)
+	svc := newStickerSvc(db)
+	alice := newTestUser(t, db, "pub-guard")
+	ctx := context.Background()
+
+	const hash = "5b6642cf4331eb911b475ea8fb19d09cbc073c73b55a10134928984daee7fc41"
+	src := StickerSource{Source: "upload", ObjectKey: "images/2026/08/fe001d.png", Width: 96, Height: 96, ContentHash: hash}
+
+	// 封面键非 sticker-covers 前缀
+	if _, err := svc.Publish(ctx, alice.ID, PublishInput{
+		Name: "封面校验包", CoverObjectKey: "images/2026/08/cover.png", StickerSources: []StickerSource{src},
+	}); !errors.Is(err, ErrInvalidCoverKey) {
+		t.Fatalf("images cover key should be ErrInvalidCoverKey, got %v", err)
+	}
+
+	// 达发布上限（直接插行构造 20 个包，避免逐次走 Publish 的校验开销）
+	rows := make([]model.StickerPack, 0, maxPublishedPacksPerUser)
+	for i := 0; i < maxPublishedPacksPerUser; i++ {
+		owner := alice.ID
+		rows = append(rows, model.StickerPack{Name: fmt.Sprintf("满仓包-%d-%s", i, uuid.NewString()[:8]), OwnerID: &owner, IsPublic: true})
+	}
+	if err := db.CreateInBatches(rows, 50).Error; err != nil {
+		t.Fatalf("seed packs: %v", err)
+	}
+	t.Cleanup(func() { db.Exec(`DELETE FROM sticker_packs WHERE owner_id = ?`, alice.ID) })
+	if _, err := svc.Publish(ctx, alice.ID, PublishInput{Name: "超限包", StickerSources: []StickerSource{src}}); !errors.Is(err, ErrPublishLimitExceeded) {
+		t.Fatalf("over limit should be ErrPublishLimitExceeded, got %v", err)
+	}
+
+	// 敏感词命中：发布不阻塞，flagged 落库（用另一个未满仓的用户验证）
+	svc.SetModeration(NewModerationService([]string{"违禁词"}))
+	bob := newTestUser(t, db, "pub-flag")
+	detail, err := svc.Publish(ctx, bob.ID, PublishInput{
+		Name: "含违禁词的包", StickerSources: []StickerSource{src},
+	})
+	if err != nil {
+		t.Fatalf("flagged publish should not be blocked: %v", err)
+	}
+	if !detail.Pack.Flagged {
+		t.Fatal("pack name hit should be flagged")
+	}
+	t.Cleanup(func() { db.Exec(`DELETE FROM stickers WHERE pack_id = ?`, detail.Pack.ID); db.Unscoped().Delete(&model.StickerPack{}, "id = ?", detail.Pack.ID) })
+}
+
+// TestStickerPublishCoverURL 注入 publicURL 后封面转公共 URL 落库。
+func TestStickerPublishCoverURL(t *testing.T) {
+	db := testDB(t)
+	migrateSvcStickerTables(t, db)
+	svc := newStickerSvc(db)
+	svc.SetPublicURL(func(k string) string { return "http://minio:9000/yuanchat/" + k })
+	alice := newTestUser(t, db, "pub-cover")
+	ctx := context.Background()
+	const hash = "5b6642cf4331eb911b475ea8fb19d09cbc073c73b55a10134928984daee7fc41"
+
+	detail, err := svc.Publish(ctx, alice.ID, PublishInput{
+		Name:           "有封面包",
+		CoverObjectKey: "sticker-covers/2026/08/abc.png",
+		StickerSources: []StickerSource{
+			{Source: "upload", ObjectKey: "images/2026/08/c.png", Width: 96, Height: 96, ContentHash: hash},
+		},
+	})
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM stickers WHERE pack_id = ?`, detail.Pack.ID)
+		db.Unscoped().Delete(&model.StickerPack{}, "id = ?", detail.Pack.ID)
+	})
+	if detail.Pack.CoverURL == nil || *detail.Pack.CoverURL != "http://minio:9000/yuanchat/sticker-covers/2026/08/abc.png" {
+		t.Fatalf("cover_url should be the public URL, got %v", detail.Pack.CoverURL)
+	}
+}
+
+// TestStickerUpdatePack 改名/换封面仅本人；改名过敏感词；空字段跳过。
+func TestStickerUpdatePack(t *testing.T) {
+	db := testDB(t)
+	migrateSvcStickerTables(t, db)
+	svc := newStickerSvc(db)
+	owner := newTestUser(t, db, "upd-svc")
+	stranger := newTestUser(t, db, "upd-svc-b")
+	ctx := context.Background()
+
+	pack := &model.StickerPack{Name: "原名", OwnerID: &owner.ID, IsPublic: true}
+	if err := db.Create(pack).Error; err != nil {
+		t.Fatalf("create pack: %v", err)
+	}
+	t.Cleanup(func() { db.Unscoped().Delete(pack) })
+
+	if _, err := svc.UpdatePack(ctx, stranger.ID, pack.ID, UpdatePackInput{Name: "抢改"}); !errors.Is(err, ErrNotPackOwner) {
+		t.Fatalf("stranger update should be ErrNotPackOwner, got %v", err)
+	}
+	if _, err := svc.UpdatePack(ctx, owner.ID, uuid.New(), UpdatePackInput{Name: "不存在"}); !errors.Is(err, ErrPackNotFound) {
+		t.Fatalf("missing pack should be ErrPackNotFound, got %v", err)
+	}
+
+	svc.SetModeration(NewModerationService([]string{"敏感词"}))
+	detail, err := svc.UpdatePack(ctx, owner.ID, pack.ID, UpdatePackInput{
+		Name:           "含敏感词的新名",
+		CoverObjectKey: "sticker-covers/2026/08/beefcafe.png",
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if detail.Pack.Name != "含敏感词的新名" {
+		t.Fatalf("name not updated: %q", detail.Pack.Name)
+	}
+	if !detail.Pack.Flagged {
+		t.Fatal("sensitive rename should set flagged")
+	}
+	var row model.StickerPack
+	db.First(&row, "id = ?", pack.ID)
+	if row.Flagged != true {
+		t.Fatal("flagged must be persisted")
+	}
+}
+
+// TestStickerAddRemovePackSticker 追加/移除包内贴纸：仅本人、collection 复制、移除不影响原收藏。
+func TestStickerAddRemovePackSticker(t *testing.T) {
+	db := testDB(t)
+	migrateSvcStickerTables(t, db)
+	svc := newStickerSvc(db)
+	owner := newTestUser(t, db, "pksticker主")
+	stranger := newTestUser(t, db, "pksticker客")
+	ctx := context.Background()
+
+	pack := &model.StickerPack{Name: "贴纸编辑包", OwnerID: &owner.ID, IsPublic: true}
+	if err := db.Create(pack).Error; err != nil {
+		t.Fatalf("create pack: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM stickers WHERE pack_id = ?`, pack.ID)
+		db.Unscoped().Delete(pack)
+	})
+	fav := seedFavorite(t, db, owner.ID, "images/2026/08/fav.png", 1)
+
+	// 非本人追加
+	if err := svc.AddPackSticker(ctx, stranger.ID, pack.ID, StickerSource{Source: "collection", StickerID: fav.ID}); !errors.Is(err, ErrNotPackOwner) {
+		t.Fatalf("stranger add should be ErrNotPackOwner, got %v", err)
+	}
+	// 本人从收藏追加：新行、原收藏不动
+	if err := svc.AddPackSticker(ctx, owner.ID, pack.ID, StickerSource{Source: "collection", StickerID: fav.ID}); err != nil {
+		t.Fatalf("owner add: %v", err)
+	}
+	var copied model.Sticker
+	if err := db.First(&copied, "pack_id = ?", pack.ID).Error; err != nil {
+		t.Fatalf("copied sticker should exist: %v", err)
+	}
+	if copied.ID == fav.ID || copied.OwnerID != nil {
+		t.Fatalf("must be a new pack-owned row: %+v", copied)
+	}
+	// 移除不存在的贴纸
+	if err := svc.RemovePackSticker(ctx, owner.ID, pack.ID, uuid.New()); !errors.Is(err, ErrStickerNotFound) {
+		t.Fatalf("missing sticker should be ErrStickerNotFound, got %v", err)
+	}
+	// 本人移除成功；原收藏不受影响
+	if err := svc.RemovePackSticker(ctx, owner.ID, pack.ID, copied.ID); err != nil {
+		t.Fatalf("owner remove: %v", err)
+	}
+	var count int64
+	db.Model(&model.Sticker{}).Where("id = ?", fav.ID).Count(&count)
+	if count != 1 {
+		t.Fatal("original favorite must survive pack sticker removal")
+	}
+	// 非本人移除（先撞 403）
+	if err := svc.RemovePackSticker(ctx, stranger.ID, pack.ID, copied.ID); !errors.Is(err, ErrNotPackOwner) {
+		t.Fatalf("stranger remove should be ErrNotPackOwner, got %v", err)
+	}
+}
+
+// TestStickerDeleteMine 删除本人发布的包；非本人 403；删除后包消失。
+func TestStickerDeleteMine(t *testing.T) {
+	db := testDB(t)
+	migrateSvcStickerTables(t, db)
+	svc := newStickerSvc(db)
+	owner := newTestUser(t, db, "del-svc主")
+	stranger := newTestUser(t, db, "del-svc客")
+	ctx := context.Background()
+
+	pack := &model.StickerPack{Name: "待删包", OwnerID: &owner.ID, IsPublic: true}
+	if err := db.Create(pack).Error; err != nil {
+		t.Fatalf("create pack: %v", err)
+	}
+	if err := svc.DeleteMine(ctx, stranger.ID, pack.ID); !errors.Is(err, ErrNotPackOwner) {
+		t.Fatalf("stranger delete should be ErrNotPackOwner, got %v", err)
+	}
+	if err := svc.DeleteMine(ctx, owner.ID, pack.ID); err != nil {
+		t.Fatalf("owner delete: %v", err)
+	}
+	var count int64
+	db.Model(&model.StickerPack{}).Where("id = ?", pack.ID).Count(&count)
+	if count != 0 {
+		t.Fatal("pack should be gone after DeleteMine")
+	}
+	if err := svc.DeleteMine(ctx, owner.ID, pack.ID); !errors.Is(err, ErrPackNotFound) {
+		t.Fatalf("double delete should be ErrPackNotFound, got %v", err)
+	}
+}
+
+// TestStickerListMinePacks 我发布的列表：仅本人包、is_owner 恒 true、计数正确。
+func TestStickerListMinePacks(t *testing.T) {
+	db := testDB(t)
+	migrateSvcStickerTables(t, db)
+	svc := newStickerSvc(db)
+	owner := newTestUser(t, db, "mine-svc")
+	stranger := newTestUser(t, db, "mine-svc客")
+	ctx := context.Background()
+
+	pack := &model.StickerPack{Name: "我的发布包", OwnerID: &owner.ID, IsPublic: true}
+	if err := db.Create(pack).Error; err != nil {
+		t.Fatalf("create pack: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM stickers WHERE pack_id = ?`, pack.ID)
+		db.Unscoped().Delete(pack)
+	})
+	newTestPackSticker := func(seq int64) {
+		packID := pack.ID
+		st := model.Sticker{
+			PackID:      &packID,
+			ObjectKey:   fmt.Sprintf("images/2026/08/%s.png", uuid.NewString()),
+			Width:       96,
+			Height:      96,
+			ContentHash: fmt.Sprintf("%064x", time.Now().UnixNano()+seq),
+		}
+		if err := db.Create(&st).Error; err != nil {
+			t.Fatalf("create sticker: %v", err)
+		}
+		t.Cleanup(func() { db.Unscoped().Delete(&st) })
+	}
+	newTestPackSticker(1)
+
+	mine, err := svc.ListMinePacks(ctx, owner.ID)
+	if err != nil {
+		t.Fatalf("ListMinePacks: %v", err)
+	}
+	var found *MyPackDTO
+	for i := range mine {
+		if mine[i].ID == pack.ID {
+			found = &mine[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("own pack missing from mine list, got %d packs", len(mine))
+	}
+	if !found.IsOwner || found.StickerCount != 1 {
+		t.Fatalf("mine item wrong: %+v", found)
+	}
+	// 陌生人的列表不含该包
+	others, err := svc.ListMinePacks(ctx, stranger.ID)
+	if err != nil {
+		t.Fatalf("ListMinePacks(stranger): %v", err)
+	}
+	for _, p := range others {
+		if p.ID == pack.ID {
+			t.Fatal("stranger must not see the pack in mine list")
+		}
+	}
+}

@@ -327,10 +327,17 @@ func Setup(
 // 依赖注册期的基数树构造，冲突会在启动时 panic——把注册集中到这里，
 // 测试可以直接构造空引擎验证路由表合法。
 func registerStickerPackRoutes(rg gin.IRouter, h *handler.StickerHandler) {
-	// 静态段（market）注册在参数段（:id）之前，gin 按静态优先匹配
+	// 静态段（market / mine）注册在参数段（:id）之前，gin 按静态优先匹配
 	rg.GET("/sticker-packs", middleware.LimitByIP(20, 40), h.ListPacks)
 	rg.GET("/sticker-packs/market", middleware.LimitByIP(20, 40), h.Market)
+	rg.GET("/sticker-packs/mine", middleware.LimitByIP(20, 40), h.ListMyPacks)
+
+	rg.POST("/sticker-packs", middleware.LimitByIP(10, 20), h.Publish)
 	rg.GET("/sticker-packs/:id", middleware.LimitByIP(20, 40), h.PackDetail)
+	rg.PATCH("/sticker-packs/:id", middleware.LimitByIP(10, 20), h.UpdatePack)
+	rg.DELETE("/sticker-packs/:id", middleware.LimitByIP(10, 20), h.DeleteMinePack)
 	rg.POST("/sticker-packs/:id/add", middleware.LimitByIP(10, 20), h.AddPack)
 	rg.DELETE("/sticker-packs/:id/add", middleware.LimitByIP(10, 20), h.RemovePack)
+	rg.POST("/sticker-packs/:id/stickers", middleware.LimitByIP(10, 20), h.AddPackSticker)
+	rg.DELETE("/sticker-packs/:id/stickers/:stickerId", middleware.LimitByIP(10, 20), h.RemovePackSticker)
 }
