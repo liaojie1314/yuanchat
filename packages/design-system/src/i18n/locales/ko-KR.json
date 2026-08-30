@@ -511,6 +511,7 @@
   "admin.moderation.tabReports": "사용자 신고",
   "admin.moderation.keep": "유지",
   "admin.moderation.deleteMsg": "메시지 삭제",
+  "admin.moderation.takedownPack": "팩 차단",
   "admin.moderation.approve": "승인",
   "admin.moderation.colReporter": "신고자",
   "admin.moderation.colReason": "사유",

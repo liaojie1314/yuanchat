@@ -511,6 +511,7 @@
   "admin.moderation.tabReports": "ユーザー報告",
   "admin.moderation.keep": "保持",
   "admin.moderation.deleteMsg": "メッセージを削除",
+  "admin.moderation.takedownPack": "パックを非公開",
   "admin.moderation.approve": "承認",
   "admin.moderation.colReporter": "報告者",
   "admin.moderation.colReason": "理由",

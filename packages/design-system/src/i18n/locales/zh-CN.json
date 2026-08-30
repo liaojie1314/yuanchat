@@ -511,6 +511,7 @@
   "admin.moderation.tabReports": "用户举报",
   "admin.moderation.keep": "保留",
   "admin.moderation.deleteMsg": "删除消息",
+  "admin.moderation.takedownPack": "下架表情包",
   "admin.moderation.approve": "通过",
   "admin.moderation.colReporter": "举报人",
   "admin.moderation.colReason": "理由",

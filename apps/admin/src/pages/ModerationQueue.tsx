@@ -166,12 +166,22 @@ function ReportsTab() {
                   >
                     {t("admin.moderation.keep")}
                   </button>
+                  {/* 删除消息 / 下架贴纸包：处置动作都是 handleReport(id, "delete")，
+                      差异只在服务端落地语义（消息硬删 / 包置 taken_down） */}
                   {r.target_type === "message" && (
                     <button
                       onClick={() => void handleReport(r.id, "delete").then(refresh)}
                       className="text-label-lg text-error hover:underline"
                     >
                       {t("admin.moderation.deleteMsg")}
+                    </button>
+                  )}
+                  {r.target_type === "sticker_pack" && (
+                    <button
+                      onClick={() => void handleReport(r.id, "delete").then(refresh)}
+                      className="text-label-lg text-error hover:underline"
+                    >
+                      {t("admin.moderation.takedownPack")}
                     </button>
                   )}
                 </>

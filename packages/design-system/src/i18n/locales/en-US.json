@@ -511,6 +511,7 @@
   "admin.moderation.tabReports": "Reports",
   "admin.moderation.keep": "Keep",
   "admin.moderation.deleteMsg": "Delete message",
+  "admin.moderation.takedownPack": "Take down pack",
   "admin.moderation.approve": "Approve",
   "admin.moderation.colReporter": "Reporter",
   "admin.moderation.colReason": "Reason",
