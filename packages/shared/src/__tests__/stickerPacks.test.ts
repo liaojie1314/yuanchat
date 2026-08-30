@@ -199,13 +199,13 @@ describe("publishStickerPack", () => {
     expect(detail.pack.id).toBe("p9");
   });
 
-  it("surfaces the publish limit error from the 400 envelope", async () => {
-    mockApiError(400, "publish limit exceeded");
+  it("surfaces the publish limit error with business code 4003", async () => {
+    mockApiError(4003, "publish limit exceeded");
     const err = await publishStickerPack({ name: "x", sticker_sources: [] }).catch(
       (e: unknown) => e,
     );
     expect(err).toBeInstanceOf(ApiError);
-    expect((err as ApiError).code).toBe(400);
+    expect((err as ApiError).code).toBe(4003);
     expect((err as ApiError).message).toMatch(/publish limit/);
   });
 });

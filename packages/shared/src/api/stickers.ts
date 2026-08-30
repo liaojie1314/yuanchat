@@ -228,8 +228,8 @@ export async function removeStickerPack(packId: string): Promise<void> {
  *
  * @param input - 包名（≤64 字符）、封面（sticker-covers/ 对象键，可省略）与贴纸来源（≥1 条）
  * @returns 与包详情相同的形状（added=false、is_owner=true）
- * @throws ApiError 400：包名非法 / 来源为空 / 每用户发布数达上限（message 为
- *   `publish limit exceeded`，服务端未给独立业务码，前端按 message 识别）
+ * @throws ApiError 400：包名非法 / 来源为空；4003：每用户发布数达上限
+ *   （独立业务码，前端按 code 识别）
  */
 export async function publishStickerPack(input: PublishPackInput): Promise<PackDetail> {
   return apiPost<PackDetail>("/api/v1/sticker-packs", input);

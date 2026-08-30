@@ -28,7 +28,9 @@ func respondPackError(c *gin.Context, logger *zap.Logger, op string, err error) 
 	case errors.Is(err, service.ErrInvalidCoverKey):
 		BadRequest(c, "cover must be an uploaded sticker cover")
 	case errors.Is(err, service.ErrPublishLimitExceeded):
-		Error(c, http.StatusBadRequest, http.StatusBadRequest, "publish limit exceeded")
+		// 业务码 4003：HTTP 400 之下再给独立业务码，前端按 code 而非 message 识别
+		// （沿用 file.go 4001/4002、message.go 4031 的「HTTP 状态 + 数字业务码」惯例）
+		Error(c, http.StatusBadRequest, 4003, "publish limit exceeded")
 	case errors.Is(err, service.ErrInvalidStickerSources):
 		BadRequest(c, "sticker sources must not be empty")
 	case errors.Is(err, service.ErrTooManyPackStickers):

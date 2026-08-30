@@ -453,7 +453,8 @@ func TestPublishEndpoint(t *testing.T) {
 	})
 }
 
-// TestPublishEndpointLimit 达发布上限（20）后 → 400。
+// TestPublishEndpointLimit 达发布上限（20）后 → 400 + 独立业务码 4003
+// （前端按 code 识别专属文案，不能依赖 message 字符串）。
 func TestPublishEndpointLimit(t *testing.T) {
 	db := packTestDB(t)
 	svc := service.NewStickerService(repository.NewStickerRepository(db), zap.NewNop())
@@ -472,7 +473,7 @@ func TestPublishEndpointLimit(t *testing.T) {
 
 	packRouterState.current = alice.ID
 	const hash = "5b6642cf4331eb911b475ea8fb19d09cbc073c73b55a10134928984daee7fc41"
-	w, _ := doPackJSON(t, r, http.MethodPost, "/api/v1/sticker-packs", gin.H{
+	w, resp := doPackJSON(t, r, http.MethodPost, "/api/v1/sticker-packs", gin.H{
 		"name": "超限包",
 		"sticker_sources": []gin.H{
 			{"source": "upload", "object_key": "images/2026/08/abcd1234.png", "width": 96, "height": 96, "content_hash": hash},
@@ -480,6 +481,9 @@ func TestPublishEndpointLimit(t *testing.T) {
 	})
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("over limit status = %d, want 400", w.Code)
+	}
+	if code, _ := resp["code"].(float64); code != 4003 {
+		t.Fatalf("over limit code = %v, want 4003", resp["code"])
 	}
 }
 

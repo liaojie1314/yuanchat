@@ -112,9 +112,9 @@ describe("StickerPublishView", () => {
     expect(shared.showToast).toHaveBeenCalledWith("info", "Published");
   });
 
-  it("maps the publish-limit error to its dedicated message", async () => {
+  it("maps the publish-limit error (business code 4003) to its dedicated message", async () => {
     vi.mocked(shared.publishStickerPack).mockRejectedValue(
-      new shared.ApiError(400, "publish limit exceeded"),
+      new shared.ApiError(4003, "publish limit exceeded"),
     );
     renderPublish();
 
@@ -128,6 +128,27 @@ describe("StickerPublishView", () => {
         "error",
         "You have reached the publish limit (20 packs)",
       ),
+    );
+  });
+
+  it("maps other 400 errors to the generic failure message, not the limit one", async () => {
+    // 与上限错误同 HTTP 状态、不同业务码/message：不得误触上限专属文案
+    vi.mocked(shared.publishStickerPack).mockRejectedValue(
+      new shared.ApiError(400, "invalid pack name"),
+    );
+    renderPublish();
+
+    const buttons = await screen.findAllByRole("button", { name: "Add to Stickers" });
+    fireEvent.click(buttons[0]);
+    fireEvent.change(screen.getByLabelText("Pack name"), { target: { value: "新包" } });
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+
+    await waitFor(() =>
+      expect(shared.showToast).toHaveBeenCalledWith("error", "Failed to publish, please retry"),
+    );
+    expect(shared.showToast).not.toHaveBeenCalledWith(
+      "error",
+      "You have reached the publish limit (20 packs)",
     );
   });
 

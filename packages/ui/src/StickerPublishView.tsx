@@ -9,8 +9,8 @@
  *    - 直传新图：上传后立即成为一条收藏项并自动勾选（共用一条 collection 通道）
  * 3. 选封面：默认取第一张勾选贴纸，点选其他勾选项可切换；提交时以该贴纸为源
  *    复制一份到 sticker-covers/ 公共读类别（封面单独计费无——一次普通上传）
- * 4. 提交发布：成功跳转新包详情；达每用户 20 个上限时服务端回 400
- *    `publish limit exceeded`（无独立业务码，按 message 识别）转专属文案
+ * 4. 提交发布：成功跳转新包详情；达每用户 20 个上限时服务端回 400 + 业务码
+ *    4003（按 code 识别）转专属文案
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -32,9 +32,12 @@ import { uploadStickerCover } from "./stickerUpload";
 /** 包名最大长度（与服务端 VARCHAR(64) 对齐） */
 const NAME_MAX = 64;
 
-/** 识别「每用户发布数达上限」：服务端映射为 400 + 固定 message，未给独立业务码 */
+/**
+ * 识别「每用户发布数达上限」：服务端映射为 400 + 业务码 4003（同 4001/4002
+ * 上传错误惯例）。按 code 而非 message 判断，避免服务端改文案即失配。
+ */
 function isPublishLimitError(err: unknown): boolean {
-  return err instanceof ApiError && err.message.indexOf("publish limit exceeded") >= 0;
+  return err instanceof ApiError && err.code === 4003;
 }
 
 export function StickerPublishView() {

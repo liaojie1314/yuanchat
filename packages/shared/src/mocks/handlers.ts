@@ -320,7 +320,7 @@ interface MockPack {
  * @remarks 24 个是为了让默认页大小 20 之下必然出现 next_cursor，
  *   E2E 能直接验证游标分页与「加载更多」。created_at 全部唯一且倒序生成，
  *   与服务端 created_at DESC + 游标语义一致。发布上限 20 也能自然触发：
- *   mock 用户从 0 个起发，连发 20 个后回 400 `publish limit exceeded`。
+ *   mock 用户从 0 个起发，连发 20 个后回 400 + 业务码 4003 `publish limit exceeded`。
  */
 const MARKET_SEED_COUNT = 24;
 
@@ -1025,7 +1025,7 @@ export const handlers = [
   }),
 
   // --------------------------------------------------
-  // 商城 — 发布（一步创建即公开；达 20 个回 400 publish limit exceeded）
+  // 商城 — 发布（一步创建即公开；达 20 个回 400 + 业务码 4003 publish limit exceeded）
   // POST /api/v1/sticker-packs
   // --------------------------------------------------
   http.post("http://localhost:8085/api/v1/sticker-packs", async ({ request }) => {
@@ -1041,7 +1041,8 @@ export const handlers = [
       return apiError(400, "sticker sources must not be empty");
     }
     if (mockPacks.filter((p) => p.published_by_me).length >= 20) {
-      return apiError(400, "publish limit exceeded");
+      // 与真实服务端同码：400 + 业务码 4003，前端按 code 识别上限错误
+      return apiError(4003, "publish limit exceeded");
     }
     const stickers: MockSticker[] = [];
     for (const src of body.sticker_sources) {
