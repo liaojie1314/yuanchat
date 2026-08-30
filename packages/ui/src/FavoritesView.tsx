@@ -156,6 +156,7 @@ export function FavoritesView() {
         {/* 移动端商城入口：底栏不设第 5 项，商城从收藏页进入（桌面侧栏另有入口） */}
         <Link
           to="/stickers"
+          state={{ from: "/favorites" }}
           className="bg-primary text-on-primary text-label-lg inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 font-medium transition-opacity hover:opacity-90"
         >
           <Sticker size={15} />

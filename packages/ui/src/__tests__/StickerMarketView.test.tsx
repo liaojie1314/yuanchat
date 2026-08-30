@@ -76,7 +76,8 @@ describe("StickerMarketView", () => {
 
     expect(await screen.findByText("小黄脸")).toBeInTheDocument();
     expect(screen.getByText("by Ming")).toBeInTheDocument();
-    expect(screen.getByText("8 stickers")).toBeInTheDocument();
+    // 贴纸数渲染为封面左下角的计数胶囊（仅数字，防止单行文案截断丢信息）
+    expect(screen.getByText("8")).toBeInTheDocument();
     // owner_name 为 null 的官方包走官方文案，且已添加角标可见
     expect(screen.getByText("Official")).toBeInTheDocument();
     expect(screen.getByText("Added")).toBeInTheDocument();

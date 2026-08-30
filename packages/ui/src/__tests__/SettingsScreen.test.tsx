@@ -10,6 +10,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { useAuthStore } from "@yuanchat/shared";
+import { MemoryRouter } from "react-router-dom";
 import { SettingsScreen } from "../SettingsScreen";
 
 vi.mock("@yuanchat/shared", async (importOriginal) => {
@@ -26,20 +27,32 @@ describe("SettingsScreen", () => {
   });
 
   it("渲染分组导航与用户卡片", () => {
-    render(<SettingsScreen />);
+    render(
+      <MemoryRouter>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
     expect(screen.getByText("Alice")).toBeInTheDocument();
     expect(screen.getByText("Account & Security")).toBeInTheDocument();
     expect(screen.getByText("Appearance")).toBeInTheDocument();
   });
 
   it("账号页手机号脱敏", () => {
-    render(<SettingsScreen />);
+    render(
+      <MemoryRouter>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
     fireEvent.click(screen.getByText("Account & Security"));
     expect(screen.getByText("138****0001")).toBeInTheDocument();
   });
 
   it("桌面端不渲染退出登录（登出唯一入口在左侧导航栏）", () => {
-    render(<SettingsScreen />);
+    render(
+      <MemoryRouter>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
     expect(screen.queryByText("Sign Out")).toBeNull();
   });
 });

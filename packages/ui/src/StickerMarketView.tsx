@@ -12,10 +12,11 @@
  * is_official 区分「官方出品」与「已注销用户」。
  */
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Loader2, PackageOpen, Sticker } from "lucide-react";
-import { captureException, listMarketPacks, showToast } from "@yuanchat/shared";
+import { ArrowLeft, Loader2, PackageOpen, Sticker } from "lucide-react";
+import { captureException, listMarketPacks, showToast, useBreakpoint } from "@yuanchat/shared";
+import { useStickerBack } from "./useStickerBack";
 import type { MarketPackItem } from "@yuanchat/shared";
 import { StickerPackCover } from "./StickerPackCover";
 import { packOwnerText } from "./stickerPackUtils";
@@ -72,6 +73,15 @@ function MarketSkeleton() {
 export function StickerMarketView() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isMobile = useBreakpoint() === "mobile";
+  // 入口带 from（设置/收藏/聊天进入时写入）：返回箭头与系统返回键都回来源 tab
+  const fromTab = (location.state as { from?: string } | null)?.from;
+  const backTarget =
+    fromTab && ["/chat", "/contacts", "/favorites", "/settings"].includes(fromTab)
+      ? fromTab
+      : "/chat";
+  useStickerBack(backTarget);
   const [packs, setPacks] = useState<MarketPackItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [state, setState] = useState<LoadState>("loading");
@@ -116,7 +126,18 @@ export function StickerMarketView() {
     <div className="flex h-full flex-col">
       {/* 页头 */}
       <header className="border-outline-variant bg-surface-container-low flex h-[60px] shrink-0 items-center gap-2 border-b px-4">
-        <Sticker size={20} className="text-primary shrink-0" />
+        {isMobile && fromTab ? (
+          <button
+            type="button"
+            onClick={() => navigate(backTarget)}
+            aria-label={t("sticker.market.back")}
+            className="text-on-surface hover:bg-surface-container -ml-1 rounded-lg p-1.5 transition-colors"
+          >
+            <ArrowLeft size={20} />
+          </button>
+        ) : (
+          <Sticker size={20} className="text-primary shrink-0" />
+        )}
         <h1 className="text-title-md text-on-surface font-semibold">{t("sticker.market.title")}</h1>
         <div className="flex-1" />
         <button

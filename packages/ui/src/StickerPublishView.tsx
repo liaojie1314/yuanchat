@@ -14,6 +14,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useStickerBack } from "./useStickerBack";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Check } from "lucide-react";
 import {
@@ -43,6 +44,9 @@ function isPublishLimitError(err: unknown): boolean {
 export function StickerPublishView() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+
+  // 系统返回键与页面内返回箭头同语义，不落「非根页面回聊天页」的兜底
+  useStickerBack("/stickers");
   const location = useLocation();
 
   const [name, setName] = useState("");

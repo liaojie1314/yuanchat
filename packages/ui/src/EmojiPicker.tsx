@@ -353,7 +353,7 @@ export function EmojiPicker({
         <div className="border-outline-variant shrink-0 border-t px-3 py-1.5 text-center">
           <button
             type="button"
-            onClick={() => navigate("/stickers")}
+            onClick={() => navigate("/stickers", { state: { from: "/chat" } })}
             className="text-label-md text-primary hover:bg-surface-container-low rounded-lg px-3 py-1 transition-colors"
           >
             {t("sticker.market.browse")}

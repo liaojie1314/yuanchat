@@ -12,6 +12,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useStickerBack } from "./useStickerBack";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, PackageOpen, X } from "lucide-react";
 import {
@@ -34,6 +35,9 @@ const NAME_MAX = 64;
 export function StickerPackEditView({ packId }: { packId: string }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+
+  // 系统返回键与页面内返回箭头同语义，不落「非根页面回聊天页」的兜底
+  useStickerBack(`/stickers/${packId}`);
   const location = useLocation();
 
   const [detail, setDetail] = useState<PackDetail | null>(null);
