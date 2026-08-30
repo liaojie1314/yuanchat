@@ -123,6 +123,14 @@ func (r *AdminRepository) ClearFlag(ctx context.Context, messageID uuid.UUID) (b
 	return res.RowsAffected > 0, res.Error
 }
 
+// TakeDownStickerPack 下架表情包：商城不再展示，已添加者保留（软下架非硬删）。
+// 返回是否命中。
+func (r *AdminRepository) TakeDownStickerPack(ctx context.Context, packID uuid.UUID) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.StickerPack{}).
+		Where("id = ?", packID).Update("taken_down", true)
+	return res.RowsAffected > 0, res.Error
+}
+
 // ---------- 举报 ----------
 
 // CreateReport 写入一条用户举报。

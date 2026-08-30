@@ -156,8 +156,11 @@ func Setup(
 		})
 	})
 
-	// 敏感词审核：命中词库的文本消息标记 flagged 进审核队列
-	msgSvc.SetModeration(service.NewModerationService(cfg.Moderation.Words))
+	// 敏感词审核：共享单例同时服务消息正文与表情包包名——实例无状态，
+	// 两处各自现场 New 会让热更新词库时只改到一处
+	moderationSvc := service.NewModerationService(cfg.Moderation.Words)
+	msgSvc.SetModeration(moderationSvc)
+	stickerSvc.SetModeration(moderationSvc)
 
 	// 好友上下线帧广播（对本实例在线好友）
 	notifyFriends := func(userID uuid.UUID, online bool) {
