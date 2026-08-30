@@ -269,6 +269,7 @@
   "sticker.emptyOfficial": "No official stickers",
   "sticker.removeFailed": "Failed to delete, please retry",
   "sticker.imageFailed": "Failed to load",
+  "sticker.market.browse": "Browse the market",
   "sticker.market.title": "Sticker Market",
   "sticker.market.myPacks": "My Packs",
   "sticker.market.publish": "Create Pack",

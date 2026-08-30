@@ -269,6 +269,7 @@
   "sticker.emptyOfficial": "公式スタンプはありません",
   "sticker.removeFailed": "削除に失敗しました。再試行してください",
   "sticker.imageFailed": "読み込み失敗",
+  "sticker.market.browse": "マーケットを見る",
   "sticker.market.title": "ステッカーマーケット",
   "sticker.market.myPacks": "投稿済み",
   "sticker.market.publish": "パックを作成",

@@ -15,6 +15,7 @@
  * @param compact - 移动端紧凑模式（放大表情、收窄格子）
  */
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 import { cn } from "@yuanchat/shared/utils";
@@ -71,6 +72,7 @@ export function EmojiPicker({
   }) => void;
 }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [recent, setRecent] = useState<string[]>(() => readRecent());
   const tabsRef = useRef<HTMLDivElement>(null);
   const [activeKey, setActiveKey] = useState<string>(EMOJI_CATEGORIES[0].key);
@@ -341,6 +343,21 @@ export function EmojiPicker({
               {emoji}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* 官方 tab 底部：商城入口（面板不挤占 tab，移动端与桌面侧栏之外的第二条路径）。
+          useNavigate 需 Router 上下文——本组件只在聊天主界面（Router 内）渲染，
+          单测里包 MemoryRouter 即可 */}
+      {isStickerTab && activeKey === "official" && (
+        <div className="border-outline-variant shrink-0 border-t px-3 py-1.5 text-center">
+          <button
+            type="button"
+            onClick={() => navigate("/stickers")}
+            className="text-label-md text-primary hover:bg-surface-container-low rounded-lg px-3 py-1 transition-colors"
+          >
+            {t("sticker.market.browse")}
+          </button>
         </div>
       )}
     </div>

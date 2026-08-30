@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { EmojiPicker } from "../EmojiPicker";
 import * as shared from "@yuanchat/shared";
 
@@ -32,9 +33,23 @@ vi.mock("@yuanchat/shared", async (importOriginal) => {
   };
 });
 
+/**
+ * 渲染并切到指定 tab（tab 文案为 en-US）。
+ *
+ * @remarks EmojiPicker 官方 tab 底部有商城导航（useNavigate），因此必须在
+ * Router 上下文内渲染——生产环境中该组件只在聊天主界面的 Router 内挂载。
+ */
+function renderPicker(props: Parameters<typeof EmojiPicker>[0]) {
+  return render(
+    <MemoryRouter>
+      <EmojiPicker {...props} />
+    </MemoryRouter>,
+  );
+}
+
 /** 渲染并切到指定 tab（tab 文案为 en-US） */
 async function openTab(name: "Favorites" | "Official") {
-  render(<EmojiPicker onPick={vi.fn()} onClose={vi.fn()} onPickSticker={vi.fn()} />);
+  renderPicker({ onPick: vi.fn(), onClose: vi.fn(), onPickSticker: vi.fn() });
   fireEvent.click(await screen.findByRole("tab", { name }));
 }
 
@@ -48,21 +63,19 @@ describe("EmojiPicker sticker tabs", () => {
   });
 
   it("renders Favorites and Official tabs only when onPickSticker is provided", async () => {
-    const { unmount } = render(
-      <EmojiPicker onPick={vi.fn()} onClose={vi.fn()} onPickSticker={vi.fn()} />,
-    );
+    const { unmount } = renderPicker({ onPick: vi.fn(), onClose: vi.fn(), onPickSticker: vi.fn() });
     expect(await screen.findByRole("tab", { name: "Favorites" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Official" })).toBeInTheDocument();
     unmount();
 
-    render(<EmojiPicker onPick={vi.fn()} onClose={vi.fn()} />);
+    renderPicker({ onPick: vi.fn(), onClose: vi.fn() });
     expect(screen.queryByRole("tab", { name: "Favorites" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Official" })).not.toBeInTheDocument();
   });
 
   it("calls onPickSticker with the mapped payload when a sticker is clicked", async () => {
     const onPickSticker = vi.fn();
-    render(<EmojiPicker onPick={vi.fn()} onClose={vi.fn()} onPickSticker={onPickSticker} />);
+    renderPicker({ onPick: vi.fn(), onClose: vi.fn(), onPickSticker });
     fireEvent.click(await screen.findByRole("tab", { name: "Favorites" }));
 
     fireEvent.click(await screen.findByRole("button", { name: "Send sticker" }));
@@ -137,5 +150,14 @@ describe("EmojiPicker sticker tabs", () => {
     fireEvent.contextMenu(sticker);
 
     expect(screen.queryByRole("menuitem", { name: /Delete/i })).not.toBeInTheDocument();
+  });
+
+  it("shows the market entry only on the official tab", async () => {
+    renderPicker({ onPick: vi.fn(), onClose: vi.fn(), onPickSticker: vi.fn() });
+    fireEvent.click(await screen.findByRole("tab", { name: "Official" }));
+    expect(await screen.findByRole("button", { name: "Browse the market" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Favorites" }));
+    expect(screen.queryByRole("button", { name: "Browse the market" })).not.toBeInTheDocument();
   });
 });
