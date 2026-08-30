@@ -21,8 +21,8 @@ type Storage struct {
 	useSSL   bool
 }
 
-// New 建立 MinIO 连接，确保默认桶存在，并为 avatars/ 前缀开放匿名只读。
-// 头像通过 PublicURL 直接暴露，无需预签名；其余对象（图片消息等）走预签名。
+// New 建立 MinIO 连接，确保默认桶存在，并为匿名公共读前缀开放访问。
+// 头像与表情包封面通过 PublicURL 直接暴露，无需预签名；其余对象（图片消息等）走预签名。
 func New(cfg config.MinIOConfig) (*Storage, error) {
 	client, err := minio.New(cfg.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
@@ -45,7 +45,7 @@ func New(cfg config.MinIOConfig) (*Storage, error) {
 	if err := s.ensureBucket(ctx); err != nil {
 		return nil, err
 	}
-	if err := s.applyAvatarsPublicPolicy(ctx); err != nil {
+	if err := s.applyPublicReadPolicy(ctx); err != nil {
 		return nil, err
 	}
 
@@ -67,8 +67,11 @@ func (s *Storage) ensureBucket(ctx context.Context) error {
 	return nil
 }
 
-// applyAvatarsPublicPolicy 为 <bucket>/avatars/* 前缀开放匿名 s3:GetObject。
-func (s *Storage) applyAvatarsPublicPolicy(ctx context.Context) error {
+// applyPublicReadPolicy 为匿名公共读前缀开放 s3:GetObject：
+// avatars/*（用户头像）与 sticker-covers/*（表情包封面）。两个前缀各占一条
+// Statement 而非合并 Resource——未来单独收紧某一前缀的策略时互不牵连。
+// SetBucketPolicy 是整桶覆盖，因此每次启动都以完整声明重写。
+func (s *Storage) applyPublicReadPolicy(ctx context.Context) error {
 	policy := fmt.Sprintf(`{
   "Version": "2012-10-17",
   "Statement": [
@@ -77,11 +80,17 @@ func (s *Storage) applyAvatarsPublicPolicy(ctx context.Context) error {
       "Principal": { "AWS": ["*"] },
       "Action": ["s3:GetObject"],
       "Resource": ["arn:aws:s3:::%s/avatars/*"]
+    },
+    {
+      "Effect": "Allow",
+      "Principal": { "AWS": ["*"] },
+      "Action": ["s3:GetObject"],
+      "Resource": ["arn:aws:s3:::%s/sticker-covers/*"]
     }
   ]
-}`, s.bucket)
+}`, s.bucket, s.bucket)
 	if err := s.client.SetBucketPolicy(ctx, s.bucket, policy); err != nil {
-		return fmt.Errorf("failed to set avatars public policy: %w", err)
+		return fmt.Errorf("failed to set public read policy: %w", err)
 	}
 	return nil
 }
@@ -129,7 +138,7 @@ func (s *Storage) ObjectExists(ctx context.Context, objectKey string) (bool, err
 }
 
 // PublicURL 拼出对象的公共访问 URL，形如 scheme://endpoint/bucket/key。
-// 仅对已开放匿名读的前缀（avatars/）有效。
+// 仅对已开放匿名读的前缀（avatars/、sticker-covers/）有效。
 func (s *Storage) PublicURL(objectKey string) string {
 	scheme := "http"
 	if s.useSSL {
