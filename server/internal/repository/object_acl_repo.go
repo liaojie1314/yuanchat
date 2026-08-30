@@ -71,8 +71,8 @@ func (r *ObjectACLRepository) CanRead(ctx context.Context, userID uuid.UUID, obj
 
 // ReferencedKeys 从给定候选集中筛出**仍被引用**的 key（GC 用，见 cmd/gc）。
 //
-// 引用来源三处：消息内容（含已撤回消息——撤回把 content 置 '{}'，故自然不再算引用）、
-// 贴纸表、用户/会话头像 URL（存的是完整 URL，故用后缀匹配）。
+// 引用来源四处：消息内容（含已撤回消息——撤回把 content 置 '{}'，故自然不再算引用）、
+// 贴纸表、表情包封面 URL、用户/会话头像 URL（后两者存的是完整 URL，故用后缀匹配）。
 // 返回集合之外的候选即"无人引用"，GC 结合宽限期决定是否删除。
 //
 // 按批查询（调用方分批传入）而非一次性把全库 key 拉进内存：对象数随消息量线性增长，
@@ -101,20 +101,21 @@ func (r *ObjectACLRepository) ReferencedKeys(ctx context.Context, keys []string)
 		return nil, fmt.Errorf("referenced by stickers: %w", err)
 	}
 
-	// 头像：users.avatar_url / conversations.avatar_url 存的是完整 URL（含 bucket 与前缀），
-	// 只能后缀匹配。用 unnest + EXISTS 把整批合成一次往返——逐个候选发一条 EXISTS
-	// 会让一次 GC 产生 O(对象数) 次数据库往返。
+	// 头像与表情包封面：users.avatar_url / conversations.avatar_url / sticker_packs.cover_url
+	// 存的都是完整 URL（含 bucket 与前缀），只能后缀匹配。用 unnest + EXISTS 把整批
+	// 合成一次往返——逐个候选发一条 EXISTS 会让一次 GC 产生 O(对象数) 次数据库往返。
 	//
-	// 不按 `avatars/` 前缀提前跳过：avatar_url 是自由字符串列，历史上（或将来手工改库）
-	// 完全可能指向 images/ 下的对象，跳过就会把仍在用的头像当孤儿删掉。
+	// 不按 `avatars/` 等前缀提前跳过：这些是自由字符串列，历史上（或将来手工改库）
+	// 完全可能指向 images/ 下的对象，跳过就会把仍在用的头像/封面当孤儿删掉。
 	var avatarHits []string
 	err := r.db.WithContext(ctx).Raw(`
 		SELECT k FROM unnest(?::text[]) AS k
 		WHERE EXISTS (SELECT 1 FROM users WHERE avatar_url LIKE '%' || k)
-		   OR EXISTS (SELECT 1 FROM conversations WHERE avatar_url LIKE '%' || k)`,
+		   OR EXISTS (SELECT 1 FROM conversations WHERE avatar_url LIKE '%' || k)
+		   OR EXISTS (SELECT 1 FROM sticker_packs WHERE cover_url LIKE '%' || k)`,
 		pq.StringArray(keys)).Scan(&avatarHits).Error
 	if err != nil {
-		return nil, fmt.Errorf("referenced by avatar: %w", err)
+		return nil, fmt.Errorf("referenced by avatar/pack cover: %w", err)
 	}
 	for _, k := range avatarHits {
 		referenced[k] = struct{}{}

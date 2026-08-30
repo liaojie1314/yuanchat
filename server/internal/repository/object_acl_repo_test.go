@@ -187,7 +187,41 @@ func TestObjectACLCanRead_ViaSticker(t *testing.T) {
 	}
 }
 
-// TestObjectACLReferencedKeys GC 的引用判定：消息/贴纸/头像三类引用都算，其余为孤儿。
+// TestObjectACLReferencedKeys_PackCover 表情包封面必须被 GC 判定为在用对象。
+//
+// cover_url 存的是完整 URL，走后缀匹配——此前引用收集漏掉 sticker_packs.cover_url，
+// `cmd/gc -delete` 会把全部贴纸包封面判为孤儿删掉（官方包封面早已入库，风险现成存在）。
+func TestObjectACLReferencedKeys_PackCover(t *testing.T) {
+	db := testDB(t)
+	if err := db.AutoMigrate(&model.StickerPack{}); err != nil {
+		t.Fatalf("migrate sticker_packs: %v", err)
+	}
+	repo := NewObjectACLRepository(db)
+	ctx := context.Background()
+
+	coverKey := fmt.Sprintf("sticker-covers/2026/08/%s.png", uuid.NewString())
+	coverURL := "http://minio:9000/yuanchat/" + coverKey
+	pack := &model.StickerPack{Name: "gc-cover-pack", CoverURL: &coverURL, IsOfficial: true}
+	if err := db.Create(pack).Error; err != nil {
+		t.Fatalf("create pack: %v", err)
+	}
+	t.Cleanup(func() { db.Unscoped().Delete(pack) })
+
+	orphanKey := fmt.Sprintf("sticker-covers/2026/08/%s.png", uuid.NewString())
+
+	got, err := repo.ReferencedKeys(ctx, []string{coverKey, orphanKey})
+	if err != nil {
+		t.Fatalf("ReferencedKeys: %v", err)
+	}
+	if _, ok := got[coverKey]; !ok {
+		t.Fatalf("%s 是贴纸包封面，应被判定为仍被引用（GC 会误删）", coverKey)
+	}
+	if _, ok := got[orphanKey]; ok {
+		t.Fatalf("%s 无任何引用，不应出现在结果里（GC 会漏删）", orphanKey)
+	}
+}
+
+// TestObjectACLReferencedKeys GC 的引用判定：消息/贴纸/头像引用都算，其余为孤儿。
 func TestObjectACLReferencedKeys(t *testing.T) {
 	db := testDB(t)
 	if err := db.AutoMigrate(&model.StickerPack{}, &model.Sticker{}); err != nil {
