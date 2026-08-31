@@ -6,18 +6,7 @@
  * 点击"删除"按钮取消收藏，长列表支持翻页加载。
  */
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import {
-  FileText,
-  Image,
-  Loader2,
-  MessageSquare,
-  Mic,
-  Smile,
-  Star,
-  Sticker,
-  Trash2,
-} from "lucide-react";
+import { FileText, Image, Loader2, MessageSquare, Mic, Smile, Star, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   captureException,
@@ -153,15 +142,6 @@ export function FavoritesView() {
         <Star size={20} className="text-primary shrink-0" />
         <h1 className="text-title-md text-on-surface font-semibold">{t("favorites.title")}</h1>
         <div className="flex-1" />
-        {/* 移动端商城入口：底栏不设第 5 项，商城从收藏页进入（桌面侧栏另有入口） */}
-        <Link
-          to="/stickers"
-          state={{ from: "/favorites" }}
-          className="bg-primary text-on-primary text-label-lg inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 font-medium transition-opacity hover:opacity-90"
-        >
-          <Sticker size={15} />
-          {t("sticker.market.title")}
-        </Link>
       </header>
 
       {/* 类型标签页 */}
