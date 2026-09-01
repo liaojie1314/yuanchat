@@ -82,6 +82,23 @@ jobs:
   backend:
     name: Backend (vet + test)
     runs-on: ubuntu-latest
+    # 集成测试依赖 Postgres（testutil.NewDB 建独立测试库并跑 goose 迁移，
+    # 需要可建库的角色；pg_trgm 扩展由迁移自建，需超级用户）。
+    # 无 DB 时这些用例整体 skip，覆盖率会塌到 ~13% 被 40% 门禁拦下。
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: yuanchat
+          POSTGRES_PASSWORD: yuanchat_dev
+          POSTGRES_DB: postgres
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U yuanchat"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
