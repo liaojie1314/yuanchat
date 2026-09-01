@@ -15,45 +15,14 @@ import (
 	"github.com/yuanchat/server/internal/repository"
 	"github.com/yuanchat/server/internal/testutil"
 	"go.uber.org/zap"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
-	"gorm.io/gorm/schema"
 )
 
-// adminTestDB 连接本地开发库（deploy/docker-compose.yml 的 postgres :5434）。
+// adminTestDB 返回独立测试库上的事务句柄（跑完整迁移、用例结束回滚），
 // 数据库不可达时跳过集成用例（CI 无 DB 环境仍绿）。
 func adminTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := "host=localhost port=5434 user=yuanchat password=yuanchat_dev dbname=yuanchat sslmode=disable"
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger:                 gormlogger.Default.LogMode(gormlogger.Silent),
-		NamingStrategy:         schema.NamingStrategy{SingularTable: true},
-		SkipDefaultTransaction: true,
-	})
-	if err != nil {
-		t.Skipf("dev postgres unavailable, skip integration test: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil || sqlDB.Ping() != nil {
-		t.Skip("dev postgres unavailable, skip integration test")
-	}
-	// 每个用例开一个连接池，因此必须限量并在结束时关闭：dev 库 max_connections = 100，
-	// 池子只开不关时全量 -race 跑到后半程会撞 53300（too many clients），
-	// 集成用例被迫跳过，看起来像「库不可达」，实际是自己把连接耗光了
-	sqlDB.SetMaxOpenConns(4)
-	sqlDB.SetMaxIdleConns(2)
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.AutoMigrate(&model.AdminActionLog{}); err != nil {
-		t.Fatalf("migrate admin_action_logs: %v", err)
-	}
-	// role 列可能尚未迁移（goose 005），确保存在
-	if !db.Migrator().HasColumn(&model.User{}, "role") {
-		if err := db.Migrator().AddColumn(&model.User{}, "Role"); err != nil {
-			t.Fatalf("add role column: %v", err)
-		}
-	}
-	return db
+	return testutil.NewDB(t)
 }
 
 func newAdminTestUser(t *testing.T, db *gorm.DB, nick string, role int16) *model.User {
@@ -206,9 +175,6 @@ func TestBannedUserCannotLogin(t *testing.T) {
 // 驳回（不删除）则不动包。
 func TestHandleReportTakesDownStickerPack(t *testing.T) {
 	db := adminTestDB(t)
-	if err := db.AutoMigrate(&model.StickerPack{}); err != nil {
-		t.Fatalf("migrate sticker_packs: %v", err)
-	}
 	repo := repository.NewAdminRepository(db)
 	svc := NewAdminService(repo, repository.NewConversationRepository(db), zap.NewNop())
 	ctx := context.Background()

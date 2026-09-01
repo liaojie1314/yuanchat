@@ -16,37 +16,16 @@ import (
 	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/repository"
 	"github.com/yuanchat/server/internal/service"
+	"github.com/yuanchat/server/internal/testutil"
 	"go.uber.org/zap"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
-	"gorm.io/gorm/schema"
 )
 
-// packTestDB 连接本地开发库（deploy/docker-compose.yml 的 postgres :5434）。
+// packTestDB 返回独立测试库上的事务句柄（跑完整迁移、用例结束回滚），
 // 数据库不可达时跳过集成用例（CI 无 DB 环境仍绿）。
 func packTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := "host=localhost port=5434 user=yuanchat password=yuanchat_dev dbname=yuanchat sslmode=disable"
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger:                 gormlogger.Default.LogMode(gormlogger.Silent),
-		NamingStrategy:         schema.NamingStrategy{SingularTable: true},
-		SkipDefaultTransaction: true,
-	})
-	if err != nil {
-		t.Skipf("dev postgres unavailable, skip integration test: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil || sqlDB.Ping() != nil {
-		t.Skip("dev postgres unavailable, skip integration test")
-	}
-	sqlDB.SetMaxOpenConns(4)
-	sqlDB.SetMaxIdleConns(2)
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.AutoMigrate(&model.StickerPack{}, &model.Sticker{}, &model.UserStickerPack{}); err != nil {
-		t.Fatalf("migrate sticker tables: %v", err)
-	}
-	return db
+	return testutil.NewDB(t)
 }
 
 // newPackTestUser 建一次性用户（handler 层用例）。

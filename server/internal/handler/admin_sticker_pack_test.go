@@ -35,10 +35,13 @@ func newAdminTestPack(t *testing.T, db *gorm.DB, name string, flagged, takenDown
 }
 
 // newAdminPackTestRouter 构造挂好 fake 鉴权（user_id）的 admin 路由。
-func newAdminPackTestRouter(h *AdminHandler) *gin.Engine {
+// actor 必须是真实存在的用户：下架/清除标记会写 admin_action_logs.actor_id 外键，
+// 假 uuid 会在夹具事务里触发外键违规并中止整个事务。
+func newAdminPackTestRouter(t *testing.T, db *gorm.DB, h *AdminHandler) *gin.Engine {
+	actor := newPackTestUser(t, db, "admin审核员")
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
-		c.Set("user_id", uuid.New())
+		c.Set("user_id", actor.ID)
 		c.Next()
 	})
 	r.GET("/api/v1/admin/sticker-packs", h.ListStickerPacks)
@@ -61,7 +64,7 @@ func TestAdminListStickerPacksFlagged(t *testing.T) {
 		repository.NewConversationRepository(db),
 		zap.NewNop(),
 	)
-	r := newAdminPackTestRouter(NewAdminHandler(adminSvc, nil, zap.NewNop()))
+	r := newAdminPackTestRouter(t, db, NewAdminHandler(adminSvc, nil, zap.NewNop()))
 
 	w, resp := doPackJSON(t, r, "GET", "/api/v1/admin/sticker-packs?flagged=true", nil)
 	if w.Code != 200 {
@@ -102,7 +105,7 @@ func TestAdminTakeDownStickerPack(t *testing.T) {
 		repository.NewConversationRepository(db),
 		zap.NewNop(),
 	)
-	r := newAdminPackTestRouter(NewAdminHandler(adminSvc, nil, zap.NewNop()))
+	r := newAdminPackTestRouter(t, db, NewAdminHandler(adminSvc, nil, zap.NewNop()))
 
 	w, resp := doPackJSON(t, r, "POST", fmt.Sprintf("/api/v1/admin/sticker-packs/%s/takedown", packID), nil)
 	if w.Code != 200 {
@@ -132,7 +135,7 @@ func TestAdminClearStickerPackFlag(t *testing.T) {
 		repository.NewConversationRepository(db),
 		zap.NewNop(),
 	)
-	r := newAdminPackTestRouter(NewAdminHandler(adminSvc, nil, zap.NewNop()))
+	r := newAdminPackTestRouter(t, db, NewAdminHandler(adminSvc, nil, zap.NewNop()))
 
 	w, resp := doPackJSON(t, r, "DELETE", fmt.Sprintf("/api/v1/admin/sticker-packs/%s/flag", packID), nil)
 	if w.Code != 200 {
