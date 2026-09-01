@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/model"
+	"github.com/yuanchat/server/internal/pkg/jwt"
+	"github.com/yuanchat/server/internal/pkg/shortid"
 	"github.com/yuanchat/server/internal/repository"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -40,6 +43,54 @@ func countFlaggedUGC(t *testing.T, db *gorm.DB, ugcType string) int64 {
 
 // TestUpdateProfileFlagsSensitiveNicknameAndBio 昵称 / bio 命中敏感词：
 // 写入照常成功（打标不阻塞），同时各记一条命中记录；未命中的更新不产生记录。
+// TestRegisterFlagsSensitiveNickname 注册昵称命中敏感词：注册照常成功
+//（打标不阻塞），命中记入 flagged_ugc 台账并关联新用户；干净昵称不产生记录。
+func TestRegisterFlagsSensitiveNickname(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	// 注册路径需要完整依赖：sidGen（短号）与 jwtGen（签发令牌）都不可为 nil。
+	svc := NewUserService(
+		repository.NewUserRepository(db),
+		jwt.NewGenerator("test-secret", time.Minute, time.Hour),
+		shortid.NewGenerator(db),
+		nil,
+		zap.NewNop(),
+	)
+	svc.SetUGCModeration(newUGCModeration(), repository.NewFlaggedUGCRepository(db))
+	badReq := RegisterRequest{
+		Phone:    "19800001111",
+		Password: "Passw0rdX",
+		Nickname: testBadWord + "昵称",
+	}
+	res, err := svc.Register(ctx, badReq)
+	if err != nil {
+		t.Fatalf("register with flagged nickname: %v", err)
+	}
+	if res.User.Nickname != badReq.Nickname {
+		t.Fatalf("flagged nickname not persisted: %q", res.User.Nickname)
+	}
+	if n := countFlaggedUGC(t, db, model.UGCTypeNickname); n != 1 {
+		t.Fatalf("nickname flag records = %d, want 1", n)
+	}
+	var rec model.FlaggedUGC
+	if err := db.First(&rec, "ugc_type = ?", model.UGCTypeNickname).Error; err != nil {
+		t.Fatalf("load flagged record: %v", err)
+	}
+	if rec.UserID == nil || *rec.UserID != res.User.ID {
+		t.Fatalf("flagged record not linked to registered user: %v", rec.UserID)
+	}
+
+	cleanReq := badReq
+	cleanReq.Phone = "19800002222"
+	cleanReq.Nickname = "干净的昵称"
+	if _, err := svc.Register(ctx, cleanReq); err != nil {
+		t.Fatalf("register with clean nickname: %v", err)
+	}
+	if n := countFlaggedUGC(t, db, model.UGCTypeNickname); n != 1 {
+		t.Fatalf("clean nickname flagged, records = %d, want 1", n)
+	}
+}
+
 func TestUpdateProfileFlagsSensitiveNicknameAndBio(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()

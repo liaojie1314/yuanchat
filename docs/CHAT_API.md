@@ -908,7 +908,68 @@ EmojiPicker 无需改动即可展示已添加的包。官方包与发布包贴�
   - `GET /api/v1/admin/sticker-packs?q=&flagged=true`——表情包检索（`flagged=true` 只看审核队列）；
   - `POST /api/v1/admin/sticker-packs/:id/takedown`——直接下架（`taken_down=true`，软下架非硬删）；
   - `DELETE /api/v1/admin/sticker-packs/:id/flag`——清除敏感词标记（审核通过）。
-- 举报处置选「删除」时对 `sticker_pack` 目标执行下架（原 `admin_service` 只会删消息）。
+- 举报处置选「删除」时对 `sticker_pack` 目标执行下架（原 `admin_service` 只会删消息）；
+  `target_type=user` 且选「删除」时复用 `POST /admin/users/:id/ban` 封禁（自封禁 → `400`，
+  目标不存在 → `404`），账号封禁踢下线语义同既有 ban 端点。
+- 目标为 user 的举报处置时，若目标是举报人上下文之外的管理员本人 → `400`（`cannot ban yourself`）。
+
+#### 管理端治理端点（审核补漏 / 运营概览）
+
+以下端点均挂在 `/api/v1/admin` 组（JWT + `role=admin` 双重校验）下；除标注外，
+写操作写审计日志，读操作不写。响应统一信封 `{code, message, data}`；分页端点
+data 为数组本体，分页字段平级在外：`{code, message, data, total, page, size}`
+（`page` 从 1 起，`size` 上限 100）。
+
+**用户 / 消息**
+
+- `POST /api/v1/admin/users/:id/reset-avatar` — 重置用户头像：`avatar_url` 置空，
+  前端回退默认头像；旧头像对象由 GC 通道回收，不立即删除。响应 `{"reset": true}`。
+  用户不存在 → `404`。审计 action=`reset_avatar`。
+- `GET /api/v1/admin/messages/:id/media` — 消息媒体预签名下载 URL（管理端专用读通道，
+  授权完全由路由层的 JWT + RequireAdmin 承担，不依赖举报人上下文）。响应
+  `{"url", "expires_in": 600, "message_type", "object_key", "file_name?", "width?", "height?", "duration?"}`。
+  消息不存在 → `404`；该类型无可预览媒体（text / system / e2ee / 坏数据）→ `404`
+  （`message has no media object`）；对象存储不可用 → `503`。只读，不写审计。
+
+**UGC 审核队列（flagged_ugc：昵称 / bio / 群名 / 群公告命中敏感词，内容照常落库不阻塞）**
+
+- `GET /api/v1/admin/flagged-ugc?type=&handled=&page=&size=` — 分页检索命中记录。
+  `type` ∈ `nickname|bio|group_name|announcement`（缺省全部）；`handled` 三态：
+  缺省 / `false`=待处理、`true`=已处置、`all`=全部。只读。
+- `POST /api/v1/admin/flagged-ugc/:id/reset` — 强制重置命中内容并关闭记录：
+  nickname → 重置为默认昵称「用户{短号}」；bio / 群名 → 清空；公告 → 清空。
+  审计 detail 带原内容与命中词。记录不存在（或已处置）→ `404`。
+- `DELETE /api/v1/admin/flagged-ugc/:id` — 放行（审核通过，内容维持原样），
+  记录置 `handled_at`，幂等（并发重复处置不重复记审计）。响应 `{"dismissed": true}`；
+  不存在 → `404`。审计 action=`clear_ugc_flag`。
+
+**表情包治理（补全）**
+
+- `POST /api/v1/admin/sticker-packs/:id/untakedown` — 恢复上架（清 `taken_down`，
+  商城重新展示）。响应 `{"taken_down": false}`；不存在 → `404`。审计 action=`untake_down_sticker_pack`。
+- `POST /api/v1/admin/sticker-packs/:id/official` — 设置官方标识，请求体
+  `{"is_official": bool}`（显式目标值，`binding:"required"`，缺省 → `400`）。
+  响应 `{"is_official": <目标值>}`；不存在 → `404`。审计 action=`set_sticker_pack_official`。
+  官方标识 / 下架 / 打标对用户侧的口径：未下架、未打标且（官方或已添加）的包内贴纸才可发送；
+  下架或打标的包对未添加者按 `404` 隐藏，已添加者保留。
+
+**运营概览（全部只读，不写审计）**
+
+- `GET /api/v1/admin/stats` — 聚合指标快照：
+  `{"users": {total, banned, new_today, new_week}, "conversations": {total},
+"messages": {total, today, by_type}, "moderation": {pending_reports, flagged_messages,
+pending_ugc, taken_down_packs, flagged_packs}, "growth": {friend_requests_today,
+friend_requests_week, otp_today, otp_week}, "runtime": {online_connections}}`。
+  计数口径：消息只统计未删除；「今日」按服务器本地时区零点；OTP 按
+  `verification_codes` 审计表行数；`online_connections` 为本实例 WS 连接数
+  （多实例部署下需自行聚合）。
+- `GET /api/v1/admin/storage-stats` — 按对象类别的存储占用（DB 聚合口径，与 GC 视角一致）：
+  `{"categories": [{"category", "object_count", "total_bytes"}]}`，类别 =
+  `avatar` / `sticker` / `sticker_cover`（字节未知，`total_bytes=null`）与
+  `message_image` / `message_file` / `message_voice`（未删除消息按类型计数，
+  对 content.size 求和，非数字脏数据按 0 计入）。
+- `GET /api/v1/admin/push-subscriptions?page=&size=` — 分页列出 Web Push 订阅
+  （最新在前，附 `user_nickname`，LEFT JOIN 软删用户不剔除）。
 
 #### 对象存储
 

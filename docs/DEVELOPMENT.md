@@ -105,8 +105,8 @@ pnpm install                # 安装所有 workspace 依赖
 
 **Mock 覆盖的接口**：
 
-- `POST /api/v1/users/login` — 账号（手机号/邮箱）+ 密码登录（密码 `wrong` 测试错误）
-- `POST /api/v1/users/register` — 手机号 + 密码 + 验证码 + 昵称注册
+- `POST /api/v1/auth/login` — 账号（手机号/邮箱）+ 密码登录（密码 `wrong` 测试错误）
+- `POST /api/v1/auth/register` — 手机号 + 密码 + 验证码 + 昵称注册
 - `POST /api/v1/auth/logout` — 登出（始终返回成功，300ms 延迟）
 - `GET /api/v1/captcha` — SVG 验证码
 

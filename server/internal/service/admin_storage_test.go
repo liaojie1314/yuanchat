@@ -111,6 +111,8 @@ func TestAdminStorageStats(t *testing.T) {
 		return msg
 	}
 	mkMsg(model.MessageTypeImage, `{"key":"images/x/a.png","width":1,"height":1,"size":100}`)
+	// 历史脏数据：size 非数字，聚合必须按 0 计入而不是让整条 SQL 报错
+	mkMsg(model.MessageTypeImage, `{"key":"images/x/dirty.png","width":1,"height":1,"size":"abc"}`)
 	mkMsg(model.MessageTypeFile, `{"key":"files/x/b.zip","name":"b.zip","size":200}`)
 	deleted := mkMsg(model.MessageTypeVoice, `{"key":"files/x/c.webm","duration":3,"size":300}`)
 	if err := db.Delete(deleted).Error; err != nil { // 软删：不计入统计
@@ -134,8 +136,9 @@ func TestAdminStorageStats(t *testing.T) {
 		t.Fatalf("avatar count = %d, want %d", got, want)
 	}
 	img := byCat(stats, "message_image")
-	if img.ObjectCount != baseImage.ObjectCount+1 {
-		t.Fatalf("message_image count = %d, want %d", img.ObjectCount, baseImage.ObjectCount+1)
+	// 计数含脏数据行，但字节数只累加合法的 size=100（脏 size 按 0 计入）
+	if img.ObjectCount != baseImage.ObjectCount+2 {
+		t.Fatalf("message_image count = %d, want %d", img.ObjectCount, baseImage.ObjectCount+2)
 	}
 	if img.TotalBytes == nil || *img.TotalBytes != *baseImage.TotalBytes+100 {
 		t.Fatalf("message_image bytes = %v, want +%d", img.TotalBytes, 100)

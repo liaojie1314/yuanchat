@@ -412,8 +412,8 @@ type StorageStat struct {
 //   - sticker：stickers 表行数（内容寻址去重后的唯一贴纸对象，无 size 字段 → nil）；
 //   - sticker_cover：sticker_packs.cover_url 非空的行数（字节数未知 → nil）；
 //   - message_image / message_file / message_voice：未删除消息按类型计数，
-//     并对 content JSONB 里的 size 字段求和（WS 写入路径强制要求 size>0，
-//     历史数据缺失该字段时 COALESCE 按 0 计入）。
+//     并对 content JSONB 里的 size 字段求和（WS 写入路径强制要求 size>0；
+//     历史脏数据缺字段或非数字时按 0 计入，不让单条坏行炸掉整个聚合）。
 //
 // 不走 MinIO ListObjects 全桶遍历：桶随消息量线性增长，遍历成本不可控，
 // 且 DB 口径天然只统计「仍被引用」的对象，与 GC 视角一致。
@@ -429,13 +429,13 @@ func (r *AdminRepository) CountStorageStats(ctx context.Context) ([]StorageStat,
 		SELECT 'sticker_cover', COUNT(*), NULL::bigint
 			FROM sticker_packs WHERE cover_url IS NOT NULL
 		UNION ALL
-		SELECT 'message_image', COUNT(*), COALESCE(SUM((content->>'size')::bigint), 0)
+		SELECT 'message_image', COUNT(*), COALESCE(SUM(CASE WHEN content->>'size' ~ '^[0-9]+$' THEN (content->>'size')::bigint ELSE 0 END), 0)
 			FROM messages WHERE deleted_at IS NULL AND message_type = ?
 		UNION ALL
-		SELECT 'message_file', COUNT(*), COALESCE(SUM((content->>'size')::bigint), 0)
+		SELECT 'message_file', COUNT(*), COALESCE(SUM(CASE WHEN content->>'size' ~ '^[0-9]+$' THEN (content->>'size')::bigint ELSE 0 END), 0)
 			FROM messages WHERE deleted_at IS NULL AND message_type = ?
 		UNION ALL
-		SELECT 'message_voice', COUNT(*), COALESCE(SUM((content->>'size')::bigint), 0)
+		SELECT 'message_voice', COUNT(*), COALESCE(SUM(CASE WHEN content->>'size' ~ '^[0-9]+$' THEN (content->>'size')::bigint ELSE 0 END), 0)
 			FROM messages WHERE deleted_at IS NULL AND message_type = ?`,
 		model.MessageTypeImage, model.MessageTypeFile, model.MessageTypeVoice).
 		Scan(&rows).Error

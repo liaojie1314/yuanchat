@@ -2,7 +2,7 @@
 
 > **前置阅读**：[ARCHITECTURE.md](./ARCHITECTURE.md)
 >
-> 本文按 `server/internal/database/migrations/` 的实际迁移序（001 → 015）重建，
+> 本文按 `server/internal/database/migrations/` 的实际迁移序（001 → 016）重建，
 > 与代码严格同步；旧文档中的 Elasticsearch / MinIO 章节已过时，不在此保留。
 
 ---
@@ -140,6 +140,16 @@
 - 商城列表索引 `idx_packs_public(is_public, taken_down, created_at DESC)`；
   审核队列部分索引 `idx_packs_flagged … WHERE flagged = TRUE`。
 
+### 016_flagged_ugc — UGC 敏感词命中审核队列
+
+- 新表 `flagged_ugc`：昵称 / bio / 群名 / 群公告写入时命中敏感词的记录台账
+  （内容照常落业务表，同 `messages.flagged` 打标不阻塞范式）。
+  列：`ugc_type`（nickname | bio | group_name | announcement）、`content`、
+  `hit_word`、`user_id?`（写入者）、`conversation_id?`（群名 / 公告所属会话）、
+  `handled_at`（NULL = 待处理）、`created_at`。
+- 待处理队列部分索引 `idx_flagged_ugc_pending(created_at DESC) WHERE handled_at IS NULL`；
+  类型过滤索引 `idx_flagged_ugc_type(ugc_type, created_at DESC)`。
+
 ---
 
 ## 三、最终态关键表结构
@@ -184,6 +194,8 @@ favorites              user_id, message_id, conversation_id, 快照字段, conte
 push_subscriptions  user_id, endpoint(uniq), p256dh, auth, user_agent
 reports             reporter_id, target_type(message|user), target_id, reason,
                     status(0待处理/1保留/2删除), handled_by, handled_at
+flagged_ugc         ugc_type(nickname|bio|group_name|announcement), content,
+                    hit_word, user_id?, conversation_id?, handled_at?, created_at
 admin_action_logs   actor_id, action, target_type, target_id, detail JSONB
 ```
 

@@ -59,7 +59,8 @@ func (e *WeakPasswordError) Unwrap() error { return ErrWeakPassword }
 // 长度按字节计而非字符：bcrypt 只取前 72 字节，按字符放行会让多字节密码被静默截断。
 //
 // 规则以 spec / constraints 为准，与前端 validatePassword 并不完全等价——
-// 前端另有「必须含特殊字符」且不限上限、不禁空白，两侧差异见批次报告。
+// 前端另有「必须含特殊字符」且不限上限、不禁空白，两侧差异以前后端各自的
+// 实现文档为准，此处只保证服务端下限。
 func ValidatePasswordStrength(pw string) error {
 	if len(pw) < 8 {
 		return &WeakPasswordError{MessageKey: msgPasswordMinLength}
@@ -198,6 +199,14 @@ func (s *UserService) Register(ctx context.Context, req RegisterRequest) (*AuthR
 
 	if err := s.repo.Create(ctx, user); err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
+	}
+
+	// 注册昵称同样过敏感词审核（打标不阻塞）：与 UpdateProfile 同一语义，
+	// 否则注册阶段就是审核队列绕过点——违规昵称只要注册后不再改资料就查无记录。
+	if s.moderation != nil && s.ugcRepo != nil && req.Nickname != "" {
+		if hit := s.moderation.Check(req.Nickname); hit != "" {
+			s.flagUGC(ctx, model.UGCTypeNickname, req.Nickname, hit, user.ID)
+		}
 	}
 
 	s.logger.Info("User registered", zap.String("user_id", user.ID.String()))

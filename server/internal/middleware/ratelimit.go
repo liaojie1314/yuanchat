@@ -146,7 +146,7 @@ func (rl *RateLimiter) allow(key string) bool {
 // 拒绝请求等于把存储故障放大为全站 429/503，与 presence 发布故障时
 // 「记日志继续」的容错姿态一致（进程内客户端在 main 启动时 Ping 失败即 Fatal，
 // 运行期 Redis 短暂不可达只影响新写入）。降级期间多实例各自为政，
-// 但单实例行为仍正确；每次拒绝/降级都记 Prometheus 指标便于告警。
+// 但单实例行为仍正确；拒绝与降级放行分别记 Prometheus 指标便于告警。
 func redisAllow(rdb *redis.Client, key string, rate, capacity int) bool {
 	logger := rateLimitLogger.Load()
 
@@ -167,7 +167,8 @@ func redisAllow(rdb *redis.Client, key string, rate, capacity int) bool {
 			logger.Warn("rate limit redis unavailable, failing open",
 				zap.String("key", key), zap.Error(err))
 		}
-		metrics.RateLimitRejectedTotal.WithLabelValues("redis_degraded").Inc()
+		// 降级放行不属于「拒绝」，单独计数，避免与真实拒绝量混在一张告警表里
+		metrics.RateLimitDegradedTotal.Inc()
 		return true
 	}
 

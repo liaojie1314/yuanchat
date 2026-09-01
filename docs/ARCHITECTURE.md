@@ -72,8 +72,8 @@
 **路由映射示例**：
 | HTTP Path | Method | gRPC 服务 | RPC 方法 |
 |-----------|--------|-----------|----------|
-| `/api/v1/users/register` | POST | user.UserService | Register |
-| `/api/v1/users/login` | POST | user.UserService | Login |
+| `/api/v1/auth/register` | POST | user.UserService | Register |
+| `/api/v1/auth/login` | POST | user.UserService | Login |
 | `/api/v1/messages/send` | POST | message.MessageService | SendMessage |
 | `/api/v1/messages/history` | GET | message.MessageService | GetHistory |
 | `/api/v1/groups/create` | POST | group.GroupService | CreateGroup |
@@ -252,7 +252,7 @@
 ```
 Client                  API Gateway           User Service           Redis
   │                         │                      │                   │
-  │ POST /api/v1/users/login│                      │                   │
+  │ POST /api/v1/auth/login │                      │                   │
   │ ────────────────────────►                      │                   │
   │                         │ gRPC: Login          │                   │
   │                         │ ─────────────────────►                   │

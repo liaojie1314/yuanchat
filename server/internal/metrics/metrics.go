@@ -48,6 +48,13 @@ var (
 		Help: "Total number of requests rejected by the rate limiter, by backend",
 	}, []string{"backend"})
 
+	// RateLimitDegradedTotal 限流后端不可用时降级放行（fail-open）的请求总数。
+	// 放行不属于「拒绝」，单独计数避免与真实拒绝量混在一张告警表里。
+	RateLimitDegradedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "yuanchat_ratelimit_degraded_total",
+		Help: "Total number of requests allowed because the rate limit backend was unavailable (fail-open)",
+	})
+
 	// WSDispatchPublishedTotal 跨实例分发发布总数（Redis Pub/Sub 模式下每帧发布计一次）。
 	WSDispatchPublishedTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "yuanchat_ws_dispatch_published_total",
