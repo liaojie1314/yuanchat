@@ -62,9 +62,11 @@ func TestAdminListStickerPacksFlagged(t *testing.T) {
 	adminSvc := service.NewAdminService(
 		repository.NewAdminRepository(db),
 		repository.NewConversationRepository(db),
+		repository.NewUserRepository(db),
+		repository.NewFlaggedUGCRepository(db),
 		zap.NewNop(),
 	)
-	r := newAdminPackTestRouter(t, db, NewAdminHandler(adminSvc, nil, zap.NewNop()))
+	r := newAdminPackTestRouter(t, db, NewAdminHandler(adminSvc, nil, nil, zap.NewNop()))
 
 	w, resp := doPackJSON(t, r, "GET", "/api/v1/admin/sticker-packs?flagged=true", nil)
 	if w.Code != 200 {
@@ -103,9 +105,11 @@ func TestAdminTakeDownStickerPack(t *testing.T) {
 	adminSvc := service.NewAdminService(
 		repository.NewAdminRepository(db),
 		repository.NewConversationRepository(db),
+		repository.NewUserRepository(db),
+		repository.NewFlaggedUGCRepository(db),
 		zap.NewNop(),
 	)
-	r := newAdminPackTestRouter(t, db, NewAdminHandler(adminSvc, nil, zap.NewNop()))
+	r := newAdminPackTestRouter(t, db, NewAdminHandler(adminSvc, nil, nil, zap.NewNop()))
 
 	w, resp := doPackJSON(t, r, "POST", fmt.Sprintf("/api/v1/admin/sticker-packs/%s/takedown", packID), nil)
 	if w.Code != 200 {
@@ -133,9 +137,11 @@ func TestAdminClearStickerPackFlag(t *testing.T) {
 	adminSvc := service.NewAdminService(
 		repository.NewAdminRepository(db),
 		repository.NewConversationRepository(db),
+		repository.NewUserRepository(db),
+		repository.NewFlaggedUGCRepository(db),
 		zap.NewNop(),
 	)
-	r := newAdminPackTestRouter(t, db, NewAdminHandler(adminSvc, nil, zap.NewNop()))
+	r := newAdminPackTestRouter(t, db, NewAdminHandler(adminSvc, nil, nil, zap.NewNop()))
 
 	w, resp := doPackJSON(t, r, "DELETE", fmt.Sprintf("/api/v1/admin/sticker-packs/%s/flag", packID), nil)
 	if w.Code != 200 {

@@ -2,6 +2,7 @@
  * 用户管理页 — 检索、封禁/解封
  */
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "@yuanchat/ui";
 import { listUsers, banUser, unbanUser, type AdminUser } from "../api";
@@ -10,8 +11,10 @@ import { SearchBox, DataTable, Pager, EmptyRow } from "../components/Table";
 
 export function UsersPage() {
   const { t } = useTranslation();
+  // 举报列表深链 /users?q=<target_id>：初始搜索词取 URL 参数（后端支持按 ID 精确匹配）
+  const [searchParams] = useSearchParams();
   const { q, search, page, setPage, list, total, totalPages, loading, refresh } =
-    usePagedQuery<AdminUser>((query, p) => listUsers(query, p));
+    usePagedQuery<AdminUser>((query, p) => listUsers(query, p), 20, 0, searchParams.get("q") ?? "");
   const [banTarget, setBanTarget] = useState<AdminUser | null>(null);
 
   const headers = [

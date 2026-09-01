@@ -95,8 +95,9 @@ func Setup(
 	forwardH := handler.NewForwardHandler(msgSvc, hub, logger)
 
 	adminRepo := repository.NewAdminRepository(db)
-	adminSvc := service.NewAdminService(adminRepo, convRepo, logger)
-	adminH := handler.NewAdminHandler(adminSvc, hub, logger)
+	flaggedUGCRepo := repository.NewFlaggedUGCRepository(db)
+	adminSvc := service.NewAdminService(adminRepo, convRepo, userRepo, flaggedUGCRepo, logger)
+	adminH := handler.NewAdminHandler(adminSvc, hub, st, logger)
 	reportH := handler.NewReportHandler(adminSvc, logger)
 
 	pushRepo := repository.NewPushRepository(db)
@@ -163,6 +164,9 @@ func Setup(
 	moderationSvc := service.NewModerationService(cfg.Moderation.Words)
 	msgSvc.SetModeration(moderationSvc)
 	stickerSvc.SetModeration(moderationSvc)
+	// UGC 打标走同一词库：昵称 / bio / 群名 / 公告命中进 flagged_ugc 审核队列
+	userSvc.SetUGCModeration(moderationSvc, flaggedUGCRepo)
+	convSvc.SetUGCModeration(moderationSvc, flaggedUGCRepo)
 
 	// 好友上下线帧广播（对本实例在线好友）
 	notifyFriends := func(userID uuid.UUID, online bool) {
@@ -320,9 +324,15 @@ func Setup(
 		admin.DELETE("/messages/:id/flag", adminH.ClearMessageFlag)
 		admin.GET("/sticker-packs", adminH.ListStickerPacks)
 		admin.POST("/sticker-packs/:id/takedown", adminH.TakeDownStickerPack)
+		admin.POST("/sticker-packs/:id/untakedown", adminH.UntakeDownStickerPack)
+		admin.POST("/sticker-packs/:id/official", adminH.SetStickerPackOfficial)
 		admin.DELETE("/sticker-packs/:id/flag", adminH.ClearStickerPackFlag)
 		admin.GET("/reports", adminH.ListReports)
 		admin.POST("/reports/:id/handle", adminH.HandleReport)
+		admin.GET("/messages/:id/media", adminH.MessageMedia)
+		admin.GET("/flagged-ugc", adminH.ListFlaggedUGC)
+		admin.POST("/flagged-ugc/:id/reset", adminH.ResetFlaggedUGC)
+		admin.DELETE("/flagged-ugc/:id", adminH.DismissFlaggedUGC)
 		admin.GET("/audit-logs", adminH.ListAuditLogs)
 	}
 

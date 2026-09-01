@@ -31,6 +31,8 @@ const (
 	AdminActionClearFlag     = "clear_flag"
 	AdminActionReportKeep    = "report_keep"
 	AdminActionReportDelete  = "report_delete"
-	AdminActionTakeDownPack  = "take_down_sticker_pack"
-	AdminActionClearPackFlag = "clear_sticker_pack_flag"
+	AdminActionTakeDownPack    = "take_down_sticker_pack"
+	AdminActionUntakeDownPack  = "untake_down_sticker_pack"
+	AdminActionSetPackOfficial = "set_sticker_pack_official"
+	AdminActionClearPackFlag   = "clear_sticker_pack_flag"
 )

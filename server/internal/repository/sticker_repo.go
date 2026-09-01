@@ -166,8 +166,11 @@ type PackWithMeta struct {
 const packMetaSelect = "sticker_packs.*, users.nickname AS owner_name, COUNT(stickers.id) AS sticker_count, " +
 		"(ARRAY_AGG(stickers.object_key ORDER BY stickers.created_at, stickers.id))[1] AS first_sticker_key"
 
-// ListMarket 商城列表：公开 + 未下架，按 created_at 倒序游标分页
+// ListMarket 商城列表：公开 + 未下架 + 未被敏感词打标，按 created_at 倒序游标分页
 // （before 为 nil 表示从最新开始；limit 由调用方钳制）。
+//
+// flagged 包对所有人（含发布者本人）从商城暂隐，管理员清标记后自动恢复——
+// 与 taken_down 的商城口径一致（商城不区分 owner）；已添加用户不受影响（ListVisible）。
 //
 // 排序键 created_at 是全局唯一有序的时间戳（timestamptz 微秒精度），
 // 不做 id tie-break——与 favorites 游标分页的精度承诺一致。
@@ -177,7 +180,7 @@ func (r *StickerRepository) ListMarket(ctx context.Context, before *time.Time, l
 		Select(packMetaSelect).
 		Joins("LEFT JOIN users ON users.id = sticker_packs.owner_id").
 		Joins("LEFT JOIN stickers ON stickers.pack_id = sticker_packs.id").
-		Where("sticker_packs.is_public = TRUE AND sticker_packs.taken_down = FALSE").
+		Where("sticker_packs.is_public = TRUE AND sticker_packs.taken_down = FALSE AND sticker_packs.flagged = FALSE").
 		Group("sticker_packs.id, users.nickname").
 		Order("sticker_packs.created_at DESC").
 		Limit(limit)

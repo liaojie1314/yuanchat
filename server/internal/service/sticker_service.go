@@ -466,10 +466,11 @@ func (s *StickerService) PackDetail(ctx context.Context, userID, packID uuid.UUI
 		return nil, fmt.Errorf("check added batch: %w", err)
 	}
 	isOwner := meta.OwnerID != nil && *meta.OwnerID == userID
-	// 下架包仅对已添加者与发布者保留可见（CHAT_API「下架包仅对已添加者保留可见」、
-	// shared client 契约「已下架且未添加 → 404」同口径）：其余请求者按不存在返回，
-	// 不区分下架/删除两种状态，避免被处置内容凭 id 直链继续可看。
-	if meta.TakenDown && !added[packID] && !isOwner {
+	// 下架或被敏感词打标的包仅对已添加者与发布者保留可见（与 taken_down 同口径、
+	// shared client 契约「已下架且未添加 → 404」一致）：其余请求者按不存在返回，
+	// 不区分下架/打标/删除三种状态，避免被处置内容凭 id 直链继续可看。
+	// 打标是暂隐而非下架：管理员清标记后包自动恢复商城展示。
+	if (meta.TakenDown || meta.Flagged) && !added[packID] && !isOwner {
 		return nil, ErrPackNotFound
 	}
 	items := make([]StickerItemDTO, 0, len(stickers))
@@ -497,7 +498,7 @@ func (s *StickerService) PackDetail(ctx context.Context, userID, packID uuid.UUI
 }
 
 // AddPack 把一个表情包加入「我的表情包」列表，幂等：重复添加不报错也不重复落行。
-// 已下架或未公开的包拒绝添加；已添加者不受其后下架影响（见 ListVisible）。
+// 已下架、被敏感词打标或未公开的包拒绝添加；已添加者不受其后下架影响（见 ListVisible）。
 func (s *StickerService) AddPack(ctx context.Context, userID, packID uuid.UUID) error {
 	meta, err := s.repo.GetPackMeta(ctx, packID)
 	if err != nil {
@@ -506,7 +507,7 @@ func (s *StickerService) AddPack(ctx context.Context, userID, packID uuid.UUID) 
 		}
 		return fmt.Errorf("get pack meta: %w", err)
 	}
-	if meta.TakenDown || !(meta.IsPublic || meta.IsOfficial) {
+	if meta.TakenDown || meta.Flagged || !(meta.IsPublic || meta.IsOfficial) {
 		return ErrPackNotAvailable
 	}
 	if _, err := s.repo.AddUserPack(ctx, userID, packID); err != nil {

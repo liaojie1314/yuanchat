@@ -99,6 +99,33 @@ type UserService struct {
 	sidGen *shortid.Generator
 	rdb    *redis.Client
 	logger *zap.Logger
+
+	// UGC 审核：昵称 / bio 命中敏感词时照常写入，但记入 flagged_ugc 审核队列。
+	// 两者均可为 nil（未接线或未配置词库时跳过审核）。
+	moderation *ModerationService
+	ugcRepo    *repository.FlaggedUGCRepository
+}
+
+// SetUGCModeration 注入 UGC 敏感词审核依赖（router 接线用）。
+func (s *UserService) SetUGCModeration(m *ModerationService, r *repository.FlaggedUGCRepository) {
+	s.moderation = m
+	s.ugcRepo = r
+}
+
+// flagUGC 记录一条 UGC 敏感词命中。记录失败只告警不回滚业务写入——
+// 与 messages.flagged 一致，打标不阻塞；审核队列少一条记录的代价远小于
+// 用户资料改不动的代价。
+func (s *UserService) flagUGC(ctx context.Context, ugcType, content, hitWord string, userID uuid.UUID) {
+	rec := &model.FlaggedUGC{
+		UGCType: ugcType,
+		Content: content,
+		HitWord: hitWord,
+		UserID:  &userID,
+	}
+	if err := s.ugcRepo.Create(ctx, rec); err != nil {
+		s.logger.Warn("record flagged ugc failed",
+			zap.String("ugc_type", ugcType), zap.String("user_id", userID.String()), zap.Error(err))
+	}
 }
 
 // NewUserService 构造用户服务。
@@ -307,6 +334,20 @@ func (s *UserService) UpdateProfile(
 
 	if err := s.repo.Update(ctx, user); err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
+	}
+
+	// 敏感词审核（打标不阻塞）：只对本次实际提交的字段打标，命中照常写库
+	if s.moderation != nil && s.ugcRepo != nil {
+		if nickname != nil {
+			if hit := s.moderation.Check(*nickname); hit != "" {
+				s.flagUGC(ctx, model.UGCTypeNickname, *nickname, hit, userID)
+			}
+		}
+		if bio != nil {
+			if hit := s.moderation.Check(*bio); hit != "" {
+				s.flagUGC(ctx, model.UGCTypeBio, *bio, hit, userID)
+			}
+		}
 	}
 	return user, nil
 }

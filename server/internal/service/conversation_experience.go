@@ -93,6 +93,12 @@ func (s *ConversationService) UpdateAnnouncement(
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("load members: %w", err)
 	}
+	// 公告敏感词打标：命中照常生效，仅记入审核队列（空公告是清除操作，不打标）
+	if s.moderation != nil && s.ugcRepo != nil && text != "" {
+		if hit := s.moderation.Check(text); hit != "" {
+			s.flagUGC(ctx, model.UGCTypeAnnouncement, text, hit, operatorID, convID)
+		}
+	}
 	return &GroupOpResult{SysMsg: sysMsg, SysText: sysText, MemberIDs: memberIDs}, announcement, &now, nil
 }
 

@@ -21,11 +21,16 @@ func NewAdminRepository(db *gorm.DB) *AdminRepository {
 // ---------- 用户 ----------
 
 // SearchUsers 按昵称/手机号/邮箱模糊分页检索用户（含封禁用户）。
+// q 为合法 UUID 时同时按用户 ID 精确匹配：管理端从举报等入口深链跳转
+// 只带得出目标 ID， fuzzy 条件命中不了主键。
 func (r *AdminRepository) SearchUsers(ctx context.Context, q string, offset, limit int) ([]model.User, int64, error) {
 	tx := r.db.WithContext(ctx).Model(&model.User{})
 	if q != "" {
 		like := "%" + q + "%"
 		tx = tx.Where("nickname ILIKE ? OR phone LIKE ? OR email ILIKE ?", like, like, like)
+		if id, err := uuid.Parse(q); err == nil {
+			tx = tx.Or("id = ?", id)
+		}
 	}
 	var total int64
 	if err := tx.Count(&total).Error; err != nil {
@@ -110,6 +115,20 @@ func (r *AdminRepository) SearchMessages(ctx context.Context, q string, flaggedO
 	return msgs, total, err
 }
 
+// FindMessage 按 ID 查一条未删除消息，未命中返回 (nil, nil)。
+// 供管理端媒体预览端点定位消息引用的对象键。
+func (r *AdminRepository) FindMessage(ctx context.Context, messageID uuid.UUID) (*model.Message, error) {
+	var msg model.Message
+	err := r.db.WithContext(ctx).First(&msg, "id = ?", messageID).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &msg, nil
+}
+
 // DeleteMessage 软删除一条消息（管理员强制删除）。返回是否命中。
 func (r *AdminRepository) DeleteMessage(ctx context.Context, messageID uuid.UUID) (bool, error) {
 	res := r.db.WithContext(ctx).Delete(&model.Message{}, "id = ?", messageID)
@@ -132,6 +151,22 @@ func (r *AdminRepository) TakeDownStickerPack(ctx context.Context, packID uuid.U
 }
 
 // ---------- 表情包 ----------
+
+// UntakeDownStickerPack 恢复表情包上架：清 taken_down 标记，商城重新展示。
+// 返回是否命中。
+func (r *AdminRepository) UntakeDownStickerPack(ctx context.Context, packID uuid.UUID) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.StickerPack{}).
+		Where("id = ?", packID).Update("taken_down", false)
+	return res.RowsAffected > 0, res.Error
+}
+
+// SetStickerPackOfficial 设置表情包的官方标识（is_official）。
+// 返回是否命中。
+func (r *AdminRepository) SetStickerPackOfficial(ctx context.Context, packID uuid.UUID, official bool) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.StickerPack{}).
+		Where("id = ?", packID).Update("is_official", official)
+	return res.RowsAffected > 0, res.Error
+}
 
 // AdminStickerPack 表情包及发布者昵称、贴纸数（管理端视图）。
 type AdminStickerPack struct {

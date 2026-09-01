@@ -1,5 +1,5 @@
 /**
- * 消息审核页 — 内容关键词检索、删除
+ * 消息审核页 — 内容关键词检索、删除、非文本消息媒体预览
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -7,23 +7,7 @@ import { ConfirmDialog } from "@yuanchat/ui";
 import { listMessages, deleteMessage, type AdminMessage } from "../api";
 import { usePagedQuery } from "../hooks/usePagedQuery";
 import { SearchBox, DataTable, Pager, EmptyRow } from "../components/Table";
-
-const TYPE_KEY: Record<number, string> = {
-  2: "chat.message.image",
-  3: "chat.message.file",
-  4: "chat.message.voice",
-  8: "chat.message.sticker",
-};
-
-/** content JSONB 原文 → 展示文本（text 消息取 text 字段，解析失败回退原文） */
-function contentText(raw: string): string {
-  try {
-    const parsed = JSON.parse(raw) as { text?: string };
-    return parsed.text ?? "";
-  } catch {
-    return raw;
-  }
-}
+import { MessageMediaCell } from "../components/MessageMedia";
 
 export function MessageAuditPage() {
   const { t } = useTranslation();
@@ -57,12 +41,7 @@ export function MessageAuditPage() {
             className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low"
           >
             <td className="max-w-md px-4 py-3 text-body-md text-on-surface">
-              <p className="line-clamp-2">
-                {TYPE_KEY[m.message_type] && (
-                  <span className="text-on-surface-variant">{t(TYPE_KEY[m.message_type])} </span>
-                )}
-                {contentText(m.content)}
-              </p>
+              <MessageMediaCell message={m} />
             </td>
             <td className="px-4 py-3 text-body-md text-on-surface-variant">{m.sender_nickname}</td>
             <td className="whitespace-nowrap px-4 py-3 text-body-md text-on-surface-variant">

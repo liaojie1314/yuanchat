@@ -51,6 +51,8 @@ func newAdminService(db *gorm.DB) *AdminService {
 	return NewAdminService(
 		repository.NewAdminRepository(db),
 		repository.NewConversationRepository(db),
+		repository.NewUserRepository(db),
+		repository.NewFlaggedUGCRepository(db),
 		zap.NewNop(),
 	)
 }
@@ -176,7 +178,7 @@ func TestBannedUserCannotLogin(t *testing.T) {
 func TestHandleReportTakesDownStickerPack(t *testing.T) {
 	db := adminTestDB(t)
 	repo := repository.NewAdminRepository(db)
-	svc := NewAdminService(repo, repository.NewConversationRepository(db), zap.NewNop())
+	svc := NewAdminService(repo, repository.NewConversationRepository(db), repository.NewUserRepository(db), repository.NewFlaggedUGCRepository(db), zap.NewNop())
 	ctx := context.Background()
 
 	admin := newAdminTestUser(t, db, "TakedownAdmin", model.RoleAdmin)

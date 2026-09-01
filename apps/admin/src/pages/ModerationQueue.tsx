@@ -1,8 +1,10 @@
 /**
- * 内容审核队列页 — 敏感词命中消息 + 用户举报，双 tab
+ * 内容审核队列页 — 敏感词命中消息 + UGC 命中 + 用户举报 + 表情包，多 tab
  */
 import { useCallback, useState } from "react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { ConfirmDialog } from "@yuanchat/ui";
 import {
   listFlaggedMessages,
   clearMessageFlag,
@@ -12,9 +14,13 @@ import {
   clearPackFlag,
   listReports,
   handleReport,
+  listFlaggedUGC,
+  resetFlaggedUGC,
+  dismissFlaggedUGC,
   type AdminMessage,
   type AdminStickerPack,
   type AdminReport,
+  type FlaggedUGC,
 } from "../api";
 import { usePagedQuery } from "../hooks/usePagedQuery";
 import { DataTable, Pager, EmptyRow } from "../components/Table";
@@ -152,6 +158,8 @@ function ReportsTab() {
     20,
     status,
   );
+  // 封禁用户是破坏性动作，弹确认框；记录待封禁的举报条目
+  const [banTarget, setBanTarget] = useState<AdminReport | null>(null);
 
   const headers = [
     t("admin.moderation.colReporter"),
@@ -199,9 +207,19 @@ function ReportsTab() {
               {r.reporter_nickname}
             </td>
             <td className="px-4 py-3 text-body-md text-on-surface-variant">
-              <span className="font-mono text-xs">
-                {r.target_type}:{r.target_id.slice(0, 8)}…
-              </span>
+              {r.target_type === "user" ? (
+                // user 举报：完整 target_id 可点，深链到用户检索（按 ID 精确匹配）
+                <Link
+                  to={`/users?q=${r.target_id}`}
+                  className="font-mono text-xs text-primary hover:underline"
+                >
+                  {r.target_type}:{r.target_id}
+                </Link>
+              ) : (
+                <span className="font-mono text-xs">
+                  {r.target_type}:{r.target_id}
+                </span>
+              )}
             </td>
             <td className="max-w-xs px-4 py-3 text-body-md text-on-surface-variant">
               <p className="line-clamp-2">{r.reason || "—"}</p>
@@ -245,6 +263,15 @@ function ReportsTab() {
                       {t("admin.moderation.takedownPack")}
                     </button>
                   )}
+                  {/* user 举报闭环：delete 处置在服务端落地为封禁（复用 BanUser + 踢下线） */}
+                  {r.target_type === "user" && (
+                    <button
+                      onClick={() => setBanTarget(r)}
+                      className="text-label-lg text-error hover:underline"
+                    >
+                      {t("admin.moderation.banUser")}
+                    </button>
+                  )}
                 </>
               )}
             </td>
@@ -252,13 +279,145 @@ function ReportsTab() {
         ))}
       </DataTable>
       <Pager page={page} totalPages={totalPages} total={total} onPage={setPage} />
+
+      <ConfirmDialog
+        open={banTarget !== null}
+        title={t("admin.moderation.banUser")}
+        message={t("admin.moderation.banUserConfirm")}
+        danger
+        onConfirm={() => {
+          const target = banTarget;
+          setBanTarget(null);
+          if (target) void handleReport(target.id, "delete").then(refresh);
+        }}
+        onCancel={() => setBanTarget(null)}
+      />
     </>
   );
 }
 
+/** UGC 审核队列 tab：昵称 / bio / 群名 / 群公告的敏感词命中记录，可强制重置或放行 */
+function FlaggedUGCTab() {
+  const { t } = useTranslation();
+  const [handled, setHandled] = useState<"false" | "true" | "all">("false");
+  const fetcher = useCallback((_q: string, p: number) => listFlaggedUGC(handled, p), [handled]);
+  const { page, setPage, list, total, totalPages, loading, refresh } = usePagedQuery<FlaggedUGC>(
+    fetcher,
+    20,
+    handled,
+  );
+  // 强制重置会改写用户 / 群的内容，弹确认框
+  const [resetTarget, setResetTarget] = useState<FlaggedUGC | null>(null);
+
+  const headers = [
+    t("admin.ugc.colType"),
+    t("admin.ugc.colContent"),
+    t("admin.ugc.colHit"),
+    t("admin.ugc.colOwner"),
+    t("admin.messages.colTime"),
+    t("admin.users.colActions"),
+  ];
+
+  const TYPE_KEY: Record<string, string> = {
+    nickname: "admin.ugc.typeNickname",
+    bio: "admin.ugc.typeBio",
+    group_name: "admin.ugc.typeGroupName",
+    announcement: "admin.ugc.typeAnnouncement",
+  };
+
+  const HANDLED_TABS = [
+    { value: "false", label: t("admin.moderation.statusPending") },
+    { value: "true", label: t("admin.moderation.statusHandled") },
+    { value: "all", label: t("admin.conversations.typeAll") },
+  ] as const;
+
+  return (
+    <>
+      <div className="mb-3 inline-flex rounded-lg bg-surface-container p-1">
+        {HANDLED_TABS.map(({ value, label }) => (
+          <button
+            key={value}
+            onClick={() => {
+              setHandled(value);
+              setPage(1);
+            }}
+            className={cn(
+              "rounded-md px-3 py-1.5 text-label-lg font-medium transition-all",
+              handled === value
+                ? "bg-surface text-on-surface shadow-elevation-1"
+                : "text-on-surface-variant hover:text-on-surface",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <DataTable headers={headers}>
+        {!loading && list.length === 0 && <EmptyRow colSpan={headers.length} />}
+        {list.map((u) => (
+          <tr
+            key={u.id}
+            className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low"
+          >
+            <td className="px-4 py-3 text-body-md text-on-surface">
+              {t(TYPE_KEY[u.ugc_type] ?? "admin.ugc.colType")}
+            </td>
+            <td className="max-w-xs px-4 py-3 text-body-md text-on-surface">
+              <p className="line-clamp-2">{u.content}</p>
+            </td>
+            <td className="px-4 py-3">
+              <span className="rounded bg-error-container px-2 py-0.5 text-label-sm text-error-on-container">
+                {u.hit_word}
+              </span>
+            </td>
+            <td className="max-w-[140px] truncate px-4 py-3 font-mono text-xs text-on-surface-variant">
+              {u.user_id ?? "—"}
+            </td>
+            <td className="whitespace-nowrap px-4 py-3 text-body-md text-on-surface-variant">
+              {new Date(u.created_at).toLocaleString()}
+            </td>
+            <td className="space-x-3 whitespace-nowrap px-4 py-3">
+              {u.handled_at == null && (
+                <>
+                  <button
+                    onClick={() => setResetTarget(u)}
+                    className="text-label-lg text-error hover:underline"
+                  >
+                    {t("admin.ugc.reset")}
+                  </button>
+                  <button
+                    onClick={() => void dismissFlaggedUGC(u.id).then(refresh)}
+                    className="text-label-lg text-primary hover:underline"
+                  >
+                    {t("admin.moderation.approve")}
+                  </button>
+                </>
+              )}
+            </td>
+          </tr>
+        ))}
+      </DataTable>
+      <Pager page={page} totalPages={totalPages} total={total} onPage={setPage} />
+
+      <ConfirmDialog
+        open={resetTarget !== null}
+        title={t("admin.ugc.reset")}
+        message={t("admin.ugc.resetConfirm")}
+        danger
+        onConfirm={() => {
+          const target = resetTarget;
+          setResetTarget(null);
+          if (target) void resetFlaggedUGC(target.id).then(refresh);
+        }}
+        onCancel={() => setResetTarget(null)}
+      />
+    </>
+  );
+}
 export function ModerationQueuePage() {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<"flagged" | "packs" | "reports">("flagged");
+  const [tab, setTab] = useState<"flagged" | "ugc" | "packs" | "reports">("flagged");
 
   return (
     <div>
@@ -268,6 +427,7 @@ export function ModerationQueuePage() {
           {(
             [
               { value: "flagged", label: t("admin.moderation.tabFlagged") },
+              { value: "ugc", label: t("admin.moderation.tabUGC") },
               { value: "packs", label: t("admin.moderation.tabPacks") },
               { value: "reports", label: t("admin.moderation.tabReports") },
             ] as const
@@ -289,6 +449,7 @@ export function ModerationQueuePage() {
       </div>
 
       {tab === "flagged" && <FlaggedTab />}
+      {tab === "ugc" && <FlaggedUGCTab />}
       {tab === "packs" && <FlaggedPacksTab />}
       {tab === "reports" && <ReportsTab />}
     </div>
