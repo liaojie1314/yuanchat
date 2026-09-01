@@ -112,30 +112,28 @@ export function StickerPackEditView({ packId }: { packId: string }) {
     }
   };
 
-  /** 追加贴纸（收藏来源）：成功后并入包内网格（收藏列表不动） */
+  /**
+   * 追加贴纸（收藏来源）：成功后回读包详情，用服务端真身替换网格内容。
+   *
+   * @remarks 服务端对 collection 来源是「复制出新行」（新 id、同 object_key），
+   * 收藏行的 id 在包内并不存在——若直接把收藏项乐观并入 detail.stickers，
+   * 之后的「从包移除」会拿收藏 id 打 DELETE 而恒 404。所以这里不用乐观 id：
+   * POST 成功后立即 getPackDetail 对齐服务端状态。
+   */
   const addFromCollection = async (sticker: StickerItem) => {
     if (!detail) return;
     try {
       await addStickerToPack(packId, { source: "collection", sticker_id: sticker.id });
-      setDetail((prev) =>
-        prev
-          ? {
-              ...prev,
-              stickers: prev.stickers.concat([
-                {
-                  id: sticker.id,
-                  object_key: sticker.object_key,
-                  width: sticker.width,
-                  height: sticker.height,
-                },
-              ]),
-              pack: { ...prev.pack, sticker_count: prev.pack.sticker_count + 1 },
-            }
-          : prev,
-      );
     } catch (err) {
       captureException(err, { context: "StickerPackEditView.addFromCollection" });
       showToast("error", t("sticker.market.addFailed"));
+      return;
+    }
+    try {
+      setDetail(await getPackDetail(packId));
+    } catch (err) {
+      // 追加已成功，仅详情回读失败：下次进入页面会自动对齐，不打断用户
+      captureException(err, { context: "StickerPackEditView.reloadAfterAdd" });
     }
   };
 
@@ -294,7 +292,7 @@ export function StickerPackEditView({ packId }: { packId: string }) {
             <StickerSourcePicker
               stickers={myStickers}
               selectedIds={[]}
-              excludedIds={detail.stickers.map((s) => s.id)}
+              excludedKeys={detail.stickers.map((s) => s.object_key)}
               onToggle={(id) => {
                 const st = myStickers.find((s) => s.id === id);
                 if (st) void addFromCollection(st);

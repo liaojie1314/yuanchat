@@ -104,7 +104,7 @@ describe("StickerPackEditView", () => {
   it("appends a favorite sticker to the pack via the collection source", async () => {
     renderEdit();
 
-    // 收藏网格里的 s9 可选（排除表里只有包内的 s1，mock 收藏里没有它）
+    // 收藏网格里的 s9 可选（排除表按 object_key 匹配包内 s1，mock 收藏里没有它）
     const buttons = await screen.findAllByRole("button", { name: "Add to Stickers" });
     fireEvent.click(buttons[0]);
 
@@ -114,6 +114,48 @@ describe("StickerPackEditView", () => {
         sticker_id: "s9",
       }),
     );
+    // 追加成功后必须回读详情：包内行是服务端新复制的行（新 id 与收藏不同），
+    // 不回读的话网格里是收藏 id 的占位行，后续「从包移除」会拿错误 id 恒 404
+    await waitFor(() => expect(shared.getPackDetail).toHaveBeenCalledTimes(2));
+  });
+
+  it("replaces the pack grid with the reconciled server detail after appending", async () => {
+    // 回读返回的是服务端真身：包内出现的是复制行 s9x（新 id、同 object_key）
+    vi.mocked(shared.getPackDetail)
+      .mockResolvedValueOnce(DETAIL)
+      .mockResolvedValue({
+        ...DETAIL,
+        stickers: [
+          ...DETAIL.stickers,
+          { id: "s9x", object_key: "images/2026/08/z.png", width: 96, height: 96 },
+        ],
+        pack: { ...DETAIL.pack, sticker_count: 2 },
+      });
+    renderEdit();
+
+    fireEvent.click((await screen.findAllByRole("button", { name: "Add to Stickers" }))[0]);
+    await waitFor(() => expect(shared.getPackDetail).toHaveBeenCalledTimes(2));
+
+    // 网格按服务端真身渲染（s1 + s9x）：移除按钮携带的是包内行的 id（s9x），
+    // 不是收藏 id
+    const removes = await screen.findAllByRole("button", { name: "Remove from pack" });
+    expect(removes).toHaveLength(2);
+    fireEvent.click(removes[1]);
+    await waitFor(() => expect(shared.removeStickerFromPack).toHaveBeenCalledWith("p1", "s9x"));
+  });
+
+  it("disables favorites whose object_key is already in the pack", async () => {
+    // s-copy 与包内 s1 同内容（复制行 object_key 相同、id 不同）→ 按键排除
+    vi.mocked(shared.listMyStickers).mockResolvedValue([
+      { id: "s9", object_key: "images/2026/08/z.png", width: 96, height: 96 },
+      { id: "s-copy", object_key: "images/2026/08/a.png", width: 96, height: 96 },
+    ]);
+    renderEdit();
+
+    const buttons = await screen.findAllByRole("button", { name: "Add to Stickers" });
+    expect(buttons).toHaveLength(2);
+    const disabled = buttons.filter((b) => (b as HTMLButtonElement).disabled);
+    expect(disabled).toHaveLength(1);
   });
 
   it("shows a not-owner notice when the viewer is not the publisher", async () => {

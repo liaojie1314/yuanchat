@@ -21,7 +21,7 @@ import { uploadAndCollectSticker } from "./stickerUpload";
 export function StickerSourcePicker({
   stickers,
   selectedIds,
-  excludedIds,
+  excludedKeys,
   onToggle,
   onUploaded,
   onUploadStart,
@@ -31,8 +31,13 @@ export function StickerSourcePicker({
   stickers: StickerItem[];
   /** 当前勾选的贴纸 id 集合 */
   selectedIds: string[];
-  /** 已在包内的贴纸 id（编辑页防止重复加入，渲染为不可点选） */
-  excludedIds?: string[];
+  /**
+   * 已在包内的贴纸对象键（编辑页防止重复加入，渲染为不可点选）。
+   *
+   * @remarks 按 object_key 而非 id 匹配：加入包是「复制出新行」（服务端新 id），
+   * 同一内容在收藏与包内的两行 id 永不相等，按 id 排除永远匹配不上。
+   */
+  excludedKeys?: string[];
   /** 勾选/取消勾选回调 */
   onToggle: (id: string) => void;
   /** 直传成功回调（参数为新收藏项；父层负责把它并入收藏网格并勾选） */
@@ -95,7 +100,7 @@ export function StickerSourcePicker({
         <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6 md:grid-cols-8">
           {stickers.map((st) => {
             const selected = selectedIds.indexOf(st.id) >= 0;
-            const excluded = (excludedIds ?? []).indexOf(st.id) >= 0;
+            const excluded = (excludedKeys ?? []).indexOf(st.object_key) >= 0;
             return (
               <button
                 key={st.id}
