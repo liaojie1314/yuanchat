@@ -594,16 +594,34 @@ packages/shared/coverage/
 
 #### 覆盖率阈值
 
-`packages/shared` 设置了最低覆盖率阈值（`vitest.config.ts`）：
+覆盖率门禁在 CI 中强制执行（`.github/workflows/ci.yml`）。前端阈值配置在各包的
+`vitest.config.ts`（低于阈值 `pnpm test:coverage` 直接失败）：
 
-| 指标       | 阈值 |
-| ---------- | ---- |
-| statements | 60%  |
-| branches   | 50%  |
-| functions  | 60%  |
-| lines      | 60%  |
+| 包                       | statements | lines | 备注                                                                  |
+| ------------------------ | ---------- | ----- | --------------------------------------------------------------------- |
+| `packages/shared`        | 60%        | 60%   | 另有 branches 50% / functions 60%                                     |
+| `packages/ui`            | 53%        | 53%   | 目标 60%，先钉基线 -2pt，补组件测试后逐步上调                         |
+| `packages/design-system` | 46%        | 46%   | 目标 60%，先钉基线 -2pt；`skins.ts`/`legacyWebViewCompat.ts` 尚未覆盖 |
 
-低于阈值时 CI 失败。
+> 排除规则：各包 `src/__tests__/**`、`src/index.ts`（入口）、`src/mocks/**`（MSW）、
+> `src/types/**`（纯类型）、`src/i18n/**`、`src/tailwind.config.ts`（构建期配置）不计入。
+
+后端阈值为语句覆盖率 ≥ **40%**（`scripts/check-coverage.mjs` 校验，低于阈值 CI 失败）：
+
+```bash
+cd server && go test ./... -coverprofile=coverage.out -covermode=atomic
+node scripts/check-coverage.mjs 40 server/coverage.out   # 阈值以 CI 为准
+```
+
+> 后端目标 80%（见 `docs/MASTER_PLAN.md` 6.2），现状基线约 43%，先钉 40%（基线 -2pt），
+> 待补齐 `internal/handler`（约 19%）、`internal/repository`（约 18%）、`internal/middleware`
+> （约 7%）的测试后逐步上调。低分大户：handler、repository、middleware、ws（约 49%）。
+
+> **排除规则**：`cmd/`（main 入口）、`internal/testutil/`（测试辅助）、
+> `internal/database/`（DB 连接/迁移胶水层）不计入后端覆盖率统计。
+
+CI 会把覆盖率报告上传为 artifact（`backend-coverage`：`server/coverage.out`；
+`frontend-coverage`：`packages/*/coverage/` 含 lcov + HTML），不阻塞 PR 展示。
 
 ### Go 后端测试
 

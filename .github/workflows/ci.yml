@@ -30,6 +30,20 @@ jobs:
         run: node scripts/check-i18n.mjs
       - name: Test
         run: pnpm test
+      - name: Coverage gate
+        # 覆盖率 + vitest thresholds 门禁（shared 60 / ui 53 / design-system 46，
+        # 目标见 docs/MASTER_PLAN.md 6.2）。@vitest/coverage-v8 尚未进 lockfile
+        # （避免本地改动 pnpm-lock.yaml），CI 内临时补装；后续把该依赖正式
+        # 提交为 workspace devDependency 后可删除此临时步骤。
+        run: |
+          pnpm add -w @vitest/coverage-v8@2.1.9
+          LANG=C.UTF-8 pnpm test:coverage
+      - name: Upload frontend coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: packages/*/coverage/
+          retention-days: 7
       - name: Typecheck (web)
         run: cd apps/web && npx tsc --noEmit
       - name: Typecheck (desktop)
@@ -80,7 +94,19 @@ jobs:
         run: go vet ./...
       - name: Test
         working-directory: server
-        run: go test ./...
+        run: go test ./... -coverprofile=coverage.out -covermode=atomic
+      - name: Coverage gate
+        # 后端覆盖率门禁（排除 cmd/ testutil/ database/）。
+        # 目标 80%（docs/MASTER_PLAN.md 6.2），现状基线 42.8%，先钉 40%（基线 -2pt），
+        # 补齐 handler/repository 测试后逐步上调（B7 re-raise 待办）。
+        working-directory: server
+        run: node ../scripts/check-coverage.mjs 40 coverage.out
+      - name: Upload backend coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: server/coverage.out
+          retention-days: 7
       - name: Race (ws)
         working-directory: server
         run: go test -race ./internal/ws/
