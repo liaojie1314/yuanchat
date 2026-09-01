@@ -17,6 +17,8 @@ func TestReportCreateAcceptsStickerPack(t *testing.T) {
 	adminSvc := service.NewAdminService(
 		repository.NewAdminRepository(db),
 		repository.NewConversationRepository(db),
+		repository.NewUserRepository(db),
+		repository.NewFlaggedUGCRepository(db),
 		zap.NewNop(),
 	)
 	h := NewReportHandler(adminSvc, zap.NewNop())

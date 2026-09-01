@@ -59,7 +59,8 @@ func (e *WeakPasswordError) Unwrap() error { return ErrWeakPassword }
 // 长度按字节计而非字符：bcrypt 只取前 72 字节，按字符放行会让多字节密码被静默截断。
 //
 // 规则以 spec / constraints 为准，与前端 validatePassword 并不完全等价——
-// 前端另有「必须含特殊字符」且不限上限、不禁空白，两侧差异见批次报告。
+// 前端另有「必须含特殊字符」且不限上限、不禁空白，两侧差异以前后端各自的
+// 实现文档为准，此处只保证服务端下限。
 func ValidatePasswordStrength(pw string) error {
 	if len(pw) < 8 {
 		return &WeakPasswordError{MessageKey: msgPasswordMinLength}
@@ -99,6 +100,33 @@ type UserService struct {
 	sidGen *shortid.Generator
 	rdb    *redis.Client
 	logger *zap.Logger
+
+	// UGC 审核：昵称 / bio 命中敏感词时照常写入，但记入 flagged_ugc 审核队列。
+	// 两者均可为 nil（未接线或未配置词库时跳过审核）。
+	moderation *ModerationService
+	ugcRepo    *repository.FlaggedUGCRepository
+}
+
+// SetUGCModeration 注入 UGC 敏感词审核依赖（router 接线用）。
+func (s *UserService) SetUGCModeration(m *ModerationService, r *repository.FlaggedUGCRepository) {
+	s.moderation = m
+	s.ugcRepo = r
+}
+
+// flagUGC 记录一条 UGC 敏感词命中。记录失败只告警不回滚业务写入——
+// 与 messages.flagged 一致，打标不阻塞；审核队列少一条记录的代价远小于
+// 用户资料改不动的代价。
+func (s *UserService) flagUGC(ctx context.Context, ugcType, content, hitWord string, userID uuid.UUID) {
+	rec := &model.FlaggedUGC{
+		UGCType: ugcType,
+		Content: content,
+		HitWord: hitWord,
+		UserID:  &userID,
+	}
+	if err := s.ugcRepo.Create(ctx, rec); err != nil {
+		s.logger.Warn("record flagged ugc failed",
+			zap.String("ugc_type", ugcType), zap.String("user_id", userID.String()), zap.Error(err))
+	}
 }
 
 // NewUserService 构造用户服务。
@@ -171,6 +199,14 @@ func (s *UserService) Register(ctx context.Context, req RegisterRequest) (*AuthR
 
 	if err := s.repo.Create(ctx, user); err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
+	}
+
+	// 注册昵称同样过敏感词审核（打标不阻塞）：与 UpdateProfile 同一语义，
+	// 否则注册阶段就是审核队列绕过点——违规昵称只要注册后不再改资料就查无记录。
+	if s.moderation != nil && s.ugcRepo != nil && req.Nickname != "" {
+		if hit := s.moderation.Check(req.Nickname); hit != "" {
+			s.flagUGC(ctx, model.UGCTypeNickname, req.Nickname, hit, user.ID)
+		}
 	}
 
 	s.logger.Info("User registered", zap.String("user_id", user.ID.String()))
@@ -307,6 +343,20 @@ func (s *UserService) UpdateProfile(
 
 	if err := s.repo.Update(ctx, user); err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
+	}
+
+	// 敏感词审核（打标不阻塞）：只对本次实际提交的字段打标，命中照常写库
+	if s.moderation != nil && s.ugcRepo != nil {
+		if nickname != nil {
+			if hit := s.moderation.Check(*nickname); hit != "" {
+				s.flagUGC(ctx, model.UGCTypeNickname, *nickname, hit, userID)
+			}
+		}
+		if bio != nil {
+			if hit := s.moderation.Check(*bio); hit != "" {
+				s.flagUGC(ctx, model.UGCTypeBio, *bio, hit, userID)
+			}
+		}
 	}
 	return user, nil
 }

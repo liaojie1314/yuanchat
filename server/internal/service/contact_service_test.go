@@ -10,42 +10,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/repository"
+	"github.com/yuanchat/server/internal/testutil"
 	"go.uber.org/zap"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
-	"gorm.io/gorm/schema"
 )
 
-// testDB 连接本地开发库（deploy/docker-compose.yml 的 postgres :5434）。
+// testDB 返回独立测试库上的事务句柄（跑完整迁移、用例结束回滚），
 // 数据库不可达时跳过集成用例（CI 无 DB 环境仍绿）。
 func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := "host=localhost port=5434 user=yuanchat password=yuanchat_dev dbname=yuanchat sslmode=disable"
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
-		NamingStrategy: schema.NamingStrategy{
-			SingularTable: true,
-		},
-		SkipDefaultTransaction: true,
-	})
-	if err != nil {
-		t.Skipf("dev postgres unavailable, skip integration test: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil || sqlDB.Ping() != nil {
-		t.Skip("dev postgres unavailable, skip integration test")
-	}
-	// 每个用例开一个连接池，因此必须限量并在结束时关闭：dev 库 max_connections = 100，
-	// 池子只开不关时全量 -race 跑到后半程会撞 53300（too many clients），
-	// 集成用例被迫跳过，看起来像「库不可达」，实际是自己把连接耗光了
-	sqlDB.SetMaxOpenConns(4)
-	sqlDB.SetMaxIdleConns(2)
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.AutoMigrate(&model.FriendRequest{}, &model.MessageReaction{}); err != nil {
-		t.Fatalf("migrate friend_requests: %v", err)
-	}
-	return db
+	return testutil.NewDB(t)
 }
 
 // newTestUser 创建一次性测试用户（短号用时间戳避免冲突，用后删除）。

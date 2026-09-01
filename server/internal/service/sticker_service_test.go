@@ -158,7 +158,7 @@ func TestStickerListPacks(t *testing.T) {
 	db.AutoMigrate(&model.StickerPack{}, &model.Sticker{})
 	svc := newStickerSvc(db)
 	viewer := newTestUser(t, db, "甲packs")
-	packs, err := svc.ListPacks(context.Background(), viewer.ID)
+	packs, _, err := svc.ListPacks(context.Background(), viewer.ID, "", 0)
 	if err != nil {
 		t.Fatalf("list packs: %v", err)
 	}
@@ -338,6 +338,82 @@ func TestStickerResolveSendable(t *testing.T) {
 		if err != nil || got.ObjectKey != "images/2026/08/0f1e2d3c4b5a.png" {
 			t.Fatalf("official sticker should be sendable by %s: %+v err=%v", uid, got, err)
 		}
+	}
+}
+
+// TestStickerResolveSendablePackPolicy 表情包贴纸的发送可用口径（收紧后）：
+//   - 官方包贴纸：未下架、未打标，全员可发（无需添加）；
+//   - 非官方包：发送者已添加才可发，未添加拒绝；
+//   - 下架（taken_down）或被敏感词打标（flagged）的包：即使已添加也拒绝发送；
+//   - 拒绝原因统一按 ErrStickerNotFound 返回，不区分具体状态。
+func TestStickerResolveSendablePackPolicy(t *testing.T) {
+	db := testDB(t)
+	db.AutoMigrate(&model.StickerPack{}, &model.Sticker{}, &model.UserStickerPack{})
+	alice := newTestUser(t, db, "甲packpolicy")
+	bob := newTestUser(t, db, "乙packpolicy")
+	svc := newStickerSvc(db)
+	ctx := context.Background()
+
+	// makePack 建一个包并放一张贴纸，返回贴纸与包 ID（content_hash 末位随序号区分）
+	hashSeq := 0
+	makePack := func(name string, mutate func(*model.StickerPack)) (model.Sticker, uuid.UUID) {
+		pack := model.StickerPack{Name: name, OwnerID: &alice.ID, IsPublic: true}
+		if mutate != nil {
+			mutate(&pack)
+		}
+		if err := db.Create(&pack).Error; err != nil {
+			t.Fatalf("create pack %s: %v", name, err)
+		}
+		hashSeq++
+		st := model.Sticker{
+			PackID:      &pack.ID,
+			ObjectKey:   "images/2026/08/0f1e2d3c4b5a.png",
+			Width:       96,
+			Height:      96,
+			ContentHash: fmt.Sprintf("ca63399bacaae3dafdf677291f0a7621fc58a681fa89daba700a678d18e7e%d", hashSeq),
+		}
+		if err := db.Create(&st).Error; err != nil {
+			t.Fatalf("create sticker: %v", err)
+		}
+		return st, pack.ID
+	}
+	addPackFor := func(userID, packID uuid.UUID) {
+		if err := db.Create(&model.UserStickerPack{UserID: userID, PackID: packID}).Error; err != nil {
+			t.Fatalf("add user pack: %v", err)
+		}
+	}
+
+	// 官方包：未添加的 bob 也可发
+	official, officialPackID := makePack("官方包policy", func(p *model.StickerPack) {
+		p.OwnerID = nil
+		p.IsOfficial = true
+	})
+	if got, err := svc.ResolveSendable(ctx, bob.ID, official.ID); err != nil || got.PackID == nil || *got.PackID != officialPackID {
+		t.Fatalf("official pack sticker should be sendable without adding: %+v err=%v", got, err)
+	}
+
+	// 已添加的非官方包：可发；未添加的 bob：拒绝
+	normal, normalPackID := makePack("普通包policy", nil)
+	addPackFor(alice.ID, normalPackID)
+	if got, err := svc.ResolveSendable(ctx, alice.ID, normal.ID); err != nil || got.PackID == nil {
+		t.Fatalf("added pack sticker should be sendable: %+v err=%v", got, err)
+	}
+	if _, err := svc.ResolveSendable(ctx, bob.ID, normal.ID); !errors.Is(err, ErrStickerNotFound) {
+		t.Fatalf("unadded pack sticker must be rejected, got %v", err)
+	}
+
+	// 下架包：即使已添加也拒绝
+	taken, takenPackID := makePack("下架包policy", func(p *model.StickerPack) { p.TakenDown = true })
+	addPackFor(alice.ID, takenPackID)
+	if _, err := svc.ResolveSendable(ctx, alice.ID, taken.ID); !errors.Is(err, ErrStickerNotFound) {
+		t.Fatalf("taken-down pack sticker must be rejected even if added, got %v", err)
+	}
+
+	// 被打标包：即使已添加也拒绝
+	flagged, flaggedPackID := makePack("打标包policy", func(p *model.StickerPack) { p.Flagged = true })
+	addPackFor(alice.ID, flaggedPackID)
+	if _, err := svc.ResolveSendable(ctx, alice.ID, flagged.ID); !errors.Is(err, ErrStickerNotFound) {
+		t.Fatalf("flagged pack sticker must be rejected even if added, got %v", err)
 	}
 }
 

@@ -4,11 +4,13 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/middleware"
 	"github.com/yuanchat/server/internal/service"
+	"github.com/yuanchat/server/internal/storage"
 	"github.com/yuanchat/server/internal/ws"
 	"go.uber.org/zap"
 )
@@ -18,12 +20,18 @@ type AdminHandler struct {
 	svc        *service.AdminService
 	hub        *ws.Hub
 	dispatcher ws.Dispatcher
-	logger     *zap.Logger
+	// st 对象存储句柄：管理端媒体预览签发预签名 GET 用，可能为 nil（MinIO 不可达时降级 503）。
+	st     *storage.Storage
+	logger *zap.Logger
 }
 
-func NewAdminHandler(svc *service.AdminService, hub *ws.Hub, logger *zap.Logger) *AdminHandler {
-	return &AdminHandler{svc: svc, hub: hub, dispatcher: hub, logger: logger}
+func NewAdminHandler(svc *service.AdminService, hub *ws.Hub, st *storage.Storage, logger *zap.Logger) *AdminHandler {
+	return &AdminHandler{svc: svc, hub: hub, dispatcher: hub, st: st, logger: logger}
 }
+
+// mediaURLTTL 管理端预签名下载 URL 有效期。
+// 比用户侧 downloadURLTTL 短：审核员看完即弃，URL 落入日志或误转发的窗口越小越好。
+const mediaURLTTL = 10 * time.Minute
 
 // pageParams 解析 page/size 查询参数（1 起，size 上限 100）。
 func pageParams(c *gin.Context) (int, int) {
@@ -115,6 +123,34 @@ func (h *AdminHandler) UnbanUser(c *gin.Context) {
 		return
 	}
 	Success(c, gin.H{"banned": false})
+}
+
+// ResetAvatar 管理端重置用户头像：avatar_url 置空，恢复默认头像。
+//
+//	@Summary		管理端：重置用户头像
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"用户 id"
+//	@Success		200	{object}	Response
+//	@Failure		404	{object}	Response	"用户不存在"
+//	@Router			/api/v1/admin/users/{id}/reset-avatar [post]
+func (h *AdminHandler) ResetAvatar(c *gin.Context) {
+	actorID, _ := middleware.GetUserID(c)
+	targetID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid user id")
+		return
+	}
+	if err := h.svc.ResetAvatar(c.Request.Context(), actorID, targetID); err != nil {
+		if errors.Is(err, service.ErrUserNotFound) {
+			NotFound(c, "user not found")
+			return
+		}
+		h.logger.Error("admin reset avatar failed", zap.Error(err))
+		InternalError(c, "reset avatar failed")
+		return
+	}
+	Success(c, gin.H{"reset": true})
 }
 
 // ListConversations 分页检索会话。
@@ -351,6 +387,72 @@ func (h *AdminHandler) ClearStickerPackFlag(c *gin.Context) {
 	Success(c, gin.H{"flagged": false})
 }
 
+// UntakeDownStickerPack 恢复表情包上架（清 taken_down，商城重新展示）。
+//
+//	@Summary		管理端：恢复上架表情包
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"表情包 id"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/sticker-packs/{id}/untakedown [post]
+func (h *AdminHandler) UntakeDownStickerPack(c *gin.Context) {
+	actorID, _ := middleware.GetUserID(c)
+	packID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid sticker pack id")
+		return
+	}
+	if err := h.svc.UntakeDownStickerPack(c.Request.Context(), actorID, packID); err != nil {
+		if errors.Is(err, service.ErrPackNotFound) {
+			NotFound(c, "sticker pack not found")
+			return
+		}
+		h.logger.Error("admin untake down sticker pack failed", zap.Error(err))
+		InternalError(c, "untake down sticker pack failed")
+		return
+	}
+	Success(c, gin.H{"taken_down": false})
+}
+
+// SetPackOfficialBody 官方标识切换请求体（显式目标值，避免并发下 toggle 语义歧义）。
+type SetPackOfficialBody struct {
+	// IsOfficial 目标状态：true=标记官方，false=取消官方
+	IsOfficial *bool `json:"is_official" binding:"required"`
+}
+
+// SetStickerPackOfficial 设置表情包的官方标识（is_official）。
+//
+//	@Summary		管理端：切换表情包官方标识
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Param			id		path	string	true	"表情包 id"
+//	@Param			body	body	SetPackOfficialBody	true	"目标状态"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/sticker-packs/{id}/official [post]
+func (h *AdminHandler) SetStickerPackOfficial(c *gin.Context) {
+	actorID, _ := middleware.GetUserID(c)
+	packID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid sticker pack id")
+		return
+	}
+	var body SetPackOfficialBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		BadRequest(c, "invalid body: is_official is required")
+		return
+	}
+	if err := h.svc.SetStickerPackOfficial(c.Request.Context(), actorID, packID, *body.IsOfficial); err != nil {
+		if errors.Is(err, service.ErrPackNotFound) {
+			NotFound(c, "sticker pack not found")
+			return
+		}
+		h.logger.Error("admin set sticker pack official failed", zap.Error(err))
+		InternalError(c, "set sticker pack official failed")
+		return
+	}
+	Success(c, gin.H{"is_official": *body.IsOfficial})
+}
+
 // ListReports 分页列出举报。
 //
 //	@Summary		管理端：举报列表
@@ -402,13 +504,215 @@ func (h *AdminHandler) HandleReport(c *gin.Context) {
 		return
 	}
 	if err := h.svc.HandleReport(c.Request.Context(), actorID, reportID, body.Action == "delete"); err != nil {
-		if errors.Is(err, service.ErrReportNotFound) {
+		switch {
+		case errors.Is(err, service.ErrReportNotFound):
 			NotFound(c, "report not found")
-			return
+		case errors.Is(err, service.ErrAdminSelfBan):
+			// 举报目标 user 且目标是管理员本人：封禁被拒
+			Error(c, http.StatusBadRequest, 400, "cannot ban yourself")
+		case errors.Is(err, service.ErrUserNotFound):
+			// 举报目标 user 但用户已注销：按目标不存在返回
+			NotFound(c, "user not found")
+		default:
+			h.logger.Error("admin handle report failed", zap.Error(err))
+			InternalError(c, "handle report failed")
 		}
-		h.logger.Error("admin handle report failed", zap.Error(err))
-		InternalError(c, "handle report failed")
 		return
 	}
 	Success(c, gin.H{"handled": true})
+}
+
+// MessageMedia 为消息引用的媒体对象签发短期预签名下载 URL（管理端专用读通道）。
+//
+// 授权模型：不走用户侧 ObjectACL（举报人可见性）——管理端授权由路由层的
+// JWT + RequireAdmin 双重校验承担，审核员无需处于举报人上下文即可查看
+// 图片 / 语音 / 文件 / 贴纸内容。URL 有效期短（mediaURLTTL），只够一次审核浏览。
+//
+//	@Summary		管理端：消息媒体预签名下载 URL
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"消息 id"
+//	@Success		200	{object}	Response
+//	@Failure		404	{object}	Response	"消息不存在 / 该类型无媒体对象"
+//	@Failure		503	{object}	Response	"对象存储不可用"
+//	@Router			/api/v1/admin/messages/{id}/media [get]
+func (h *AdminHandler) MessageMedia(c *gin.Context) {
+	messageID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid message id")
+		return
+	}
+	media, err := h.svc.MessageMedia(c.Request.Context(), messageID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrMessageNotFound):
+			NotFound(c, "message not found")
+		case errors.Is(err, service.ErrMessageMediaNotSupported):
+			NotFound(c, "message has no media object")
+		default:
+			h.logger.Error("admin message media failed", zap.Error(err))
+			InternalError(c, "resolve message media failed")
+		}
+		return
+	}
+	if h.st == nil {
+		Error(c, http.StatusServiceUnavailable, 503, "object storage unavailable")
+		return
+	}
+	url, err := h.st.PresignGet(c.Request.Context(), media.ObjectKey, mediaURLTTL)
+	if err != nil {
+		h.logger.Error("admin presign media failed",
+			zap.String("object_key", media.ObjectKey), zap.Error(err))
+		InternalError(c, "failed to sign media url")
+		return
+	}
+	Success(c, gin.H{
+		"url":          url,
+		"expires_in":   int(mediaURLTTL.Seconds()),
+		"message_type": media.MessageType,
+		"object_key":   media.ObjectKey,
+		"file_name":    media.FileName,
+		"width":        media.Width,
+		"height":       media.Height,
+		"duration":     media.Duration,
+	})
+}
+
+// ListFlaggedUGC 分页列出 UGC 敏感词命中记录（昵称 / bio / 群名 / 群公告）。
+//
+//	@Summary		管理端：UGC 审核队列
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Param			type		query	string	false	"按类型过滤：nickname|bio|group_name|announcement"
+//	@Param			handled		query	string	false	"true=已处置 false=待处理（默认）all=全部"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/flagged-ugc [get]
+func (h *AdminHandler) ListFlaggedUGC(c *gin.Context) {
+	page, size := pageParams(c)
+	// status 三态：false/缺省=只看待处理（审核队列主视图）、true=只看已处置、all=全部
+	status := "pending"
+	switch c.Query("handled") {
+	case "true":
+		status = "handled"
+	case "all":
+		status = ""
+	}
+	list, total, err := h.svc.SearchFlaggedUGC(c.Request.Context(), c.Query("type"), status, page, size)
+	if err != nil {
+		h.logger.Error("admin list flagged ugc failed", zap.Error(err))
+		InternalError(c, "list flagged ugc failed")
+		return
+	}
+	Paginated(c, list, total, page, size)
+}
+
+// ResetFlaggedUGC 强制重置命中的 UGC：昵称重置为默认昵称、bio / 群名 / 公告清空，
+// 记录关闭并写审计。
+//
+//	@Summary		管理端：强制重置命中的 UGC
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"命中记录 id"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/flagged-ugc/{id}/reset [post]
+func (h *AdminHandler) ResetFlaggedUGC(c *gin.Context) {
+	actorID, _ := middleware.GetUserID(c)
+	recordID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid record id")
+		return
+	}
+	if err := h.svc.ResetFlaggedUGC(c.Request.Context(), actorID, recordID); err != nil {
+		if errors.Is(err, service.ErrFlaggedUGCNotFound) {
+			NotFound(c, "flagged ugc not found")
+			return
+		}
+		h.logger.Error("admin reset flagged ugc failed", zap.Error(err))
+		InternalError(c, "reset flagged ugc failed")
+		return
+	}
+	Success(c, gin.H{"reset": true})
+}
+
+// DismissFlaggedUGC 审核通过：命中记录置为已处置，内容维持原样。
+//
+//	@Summary		管理端：放行命中的 UGC
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"命中记录 id"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/flagged-ugc/{id} [delete]
+func (h *AdminHandler) DismissFlaggedUGC(c *gin.Context) {
+	actorID, _ := middleware.GetUserID(c)
+	recordID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid record id")
+		return
+	}
+	if err := h.svc.DismissFlaggedUGC(c.Request.Context(), actorID, recordID); err != nil {
+		if errors.Is(err, service.ErrFlaggedUGCNotFound) {
+			NotFound(c, "flagged ugc not found")
+			return
+		}
+		h.logger.Error("admin dismiss flagged ugc failed", zap.Error(err))
+		InternalError(c, "dismiss flagged ugc failed")
+		return
+	}
+	Success(c, gin.H{"dismissed": true})
+}
+
+// Stats 管理端运营概览：用户 / 会话 / 消息 / 治理 / 增长 / 运行时聚合指标。
+// 只读端点，不写审计日志；WS 在线连接数由 handler 从本实例 Hub 读取补齐。
+//
+//	@Summary		管理端：运营概览指标
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/stats [get]
+func (h *AdminHandler) Stats(c *gin.Context) {
+	stats, err := h.svc.StatsOverview(c.Request.Context())
+	if err != nil {
+		h.logger.Error("admin stats failed", zap.Error(err))
+		InternalError(c, "stats failed")
+		return
+	}
+	stats.Runtime.OnlineConnections = int64(h.hub.TotalConnections())
+	Success(c, stats)
+}
+
+// StorageStats 按对象类别的存储占用统计（只读 DB 聚合，不写审计日志）。
+//
+//	@Summary		管理端：存储统计
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/storage-stats [get]
+func (h *AdminHandler) StorageStats(c *gin.Context) {
+	stats, err := h.svc.StorageStats(c.Request.Context())
+	if err != nil {
+		h.logger.Error("admin storage stats failed", zap.Error(err))
+		InternalError(c, "storage stats failed")
+		return
+	}
+	Success(c, stats)
+}
+
+// ListPushSubscriptions 分页列出 Web Push 订阅（endpoint / 创建时间 / 所属用户）。
+//
+//	@Summary		管理端：推送订阅列表
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Param			page	query	int	false	"页码（从 1 开始）"
+//	@Param			size	query	int	false	"每页条数（上限 100）"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/push-subscriptions [get]
+func (h *AdminHandler) ListPushSubscriptions(c *gin.Context) {
+	page, size := pageParams(c)
+	subs, total, err := h.svc.SearchPushSubscriptions(c.Request.Context(), page, size)
+	if err != nil {
+		h.logger.Error("admin list push subscriptions failed", zap.Error(err))
+		InternalError(c, "list push subscriptions failed")
+		return
+	}
+	Paginated(c, subs, total, page, size)
 }

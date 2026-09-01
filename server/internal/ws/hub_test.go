@@ -161,3 +161,29 @@ func TestHubOnlineFilter(t *testing.T) {
 		t.Fatalf("filter: %v", got)
 	}
 }
+
+// TestHubTotalConnections 校验全实例连接计数：同用户多设备与多用户均按
+// 连接条数累加，逐条 Unregister 后计数精确回落。
+func TestHubTotalConnections(t *testing.T) {
+	hub := NewHub(0, zap.NewNop())
+
+	uid := uuid.New()
+	other := uuid.New()
+	c1 := newTestClient(uid)
+	c2 := newTestClient(uid) // 同用户第二台设备
+	c3 := newTestClient(other)
+	for i, c := range []*Client{c1, c2, c3} {
+		if !hub.Register(c) {
+			t.Fatalf("register client %d should succeed", i)
+		}
+	}
+	if got := hub.TotalConnections(); got != 3 {
+		t.Fatalf("total = %d, want 3", got)
+	}
+
+	hub.Unregister(c2)
+	hub.Unregister(c3)
+	if got := hub.TotalConnections(); got != 1 {
+		t.Fatalf("total after unregister = %d, want 1", got)
+	}
+}

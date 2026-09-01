@@ -125,6 +125,12 @@ func (s *ConversationService) RenameGroup(ctx context.Context, operatorID, convI
 	if err != nil {
 		return nil, fmt.Errorf("load members: %w", err)
 	}
+	// 群名敏感词打标：命中照常改名，仅记入审核队列
+	if s.moderation != nil && s.ugcRepo != nil {
+		if hit := s.moderation.Check(name); hit != "" {
+			s.flagUGC(ctx, model.UGCTypeGroupName, name, hit, operatorID, convID)
+		}
+	}
 	s.logger.Info("group renamed", zap.String("conversation_id", convID.String()), zap.String("name", name))
 	return &GroupOpResult{
 		SysMsg:      sysMsg,

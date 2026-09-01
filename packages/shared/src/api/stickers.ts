@@ -23,6 +23,17 @@ export interface StickerPackItem {
   stickers: StickerItem[];
 }
 
+/**
+ * 「我的表情包」列表的一页结果（GET /sticker-packs）。
+ *
+ * 分页为可选：服务端在不传 limit 时返回全量且 `nextCursor` 为 null（向后兼容）；
+ * 传 limit 时按 created_at 升序取一页，`nextCursor` 非空表示还有下一页。
+ */
+export interface StickerPackPage {
+  packs: StickerPackItem[];
+  nextCursor: string | null;
+}
+
 // ========================================
 // 表情商城与自主发布
 // ========================================
@@ -161,16 +172,42 @@ export async function listMyStickers(): Promise<StickerItem[]> {
 }
 
 /**
- * 列出全部表情包（当前仅官方包）。
+ * 列出「我的表情包」（官方包 + 已添加包，含各自贴纸）——全量形态。
+ *
+ * 等价于 {@link listStickerPacksPaged} 不带分页参数：服务端返回全量，
+ * EmojiPicker 一次拿全，无需翻页。新代码如需分页请用 {@link listStickerPacksPaged}。
  *
  * @throws 响应里 `packs` 不是数组时抛错（理由同 {@link listMyStickers}）。
  */
 export async function listStickerPacks(): Promise<StickerPackItem[]> {
-  const data = await apiGet<{ packs: StickerPackItem[] }>("/api/v1/sticker-packs");
+  return (await listStickerPacksPaged()).packs;
+}
+
+/**
+ * 列出「我的表情包」（官方包 + 已添加包，含各自贴纸）——分页形态。
+ *
+ * 分页为可选：不传 limit 时服务端返回全量（向后兼容，nextCursor 恒为 null）；
+ * 传 limit 时按 created_at 升序取一页，用 nextCursor 续页直到为 null。
+ *
+ * @param params.cursor - 上一页响应的 `nextCursor`（RFC3339 时间戳），缺省取第一页
+ * @param params.limit - 每页条数（服务端上限 50；缺省返回全量）
+ * @throws 响应里 `packs` 不是数组时抛错（理由同 {@link listMyStickers}）。
+ */
+export async function listStickerPacksPaged(params?: {
+  cursor?: string;
+  limit?: number;
+}): Promise<StickerPackPage> {
+  const sp = new URLSearchParams();
+  if (params?.cursor) sp.set("cursor", params.cursor);
+  if (params?.limit) sp.set("limit", String(params.limit));
+  const qs = sp.toString();
+  const data = await apiGet<{ packs: StickerPackItem[]; next_cursor: string | null }>(
+    "/api/v1/sticker-packs" + (qs ? "?" + qs : ""),
+  );
   if (!Array.isArray(data.packs)) {
     throw new Error("malformed /sticker-packs response: packs is not an array");
   }
-  return data.packs;
+  return { packs: data.packs, nextCursor: data.next_cursor || null };
 }
 
 // ========================================

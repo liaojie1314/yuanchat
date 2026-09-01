@@ -10,8 +10,8 @@
  * 置换全新 token 对；refresh 也失效时自动清登录态回登录页。
  *
  * API 调用流程：
- * 1. loginWithPassword() → POST /api/v1/users/login → 存储 token
- * 2. registerWithPassword() → POST /api/v1/users/register → 存储 token
+ * 1. loginWithPassword() → POST /api/v1/auth/login → 存储 token
+ * 2. registerWithPassword() → POST /api/v1/auth/register → 存储 token
  * 3. logout() → POST /api/v1/auth/logout → 清空所有状态
  * 4. sessionFromTokens() → 已签发的令牌对（扫码登录）→ 存储 token 并拉 GET /users/me 补资料
  *
@@ -59,7 +59,7 @@ interface UserDTO {
   gender?: number;
 }
 
-/** POST /api/v1/users/login 响应 */
+/** POST /api/v1/auth/login 响应 */
 interface LoginResponse {
   user: UserDTO;
   access_token: string;
@@ -151,7 +151,7 @@ export const useAuthStore = create<AuthState>()(
        * account 支持手机号 / 邮箱（后端 LoginRequest.Account）
        */
       loginWithPassword: async (account: string, password: string) => {
-        const data = await apiPost<LoginResponse>("/api/v1/users/login", {
+        const data = await apiPost<LoginResponse>("/api/v1/auth/login", {
           account,
           password,
         });
@@ -175,7 +175,7 @@ export const useAuthStore = create<AuthState>()(
         captchaAnswer: number,
         nickname: string,
       ) => {
-        const data = await apiPost<LoginResponse>("/api/v1/users/register", {
+        const data = await apiPost<LoginResponse>("/api/v1/auth/register", {
           phone,
           password,
           captcha_id: captchaID,

@@ -491,10 +491,10 @@ function resolveSource(src: {
 export const handlers = [
   // --------------------------------------------------
   // 认证 — 登录
-  // POST /api/v1/users/login
+  // POST /api/v1/auth/login
   // 请求体：{ account: string; password: string }
   // --------------------------------------------------
-  http.post("http://localhost:8085/api/v1/users/login", async ({ request }) => {
+  http.post("http://localhost:8085/api/v1/auth/login", async ({ request }) => {
     await delay(600); // 模拟网络延迟
     const body = (await request.json()) as { account?: string; password?: string };
 
@@ -526,9 +526,9 @@ export const handlers = [
 
   // --------------------------------------------------
   // 认证 — 注册
-  // POST /api/v1/users/register
+  // POST /api/v1/auth/register
   // --------------------------------------------------
-  http.post("http://localhost:8085/api/v1/users/register", async ({ request }) => {
+  http.post("http://localhost:8085/api/v1/auth/register", async ({ request }) => {
     await delay(800);
     const body = (await request.json()) as {
       phone?: string;
@@ -705,21 +705,29 @@ export const handlers = [
   // 贴纸 — 我的表情包列表（官方包 + 已添加的包，与服务端扩展后的语义一致）
   // GET /api/v1/sticker-packs
   // --------------------------------------------------
-  http.get("http://localhost:8085/api/v1/sticker-packs", async () => {
+  http.get("http://localhost:8085/api/v1/sticker-packs", async ({ request }) => {
     await delay(150);
+    const qs = new URL(request.url).searchParams;
+    const limit = Number(qs.get("limit") ?? 0) || 0;
+    const cursor = qs.get("cursor");
     const visible = mockPacks.filter((p) => p.is_official || mockAddedPackIds.has(p.id));
-    return apiOk({
-      packs: visible.map((p) => ({
-        pack: {
-          id: p.id,
-          name: p.name,
-          cover_url: p.cover_url,
-          is_official: p.is_official,
-          sort: 0,
-        },
-        stickers: p.stickers.map(toStickerDTO),
-      })),
+    const toDTO = (p: (typeof visible)[number]) => ({
+      pack: { id: p.id, name: p.name, cover_url: p.cover_url, is_official: p.is_official, sort: 0 },
+      stickers: p.stickers.map(toStickerDTO),
     });
+    // 分页可选：不传 limit 返回全量（向后兼容）；传 limit 按 created_at 升序
+    // 游标分页，next_cursor 为最后一条的 created_at（与服务端 ListPacks 契约一致）
+    if (limit > 0) {
+      const ordered = visible
+        .slice()
+        .sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0));
+      const filtered = cursor ? ordered.filter((p) => p.created_at > cursor) : ordered;
+      const page = filtered.slice(0, limit);
+      const nextCursor =
+        filtered.length > page.length && page.length > 0 ? page[page.length - 1].created_at : null;
+      return apiOk({ packs: page.map(toDTO), next_cursor: nextCursor });
+    }
+    return apiOk({ packs: visible.map(toDTO), next_cursor: null });
   }),
 
   // --------------------------------------------------

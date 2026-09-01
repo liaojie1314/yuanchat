@@ -2,16 +2,27 @@
  * AdminLayout — 左侧导航 + 内容区（桌面优先，管理后台不做移动端适配）
  */
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Users, MessagesSquare, ShieldAlert, Flag, ScrollText, LogOut } from "lucide-react";
+import {
+  LayoutDashboard,
+  Users,
+  MessagesSquare,
+  ShieldAlert,
+  Flag,
+  Sticker,
+  ScrollText,
+  LogOut,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 
 const NAV = [
+  { to: "/overview", icon: LayoutDashboard, labelKey: "admin.nav.overview" },
   { to: "/users", icon: Users, labelKey: "admin.nav.users" },
   { to: "/conversations", icon: MessagesSquare, labelKey: "admin.nav.conversations" },
   { to: "/messages", icon: ShieldAlert, labelKey: "admin.nav.messages" },
   { to: "/moderation", icon: Flag, labelKey: "admin.nav.moderation" },
+  { to: "/sticker-packs", icon: Sticker, labelKey: "admin.nav.stickerPacks" },
   { to: "/audit-logs", icon: ScrollText, labelKey: "admin.nav.auditLogs" },
 ];
 

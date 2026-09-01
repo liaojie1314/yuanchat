@@ -95,17 +95,21 @@ func Setup(
 	forwardH := handler.NewForwardHandler(msgSvc, hub, logger)
 
 	adminRepo := repository.NewAdminRepository(db)
-	adminSvc := service.NewAdminService(adminRepo, convRepo, logger)
-	adminH := handler.NewAdminHandler(adminSvc, hub, logger)
+	flaggedUGCRepo := repository.NewFlaggedUGCRepository(db)
+	adminSvc := service.NewAdminService(adminRepo, convRepo, userRepo, flaggedUGCRepo, logger)
+	adminH := handler.NewAdminHandler(adminSvc, hub, st, logger)
 	reportH := handler.NewReportHandler(adminSvc, logger)
 
 	pushRepo := repository.NewPushRepository(db)
 	pushSvc := service.NewPushService(pushRepo, cfg.Push, logger)
 	pushH := handler.NewPushHandler(pushSvc, logger)
+	// 概览的推送订阅视图与用户侧订阅读写同一张表
+	adminSvc.SetPushRepo(pushRepo)
 
 	e2eeH := handler.NewE2EEHandler(repository.NewE2EERepository(db), logger)
 
-	// 贴纸发送校验：WS 帧里的 sticker_id 必须属于发送者（或属于某个官方包），
+	// 贴纸发送校验：WS 帧里的 sticker_id 必须属于发送者收藏，或属于一个可用表情包
+	//（未下架、未被打标，且为官方包或发送者已添加的包），
 	// 且落库的 key/宽高一律取服务端权威值，不采信客户端传参。
 	wsH.SetStickerResolver(func(ctx context.Context, senderID, stickerID uuid.UUID) (string, int, int, error) {
 		st, err := stickerSvc.ResolveSendable(ctx, senderID, stickerID)
@@ -163,6 +167,9 @@ func Setup(
 	moderationSvc := service.NewModerationService(cfg.Moderation.Words)
 	msgSvc.SetModeration(moderationSvc)
 	stickerSvc.SetModeration(moderationSvc)
+	// UGC 打标走同一词库：昵称 / bio / 群名 / 公告命中进 flagged_ugc 审核队列
+	userSvc.SetUGCModeration(moderationSvc, flaggedUGCRepo)
+	convSvc.SetUGCModeration(moderationSvc, flaggedUGCRepo)
 
 	// 好友上下线帧广播（对本实例在线好友）
 	notifyFriends := func(userID uuid.UUID, online bool) {
@@ -189,6 +196,20 @@ func Setup(
 		})
 		hub.SetPresenceBackend(rp)
 		logger.Info("presence backend: redis", zap.String("channel", cfg.Presence.Channel))
+	}
+
+	// 分布式限流：Redis 客户端由 main 启动时 Ping 校验（失败即 Fatal），
+	// 注入后所有 LimitByIP 改走 Redis 原子令牌桶（多实例共享配额）；
+	// 运行期 Redis 故障时 fail-open 放行（见 middleware.redisAllow 注释）。
+	middleware.SetRateLimitRedis(rdb, logger)
+
+	// 跨实例消息分发：redis 模式下本机投递完成后发布到 Redis channel，
+	// 各实例订阅后投递给自己的本机连接（发布前只投本机 + 订阅端按实例 ID 过滤，不重复）。
+	// 默认 inproc：不注入发布回调，Hub 行为与单实例完全一致。
+	if cfg.Dispatcher.Backend == "redis" {
+		rd := ws.NewRedisDispatcher(rdb, cfg.Dispatcher.Channel, hub, logger)
+		hub.SetRemotePublisher(rd.Publish)
+		logger.Info("dispatcher backend: redis", zap.String("channel", cfg.Dispatcher.Channel))
 	}
 
 	// 好友上下线广播：独立 goroutine 通知在线好友，不阻塞连接注册路径
@@ -230,11 +251,12 @@ func Setup(
 		qr.POST("/:token/confirm", middleware.AuthRequired(cfg.JWT), authH.ConfirmQRSession)
 	}
 
+	// 注册/登录统一收敛到 /auth 前缀，与 /auth/refresh、/auth/password、/auth/qr 对齐
+	api.POST("/auth/register", middleware.LimitByIP(5, 10), userH.Register)
+	api.POST("/auth/login", middleware.LimitByIP(10, 20), userH.Login)
+
 	users := api.Group("/users")
 	{
-		users.POST("/register", middleware.LimitByIP(5, 10), userH.Register)
-		users.POST("/login", middleware.LimitByIP(10, 20), userH.Login)
-
 		authUsers := users.Group("", middleware.AuthRequired(cfg.JWT))
 		{
 			authUsers.GET("/me", userH.GetProfile)
@@ -313,6 +335,7 @@ func Setup(
 		admin.GET("/users", adminH.ListUsers)
 		admin.POST("/users/:id/ban", adminH.BanUser)
 		admin.DELETE("/users/:id/ban", adminH.UnbanUser)
+		admin.POST("/users/:id/reset-avatar", adminH.ResetAvatar)
 		admin.GET("/conversations", adminH.ListConversations)
 		admin.POST("/conversations/:id/dissolve", adminH.DissolveConversation)
 		admin.GET("/messages", adminH.ListMessages)
@@ -320,10 +343,20 @@ func Setup(
 		admin.DELETE("/messages/:id/flag", adminH.ClearMessageFlag)
 		admin.GET("/sticker-packs", adminH.ListStickerPacks)
 		admin.POST("/sticker-packs/:id/takedown", adminH.TakeDownStickerPack)
+		admin.POST("/sticker-packs/:id/untakedown", adminH.UntakeDownStickerPack)
+		admin.POST("/sticker-packs/:id/official", adminH.SetStickerPackOfficial)
 		admin.DELETE("/sticker-packs/:id/flag", adminH.ClearStickerPackFlag)
 		admin.GET("/reports", adminH.ListReports)
 		admin.POST("/reports/:id/handle", adminH.HandleReport)
+		admin.GET("/messages/:id/media", adminH.MessageMedia)
+		admin.GET("/flagged-ugc", adminH.ListFlaggedUGC)
+		admin.POST("/flagged-ugc/:id/reset", adminH.ResetFlaggedUGC)
+		admin.DELETE("/flagged-ugc/:id", adminH.DismissFlaggedUGC)
 		admin.GET("/audit-logs", adminH.ListAuditLogs)
+		// 只读概览：聚合指标与推送订阅视图，不写审计日志
+		admin.GET("/stats", adminH.Stats)
+		admin.GET("/storage-stats", adminH.StorageStats)
+		admin.GET("/push-subscriptions", adminH.ListPushSubscriptions)
 	}
 
 	return r, wsH

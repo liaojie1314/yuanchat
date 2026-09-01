@@ -8,7 +8,13 @@
  * - GET    /api/v1/sticker-packs   官方表情包（同上）
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { addSticker, removeSticker, listMyStickers, listStickerPacks } from "../api/stickers";
+import {
+  addSticker,
+  removeSticker,
+  listMyStickers,
+  listStickerPacks,
+  listStickerPacksPaged,
+} from "../api/stickers";
 
 /** 桩：一次 apiGet/apiPost/apiDelete 信封响应 */
 function mockApiOnce(data: unknown) {
@@ -121,5 +127,54 @@ describe("listStickerPacks", () => {
   it("rejects a malformed response instead of pretending no pack exists", async () => {
     mockApiOnce({});
     await expect(listStickerPacks()).rejects.toThrow(/not an array/);
+  });
+});
+
+describe("listStickerPacksPaged", () => {
+  beforeEach(() => vi.unstubAllGlobals());
+
+  it("forwards cursor/limit params and maps next_cursor", async () => {
+    mockApiOnce({ packs: [], next_cursor: "2026-08-01T00:00:00Z" });
+
+    const result = await listStickerPacksPaged({ cursor: "2026-07-31T00:00:00Z", limit: 2 });
+
+    expect(callArgs()[0]).toContain(
+      "/api/v1/sticker-packs?cursor=2026-07-31T00%3A00%3A00Z&limit=2",
+    );
+    expect(result).toEqual({ packs: [], nextCursor: "2026-08-01T00:00:00Z" });
+  });
+
+  it("returns null nextCursor when the server omits it (full mode)", async () => {
+    mockApiOnce({ packs: [] });
+
+    const result = await listStickerPacksPaged();
+
+    expect(callArgs()[0]).toBe("http://localhost:8085/api/v1/sticker-packs");
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it("keeps pack + stickers nesting on paged responses", async () => {
+    mockApiOnce({
+      packs: [
+        {
+          pack: { id: "p1", name: "默认表情", is_official: true, sort: 0 },
+          stickers: [{ id: "s1", object_key: "images/x.png", width: 96, height: 96 }],
+        },
+      ],
+      next_cursor: null,
+    });
+
+    const result = await listStickerPacksPaged({ limit: 10 });
+
+    expect(result.packs[0].pack.name).toBe("默认表情");
+    expect(result.packs[0].stickers).toHaveLength(1);
+  });
+
+  it("rejects a malformed response instead of pretending no pack exists", async () => {
+    mockApiOnce({});
+    await expect(listStickerPacksPaged()).rejects.toThrow(/not an array/);
+
+    mockApiOnce({ packs: null });
+    await expect(listStickerPacksPaged()).rejects.toThrow(/not an array/);
   });
 });

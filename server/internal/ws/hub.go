@@ -26,6 +26,10 @@ type Hub struct {
 	presenceNotifier func(userID uuid.UUID, online bool)
 	// backend 全局在线视图后端：本地事件外发 + 远端实例在线镜像（多实例部署）
 	backend PresenceBackend
+	// remotePublisher 跨实例分发发布回调（Redis 模式下由装配层注入）：
+	// SendToUsers 在完成本机投递后调用，把帧发布到 Redis channel 供其他实例投递。
+	// nil 表示进程内分发（单实例默认），行为与历史版本完全一致。
+	remotePublisher func(userIDs []uuid.UUID, data []byte)
 }
 
 // NewHub 创建 Hub。maxConnPerUser ≤ 0 表示不限制。
@@ -108,9 +112,29 @@ func (h *Hub) Unregister(c *Client) {
 	}
 }
 
-// SendToUsers 向目标用户的所有在线连接投递数据。
+// SetRemotePublisher 注入跨实例分发发布回调（装配层在启动前调用一次）。
+// 注入后 SendToUsers = 本机投递 + 发布到 Redis channel；订阅端收到其他实例
+// 的帧后调用 DeliverLocal 投递给本机连接，两条路径对本机恰好各投一次。
+func (h *Hub) SetRemotePublisher(fn func(userIDs []uuid.UUID, data []byte)) {
+	h.remotePublisher = fn
+}
+
+// SendToUsers 向目标用户的所有在线连接投递数据：先本机投递，
+// 若装配了跨实例发布回调则在锁外发布（发布走网络 IO，不能持锁）。
 // 发送通道已满时丢弃该帧（慢连接不应阻塞整个分发），仅记录日志。
 func (h *Hub) SendToUsers(userIDs []uuid.UUID, data []byte) {
+	h.DeliverLocal(userIDs, data)
+
+	// 锁外发布：DeliverLocal 已释放读锁；发布失败只记日志（发布是尽力而为，
+	// 其他实例漏收一帧属于跨实例模式可接受的降级，不回滚本机已完成的投递）
+	if h.remotePublisher != nil && len(userIDs) > 0 {
+		h.remotePublisher(userIDs, data)
+	}
+}
+
+// DeliverLocal 仅向本实例连接投递（不触发跨实例发布）。
+// 供 RedisDispatcher 的订阅协程回放其他实例发来的帧，避免「订阅→发布」自环。
+func (h *Hub) DeliverLocal(userIDs []uuid.UUID, data []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -125,6 +149,19 @@ func (h *Hub) SendToUsers(userIDs []uuid.UUID, data []byte) {
 			}
 		}
 	}
+}
+
+// TotalConnections 返回本实例当前全部 WebSocket 在线连接总数
+// （一个用户多设备在线按多条计）。管理端概览的运行时指标从这里取数，
+// 读锁保护，O(用户数) 遍历。
+func (h *Hub) TotalConnections() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	n := 0
+	for _, conns := range h.clients {
+		n += len(conns)
+	}
+	return n
 }
 
 // OnlineCount 返回某用户当前在线连接数（测试与调试用）。

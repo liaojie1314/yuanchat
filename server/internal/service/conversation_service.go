@@ -88,6 +88,33 @@ type ConversationService struct {
 	contactRepo *repository.ContactRepository
 	userRepo    *repository.UserRepository
 	logger      *zap.Logger
+
+	// UGC 审核：群名 / 群公告命中敏感词时照常写入，但记入 flagged_ugc 审核队列。
+	// 两者均可为 nil（未接线或未配置词库时跳过审核）。
+	moderation *ModerationService
+	ugcRepo    *repository.FlaggedUGCRepository
+}
+
+// SetUGCModeration 注入 UGC 敏感词审核依赖（router 接线用）。
+func (s *ConversationService) SetUGCModeration(m *ModerationService, r *repository.FlaggedUGCRepository) {
+	s.moderation = m
+	s.ugcRepo = r
+}
+
+// flagUGC 记录一条群维度的 UGC 敏感词命中（群名 / 公告）。
+// 记录失败只告警：打标不阻塞，群操作本身已提交成功。
+func (s *ConversationService) flagUGC(ctx context.Context, ugcType, content, hitWord string, operatorID, convID uuid.UUID) {
+	rec := &model.FlaggedUGC{
+		UGCType:        ugcType,
+		Content:        content,
+		HitWord:        hitWord,
+		UserID:         &operatorID,
+		ConversationID: &convID,
+	}
+	if err := s.ugcRepo.Create(ctx, rec); err != nil {
+		s.logger.Warn("record flagged ugc failed",
+			zap.String("ugc_type", ugcType), zap.String("conversation_id", convID.String()), zap.Error(err))
+	}
 }
 
 func NewConversationService(

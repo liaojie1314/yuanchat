@@ -20,10 +20,7 @@ import (
 	"github.com/yuanchat/server/internal/pkg/password"
 	"github.com/yuanchat/server/internal/testutil"
 	"go.uber.org/zap"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
-	"gorm.io/gorm/schema"
 )
 
 // recordingSender 是验证码下发通道的测试替身：只把码记下来，不真的发。
@@ -101,32 +98,11 @@ func doLogout(r *gin.Engine, token string) *httptest.ResponseRecorder {
 	return w
 }
 
-// authTestDB 连接本地开发库（deploy/docker-compose.yml 的 postgres :5434），
+// authTestDB 返回独立测试库上的事务句柄（跑完整迁移、用例结束回滚），
 // 不可达时跳过集成用例。范式同 internal/service 的 testDB。
 func authTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := "host=localhost port=5434 user=yuanchat password=yuanchat_dev dbname=yuanchat sslmode=disable"
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
-		NamingStrategy: schema.NamingStrategy{
-			SingularTable: true,
-		},
-		SkipDefaultTransaction: true,
-	})
-	if err != nil {
-		t.Skipf("dev postgres unavailable, skip integration test: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil || sqlDB.Ping() != nil {
-		t.Skip("dev postgres unavailable, skip integration test")
-	}
-	// 每个用例开一个连接池，因此必须限量并在结束时关闭：dev 库 max_connections = 100，
-	// 池子只开不关时全量 -race 跑到后半程会撞 53300（too many clients），
-	// 集成用例被迫跳过，看起来像「库不可达」，实际是自己把连接耗光了
-	sqlDB.SetMaxOpenConns(4)
-	sqlDB.SetMaxIdleConns(2)
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	return db
+	return testutil.NewDB(t)
 }
 
 // newBannedUser 建一个被封禁的一次性用户，用后删除。
@@ -258,10 +234,10 @@ func TestForgotPasswordFlowChangesPassword(t *testing.T) {
 	}
 
 	// 旧密码必须失效，否则「重置成功」依旧是假的
-	if w := postJSON(r, "/api/v1/users/login", `{"account":"`+phone+`","password":"`+oldPassword+`"}`); w.Code != http.StatusUnauthorized {
+	if w := postJSON(r, "/api/v1/auth/login", `{"account":"`+phone+`","password":"`+oldPassword+`"}`); w.Code != http.StatusUnauthorized {
 		t.Fatalf("旧密码登录 status = %d, want 401, body=%s", w.Code, w.Body.String())
 	}
-	if w := postJSON(r, "/api/v1/users/login", `{"account":"`+phone+`","password":"`+newPassword+`"}`); w.Code != http.StatusOK {
+	if w := postJSON(r, "/api/v1/auth/login", `{"account":"`+phone+`","password":"`+newPassword+`"}`); w.Code != http.StatusOK {
 		t.Fatalf("新密码登录 status = %d, want 200, body=%s", w.Code, w.Body.String())
 	}
 }
@@ -328,13 +304,13 @@ func TestLoginLocksAccountAfterFiveFailures(t *testing.T) {
 	phone := *user.Phone
 
 	for i := 0; i < 5; i++ {
-		w := postJSON(r, "/api/v1/users/login", `{"account":"`+phone+`","password":"`+badPassword+`"}`)
+		w := postJSON(r, "/api/v1/auth/login", `{"account":"`+phone+`","password":"`+badPassword+`"}`)
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("第 %d 次错误密码 status = %d, want 401, body=%s", i+1, w.Code, w.Body.String())
 		}
 	}
 
-	w := postJSON(r, "/api/v1/users/login", `{"account":"`+phone+`","password":"`+goodPassword+`"}`)
+	w := postJSON(r, "/api/v1/auth/login", `{"account":"`+phone+`","password":"`+goodPassword+`"}`)
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("锁定后 status = %d, want 429, body=%s", w.Code, w.Body.String())
 	}

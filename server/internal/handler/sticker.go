@@ -137,10 +137,14 @@ func (h *StickerHandler) ListMine(c *gin.Context) {
 
 // ListPacks 列出「我的表情包」= 官方包 + 已添加包及各自贴纸（GET /sticker-packs）。
 // 返回结构与 H1 保持一致（{packs: [{pack, stickers}]}），集合语义随商城扩展。
+// 分页为可选：不传 limit 时返回全量；传 limit（可带 cursor）时按 created_at 升序
+// 游标分页，响应多一个 next_cursor（无下一页为 null）。
 //
 //	@Summary		我的表情包列表（官方包 + 已添加包）
 //	@Tags			stickers
 //	@Security		BearerAuth
+//	@Param			cursor	query	string	false	"游标（RFC3339，上一页 next_cursor）"
+//	@Param			limit	query	int		false	"每页条数（上限 50；缺省返回全量）"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/sticker-packs [get]
 func (h *StickerHandler) ListPacks(c *gin.Context) {
@@ -149,11 +153,21 @@ func (h *StickerHandler) ListPacks(c *gin.Context) {
 		Unauthorized(c, "unauthorized")
 		return
 	}
-	packs, err := h.svc.ListPacks(c.Request.Context(), userID)
+	// limit 缺省（0）= 不分页返回全量；仅显式传了合法整数才走分页
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "0"))
+	packs, nextCursor, err := h.svc.ListPacks(c.Request.Context(), userID, c.Query("cursor"), limit)
 	if err != nil {
+		if errors.Is(err, service.ErrInvalidCursor) {
+			BadRequest(c, "invalid cursor")
+			return
+		}
 		h.logger.Error("list sticker packs failed", zap.Error(err))
 		InternalError(c, "list sticker packs failed")
 		return
 	}
-	Success(c, gin.H{"packs": packs})
+	var cursorField any
+	if nextCursor != "" {
+		cursorField = nextCursor
+	}
+	Success(c, gin.H{"packs": packs, "next_cursor": cursorField})
 }
