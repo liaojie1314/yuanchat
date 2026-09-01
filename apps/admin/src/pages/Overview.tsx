@@ -6,12 +6,22 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, RefreshCw, Users, MessagesSquare, ShieldAlert, Bell } from "lucide-react";
+import {
+  ChevronRight,
+  RefreshCw,
+  Users,
+  MessagesSquare,
+  ShieldAlert,
+  Bell,
+  HardDrive,
+} from "lucide-react";
 import {
   getStats,
   listPushSubscriptions,
+  getStorageStats,
   type AdminStats,
   type AdminPushSubscription,
+  type StorageStats,
 } from "../api";
 import { DataTable, Pager, EmptyRow } from "../components/Table";
 import { cn } from "@yuanchat/shared/utils";
@@ -87,17 +97,52 @@ const TYPE_KEYS = [
   { type: "sticker", labelKey: "admin.overview.typeSticker" },
 ] as const;
 
+/** 存储类别行顺序与对应 i18n key（check-i18n 要求字面量 key）。 */
+const STORAGE_KEYS = [
+  { category: "avatar", labelKey: "admin.storage.avatar" },
+  { category: "sticker", labelKey: "admin.storage.sticker" },
+  { category: "sticker_cover", labelKey: "admin.storage.stickerCover" },
+  { category: "message_image", labelKey: "admin.storage.messageImage" },
+  { category: "message_file", labelKey: "admin.storage.messageFile" },
+  { category: "message_voice", labelKey: "admin.storage.messageVoice" },
+] as const;
+
+/** 字节数人性化显示（未知为 null →「—」）。 */
+function formatBytes(bytes: number | null): string {
+  if (bytes === null) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let v = bytes;
+  let i = -1;
+  do {
+    v /= 1024;
+    i++;
+  } while (v >= 1024 && i < units.length - 1);
+  return `${v.toFixed(1)} ${units[i]}`;
+}
+
 /** 概览页组件：一次拉取聚合指标，订阅表格独立分页加载。 */
 export function OverviewPage() {
   const { t } = useTranslation();
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [failed, setFailed] = useState(false);
+  // 存储统计区块状态（独立于指标刷新）
+  const [storage, setStorage] = useState<StorageStats | null>(null);
+  const [storageLoading, setStorageLoading] = useState(true);
+  const [storageFailed, setStorageFailed] = useState(false);
 
   const load = () => {
     setFailed(false);
     getStats()
       .then(setStats)
       .catch(() => setFailed(true));
+    // 存储统计独立拉取：失败只影响本区块，不牵连指标卡片
+    setStorageFailed(false);
+    setStorageLoading(true);
+    getStorageStats()
+      .then(setStorage)
+      .catch(() => setStorageFailed(true))
+      .finally(() => setStorageLoading(false));
   };
   useEffect(load, []);
 
@@ -251,6 +296,35 @@ export function OverviewPage() {
             />
           </>
         )}
+      </div>
+
+      {/* 存储统计（DB 聚合口径：按对象类别的引用计数与已知字节数） */}
+      <div className="mt-6">
+        <SectionTitle icon={HardDrive} label={t("admin.storage.title")} />
+      </div>
+      {storageFailed && (
+        <p className="mb-2 text-body-md text-error">{t("admin.storage.loadFailed")}</p>
+      )}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+        {storageLoading && Array.from({ length: 6 }, (_, i) => <MetricCardSkeleton key={i} />)}
+        {!storageLoading &&
+          STORAGE_KEYS.map(({ category, labelKey }) => {
+            const row = storage?.categories.find((c) => c.category === category);
+            return (
+              <div
+                key={category}
+                className="rounded-xl border border-outline-variant bg-surface-container-low px-4 py-3 shadow-elevation-1"
+              >
+                <p className="text-label-md text-on-surface-variant">{t(labelKey)}</p>
+                <p className="mt-1 text-title-md font-semibold tabular-nums text-on-surface">
+                  {(row?.object_count ?? 0).toLocaleString()}
+                </p>
+                <p className="text-label-sm text-on-surface-variant">
+                  {formatBytes(row?.total_bytes ?? null)}
+                </p>
+              </div>
+            );
+          })}
       </div>
 
       {/* 推送订阅 */}

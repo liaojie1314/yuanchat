@@ -227,6 +227,37 @@ func (s *AdminService) ClearMessageFlag(ctx context.Context, actorID, messageID 
 	return nil
 }
 
+// ResetAvatar 管理员重置用户头像：avatar_url 置空，前端回退默认头像渲染。
+// 对象存储里的旧头像文件不强删——cmd/gc 按数据库引用回收，引用清空后自然过期。
+// 写审计（action=reset_avatar）。
+func (s *AdminService) ResetAvatar(ctx context.Context, actorID, targetID uuid.UUID) error {
+	ok, err := s.repo.ClearUserAvatar(ctx, targetID)
+	if err != nil {
+		return fmt.Errorf("clear avatar: %w", err)
+	}
+	if !ok {
+		return ErrUserNotFound
+	}
+	s.audit(ctx, actorID, model.AdminActionResetAvatar, "user", targetID.String(), nil)
+	return nil
+}
+
+// StorageStats 存储统计响应（按对象类别的只读聚合，无分页）。
+type StorageStats struct {
+	// Categories 各对象类别的对象数与已知字节数合计
+	Categories []repository.StorageStat `json:"categories"`
+}
+
+// StorageStats 按对象类别聚合对象存储占用（DB 口径，只读，不写审计日志）。
+// 聚合细节与口径取舍见 repository.AdminRepository.CountStorageStats。
+func (s *AdminService) StorageStats(ctx context.Context) (*StorageStats, error) {
+	rows, err := s.repo.CountStorageStats(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("storage stats: %w", err)
+	}
+	return &StorageStats{Categories: rows}, nil
+}
+
 // SearchStickerPacks 分页检索表情包；flaggedOnly=true 只看敏感词命中的（审核队列）。
 func (s *AdminService) SearchStickerPacks(ctx context.Context, q string, flaggedOnly bool, page, size int) ([]repository.AdminStickerPack, int64, error) {
 	return s.repo.SearchStickerPacks(ctx, q, flaggedOnly, (page-1)*size, size)

@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "@yuanchat/ui";
-import { listUsers, banUser, unbanUser, type AdminUser } from "../api";
+import { listUsers, banUser, unbanUser, resetUserAvatar, type AdminUser } from "../api";
 import { usePagedQuery } from "../hooks/usePagedQuery";
 import { SearchBox, DataTable, Pager, EmptyRow } from "../components/Table";
 
@@ -16,6 +16,7 @@ export function UsersPage() {
   const { q, search, page, setPage, list, total, totalPages, loading, refresh } =
     usePagedQuery<AdminUser>((query, p) => listUsers(query, p), 20, 0, searchParams.get("q") ?? "");
   const [banTarget, setBanTarget] = useState<AdminUser | null>(null);
+  const [avatarTarget, setAvatarTarget] = useState<AdminUser | null>(null);
 
   const headers = [
     t("admin.users.colUser"),
@@ -77,18 +78,28 @@ export function UsersPage() {
               {new Date(u.created_at).toLocaleDateString()}
             </td>
             <td className="px-4 py-3">
-              {u.role !== 1 && (
-                <button
-                  onClick={() => void handleToggleBan(u)}
-                  className={
-                    u.status === 2
-                      ? "text-label-lg text-primary hover:underline"
-                      : "text-label-lg text-error hover:underline"
-                  }
-                >
-                  {u.status === 2 ? t("admin.users.unban") : t("admin.users.ban")}
-                </button>
-              )}
+              <div className="flex items-center gap-3">
+                {u.role !== 1 && (
+                  <button
+                    onClick={() => void handleToggleBan(u)}
+                    className={
+                      u.status === 2
+                        ? "text-label-lg text-primary hover:underline"
+                        : "text-label-lg text-error hover:underline"
+                    }
+                  >
+                    {u.status === 2 ? t("admin.users.unban") : t("admin.users.ban")}
+                  </button>
+                )}
+                {u.avatar_url && (
+                  <button
+                    onClick={() => setAvatarTarget(u)}
+                    className="text-label-lg text-error hover:underline"
+                  >
+                    {t("admin.users.resetAvatar")}
+                  </button>
+                )}
+              </div>
             </td>
           </tr>
         ))}
@@ -107,6 +118,18 @@ export function UsersPage() {
           if (target) void banUser(target.id).then(refresh);
         }}
         onCancel={() => setBanTarget(null)}
+      />
+      <ConfirmDialog
+        open={avatarTarget !== null}
+        title={t("admin.users.resetAvatar")}
+        message={t("admin.users.resetAvatarConfirm", { name: avatarTarget?.nickname ?? "" })}
+        danger
+        onConfirm={() => {
+          const target = avatarTarget;
+          setAvatarTarget(null);
+          if (target) void resetUserAvatar(target.id).then(refresh);
+        }}
+        onCancel={() => setAvatarTarget(null)}
       />
     </div>
   );

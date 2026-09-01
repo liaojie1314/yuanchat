@@ -35,4 +35,6 @@ const (
 	AdminActionUntakeDownPack  = "untake_down_sticker_pack"
 	AdminActionSetPackOfficial = "set_sticker_pack_official"
 	AdminActionClearPackFlag   = "clear_sticker_pack_flag"
+	// AdminActionResetAvatar 管理端重置用户头像（avatar_url 置空，恢复默认头像）。
+	AdminActionResetAvatar = "reset_avatar"
 )

@@ -319,6 +319,7 @@ func Setup(
 		admin.GET("/users", adminH.ListUsers)
 		admin.POST("/users/:id/ban", adminH.BanUser)
 		admin.DELETE("/users/:id/ban", adminH.UnbanUser)
+		admin.POST("/users/:id/reset-avatar", adminH.ResetAvatar)
 		admin.GET("/conversations", adminH.ListConversations)
 		admin.POST("/conversations/:id/dissolve", adminH.DissolveConversation)
 		admin.GET("/messages", adminH.ListMessages)
@@ -338,6 +339,7 @@ func Setup(
 		admin.GET("/audit-logs", adminH.ListAuditLogs)
 		// 只读概览：聚合指标与推送订阅视图，不写审计日志
 		admin.GET("/stats", adminH.Stats)
+		admin.GET("/storage-stats", adminH.StorageStats)
 		admin.GET("/push-subscriptions", adminH.ListPushSubscriptions)
 	}
 

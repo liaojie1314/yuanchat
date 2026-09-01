@@ -49,6 +49,15 @@ func (r *AdminRepository) SetUserStatus(ctx context.Context, userID uuid.UUID, s
 	return res.RowsAffected > 0, res.Error
 }
 
+// ClearUserAvatar 清空用户的 avatar_url（管理端重置头像）。返回是否命中记录。
+// 对象存储里的旧头像文件不在此处删除：cmd/gc 以数据库引用（含 users.avatar_url）
+// 判定对象是否可回收，引用清空后旧头像会经 GC 通道自然回收，无需强删。
+func (r *AdminRepository) ClearUserAvatar(ctx context.Context, userID uuid.UUID) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.User{}).
+		Where("id = ?", userID).Update("avatar_url", nil)
+	return res.RowsAffected > 0, res.Error
+}
+
 // ---------- 会话 ----------
 
 // ConvWithCount 会话及成员数。
@@ -130,10 +139,25 @@ func (r *AdminRepository) FindMessage(ctx context.Context, messageID uuid.UUID) 
 	return &msg, nil
 }
 
-// DeleteMessage 软删除一条消息（管理员强制删除）。返回是否命中。
+// DeleteMessage 软删除一条消息（管理员强制删除），并在同一事务里级联删除
+// 引用该消息的收藏行：收藏虽是快照设计（用户侧撤回后仍可看），但管理员强制
+// 删除代表内容违规，快照不应继续存活。返回是否命中消息。
+// HandleReport 的 delete 处置复用本方法，两条 admin 删除路径口径一致。
 func (r *AdminRepository) DeleteMessage(ctx context.Context, messageID uuid.UUID) (bool, error) {
-	res := r.db.WithContext(ctx).Delete(&model.Message{}, "id = ?", messageID)
-	return res.RowsAffected > 0, res.Error
+	var hit bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Delete(&model.Message{}, "id = ?", messageID)
+		if res.Error != nil {
+			return res.Error
+		}
+		hit = res.RowsAffected > 0
+		if !hit {
+			return nil
+		}
+		// 级联清收藏：无悬挂收藏快照
+		return tx.Where("message_id = ?", messageID).Delete(&model.Favorite{}).Error
+	})
+	return hit, err
 }
 
 // ClearFlag 清除消息的 flagged 标记（审核通过保留）。返回是否命中。
@@ -368,6 +392,54 @@ func (r *AdminRepository) CountVerificationCodeStats(ctx context.Context) (today
 	err = r.db.WithContext(ctx).Model(&model.VerificationCode{}).
 		Where("created_at >= ?", weekStart).Count(&week).Error
 	return
+}
+
+// StorageStat 单一对象类别的存储占用口径行。
+type StorageStat struct {
+	// Category 类别名：avatar / sticker / sticker_cover /
+	// message_image / message_file / message_voice
+	Category string `json:"category"`
+	// ObjectCount 该类别引用的对象数
+	ObjectCount int64 `json:"object_count"`
+	// TotalBytes 已知字节数合计；类别元数据不含大小时为 nil（前端显示「—」）
+	TotalBytes *int64 `json:"total_bytes"`
+}
+
+// CountStorageStats 按对象类别做 DB 聚合的存储统计（只读，单条 SQL）。
+//
+// 口径说明：
+//   - avatar：users.avatar_url 非空的行数（URL 不含对象键，字节数未知 → nil）；
+//   - sticker：stickers 表行数（内容寻址去重后的唯一贴纸对象，无 size 字段 → nil）；
+//   - sticker_cover：sticker_packs.cover_url 非空的行数（字节数未知 → nil）；
+//   - message_image / message_file / message_voice：未删除消息按类型计数，
+//     并对 content JSONB 里的 size 字段求和（WS 写入路径强制要求 size>0，
+//     历史数据缺失该字段时 COALESCE 按 0 计入）。
+//
+// 不走 MinIO ListObjects 全桶遍历：桶随消息量线性增长，遍历成本不可控，
+// 且 DB 口径天然只统计「仍被引用」的对象，与 GC 视角一致。
+func (r *AdminRepository) CountStorageStats(ctx context.Context) ([]StorageStat, error) {
+	rows := []StorageStat{}
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT 'avatar' AS category, COUNT(*) AS object_count, NULL::bigint AS total_bytes
+			FROM users WHERE avatar_url IS NOT NULL AND deleted_at IS NULL
+		UNION ALL
+		SELECT 'sticker', COUNT(*), NULL::bigint
+			FROM stickers
+		UNION ALL
+		SELECT 'sticker_cover', COUNT(*), NULL::bigint
+			FROM sticker_packs WHERE cover_url IS NOT NULL
+		UNION ALL
+		SELECT 'message_image', COUNT(*), COALESCE(SUM((content->>'size')::bigint), 0)
+			FROM messages WHERE deleted_at IS NULL AND message_type = ?
+		UNION ALL
+		SELECT 'message_file', COUNT(*), COALESCE(SUM((content->>'size')::bigint), 0)
+			FROM messages WHERE deleted_at IS NULL AND message_type = ?
+		UNION ALL
+		SELECT 'message_voice', COUNT(*), COALESCE(SUM((content->>'size')::bigint), 0)
+			FROM messages WHERE deleted_at IS NULL AND message_type = ?`,
+		model.MessageTypeImage, model.MessageTypeFile, model.MessageTypeVoice).
+		Scan(&rows).Error
+	return rows, err
 }
 
 // ---------- 审计日志 ----------

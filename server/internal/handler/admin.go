@@ -125,6 +125,34 @@ func (h *AdminHandler) UnbanUser(c *gin.Context) {
 	Success(c, gin.H{"banned": false})
 }
 
+// ResetAvatar 管理端重置用户头像：avatar_url 置空，恢复默认头像。
+//
+//	@Summary		管理端：重置用户头像
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"用户 id"
+//	@Success		200	{object}	Response
+//	@Failure		404	{object}	Response	"用户不存在"
+//	@Router			/api/v1/admin/users/{id}/reset-avatar [post]
+func (h *AdminHandler) ResetAvatar(c *gin.Context) {
+	actorID, _ := middleware.GetUserID(c)
+	targetID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid user id")
+		return
+	}
+	if err := h.svc.ResetAvatar(c.Request.Context(), actorID, targetID); err != nil {
+		if errors.Is(err, service.ErrUserNotFound) {
+			NotFound(c, "user not found")
+			return
+		}
+		h.logger.Error("admin reset avatar failed", zap.Error(err))
+		InternalError(c, "reset avatar failed")
+		return
+	}
+	Success(c, gin.H{"reset": true})
+}
+
 // ListConversations 分页检索会话。
 //
 //	@Summary		管理端：会话列表 / 搜索
@@ -649,6 +677,23 @@ func (h *AdminHandler) Stats(c *gin.Context) {
 		return
 	}
 	stats.Runtime.OnlineConnections = int64(h.hub.TotalConnections())
+	Success(c, stats)
+}
+
+// StorageStats 按对象类别的存储占用统计（只读 DB 聚合，不写审计日志）。
+//
+//	@Summary		管理端：存储统计
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/storage-stats [get]
+func (h *AdminHandler) StorageStats(c *gin.Context) {
+	stats, err := h.svc.StorageStats(c.Request.Context())
+	if err != nil {
+		h.logger.Error("admin storage stats failed", zap.Error(err))
+		InternalError(c, "storage stats failed")
+		return
+	}
 	Success(c, stats)
 }
 

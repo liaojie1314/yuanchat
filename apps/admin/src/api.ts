@@ -100,6 +100,11 @@ export function unbanUser(id: string) {
   return apiDelete<{ banned: boolean }>(`/api/v1/admin/users/${id}/ban`);
 }
 
+/** 重置用户头像（avatar_url 置空，恢复默认头像；旧对象由 GC 通道回收） */
+export function resetUserAvatar(id: string) {
+  return apiPost<{ reset: boolean }>(`/api/v1/admin/users/${id}/reset-avatar`, {});
+}
+
 export function listConversations(q: string, type: number, page: number, size = 20) {
   return pagedGet<AdminConversation>(
     `/api/v1/admin/conversations${qs({ q, type: type || undefined, page, size })}`,
@@ -303,6 +308,23 @@ export interface AdminStats {
 /** 拉取运营概览聚合指标（只读快照） */
 export function getStats() {
   return pagedGetSingle<AdminStats>("/api/v1/admin/stats");
+}
+
+/** 单一对象类别的存储统计行（bytes 未知为 null） */
+export interface StorageStat {
+  category: string;
+  object_count: number;
+  total_bytes: number | null;
+}
+
+/** 存储统计响应（GET /admin/storage-stats，DB 聚合口径） */
+export interface StorageStats {
+  categories: StorageStat[];
+}
+
+/** 拉取按对象类别的存储占用统计（只读） */
+export function getStorageStats() {
+  return pagedGetSingle<StorageStats>("/api/v1/admin/storage-stats");
 }
 
 /** 管理端推送订阅视图（附所属用户昵称） */
