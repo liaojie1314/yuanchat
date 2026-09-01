@@ -833,3 +833,7 @@ Android WebView 会把「滚动时才浮现的覆盖式滚动条」换成**常�
 4. 故障排查 / 踩坑记录 → 追加到 `.claude/TROUBLESHOOTING.md`（按平台分类）
 5. 本文档和 `.claude/TROUBLESHOOTING.md` 必须并行更新，所有 AI 会话必须遵守此规则
 6. `.github/workflows/` 的变更须同步更新本文档"CI/CD 与发版"章节，签名策略变化须更新 `docs/RELEASE.md`
+
+### 多实例部署配置
+
+多实例部署需同时设置 `presence.backend=redis` 与 `dispatcher.backend=redis`（后者默认 `inproc`，仅影响实时帧跨实例投递），两功能共用 Redis 实例；限流在 Redis 客户端注入后自动走分布式令牌桶，无需额外配置。

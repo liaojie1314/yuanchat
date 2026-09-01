@@ -412,34 +412,34 @@ yuanchat/
 | ⚪   | H1c 付费贴纸为候选，未立项（数据模型未预留 price 字段）                                                                                                                                                                                                                      |
 | ⚪   | H1d 贴纸 DIY（裁剪 + 加字直通商城）为候选，见 K 泳道 K9；商城入口已收敛为设置页 + 表情选择器两处                                                                                                                                                                             |
 
-#### 2.5 管理端治理（admin-hardening，2026-09-02 进行中）
+#### 2.5 管理端治理（admin-hardening，2026-09-02）
 
 分支 `feature/admin-hardening`，范围 = admin-gap-audit 全部缺口（P0/P1/P2 全清，「明确不做」除外）：
 
-| 批次   | 内容                                                                                                                                                  | 状态   |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| A      | 审核补漏：非文本消息媒体预览（admin 专用授权签发通道）、昵称/群名/公告/bio 敏感词打标进 `flagged_ugc`（016 迁移）+ 强制重置、user 举报一键封禁 + 深链 | ✅     |
-| B      | 运营仪表盘：`GET /admin/stats` 聚合指标 + 概览页（设为默认首页）、好友申请/OTP 量（verification_codes 台账）、Web Push 订阅视图、WS 在线连接数        | ✅     |
-| C      | 贴纸包治理：admin 全量管理页、untakedown + is_official 端点（写审计）、flagged 包商城暂隐（发布者/已添加者保留，清标记恢复）                          | ✅     |
-| D      | 补漏小项：admin 重置头像（P0-3）、存储统计视图（P1-3，DB 聚合口径）、admin 删消息级联清收藏（P2-1）                                                   | ✅     |
-| 搭车   | captcha 两缺陷修复、DB_SCHEMA 按 001-015 重建（compose 镜像核实已钉版本）                                                                             | ✅     |
-| 债收口 | `/auth/*` 前缀统一（/users/register、/users/login 迁移，破坏性变更前后端同版处理）、WS 贴纸发送口径收紧、`GET /sticker-packs` 游标分页、B7 覆盖率门禁 | ✅     |
-| 债收口 | 限流改 Redis 原子令牌桶 + Dispatcher Redis Pub/Sub 跨实例分发（默认 inproc，单实例行为不变）                                                          | 进行中 |
+| 批次   | 内容                                                                                                                                                  | 状态 |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| A      | 审核补漏：非文本消息媒体预览（admin 专用授权签发通道）、昵称/群名/公告/bio 敏感词打标进 `flagged_ugc`（016 迁移）+ 强制重置、user 举报一键封禁 + 深链 | ✅   |
+| B      | 运营仪表盘：`GET /admin/stats` 聚合指标 + 概览页（设为默认首页）、好友申请/OTP 量（verification_codes 台账）、Web Push 订阅视图、WS 在线连接数        | ✅   |
+| C      | 贴纸包治理：admin 全量管理页、untakedown + is_official 端点（写审计）、flagged 包商城暂隐（发布者/已添加者保留，清标记恢复）                          | ✅   |
+| D      | 补漏小项：admin 重置头像（P0-3）、存储统计视图（P1-3，DB 聚合口径）、admin 删消息级联清收藏（P2-1）                                                   | ✅   |
+| 搭车   | captcha 两缺陷修复、DB_SCHEMA 按 001-015 重建（compose 镜像核实已钉版本）                                                                             | ✅   |
+| 债收口 | `/auth/*` 前缀统一（/users/register、/users/login 迁移，破坏性变更前后端同版处理）、WS 贴纸发送口径收紧、`GET /sticker-packs` 游标分页、B7 覆盖率门禁 | ✅   |
+| 债收口 | 限流改 Redis 原子令牌桶 + Dispatcher Redis Pub/Sub 跨实例分发（默认 inproc，单实例行为不变；env.md/DEVELOPMENT.md 已补多实例配置说明）                | ✅   |
 
 #### 3. 既有代码的真实缺陷（无 plan，可随手批次收口）
 
 > 2026-09-02 admin-hardening 会话收口：captcha 两缺陷已修、compose 镜像经核实已全部钉版本、
 > B8 测试夹具已建（见下节）。剩余条目为限流/分发多实例化与 husky tsc。
 
-| 级别 | 位置                                | 问题                                                                                                     |
-| ---- | ----------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| ✅   | `handler/captcha.go:83-90`          | 已修：`Validate` 改为比对成功才删，输错不再作废验证码                                                    |
-| ✅   | `handler/captcha.go:52`             | 已修：captcha id 改 `crypto/rand` 128bit hex，Redis key 加 `captcha:` 命名空间                           |
-| ✅   | `deploy/docker-compose.yml`         | 核实 minio/certbot/prometheus 均已钉版本号（此前登记有误）                                               |
-| 🟡   | `middleware/ratelimit.go:92-107`    | 令牌桶是**进程内** map + mutex，多实例部署时各限各的，形同失效（本批次改 Redis 实现，进行中）            |
-| 🟡   | `.husky/` 钩子不跑 `tsc`            | 幽灵依赖与类型错误只在 CI 暴露（pnpm 本地提升掩盖）                                                      |
-| ⚪   | `handler` 包 Redis 用例仍 `t.Skipf` | A8 已建 `internal/testutil.NewRedis(t)`；captcha 用例已迁移，其余用例待迁                                |
-| ⚪   | 消息分发 `Dispatcher`               | 进程内 Hub，多实例需换分布式实现；presence 已可切 `presence.backend=redis`（本批次改分布式分发，进行中） |
+| 级别 | 位置                                | 问题                                                                                                                |
+| ---- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| ✅   | `handler/captcha.go:83-90`          | 已修：`Validate` 改为比对成功才删，输错不再作废验证码                                                               |
+| ✅   | `handler/captcha.go:52`             | 已修：captcha id 改 `crypto/rand` 128bit hex，Redis key 加 `captcha:` 命名空间                                      |
+| ✅   | `deploy/docker-compose.yml`         | 核实 minio/certbot/prometheus 均已钉版本号（此前登记有误）                                                          |
+| ✅   | `middleware/ratelimit.go:92-107`    | 已修：改 Redis Lua 原子令牌桶（scope 隔离各端点档位），Redis 故障 fail-open 放行并计指标                            |
+| 🟡   | `.husky/` 钩子不跑 `tsc`            | 幽灵依赖与类型错误只在 CI 暴露（pnpm 本地提升掩盖）                                                                 |
+| ⚪   | `handler` 包 Redis 用例仍 `t.Skipf` | A8 已建 `internal/testutil.NewRedis(t)`；captcha 用例已迁移，其余用例待迁                                           |
+| ✅   | 消息分发 `Dispatcher`               | 已修：新增 RedisDispatcher（`dispatcher.backend=redis`），发布前只投本机 + host_id 去重；默认 inproc 单实例行为不变 |
 
 #### 4. J 泳道 — 用户体验与无障碍（新增，未立项）
 

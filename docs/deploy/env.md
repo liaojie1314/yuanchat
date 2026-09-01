@@ -64,10 +64,12 @@
 
 ### 在线状态（Presence）
 
-| 变量                        | 默认值            | 说明                                                    |
-| --------------------------- | ----------------- | ------------------------------------------------------- |
-| `YUANCHAT_PRESENCE_BACKEND` | `local`           | `local`=单实例进程内；`redis`=多实例 Pub/Sub 跨实例同步 |
-| `YUANCHAT_PRESENCE_CHANNEL` | `presence:events` | redis 模式的事件 channel                                |
+| 变量                          | 默认值            | 说明                                                               |
+| ----------------------------- | ----------------- | ------------------------------------------------------------------ |
+| `YUANCHAT_PRESENCE_BACKEND`   | `local`           | `local`=单实例进程内；`redis`=多实例 Pub/Sub 跨实例同步            |
+| `YUANCHAT_PRESENCE_CHANNEL`   | `presence:events` | redis 模式的事件 channel                                           |
+| `YUANCHAT_DISPATCHER_BACKEND` | `inproc`          | `inproc`=单实例进程内 Hub；`redis`=多实例 Pub/Sub 跨实例投递实时帧 |
+| `YUANCHAT_DISPATCHER_CHANNEL` | `ws:dispatch`     | redis 模式的帧分发 channel                                         |
 
 > 多副本部署**必须**设为 `redis`，否则 A 实例的用户在 B 实例上被判为离线。
 
@@ -111,6 +113,7 @@
 | `ADMIN_EMAIL`                                               | Let's Encrypt 到期通知邮箱                                       |
 | `DB_PASSWORD` / `REDIS_PASSWORD` / `JWT_SECRET` / `MINIO_*` | 留空则 `install.sh` 自动生成随机值                               |
 | `PRESENCE_BACKEND`                                          | 多实例部署改 `redis`                                             |
+| `DISPATCHER_BACKEND`                                        | 多实例部署改 `redis`（默认 `inproc` 仅影响实时帧跨实例投递）     |
 | `APP_VERSION`                                               | 自建镜像 tag，**必填**（禁止 `latest`；未设置 compose 直接报错） |
 | `TZ`                                                        | 容器时区，默认 `Asia/Shanghai`                                   |
 
