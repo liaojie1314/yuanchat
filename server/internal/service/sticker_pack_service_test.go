@@ -209,6 +209,48 @@ func TestStickerPackDetail(t *testing.T) {
 	}
 }
 
+// TestStickerPackDetailTakenDownVisibility 下架包的详情可见性：已添加者与发布者
+// 保留入口，其余请求者按 ErrPackNotFound（HTTP 404）拒绝——被处置内容不能凭
+// id 直链继续可看（对齐 CHAT_API「下架包仅对已添加者保留可见」的契约）。
+func TestStickerPackDetailTakenDownVisibility(t *testing.T) {
+	db := testDB(t)
+	migrateSvcStickerTables(t, db)
+	svc := newStickerSvc(db)
+	ctx := context.Background()
+
+	owner := newTestUser(t, db, "down-owner")
+	fan := newTestUser(t, db, "down-fan")
+	other := newTestUser(t, db, "down-other")
+	pack := seedSvcPack(t, db, func(p *model.StickerPack) {
+		p.OwnerID = &owner.ID
+		p.IsPublic = true
+		p.TakenDown = true
+	})
+
+	// 无关请求者：404
+	if _, err := svc.PackDetail(ctx, other.ID, pack.ID); !errors.Is(err, ErrPackNotFound) {
+		t.Fatalf("downed pack should be ErrPackNotFound for unrelated user, got %v", err)
+	}
+	// 发布者：保留（编辑入口仍可用）
+	if _, err := svc.PackDetail(ctx, owner.ID, pack.ID); err != nil {
+		t.Fatalf("owner should keep detail access to downed pack: %v", err)
+	}
+	// 下架前已添加的用户：保留。AddPack 此刻已不可用（不能新增），直接落关系行模拟
+	if err := svc.AddPack(ctx, fan.ID, pack.ID); err == nil {
+		t.Fatal("downed pack must not be addable")
+	}
+	if err := db.Create(&model.UserStickerPack{UserID: fan.ID, PackID: pack.ID}).Error; err != nil {
+		t.Fatalf("seed pre-takedown relation: %v", err)
+	}
+	d, err := svc.PackDetail(ctx, fan.ID, pack.ID)
+	if err != nil {
+		t.Fatalf("pre-takedown adder should keep detail access: %v", err)
+	}
+	if !d.Added {
+		t.Fatal("added flag should be true for the user who added before takedown")
+	}
+}
+
 // TestStickerAddPackGuards 下架/未公开的包不可添加，官方包与公开包可添加且幂等，
 // 移除后可再次添加。
 func TestStickerAddPackGuards(t *testing.T) {

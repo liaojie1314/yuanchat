@@ -447,7 +447,8 @@ type PackDetailDTO struct {
 	Added    bool             `json:"added"`
 }
 
-// PackDetail 包详情。已下架的包也返回（下架只从商城撤展示，已添加者保留入口）。
+// PackDetail 包详情。已下架的包仅对已添加者与发布者保留（下架只从商城撤展示，
+// 已添加者的入口与 EmojiPicker 不受影响）；其余请求者按 ErrPackNotFound 返回。
 func (s *StickerService) PackDetail(ctx context.Context, userID, packID uuid.UUID) (*PackDetailDTO, error) {
 	meta, err := s.repo.GetPackMeta(ctx, packID)
 	if err != nil {
@@ -464,6 +465,13 @@ func (s *StickerService) PackDetail(ctx context.Context, userID, packID uuid.UUI
 	if err != nil {
 		return nil, fmt.Errorf("check added batch: %w", err)
 	}
+	isOwner := meta.OwnerID != nil && *meta.OwnerID == userID
+	// 下架包仅对已添加者与发布者保留可见（CHAT_API「下架包仅对已添加者保留可见」、
+	// shared client 契约「已下架且未添加 → 404」同口径）：其余请求者按不存在返回，
+	// 不区分下架/删除两种状态，避免被处置内容凭 id 直链继续可看。
+	if meta.TakenDown && !added[packID] && !isOwner {
+		return nil, ErrPackNotFound
+	}
 	items := make([]StickerItemDTO, 0, len(stickers))
 	for _, st := range stickers {
 		items = append(items, StickerItemDTO{
@@ -478,7 +486,7 @@ func (s *StickerService) PackDetail(ctx context.Context, userID, packID uuid.UUI
 			FirstStickerKey: meta.FirstStickerKey,
 			IsOfficial:      meta.IsOfficial,
 			OwnerName:       meta.OwnerName,
-			IsOwner:         meta.OwnerID != nil && *meta.OwnerID == userID,
+			IsOwner:         isOwner,
 			Flagged:         meta.Flagged,
 			StickerCount:    meta.StickerCount,
 			CreatedAt:       meta.CreatedAt,
