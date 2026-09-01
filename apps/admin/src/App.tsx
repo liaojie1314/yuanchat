@@ -7,6 +7,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuthStore } from "@yuanchat/shared";
 import { AdminLayout } from "./components/AdminLayout";
+import { OverviewPage } from "./pages/Overview";
 import { LoginPage } from "./pages/Login";
 import { UsersPage } from "./pages/Users";
 import { ConversationsPage } from "./pages/Conversations";
@@ -32,13 +33,14 @@ export default function App() {
           </RequireAuth>
         }
       >
+        <Route path="/overview" element={<OverviewPage />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/conversations" element={<ConversationsPage />} />
         <Route path="/messages" element={<MessageAuditPage />} />
         <Route path="/moderation" element={<ModerationQueuePage />} />
         <Route path="/sticker-packs" element={<StickerPacksPage />} />
         <Route path="/audit-logs" element={<AuditLogsPage />} />
-        <Route path="*" element={<Navigate to="/users" replace />} />
+        <Route path="*" element={<Navigate to="/overview" replace />} />
       </Route>
     </Routes>
   );

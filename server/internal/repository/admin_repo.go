@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/model"
@@ -254,6 +255,119 @@ func (r *AdminRepository) FindReport(ctx context.Context, id uuid.UUID) (*model.
 // UpdateReport 保存举报处理结果。
 func (r *AdminRepository) UpdateReport(ctx context.Context, report *model.Report) error {
 	return r.db.WithContext(ctx).Save(report).Error
+}
+
+// ---------- 运营概览统计 ----------
+
+// dayStart 返回本地时区当天零点。统计的「今日」口径以此为准。
+func dayStart() time.Time {
+	now := time.Now()
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+}
+
+// CountUserStats 统计用户总数、封禁中数量、今日新增与近 7 天新增
+// （均按 created_at，COUNT 不取行）。
+func (r *AdminRepository) CountUserStats(ctx context.Context) (total, banned, newToday, newWeek int64, err error) {
+	today := dayStart()
+	week := today.AddDate(0, 0, -6)
+	if err = r.db.WithContext(ctx).Model(&model.User{}).Count(&total).Error; err != nil {
+		return
+	}
+	if err = r.db.WithContext(ctx).Model(&model.User{}).Where("status = ?", model.UserStatusDisabled).Count(&banned).Error; err != nil {
+		return
+	}
+	if err = r.db.WithContext(ctx).Model(&model.User{}).Where("created_at >= ?", today).Count(&newToday).Error; err != nil {
+		return
+	}
+	err = r.db.WithContext(ctx).Model(&model.User{}).Where("created_at >= ?", week).Count(&newWeek).Error
+	return
+}
+
+// CountConversationStats 统计会话总数（COUNT 不取行）。
+func (r *AdminRepository) CountConversationStats(ctx context.Context) (total int64, err error) {
+	err = r.db.WithContext(ctx).Model(&model.Conversation{}).Count(&total).Error
+	return
+}
+
+// CountMessageStats 统计消息总数、今日消息数、各消息类型计数与
+// 敏感词命中（flagged 未处置）数。消息表可能很大，全部走 COUNT /
+// GROUP BY 聚合，不取任何行数据。
+func (r *AdminRepository) CountMessageStats(ctx context.Context) (total, today int64, byType map[int16]int64, flagged int64, err error) {
+	todayStart := dayStart()
+	// 每次查询都从 r.db 重建条件链，避免多条 COUNT 复用同一 Statement 串味
+	live := func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.Message{}).Where("messages.deleted_at IS NULL")
+	}
+	if err = live().Count(&total).Error; err != nil {
+		return
+	}
+	if err = live().Where("messages.created_at >= ?", todayStart).Count(&today).Error; err != nil {
+		return
+	}
+	type typeRow struct {
+		MessageType int16 `json:"message_type"`
+		Count       int64
+	}
+	var rows []typeRow
+	if err = live().
+		Select("messages.message_type, COUNT(*) AS count").
+		Group("messages.message_type").Scan(&rows).Error; err != nil {
+		return
+	}
+	byType = make(map[int16]int64, len(rows))
+	for _, row := range rows {
+		byType[row.MessageType] = row.Count
+	}
+	err = live().Where("messages.flagged = TRUE").Count(&flagged).Error
+	return
+}
+
+// CountModerationStats 统计治理队列积压：待处理举报（status=pending）、
+// 待处理 UGC 命中（handled_at 为空）、已下架表情包数与敏感词打标表情包数。
+func (r *AdminRepository) CountModerationStats(ctx context.Context) (pendingReports, pendingUGC, takenDownPacks, flaggedPacks int64, err error) {
+	if err = r.db.WithContext(ctx).Model(&model.Report{}).
+		Where("reports.status = ?", model.ReportStatusPending).Count(&pendingReports).Error; err != nil {
+		return
+	}
+	if err = r.db.WithContext(ctx).Model(&model.FlaggedUGC{}).
+		Where("flagged_ugc.handled_at IS NULL").Count(&pendingUGC).Error; err != nil {
+		return
+	}
+	if err = r.db.WithContext(ctx).Model(&model.StickerPack{}).
+		Where("sticker_packs.taken_down = TRUE").Count(&takenDownPacks).Error; err != nil {
+		return
+	}
+	err = r.db.WithContext(ctx).Model(&model.StickerPack{}).
+		Where("sticker_packs.flagged = TRUE").Count(&flaggedPacks).Error
+	return
+}
+
+// CountFriendRequestStats 统计好友申请量：今日与近 7 天（按 created_at）。
+func (r *AdminRepository) CountFriendRequestStats(ctx context.Context) (today, week int64, err error) {
+	todayStart := dayStart()
+	weekStart := todayStart.AddDate(0, 0, -6)
+	if err = r.db.WithContext(ctx).Model(&model.FriendRequest{}).
+		Where("created_at >= ?", todayStart).Count(&today).Error; err != nil {
+		return
+	}
+	err = r.db.WithContext(ctx).Model(&model.FriendRequest{}).
+		Where("created_at >= ?", weekStart).Count(&week).Error
+	return
+}
+
+// CountVerificationCodeStats 统计验证码（OTP）下发量：今日与近 7 天。
+// 发码热路径在 Redis 且键会过期，无法可靠回溯计数；verification_codes
+// 表是每次下发的审计台账，这里按其行数口径统计。
+func (r *AdminRepository) CountVerificationCodeStats(ctx context.Context) (today, week int64, err error) {
+	todayStart := dayStart()
+	weekStart := todayStart.AddDate(0, 0, -6)
+	if err = r.db.WithContext(ctx).Model(&model.VerificationCode{}).
+		Where("created_at >= ?", todayStart).Count(&today).Error; err != nil {
+		return
+	}
+	err = r.db.WithContext(ctx).Model(&model.VerificationCode{}).
+		Where("created_at >= ?", weekStart).Count(&week).Error
+	return
 }
 
 // ---------- 审计日志 ----------

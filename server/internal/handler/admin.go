@@ -632,3 +632,42 @@ func (h *AdminHandler) DismissFlaggedUGC(c *gin.Context) {
 	}
 	Success(c, gin.H{"dismissed": true})
 }
+
+// Stats 管理端运营概览：用户 / 会话 / 消息 / 治理 / 增长 / 运行时聚合指标。
+// 只读端点，不写审计日志；WS 在线连接数由 handler 从本实例 Hub 读取补齐。
+//
+//	@Summary		管理端：运营概览指标
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/stats [get]
+func (h *AdminHandler) Stats(c *gin.Context) {
+	stats, err := h.svc.StatsOverview(c.Request.Context())
+	if err != nil {
+		h.logger.Error("admin stats failed", zap.Error(err))
+		InternalError(c, "stats failed")
+		return
+	}
+	stats.Runtime.OnlineConnections = int64(h.hub.TotalConnections())
+	Success(c, stats)
+}
+
+// ListPushSubscriptions 分页列出 Web Push 订阅（endpoint / 创建时间 / 所属用户）。
+//
+//	@Summary		管理端：推送订阅列表
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Param			page	query	int	false	"页码（从 1 开始）"
+//	@Param			size	query	int	false	"每页条数（上限 100）"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/push-subscriptions [get]
+func (h *AdminHandler) ListPushSubscriptions(c *gin.Context) {
+	page, size := pageParams(c)
+	subs, total, err := h.svc.SearchPushSubscriptions(c.Request.Context(), page, size)
+	if err != nil {
+		h.logger.Error("admin list push subscriptions failed", zap.Error(err))
+		InternalError(c, "list push subscriptions failed")
+		return
+	}
+	Paginated(c, subs, total, page, size)
+}

@@ -103,6 +103,8 @@ func Setup(
 	pushRepo := repository.NewPushRepository(db)
 	pushSvc := service.NewPushService(pushRepo, cfg.Push, logger)
 	pushH := handler.NewPushHandler(pushSvc, logger)
+	// 概览的推送订阅视图与用户侧订阅读写同一张表
+	adminSvc.SetPushRepo(pushRepo)
 
 	e2eeH := handler.NewE2EEHandler(repository.NewE2EERepository(db), logger)
 
@@ -334,6 +336,9 @@ func Setup(
 		admin.POST("/flagged-ugc/:id/reset", adminH.ResetFlaggedUGC)
 		admin.DELETE("/flagged-ugc/:id", adminH.DismissFlaggedUGC)
 		admin.GET("/audit-logs", adminH.ListAuditLogs)
+		// 只读概览：聚合指标与推送订阅视图，不写审计日志
+		admin.GET("/stats", adminH.Stats)
+		admin.GET("/push-subscriptions", adminH.ListPushSubscriptions)
 	}
 
 	return r, wsH

@@ -3,6 +3,7 @@
  */
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
+  LayoutDashboard,
   Users,
   MessagesSquare,
   ShieldAlert,
@@ -16,6 +17,7 @@ import { useAuthStore } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 
 const NAV = [
+  { to: "/overview", icon: LayoutDashboard, labelKey: "admin.nav.overview" },
   { to: "/users", icon: Users, labelKey: "admin.nav.users" },
   { to: "/conversations", icon: MessagesSquare, labelKey: "admin.nav.conversations" },
   { to: "/messages", icon: ShieldAlert, labelKey: "admin.nav.messages" },

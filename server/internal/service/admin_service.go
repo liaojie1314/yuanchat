@@ -23,6 +23,8 @@ type AdminService struct {
 	convRepo *repository.ConversationRepository
 	userRepo *repository.UserRepository
 	ugcRepo  *repository.FlaggedUGCRepository
+	// pushRepo 推送订阅仓库（SetPushRepo 注入，可为 nil）：概览订阅视图用
+	pushRepo *repository.PushRepository
 	logger   *zap.Logger
 }
 

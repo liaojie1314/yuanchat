@@ -257,3 +257,64 @@ export function resetFlaggedUGC(id: string) {
 export function dismissFlaggedUGC(id: string) {
   return apiDelete<{ dismissed: boolean }>(`/api/v1/admin/flagged-ugc/${id}`);
 }
+
+/** 概览用户维度计数 */
+export interface AdminUserStats {
+  total: number;
+  banned: number;
+  new_today: number;
+  new_week: number;
+}
+
+/** 概览消息维度计数 */
+export interface AdminMessageStats {
+  total: number;
+  today: number;
+  by_type: Record<string, number>;
+}
+
+/** 概览治理队列积压计数 */
+export interface AdminModerationStats {
+  pending_reports: number;
+  flagged_messages: number;
+  pending_ugc: number;
+  taken_down_packs: number;
+  flagged_packs: number;
+}
+
+/** 概览增长侧写计数（好友申请 / 验证码下发，今日与近 7 天） */
+export interface AdminGrowthStats {
+  friend_requests_today: number;
+  friend_requests_week: number;
+  otp_today: number;
+  otp_week: number;
+}
+
+/** 管理端运营概览聚合指标（GET /admin/stats 响应体） */
+export interface AdminStats {
+  users: AdminUserStats;
+  conversations: { total: number };
+  messages: AdminMessageStats;
+  moderation: AdminModerationStats;
+  growth: AdminGrowthStats;
+  runtime: { online_connections: number };
+}
+
+/** 拉取运营概览聚合指标（只读快照） */
+export function getStats() {
+  return pagedGetSingle<AdminStats>("/api/v1/admin/stats");
+}
+
+/** 管理端推送订阅视图（附所属用户昵称） */
+export interface AdminPushSubscription {
+  id: string;
+  user_id: string;
+  endpoint: string;
+  created_at: string;
+  user_nickname?: string | null;
+}
+
+/** 分页列出推送订阅（最新在前） */
+export function listPushSubscriptions(page: number, size = 10) {
+  return pagedGet<AdminPushSubscription>(`/api/v1/admin/push-subscriptions${qs({ page, size })}`);
+}

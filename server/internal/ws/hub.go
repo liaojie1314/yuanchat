@@ -127,6 +127,19 @@ func (h *Hub) SendToUsers(userIDs []uuid.UUID, data []byte) {
 	}
 }
 
+// TotalConnections 返回本实例当前全部 WebSocket 在线连接总数
+// （一个用户多设备在线按多条计）。管理端概览的运行时指标从这里取数，
+// 读锁保护，O(用户数) 遍历。
+func (h *Hub) TotalConnections() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	n := 0
+	for _, conns := range h.clients {
+		n += len(conns)
+	}
+	return n
+}
+
 // OnlineCount 返回某用户当前在线连接数（测试与调试用）。
 func (h *Hub) OnlineCount(userID uuid.UUID) int {
 	h.mu.RLock()
