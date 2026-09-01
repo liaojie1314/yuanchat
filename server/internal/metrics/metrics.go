@@ -40,3 +40,17 @@ var (
 		Help: "Total chat messages sent by message type",
 	}, []string{"message_type"})
 )
+
+var (
+	// RateLimitRejectedTotal 限流拒绝总数，按判定后端分组（redis | inproc）。
+	RateLimitRejectedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "yuanchat_ratelimit_rejected_total",
+		Help: "Total number of requests rejected by the rate limiter, by backend",
+	}, []string{"backend"})
+
+	// WSDispatchPublishedTotal 跨实例分发发布总数（Redis Pub/Sub 模式下每帧发布计一次）。
+	WSDispatchPublishedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "yuanchat_ws_dispatch_published_total",
+		Help: "Total number of frames published to the cross-instance dispatch channel",
+	})
+)

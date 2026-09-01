@@ -198,6 +198,20 @@ func Setup(
 		logger.Info("presence backend: redis", zap.String("channel", cfg.Presence.Channel))
 	}
 
+	// 分布式限流：Redis 客户端由 main 启动时 Ping 校验（失败即 Fatal），
+	// 注入后所有 LimitByIP 改走 Redis 原子令牌桶（多实例共享配额）；
+	// 运行期 Redis 故障时 fail-open 放行（见 middleware.redisAllow 注释）。
+	middleware.SetRateLimitRedis(rdb, logger)
+
+	// 跨实例消息分发：redis 模式下本机投递完成后发布到 Redis channel，
+	// 各实例订阅后投递给自己的本机连接（发布前只投本机 + 订阅端按实例 ID 过滤，不重复）。
+	// 默认 inproc：不注入发布回调，Hub 行为与单实例完全一致。
+	if cfg.Dispatcher.Backend == "redis" {
+		rd := ws.NewRedisDispatcher(rdb, cfg.Dispatcher.Channel, hub, logger)
+		hub.SetRemotePublisher(rd.Publish)
+		logger.Info("dispatcher backend: redis", zap.String("channel", cfg.Dispatcher.Channel))
+	}
+
 	// 好友上下线广播：独立 goroutine 通知在线好友，不阻塞连接注册路径
 	hub.SetPresenceNotifier(func(userID uuid.UUID, online bool) {
 		go notifyFriends(userID, online)

@@ -21,6 +21,7 @@ type Config struct {
 	MinIO      MinIOConfig      `mapstructure:"minio"`
 	Moderation ModerationConfig `mapstructure:"moderation"`
 	Presence   PresenceConfig   `mapstructure:"presence"`
+	Dispatcher DispatcherConfig `mapstructure:"dispatcher"`
 	Push       PushConfig       `mapstructure:"push"`
 	CodeSender CodeSenderConfig `mapstructure:"codesender"`
 }
@@ -125,6 +126,12 @@ type CodeSenderConfig struct {
 type PresenceConfig struct {
 	Backend string `mapstructure:"backend"` // local（单实例，默认）| redis（多实例 Pub/Sub）
 	Channel string `mapstructure:"channel"` // redis 模式的事件 channel，默认 presence:events
+}
+
+// DispatcherConfig 跨实例消息分发配置。
+type DispatcherConfig struct {
+	Backend string `mapstructure:"backend"` // inproc（进程内 Hub，单实例默认）| redis（多实例 Pub/Sub）
+	Channel string `mapstructure:"channel"` // redis 模式的分发 channel，默认 ws:dispatch
 }
 
 // ModerationConfig 内容审核配置。
