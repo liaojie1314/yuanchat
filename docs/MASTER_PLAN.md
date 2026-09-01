@@ -373,16 +373,25 @@ yuanchat/
 | ⚪   | `packages/shared` 与 `packages/ui` 没有 `tsconfig.json`，两个包的 `typecheck` 脚本一直跑不了（两端 app 的 `tsc` 会传递覆盖到它们的源码，故并非完全没检查）。与「`.husky/` 不跑 tsc」同源                                                                                                                                                                                                                                                                |
 | ⚪   | 改密后当前设备也会被登出（`token_version` 全量递增）。若要保留当前会话，需在改密响应里下发新令牌对                                                                                                                                                                                                                                                                                                                                                      |
 
-#### 2. H1b — 贴纸商城与投稿发布（已有 plan，待执行）
+#### 2. H1b — 贴纸商城与投稿发布（✅ 已完成，2026-08-30）
 
-执行：[`plans/2026-08-09-h1b-sticker-market.md`](superpowers/plans/2026-08-09-h1b-sticker-market.md)，占用迁移号 **015**。
+按 [`plans/2026-08-09-h1b-sticker-market.md`](superpowers/plans/2026-08-09-h1b-sticker-market.md) 执行完毕（迁移号 **015**），`feature/sticker-market` 分支。已交付：
 
-| 级别 | 条目                                                                                                                                                                                                                                                                                                                                                                |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 🔴   | **不可跳过的前置修复**：`repository/object_acl_repo.go:80` 的 `ReferencedKeys` 只扫 `messages.content->>'key'`、`stickers.object_key`、`users/conversations.avatar_url`，**漏了 `sticker_packs.cover_url`** → 现在跑 `cmd/gc -delete` 会删掉所有贴纸包封面。修时注意 `cover_url` 存的是完整 URL，必须像 `avatar_url` 那样用 `LIKE '%' \|\| k` 后缀匹配，不能用 `IN` |
-| 🟡   | `sticker_service.go:240` `ListPacks` 无分页，商城列表规模上来会全量返回                                                                                                                                                                                                                                                                                             |
-| ⚪   | 商城 i18n 复用既有 `sticker.market.*` 命名空间（`zh-CN.json:241-253` 已有 13 个 `sticker.*` key），不要新造 `stickerMarket.*`                                                                                                                                                                                                                                       |
-| ⚪   | H1c 付费贴纸为候选，未立项                                                                                                                                                                                                                                                                                                                                          |
+- **商城**：`GET /sticker-packs/market`（`created_at DESC` 游标分页）、包详情、幂等添加/移除（`user_sticker_packs` 关系表非快照，发布者编辑实时生效）；`GET /sticker-packs` 语义扩展为「官方包 + 已添加的包」，EmojiPicker 零改动接入
+- **投稿发布**：发布（collection 复制 / upload 直传两来源，包+贴纸同事务）、改名/换封面、增删贴纸、删包（级联）、我发布的；每用户发布上限 20（超限 400 + 业务码 4003）
+- **治理**：包名敏感词打标 `flagged`（不阻塞发布）；`POST /reports` 支持 `target_type=sticker_pack`；admin 三端点（flagged 包检索 / 直接下架 / 清标记）+ admin 审核队列第三个 tab；下架 = `taken_down` 软下架（已添加者保留），举报处置「删除」对包执行下架
+- **存储**：上传类别 `sticker-covers/` 公共读（独立桶策略 Statement）；发布封面自动以首张贴纸复制上传；商城/详情投影带 `first_sticker_key`，无封面包回退展示首图
+- **前置缺陷修复**：`ReferencedKeys` 补 `sticker_packs.cover_url`（GC 误删封面）
+- **三端实测中追加修复**：贴纸消息（kind=sticker）右键菜单缺「添加到表情」入口；发布封面因路由漏注入 PublicURL 转换静默丢库；封面缓存命中 onLoad 丢失占位不消失；认证四页磨砂卡片暗色适配；安卓返回键在商城子页落入「回聊天页」兜底（useStickerBack 拦截器 + 入口带 from）；设置页商城入口移到 About 上面；移除收藏页头商城按钮（入口收敛为设置页 + 表情选择器）
+- 实测覆盖：Web（Playwright 暗亮双主题 + 移动视口 + admin 审核闭环）、Android（模拟器，底栏 4 项、返回键语义）、桌面（渲染走查）
+
+| 级别 | 条目                                                                                                                                                                                    |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🟡   | `GET /sticker-packs`（官方 + 已添加）仍无分页——集合小（官方包 + 用户添加数）尚可接受，包数量级上来再分页                                                                                |
+| 🟡   | handler 集成测试直连 dev Postgres 且部分用例不清理（H1b 实测时 17 个测试包以 `is_public=true` 泄进商城列表）——测试需独立库/事务回滚                                                     |
+| 🟡   | WS 发送校验 `FindInAnyPack` 对**任何**表情包贴纸放行（未添加也可凭 sticker_id 发送，下架包贴纸同理）——与商城「公开内容」姿态一致暂不收紧，收紧需统一口径到「is_public 未下架 + 已添加」 |
+| ⚪   | 商城分类 / 搜索 / 热度排序未做（H1b-i 有意不做，需要时再加）                                                                                                                            |
+| ⚪   | H1c 付费贴纸为候选，未立项（数据模型未预留 price 字段）                                                                                                                                 |
 
 #### 3. 既有代码的真实缺陷（无 plan，可随手批次收口）
 

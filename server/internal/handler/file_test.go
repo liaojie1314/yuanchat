@@ -209,7 +209,8 @@ func TestResolveCategory(t *testing.T) {
 		{"image/png", "avatars", "avatars"}, // 头像：图片但显式落 avatars
 		{"image/png", "files", "files"},
 		{"application/pdf", "images", "images"},
-		{"image/png", "bogus", "files"}, // 非法 query 回落 files
+		{"image/png", "sticker-covers", "sticker-covers"}, // 封面：仅显式指定，不靠 content-type 推断
+		{"image/png", "bogus", "files"},                   // 非法 query 回落 files
 	}
 	for _, tc := range cases {
 		if got := resolveCategory(tc.contentType, tc.query); got != tc.want {
@@ -421,5 +422,64 @@ func TestDownloadURL_ACLErrorIs500(t *testing.T) {
 		"/files/download-url?key=images/2026/07/550e8400-e29b-41d4-a716-446655440000.png", nil)
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500 body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestUploadURL_StickerCoversPublicRead 表情包封面的公共读通道：
+// category=sticker-covers 签发的上传 URL 直传后匿名可取（免下载授权），
+// download-url 对该前缀不咨询 ACL（公共读前缀签与不签都能取）。
+func TestUploadURL_StickerCoversPublicRead(t *testing.T) {
+	st := testStorageForHandler(t)
+	r := newFileEngine(st, &stubACL{allow: true})
+
+	w, resp := doJSON(t, r, http.MethodPost, "/files/upload-url?category=sticker-covers", gin.H{
+		"filename": "cover.png", "content_type": "image/png", "size": 4096,
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("upload-url status = %d body=%s", w.Code, w.Body.String())
+	}
+	objectKey, _ := resp.Data["object_key"].(string)
+	publicURL, hasPublic := resp.Data["public_url"].(string)
+	if !hasPublic || publicURL == "" {
+		t.Fatalf("sticker-covers upload must return public_url, got %v", resp.Data)
+	}
+	t.Cleanup(func() { removeObject(t, objectKey) })
+
+	// 直传封面字节
+	payload := []byte("fake-cover-bytes")
+	putReq, _ := http.NewRequest(http.MethodPut, resp.Data["upload_url"].(string), bytes.NewReader(payload))
+	putReq.Header.Set("Content-Type", "image/png")
+	putReq.ContentLength = int64(len(payload))
+	putResp, err := http.DefaultClient.Do(putReq)
+	if err != nil {
+		t.Fatalf("put cover: %v", err)
+	}
+	putResp.Body.Close()
+	if putResp.StatusCode != http.StatusOK {
+		t.Fatalf("put status = %d, want 200", putResp.StatusCode)
+	}
+
+	// 公共 URL 匿名 GET 直达（桶策略对该前缀开放匿名读）
+	getResp, err := http.Get(publicURL)
+	if err != nil {
+		t.Fatalf("anonymous get: %v", err)
+	}
+	getResp.Body.Close()
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("anonymous get status = %d, want 200 (bucket policy missing sticker-covers statement?)", getResp.StatusCode)
+	}
+
+	// download-url 不咨询 ACL（stubACL.calls 为空），直接签发预签名
+	acl := &stubACL{allow: true}
+	rd := newFileEngine(st, acl)
+	wg, dresp := doJSON(t, rd, http.MethodGet, "/files/download-url?key="+objectKey, nil)
+	if wg.Code != http.StatusOK {
+		t.Fatalf("download-url status = %d body=%s", wg.Code, wg.Body.String())
+	}
+	if len(acl.calls) != 0 {
+		t.Fatalf("public-read prefix must bypass ACL, acl consulted %v", acl.calls)
+	}
+	if _, ok := dresp.Data["url"].(string); !ok {
+		t.Fatalf("download-url should return url: %v", dresp.Data)
 	}
 }

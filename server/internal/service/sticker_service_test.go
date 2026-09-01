@@ -151,11 +151,14 @@ func TestStickerRemoveNotFound(t *testing.T) {
 }
 
 // TestStickerListPacks 官方包及其贴纸能正确列出（依赖 seed 数据，若未 seed 则期望空列表不报错）。
+// 商城上线后该端点语义扩展为「官方包 + 已添加包」；对未添加任何包的用户，
+// 返回集合仍等于官方包集合。
 func TestStickerListPacks(t *testing.T) {
 	db := testDB(t)
 	db.AutoMigrate(&model.StickerPack{}, &model.Sticker{})
 	svc := newStickerSvc(db)
-	packs, err := svc.ListPacks(context.Background())
+	viewer := newTestUser(t, db, "甲packs")
+	packs, err := svc.ListPacks(context.Background(), viewer.ID)
 	if err != nil {
 		t.Fatalf("list packs: %v", err)
 	}

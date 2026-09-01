@@ -276,6 +276,81 @@ func (h *AdminHandler) ClearMessageFlag(c *gin.Context) {
 	Success(c, gin.H{"flagged": false})
 }
 
+// ListStickerPacks 分页检索表情包（flagged=true 只看审核队列）。
+//
+//	@Summary		管理端：表情包列表 / 搜索
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Param			q			query	string	false	"包名模糊匹配"
+//	@Param			flagged	query	bool	false	"仅敏感词命中的包"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/sticker-packs [get]
+func (h *AdminHandler) ListStickerPacks(c *gin.Context) {
+	page, size := pageParams(c)
+	flagged := c.Query("flagged") == "true"
+	packs, total, err := h.svc.SearchStickerPacks(c.Request.Context(), c.Query("q"), flagged, page, size)
+	if err != nil {
+		h.logger.Error("admin list sticker packs failed", zap.Error(err))
+		InternalError(c, "list sticker packs failed")
+		return
+	}
+	Paginated(c, packs, total, page, size)
+}
+
+// TakeDownStickerPack 管理员直接下架表情包（软下架：商城不再展示，已添加者保留）。
+//
+//	@Summary		管理端：下架表情包
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"表情包 id"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/sticker-packs/{id}/takedown [post]
+func (h *AdminHandler) TakeDownStickerPack(c *gin.Context) {
+	actorID, _ := middleware.GetUserID(c)
+	packID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid sticker pack id")
+		return
+	}
+	if err := h.svc.TakeDownStickerPack(c.Request.Context(), actorID, packID); err != nil {
+		if errors.Is(err, service.ErrPackNotFound) {
+			NotFound(c, "sticker pack not found")
+			return
+		}
+		h.logger.Error("admin take down sticker pack failed", zap.Error(err))
+		InternalError(c, "take down sticker pack failed")
+		return
+	}
+	Success(c, gin.H{"taken_down": true})
+}
+
+// ClearStickerPackFlag 审核通过：清除表情包敏感词标记。
+//
+//	@Summary		管理端：清除表情包标记
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"表情包 id"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/sticker-packs/{id}/flag [delete]
+func (h *AdminHandler) ClearStickerPackFlag(c *gin.Context) {
+	actorID, _ := middleware.GetUserID(c)
+	packID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid sticker pack id")
+		return
+	}
+	if err := h.svc.ClearStickerPackFlag(c.Request.Context(), actorID, packID); err != nil {
+		if errors.Is(err, service.ErrPackNotFound) {
+			NotFound(c, "sticker pack not found")
+			return
+		}
+		h.logger.Error("admin clear sticker pack flag failed", zap.Error(err))
+		InternalError(c, "clear sticker pack flag failed")
+		return
+	}
+	Success(c, gin.H{"flagged": false})
+}
+
 // ListReports 分页列出举报。
 //
 //	@Summary		管理端：举报列表

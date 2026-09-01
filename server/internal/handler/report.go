@@ -20,14 +20,14 @@ func NewReportHandler(svc *service.AdminService, logger *zap.Logger) *ReportHand
 
 // CreateReportBody 举报请求体。
 type CreateReportBody struct {
-	TargetType string    `json:"target_type" binding:"required,oneof=message user"`
+	TargetType string    `json:"target_type" binding:"required,oneof=message user sticker_pack"`
 	TargetID   uuid.UUID `json:"target_id" binding:"required"`
 	Reason     string    `json:"reason" binding:"max=500"`
 }
 
 // Create 提交举报。
 //
-//	@Summary		举报消息或用户
+//	@Summary		举报消息 / 用户 / 表情包
 //	@Tags			reports
 //	@Security		BearerAuth
 //	@Success		200	{object}	Response

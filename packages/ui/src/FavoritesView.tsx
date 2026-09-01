@@ -141,6 +141,7 @@ export function FavoritesView() {
       <header className="border-outline-variant bg-surface-container-low flex h-[60px] shrink-0 items-center gap-2 border-b px-4">
         <Star size={20} className="text-primary shrink-0" />
         <h1 className="text-title-md text-on-surface font-semibold">{t("favorites.title")}</h1>
+        <div className="flex-1" />
       </header>
 
       {/* 类型标签页 */}

@@ -283,7 +283,8 @@ func ensureOfficialStickers(ctx context.Context, db *gorm.DB, st *storage.Storag
 		return fmt.Errorf("check existing pack: %w", err)
 	}
 
-	pack := &model.StickerPack{Name: packName, IsOfficial: true, Sort: 0}
+	// 官方包在商城公开可见（IsPublic）；015 之前的存量行由迁移回填
+	pack := &model.StickerPack{Name: packName, IsOfficial: true, IsPublic: true, Sort: 0}
 	if err := db.Create(pack).Error; err != nil {
 		return fmt.Errorf("create pack: %w", err)
 	}

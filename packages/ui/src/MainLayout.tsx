@@ -24,7 +24,7 @@
  * <MainLayout />
  */
 import { Link, useLocation, Outlet } from "react-router-dom";
-import { MessageCircle, Users, Settings, Star, Sun, Moon, LogOut } from "lucide-react";
+import { MessageCircle, Users, Settings, Star, Sticker, Sun, Moon, LogOut } from "lucide-react";
 import {
   useThemeStore,
   useAuthStore,
@@ -40,11 +40,23 @@ import { Avatar } from "./Avatar";
 import { SearchModal } from "./SearchModal";
 import { ToastHost } from "./Toast";
 
-const NAV_ITEMS = [
+/**
+ * 移动端底栏导航项（4 项均分全宽）。
+ *
+ * @remarks 表情商城不进底栏：商城属低频入口，5 项会把每项压到 20% 宽且
+ * 挤占高频导航，移动端入口改放收藏页顶部与表情面板底部（桌面侧栏无此压力）。
+ */
+const MOBILE_NAV_ITEMS = [
   { to: "/chat", icon: MessageCircle, labelKey: "chat.title" },
   { to: "/contacts", icon: Users, labelKey: "contacts.title" },
   { to: "/favorites", icon: Star, labelKey: "favorites.title" },
   { to: "/settings", icon: Settings, labelKey: "settings.title" },
+];
+
+/** 桌面/平板左侧栏导航项：比底栏多一个表情商城入口（/stickers 及其子路由共用高亮） */
+const DESKTOP_NAV_ITEMS = [
+  ...MOBILE_NAV_ITEMS,
+  { to: "/stickers", icon: Sticker, labelKey: "sticker.market.title" },
 ];
 
 export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
@@ -107,7 +119,7 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
             className="border-outline-variant bg-surface-container-low flex h-20 shrink-0 border-t pb-4"
             aria-label={t("chat.title")}
           >
-            {NAV_ITEMS.map(({ to, icon: Icon, labelKey }) => {
+            {MOBILE_NAV_ITEMS.map(({ to, icon: Icon, labelKey }) => {
               const active = isActive(to);
               const badge = badgeOf(to);
               return (
@@ -154,7 +166,7 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
         </div>
         <div className="mb-1 h-px w-8 bg-white/15" />
 
-        {NAV_ITEMS.map(({ to, icon: Icon, labelKey }) => {
+        {DESKTOP_NAV_ITEMS.map(({ to, icon: Icon, labelKey }) => {
           const active = isActive(to);
           const badge = badgeOf(to);
           return (

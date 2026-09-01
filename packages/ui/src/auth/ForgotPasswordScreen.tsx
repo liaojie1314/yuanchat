@@ -208,7 +208,7 @@ export function ForgotPasswordScreen({ topSlot, onDone }: ForgotPasswordScreenPr
             className={cn(
               isMobile
                 ? ""
-                : "rounded-lg border border-white/60 bg-white/70 px-10 py-12 shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl",
+                : "dark:bg-surface-container/70 rounded-lg border border-white/60 bg-white/70 px-10 py-12 shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl dark:border-white/10",
             )}
           >
             {/* Logo */}

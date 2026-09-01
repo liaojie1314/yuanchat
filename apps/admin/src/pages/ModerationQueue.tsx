@@ -7,9 +7,13 @@ import {
   listFlaggedMessages,
   clearMessageFlag,
   deleteMessage,
+  listFlaggedPacks,
+  takedownPack,
+  clearPackFlag,
   listReports,
   handleReport,
   type AdminMessage,
+  type AdminStickerPack,
   type AdminReport,
 } from "../api";
 import { usePagedQuery } from "../hooks/usePagedQuery";
@@ -66,6 +70,63 @@ function FlaggedTab() {
                 className="text-label-lg text-error hover:underline"
               >
                 {t("common.delete")}
+              </button>
+            </td>
+          </tr>
+        ))}
+      </DataTable>
+      <Pager page={page} totalPages={totalPages} total={total} onPage={setPage} />
+    </>
+  );
+}
+
+/** 表情包审核队列：包名敏感词命中的包，可下架或放行 */
+function FlaggedPacksTab() {
+  const { t } = useTranslation();
+  const fetcher = useCallback((_q: string, p: number) => listFlaggedPacks(p), []);
+  const { page, setPage, list, total, totalPages, loading, refresh } =
+    usePagedQuery<AdminStickerPack>(fetcher);
+
+  const headers = [
+    t("admin.moderation.colPack"),
+    t("admin.moderation.colOwner"),
+    t("admin.moderation.colStickers"),
+    t("admin.messages.colTime"),
+    t("admin.users.colActions"),
+  ];
+
+  return (
+    <>
+      <DataTable headers={headers}>
+        {!loading && list.length === 0 && <EmptyRow colSpan={headers.length} />}
+        {list.map((p) => (
+          <tr
+            key={p.id}
+            className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low"
+          >
+            <td className="max-w-md px-4 py-3 text-body-md text-on-surface">
+              <p className="line-clamp-2">{p.name}</p>
+            </td>
+            <td className="px-4 py-3 text-body-md text-on-surface-variant">
+              {p.owner_name ??
+                t(p.is_official ? "sticker.market.byOfficial" : "sticker.market.deletedUser")}
+            </td>
+            <td className="px-4 py-3 text-body-md text-on-surface-variant">{p.sticker_count}</td>
+            <td className="whitespace-nowrap px-4 py-3 text-body-md text-on-surface-variant">
+              {new Date(p.created_at).toLocaleString()}
+            </td>
+            <td className="space-x-3 whitespace-nowrap px-4 py-3">
+              <button
+                onClick={() => void clearPackFlag(p.id).then(refresh)}
+                className="text-label-lg text-primary hover:underline"
+              >
+                {t("admin.moderation.approve")}
+              </button>
+              <button
+                onClick={() => void takedownPack(p.id).then(refresh)}
+                className="text-label-lg text-error hover:underline"
+              >
+                {t("admin.moderation.takedown")}
               </button>
             </td>
           </tr>
@@ -166,12 +227,22 @@ function ReportsTab() {
                   >
                     {t("admin.moderation.keep")}
                   </button>
+                  {/* 删除消息 / 下架贴纸包：处置动作都是 handleReport(id, "delete")，
+                      差异只在服务端落地语义（消息硬删 / 包置 taken_down） */}
                   {r.target_type === "message" && (
                     <button
                       onClick={() => void handleReport(r.id, "delete").then(refresh)}
                       className="text-label-lg text-error hover:underline"
                     >
                       {t("admin.moderation.deleteMsg")}
+                    </button>
+                  )}
+                  {r.target_type === "sticker_pack" && (
+                    <button
+                      onClick={() => void handleReport(r.id, "delete").then(refresh)}
+                      className="text-label-lg text-error hover:underline"
+                    >
+                      {t("admin.moderation.takedownPack")}
                     </button>
                   )}
                 </>
@@ -187,7 +258,7 @@ function ReportsTab() {
 
 export function ModerationQueuePage() {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<"flagged" | "reports">("flagged");
+  const [tab, setTab] = useState<"flagged" | "packs" | "reports">("flagged");
 
   return (
     <div>
@@ -197,6 +268,7 @@ export function ModerationQueuePage() {
           {(
             [
               { value: "flagged", label: t("admin.moderation.tabFlagged") },
+              { value: "packs", label: t("admin.moderation.tabPacks") },
               { value: "reports", label: t("admin.moderation.tabReports") },
             ] as const
           ).map(({ value, label }) => (
@@ -216,7 +288,9 @@ export function ModerationQueuePage() {
         </div>
       </div>
 
-      {tab === "flagged" ? <FlaggedTab /> : <ReportsTab />}
+      {tab === "flagged" && <FlaggedTab />}
+      {tab === "packs" && <FlaggedPacksTab />}
+      {tab === "reports" && <ReportsTab />}
     </div>
   );
 }

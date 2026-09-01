@@ -129,6 +129,32 @@ export function clearMessageFlag(id: string) {
   return apiDelete<{ flagged: boolean }>(`/api/v1/admin/messages/${id}/flag`);
 }
 
+export interface AdminStickerPack {
+  id: string;
+  name: string;
+  cover_url: string | null;
+  is_official: boolean;
+  flagged: boolean;
+  taken_down: boolean;
+  owner_name: string | null;
+  sticker_count: number;
+  created_at: string;
+}
+
+export function listFlaggedPacks(page: number, size = 20) {
+  return pagedGet<AdminStickerPack>(
+    `/api/v1/admin/sticker-packs${qs({ flagged: "true", page, size })}`,
+  );
+}
+
+export function takedownPack(id: string) {
+  return apiPost<{ taken_down: boolean }>(`/api/v1/admin/sticker-packs/${id}/takedown`, {});
+}
+
+export function clearPackFlag(id: string) {
+  return apiDelete<{ flagged: boolean }>(`/api/v1/admin/sticker-packs/${id}/flag`);
+}
+
 export interface AdminReport {
   id: string;
   reporter_id: string;

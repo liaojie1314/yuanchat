@@ -135,15 +135,21 @@ func (h *StickerHandler) ListMine(c *gin.Context) {
 	Success(c, gin.H{"stickers": rows, "has_more": hasMore})
 }
 
-// ListPacks 列出表情包及各自贴纸（GET /sticker-packs）。
+// ListPacks 列出「我的表情包」= 官方包 + 已添加包及各自贴纸（GET /sticker-packs）。
+// 返回结构与 H1 保持一致（{packs: [{pack, stickers}]}），集合语义随商城扩展。
 //
-//	@Summary		表情包列表
+//	@Summary		我的表情包列表（官方包 + 已添加包）
 //	@Tags			stickers
 //	@Security		BearerAuth
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/sticker-packs [get]
 func (h *StickerHandler) ListPacks(c *gin.Context) {
-	packs, err := h.svc.ListPacks(c.Request.Context())
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		Unauthorized(c, "unauthorized")
+		return
+	}
+	packs, err := h.svc.ListPacks(c.Request.Context(), userID)
 	if err != nil {
 		h.logger.Error("list sticker packs failed", zap.Error(err))
 		InternalError(c, "list sticker packs failed")

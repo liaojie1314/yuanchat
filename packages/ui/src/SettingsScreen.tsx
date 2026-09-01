@@ -13,8 +13,18 @@
  * 语言/主题切换即时生效；移动端退出登录点击弹行内确认态（不做全局 Dialog）。
  */
 import { useEffect, useState, type ReactNode } from "react";
-import { ChevronRight, LogOut, ShieldCheck, Palette, Info, User, ArrowLeft } from "lucide-react";
+import {
+  ChevronRight,
+  LogOut,
+  ShieldCheck,
+  Palette,
+  Info,
+  User,
+  ArrowLeft,
+  Sticker,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { registerBackInterceptor, useAuthStore, useBreakpoint } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
@@ -27,8 +37,9 @@ import { ChangePasswordDialog } from "./auth/ChangePasswordDialog";
 /** 设置内容区视图 */
 type SettingsView = "index" | "profile" | "account" | "appearance" | "about";
 
-/** 分组导航项（不含 profile：profile 单独作 hero 卡片） */
-const NAV_GROUPS: {
+/** 分组导航项（不含 profile：profile 单独作 hero 卡片）。
+ * 分两组：移动端列表把表情商城入口插在两组之间（About 上面）。 */
+const NAV_GROUPS_TOP: {
   view: SettingsView;
   icon: typeof User;
   labelKey: string;
@@ -46,11 +57,23 @@ const NAV_GROUPS: {
     labelKey: "settings.appearance",
     descKey: "settings.appearanceDesc",
   },
-  { view: "about", icon: Info, labelKey: "settings.about", descKey: "settings.aboutDesc" },
 ];
+
+const NAV_GROUPS_BOTTOM = [
+  {
+    view: "about" as SettingsView,
+    icon: Info,
+    labelKey: "settings.about",
+    descKey: "settings.aboutDesc",
+  },
+];
+
+/** 桌面/平板左列的完整分组顺序（与移动端一致：商城插在 About 上面） */
+const NAV_GROUPS = [...NAV_GROUPS_TOP, ...NAV_GROUPS_BOTTOM];
 
 export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const bp = useBreakpoint();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
@@ -214,7 +237,23 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
         </h1>
         <div className="mb-4">{heroCard}</div>
         <div className="mb-4 flex flex-col gap-1">
-          {NAV_GROUPS.map((g) => (
+          {NAV_GROUPS_TOP.map((g) => (
+            <MobileNavRow
+              key={g.view}
+              icon={g.icon}
+              label={t(g.labelKey)}
+              desc={t(g.descKey)}
+              onClick={() => setView(g.view)}
+            />
+          ))}
+          {/* 表情商城：移动端底栏保持 4 项，入口放 About 上面；带来源供返回键回设置 */}
+          <MobileNavRow
+            icon={Sticker}
+            label={t("settings.stickerMarket")}
+            desc={t("settings.stickerMarketDesc")}
+            onClick={() => navigate("/stickers", { state: { from: "/settings" } })}
+          />
+          {NAV_GROUPS_BOTTOM.map((g) => (
             <MobileNavRow
               key={g.view}
               icon={g.icon}

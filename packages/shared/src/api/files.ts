@@ -20,7 +20,7 @@ import { apiGet, apiPost } from "./client";
 export interface UploadTicket {
   uploadUrl: string;
   objectKey: string;
-  /** 仅头像类别（avatars）返回：匿名公共读地址，无需再签下载 */
+  /** 仅公共读类别（avatars / sticker-covers）返回：匿名可访问地址，无需再签下载 */
   publicUrl?: string;
 }
 
@@ -37,14 +37,15 @@ interface UploadUrlDTO {
  * @param filename - 原始文件名（仅用于服务端提取扩展名，最终 objectKey 用 uuid）
  * @param contentType - MIME，须在服务端白名单内（image/jpeg|png|gif|webp）
  * @param size - 字节大小，超过服务端上限回 4002
- * @param category - 显式类别；avatars 走匿名公共读（返回 publicUrl），缺省按 contentType 推断
+ * @param category - 显式类别；avatars / sticker-covers 走匿名公共读（返回 publicUrl），
+ *   缺省按 contentType 推断
  * @throws ApiError 4001 类型/扩展名非法 · 4002 超大 · 503 存储不可达
  */
 export async function getUploadUrl(
   filename: string,
   contentType: string,
   size: number,
-  category?: "images" | "avatars",
+  category?: "images" | "avatars" | "sticker-covers",
 ): Promise<UploadTicket> {
   const path =
     "/api/v1/files/upload-url" + (category ? "?category=" + encodeURIComponent(category) : "");

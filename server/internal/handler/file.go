@@ -28,9 +28,19 @@ const (
 	downloadURLTTL = 2 * time.Hour
 )
 
-// avatarsPrefix 头像前缀：桶策略对其开放匿名公共读，故不做对象级授权
+// avatarsPrefix / stickerCoversPrefix 桶级匿名公共读前缀：这些前缀不做对象级授权
 // （签与不签都能取，校验只会制造"看起来安全"的假象）。
-const avatarsPrefix = "avatars/"
+// sticker-covers 是表情包封面专用通道：封面在商城列表页高频重复渲染，
+// 公共读避免逐包签发预签名 URL；贴纸本体仍走 images/（私有 + 预签名下载）。
+const (
+	avatarsPrefix       = "avatars/"
+	stickerCoversPrefix = "sticker-covers/"
+)
+
+// isPublicReadPrefix 对象键是否落在桶级匿名公共读前缀内。
+func isPublicReadPrefix(key string) bool {
+	return strings.HasPrefix(key, avatarsPrefix) || strings.HasPrefix(key, stickerCoversPrefix)
+}
 
 // ObjectACL 判定某用户能否读取某对象，由 repository.ObjectACLRepository 实现。
 //
@@ -42,7 +52,7 @@ type ObjectACL interface {
 // objectKeyPattern 约束合法对象键，形如 images/2026/07/<uuid>.png。
 // download-url 用它拦截任意 key 探测：仅允许受控前缀 + 年月分区 + uuid + 小写扩展名。
 // 必须与 buildObjectKey 生成的键自洽（上传签发的 key 必然能通过下载校验）。
-var objectKeyPattern = regexp.MustCompile(`^(images|avatars|files)/[0-9]{4}/[0-9]{2}/[0-9a-f-]+\.[a-z0-9]+$`)
+var objectKeyPattern = regexp.MustCompile(`^(images|avatars|files|sticker-covers)/[0-9]{4}/[0-9]{2}/[0-9a-f-]+\.[a-z0-9]+$`)
 
 // FileHandler 文件直传端点：签发预签名上传/下载 URL，服务端不中转文件字节。
 // st 可能为 nil（MinIO 不可达时），相关端点据此降级为 503。
@@ -130,8 +140,8 @@ func (h *FileHandler) UploadURL(c *gin.Context) {
 		"object_key": objectKey,
 		"expires_in": int(uploadURLTTL.Seconds()),
 	}
-	// 头像走匿名公共读，直接返回 PublicURL，前端无需再签下载。
-	if category == "avatars" {
+	// 公共读类别（头像/封面）直接返回 PublicURL，前端无需再签下载。
+	if category == "avatars" || category == "sticker-covers" {
 		data["public_url"] = h.st.PublicURL(objectKey)
 	}
 	Success(c, data)
@@ -139,7 +149,7 @@ func (h *FileHandler) UploadURL(c *gin.Context) {
 
 // DownloadURL 校验对象键与**读取权限**后签发预签名下载 URL，用于私有对象（图片消息等）的受控读取。
 //
-// 授权模型：`avatars/` 前缀是桶级公共读，直接放行；其余前缀须经
+// 授权模型：`avatars/` 与 `sticker-covers/` 前缀是桶级公共读，直接放行；其余前缀须经
 // ObjectACL 判定——key 必须出现在请求者可见的某条未撤回消息里，或属于请求者的收藏贴纸
 // / 某个表情包。此前本端点只校验 key 格式，任何登录用户都能为任意合法格式的 key
 // 换到预签名 GET（机密性全靠 key 不可猜，且撤回对已泄漏的 key 无约束力）。
@@ -165,8 +175,8 @@ func (h *FileHandler) DownloadURL(c *gin.Context) {
 		return
 	}
 
-	// 头像走桶级公共读，签名与否都能取，故跳过授权判定；其余对象逐个校验归属。
-	if !strings.HasPrefix(key, avatarsPrefix) {
+	// 公共读前缀签名与否都能取，故跳过授权判定；其余对象逐个校验归属。
+	if !isPublicReadPrefix(key) {
 		userID, ok := middleware.GetUserID(c)
 		if !ok {
 			Unauthorized(c, "unauthorized")
@@ -208,11 +218,12 @@ func (h *FileHandler) DownloadURL(c *gin.Context) {
 // resolveCategory 决定对象存储的一级前缀（类别）。
 // 显式 query 优先：命中白名单直接采用，非法值回落 files；
 // 无 query 时按 content_type 推断（image/* → images，其余 → files）。
-// 头像不参与推断，须由前端显式 ?category=avatars 指定，以走匿名公共读。
+// avatars 与 sticker-covers 不参与推断，须由前端显式指定——前者走匿名公共读，
+// 后者是封面专用公共读通道；若靠 content-type 推断，普通图片消息会被误判进公共读。
 func resolveCategory(contentType, query string) string {
 	if query != "" {
 		switch query {
-		case "images", "avatars", "files":
+		case "images", "avatars", "files", "sticker-covers":
 			return query
 		default:
 			return "files"

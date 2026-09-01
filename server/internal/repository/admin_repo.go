@@ -123,6 +123,54 @@ func (r *AdminRepository) ClearFlag(ctx context.Context, messageID uuid.UUID) (b
 	return res.RowsAffected > 0, res.Error
 }
 
+// TakeDownStickerPack 下架表情包：商城不再展示，已添加者保留（软下架非硬删）。
+// 返回是否命中。
+func (r *AdminRepository) TakeDownStickerPack(ctx context.Context, packID uuid.UUID) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.StickerPack{}).
+		Where("id = ?", packID).Update("taken_down", true)
+	return res.RowsAffected > 0, res.Error
+}
+
+// ---------- 表情包 ----------
+
+// AdminStickerPack 表情包及发布者昵称、贴纸数（管理端视图）。
+type AdminStickerPack struct {
+	model.StickerPack
+	OwnerName    *string `json:"owner_name"`
+	StickerCount int64   `json:"sticker_count"`
+}
+
+// SearchStickerPacks 按包名模糊分页检索表情包（空 q 列出最新）。
+// flaggedOnly=true 时只返回敏感词命中的包（审核队列）。
+func (r *AdminRepository) SearchStickerPacks(ctx context.Context, q string, flaggedOnly bool, offset, limit int) ([]AdminStickerPack, int64, error) {
+	tx := r.db.WithContext(ctx).Model(&model.StickerPack{})
+	if flaggedOnly {
+		tx = tx.Where("sticker_packs.flagged = TRUE")
+	}
+	if q != "" {
+		tx = tx.Where("sticker_packs.name ILIKE ?", "%"+q+"%")
+	}
+	var total int64
+	if err := tx.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var packs []AdminStickerPack
+	err := tx.
+		Select(`sticker_packs.*, users.nickname AS owner_name,
+			(SELECT COUNT(*) FROM stickers WHERE stickers.pack_id = sticker_packs.id) AS sticker_count`).
+		Joins("LEFT JOIN users ON users.id = sticker_packs.owner_id").
+		Order("sticker_packs.created_at DESC").Offset(offset).Limit(limit).
+		Scan(&packs).Error
+	return packs, total, err
+}
+
+// ClearStickerPackFlag 清除表情包的 flagged 标记（审核通过保留）。返回是否命中。
+func (r *AdminRepository) ClearStickerPackFlag(ctx context.Context, packID uuid.UUID) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.StickerPack{}).
+		Where("id = ?", packID).Update("flagged", false)
+	return res.RowsAffected > 0, res.Error
+}
+
 // ---------- 举报 ----------
 
 // CreateReport 写入一条用户举报。

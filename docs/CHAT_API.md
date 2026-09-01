@@ -791,6 +791,110 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 - `id` 非合法 UUID → `400`（`invalid sticker id`）。
 - 贴纸不存在 → `404`；存在但非本人（含官方包贴纸）→ `403`（`not the sticker owner`）。
 
+### 表情商城与投稿发布（v0.4 H1b）
+
+`sticker_packs` 自 H1b 起新增 `owner_id`（发布者，注销置 NULL——**有意偏离** CASCADE 惯例：
+已添加该包的用户不因发布者注销而丢失）、`is_public`、`flagged`（包名敏感词命中打标，
+不阻塞发布，同 `messages.flagged` 范式）、`taken_down`（管理员下架标记，商城不再展示、
+已添加者保留）四列；新表 `user_sticker_packs(user_id, pack_id, sort, created_at)` 是
+**关系表非快照**（发布者编辑包内容对所有已添加者实时生效）。迁移号 015。
+
+`GET /sticker-packs`（H1 端点）语义扩展为「**官方包 + 已添加的包**」，响应结构不变——
+EmojiPicker 无需改动即可展示已添加的包。官方包与发布包贴纸行 `owner_id` 均可为 `NULL`。
+
+#### 商城浏览
+
+| 方法   | 路径                                          | 说明                                                                                                                                       |
+| ------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| GET    | `/api/v1/sticker-packs/market?cursor=&limit=` | 商城列表：`is_public=true AND taken_down=false`，`created_at DESC` 游标分页（`cursor`=上一页 `next_cursor`，RFC3339），每页默认/上限 20/50 |
+| GET    | `/api/v1/sticker-packs/:id`                   | 包详情（含 `owner_name`、`is_owner`、`first_sticker_key`、全部贴纸、`added`）；下架包仅对已添加者保留可见                                  |
+| POST   | `/api/v1/sticker-packs/:id/add`               | 添加到我的列表（幂等，`UNIQUE(user_id, pack_id)`）；下架/未公开包按 404 拒绝                                                               |
+| DELETE | `/api/v1/sticker-packs/:id/add`               | 从我的列表移除（不影响包本身）                                                                                                             |
+
+商城列表项形状（`added` 为当前用户是否已添加，批量查询防 N+1）：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "packs": [
+      {
+        "id": "uuid",
+        "name": "包名",
+        "cover_url": "http://<minio>/yuanchat/sticker-covers/… | null",
+        "first_sticker_key": "images/2026/08/<uuid>.png | null",
+        "owner_name": "Alice | null（官方或已注销）",
+        "is_official": false,
+        "sticker_count": 8,
+        "added": false,
+        "created_at": "2026-08-30T16:31:57+08:00"
+      }
+    ],
+    "next_cursor": "2026-08-30T16:31:57.907293+08:00 | null"
+  }
+}
+```
+
+`first_sticker_key` 为包内最早一张贴纸的对象键，封面缺失时前端回退展示它
+（`cover_url` 走 `sticker-covers/` 公共读直链，贴纸本体仍走预签名）。
+
+#### 投稿发布与管理
+
+| 方法   | 路径                                            | 说明                                                                 |
+| ------ | ----------------------------------------------- | -------------------------------------------------------------------- |
+| POST   | `/api/v1/sticker-packs`                         | 发布（`is_public=true` 一步公开，无草稿态）：包 + 全部贴纸同事务创建 |
+| PATCH  | `/api/v1/sticker-packs/:id`                     | 改名 / 换封面（仅发布者；改名过敏感词）                              |
+| POST   | `/api/v1/sticker-packs/:id/stickers`            | 追加一张贴纸（仅发布者；单包上限 500，超限 `409`）                   |
+| DELETE | `/api/v1/sticker-packs/:id/stickers/:stickerId` | 从包移除一张贴纸（仅发布者；允许空包）                               |
+| GET    | `/api/v1/sticker-packs/mine`                    | 我发布的包（`is_owner` 恒 true，带 `sticker_count`）                 |
+| DELETE | `/api/v1/sticker-packs/:id`                     | 删除我发布的包（级联清理贴纸与添加关系，已添加者同步失去）           |
+
+发布请求体（`collection` 从本人收藏**复制**新行、`object_key` 复用同一 MinIO 对象；
+`upload` 为直传新图）：
+
+```json
+{
+  "name": "包名（≤64 字）",
+  "cover_object_key": "sticker-covers/2026/08/<uuid>.png",
+  "sticker_sources": [
+    { "source": "collection", "sticker_id": "uuid" },
+    {
+      "source": "upload",
+      "object_key": "images/2026/08/<uuid>.png",
+      "width": 96,
+      "height": 96,
+      "content_hash": "<hex>"
+    }
+  ]
+}
+```
+
+- 贴纸来源为空 → `400`；封面 key 非 `sticker-covers/` 前缀 → `400`；
+  贴纸 `object_key` 非 `images/` 前缀 → `400`。
+- **每用户发布包上限 20**（硬编码常量），超限返回 `400` 且业务码 **`4003`**
+  （`publish limit exceeded`；沿用 file.go 4001/4002 惯例，前端按 code 识别）。
+- 包名非合法（空/超长）→ `400`；命中敏感词不拒绝，落 `flagged=true` 进 admin 审核队列。
+- 非发布者操作他人包 → `403`；包不存在 → `404`；下架/未公开包按 `404` 返回（不区分状态）。
+- 发布成功返回与详情一致的形状（`added=false`、`is_owner=true`）。
+
+#### 举报与治理
+
+- `POST /api/v1/reports` 的 `target_type` 白名单扩展 `sticker_pack`。
+- 管理端（JWT + `role=admin`，写操作留审计日志）新增三端点：
+  - `GET /api/v1/admin/sticker-packs?q=&flagged=true`——表情包检索（`flagged=true` 只看审核队列）；
+  - `POST /api/v1/admin/sticker-packs/:id/takedown`——直接下架（`taken_down=true`，软下架非硬删）；
+  - `DELETE /api/v1/admin/sticker-packs/:id/flag`——清除敏感词标记（审核通过）。
+- 举报处置选「删除」时对 `sticker_pack` 目标执行下架（原 `admin_service` 只会删消息）。
+
+#### 对象存储
+
+上传类别新增 **`sticker-covers/`**（`POST /files/upload-url?category=sticker-covers`）：
+匿名公共读（桶策略独立 Statement，同 `avatars/` 模式），upload-url 响应带 `public_url`
+直链，无需预签名下载。贴纸本体仍走 `images/`（私有 + 预签名）。
+对象级 ACL / GC（`ReferencedKeys`）已把 `sticker_packs.cover_url` 计入引用，
+离线 `cmd/gc` 不会把封面判为孤儿。
+
 ## 三、WebSocket 协议
 
 - 地址：`ws://<host>:8081/ws?token=<access_token>`（生产 `wss://`）。

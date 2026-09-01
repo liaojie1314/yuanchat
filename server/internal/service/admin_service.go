@@ -151,8 +151,10 @@ func (s *AdminService) ListReports(ctx context.Context, status int16, page, size
 	return s.repo.ListReports(ctx, status, (page-1)*size, size)
 }
 
-// HandleReport 处理举报：keep=保留（status=1），delete=删除目标消息（status=2）。
-// 目标为消息且选择删除时软删该消息；处理动作写审计。
+// HandleReport 处理举报：keep=保留（status=1），delete=处置目标（status=2）。
+// 目标为消息且选择删除时软删该消息；目标为表情包且选择删除时下架
+// （taken_down=true：商城不再展示，已添加者保留）；user 类目标无删除语义（既有缺口）。
+// 处理动作写审计。
 func (s *AdminService) HandleReport(ctx context.Context, actorID, reportID uuid.UUID, deleteTarget bool) error {
 	report, err := s.repo.FindReport(ctx, reportID)
 	if err != nil {
@@ -162,9 +164,17 @@ func (s *AdminService) HandleReport(ctx context.Context, actorID, reportID uuid.
 		return ErrReportNotFound
 	}
 
-	if deleteTarget && report.TargetType == model.ReportTargetMessage {
-		if _, err := s.repo.DeleteMessage(ctx, report.TargetID); err != nil {
-			return fmt.Errorf("delete reported message: %w", err)
+	if deleteTarget {
+		switch report.TargetType {
+		case model.ReportTargetMessage:
+			if _, err := s.repo.DeleteMessage(ctx, report.TargetID); err != nil {
+				return fmt.Errorf("delete reported message: %w", err)
+			}
+		case model.ReportTargetStickerPack:
+			// 目标已被硬删（如发布者自行删包）时 RowsAffected 为 0，举报照常处置
+			if _, err := s.repo.TakeDownStickerPack(ctx, report.TargetID); err != nil {
+				return fmt.Errorf("take down sticker pack: %w", err)
+			}
 		}
 	}
 
@@ -198,5 +208,37 @@ func (s *AdminService) ClearMessageFlag(ctx context.Context, actorID, messageID 
 		return ErrMessageNotFound
 	}
 	s.audit(ctx, actorID, model.AdminActionClearFlag, "message", messageID.String(), nil)
+	return nil
+}
+
+// SearchStickerPacks 分页检索表情包；flaggedOnly=true 只看敏感词命中的（审核队列）。
+func (s *AdminService) SearchStickerPacks(ctx context.Context, q string, flaggedOnly bool, page, size int) ([]repository.AdminStickerPack, int64, error) {
+	return s.repo.SearchStickerPacks(ctx, q, flaggedOnly, (page-1)*size, size)
+}
+
+// TakeDownStickerPack 管理员直接下架表情包（不经举报流程）：
+// 商城不再展示，已添加者保留。写审计。
+func (s *AdminService) TakeDownStickerPack(ctx context.Context, actorID, packID uuid.UUID) error {
+	ok, err := s.repo.TakeDownStickerPack(ctx, packID)
+	if err != nil {
+		return fmt.Errorf("take down sticker pack: %w", err)
+	}
+	if !ok {
+		return ErrPackNotFound
+	}
+	s.audit(ctx, actorID, model.AdminActionTakeDownPack, "sticker_pack", packID.String(), nil)
+	return nil
+}
+
+// ClearStickerPackFlag 审核通过：清除表情包敏感词标记（包保留展示）。写审计。
+func (s *AdminService) ClearStickerPackFlag(ctx context.Context, actorID, packID uuid.UUID) error {
+	ok, err := s.repo.ClearStickerPackFlag(ctx, packID)
+	if err != nil {
+		return fmt.Errorf("clear sticker pack flag: %w", err)
+	}
+	if !ok {
+		return ErrPackNotFound
+	}
+	s.audit(ctx, actorID, model.AdminActionClearPackFlag, "sticker_pack", packID.String(), nil)
 	return nil
 }

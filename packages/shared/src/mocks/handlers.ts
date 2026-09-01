@@ -294,6 +294,197 @@ function toStickerDTO(s: MockSticker) {
 }
 
 // ========================================
+// 表情商城 Mock 状态（商城/发布/编辑，进程内可变）
+// ========================================
+
+/** 商城表情包 mock 形状（字段与 service 层各 DTO 投影对齐）。 */
+interface MockPack {
+  id: string;
+  name: string;
+  cover_url: string | null;
+  owner_name: string | null;
+  is_official: boolean;
+  /** 是否在商城公开（官方包恒可见；发布即公开，本 mock 无草稿态） */
+  is_public: boolean;
+  /** 相对 mock 用户的归属（is_owner 判定用） */
+  published_by_me: boolean;
+  flagged: boolean;
+  taken_down: boolean;
+  created_at: string;
+  stickers: MockSticker[];
+}
+
+/**
+ * 商城预置：官方包 + 24 个演示用户包。
+ *
+ * @remarks 24 个是为了让默认页大小 20 之下必然出现 next_cursor，
+ *   E2E 能直接验证游标分页与「加载更多」。created_at 全部唯一且倒序生成，
+ *   与服务端 created_at DESC + 游标语义一致。发布上限 20 也能自然触发：
+ *   mock 用户从 0 个起发，连发 20 个后回 400 + 业务码 4003 `publish limit exceeded`。
+ */
+const MARKET_SEED_COUNT = 24;
+
+/** 演示发布者昵称池（轮转取用，让商城列表看起来有多人发布） */
+const MARKET_OWNERS = ["阿明", "阿珍", "小北", "柚子"];
+
+function seedMarketPacks(): MockPack[] {
+  const baseMs = Date.UTC(2026, 7, 30, 12, 0, 0); // 2026-08-30T12:00:00Z
+  const packs: MockPack[] = [];
+  for (let i = 0; i < MARKET_SEED_COUNT; i++) {
+    const id = "pack_market_" + String(i + 1).padStart(2, "0");
+    const stickers: MockSticker[] = Array.from({ length: 6 }, (_, j) => ({
+      id: id + "_s" + (j + 1),
+      object_key: "images/2026/07/beef0002-" + String(i + 1).padStart(2, "0") + (j + 1) + ".svg",
+      width: 96,
+      height: 96,
+    }));
+    packs.push({
+      id,
+      name: "演示表情包 " + (i + 1),
+      cover_url: stickerDataUrl("cover-" + id),
+      owner_name: MARKET_OWNERS[i % MARKET_OWNERS.length],
+      is_official: false,
+      is_public: true,
+      published_by_me: false,
+      flagged: false,
+      taken_down: false,
+      created_at: new Date(baseMs - i * 3600_000).toISOString(),
+      stickers,
+    });
+  }
+  return packs;
+}
+
+/**
+ * 全量表情包（官方 + 商城演示 + 本人发布）。发布/删除直接改这份状态。
+ *
+ * @remarks MSW browser 模式下状态随页面重载复位，E2E 各用例天然隔离。
+ */
+let mockPacks: MockPack[] = [
+  {
+    id: "pack_official_1",
+    name: "元聊小黄脸",
+    cover_url: null,
+    owner_name: null,
+    is_official: true,
+    is_public: true,
+    published_by_me: false,
+    flagged: false,
+    taken_down: false,
+    created_at: "2026-01-01T00:00:00Z",
+    stickers: MOCK_PACK_STICKERS,
+  },
+  ...seedMarketPacks(),
+];
+
+/** 当前 mock 用户已添加的包 id（「已添加」角标与 GET /sticker-packs 的可见集） */
+const mockAddedPackIds = new Set<string>();
+
+/** 测试辅助：剥掉 mock 内部字段，投影成商城列表项（added 相对 mock 用户）。 */
+function toMarketPackDTO(p: MockPack) {
+  return {
+    id: p.id,
+    name: p.name,
+    cover_url: p.cover_url,
+    owner_name: p.owner_name,
+    is_official: p.is_official,
+    sticker_count: p.stickers.length,
+    created_at: p.created_at,
+    added: mockAddedPackIds.has(p.id),
+  };
+}
+
+/** 投影成「我发布的」列表项。 */
+function toMyPackDTO(p: MockPack) {
+  return {
+    id: p.id,
+    name: p.name,
+    cover_url: p.cover_url,
+    owner_name: p.owner_name,
+    is_official: p.is_official,
+    sticker_count: p.stickers.length,
+    created_at: p.created_at,
+    is_owner: true,
+  };
+}
+
+/** 投影成包详情响应（pack 元信息 + 全部贴纸 + added）。 */
+function toPackDetailDTO(p: MockPack) {
+  return {
+    pack: {
+      id: p.id,
+      name: p.name,
+      cover_url: p.cover_url,
+      is_official: p.is_official,
+      owner_name: p.owner_name,
+      is_owner: p.published_by_me,
+      flagged: p.flagged,
+      sticker_count: p.stickers.length,
+      created_at: p.created_at,
+    },
+    stickers: p.stickers.map(toStickerDTO),
+    added: mockAddedPackIds.has(p.id),
+  };
+}
+
+/** 按 created_at 倒序排的商城可见集（is_public || is_official，下架的排除）。 */
+function visiblePacksByNewest(): MockPack[] {
+  return mockPacks
+    .filter((p) => !p.taken_down && (p.is_public || p.is_official))
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+}
+
+/**
+ * 发布/追加贴纸的来源体校验：collection 校验收藏存在，upload 校验
+ * images/ 锚定正则与 64 位十六进制 hash（与服务端同口径）。
+ * 校验失败返回错误响应，成功返回要新建的贴纸行。
+ */
+function resolveSource(src: {
+  source?: string;
+  sticker_id?: string;
+  object_key?: string;
+  width?: number;
+  height?: number;
+  content_hash?: string;
+}): { ok: true; sticker: MockSticker } | { ok: false; response: ReturnType<typeof apiError> } {
+  if (src.source === "collection") {
+    const fav = mockMyStickers.find((s) => s.id === src.sticker_id);
+    if (!fav) return { ok: false, response: apiError(40401, "sticker not found") };
+    return {
+      ok: true,
+      sticker: {
+        id: "pk_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8),
+        object_key: fav.object_key,
+        width: fav.width,
+        height: fav.height,
+      },
+    };
+  }
+  if (src.source === "upload") {
+    const KEY_RE = /^images\/[0-9]{4}\/[0-9]{2}\/[0-9a-f-]+\.[a-z0-9]+$/;
+    if (!src.object_key || !KEY_RE.test(src.object_key)) {
+      return { ok: false, response: apiError(40011, "invalid object key") };
+    }
+    if (!src.content_hash || !/^[0-9a-f]{64}$/.test(src.content_hash)) {
+      return { ok: false, response: apiError(40012, "invalid content hash") };
+    }
+    if (!src.width || !src.height || src.width <= 0 || src.height <= 0) {
+      return { ok: false, response: apiError(40013, "invalid size") };
+    }
+    return {
+      ok: true,
+      sticker: {
+        id: "pk_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8),
+        object_key: src.object_key,
+        width: src.width,
+        height: src.height,
+      },
+    };
+  }
+  return { ok: false, response: apiError(400, "invalid sticker source") };
+}
+
+// ========================================
 // 处理器
 // ========================================
 
@@ -511,24 +702,23 @@ export const handlers = [
   }),
 
   // --------------------------------------------------
-  // 贴纸 — 表情包列表（仅官方包）
+  // 贴纸 — 我的表情包列表（官方包 + 已添加的包，与服务端扩展后的语义一致）
   // GET /api/v1/sticker-packs
   // --------------------------------------------------
   http.get("http://localhost:8085/api/v1/sticker-packs", async () => {
     await delay(150);
+    const visible = mockPacks.filter((p) => p.is_official || mockAddedPackIds.has(p.id));
     return apiOk({
-      packs: [
-        {
-          pack: {
-            id: "pack_official_1",
-            name: "元聊小黄脸",
-            cover_url: null,
-            is_official: true,
-            sort: 0,
-          },
-          stickers: MOCK_PACK_STICKERS.map(toStickerDTO),
+      packs: visible.map((p) => ({
+        pack: {
+          id: p.id,
+          name: p.name,
+          cover_url: p.cover_url,
+          is_official: p.is_official,
+          sort: 0,
         },
-      ],
+        stickers: p.stickers.map(toStickerDTO),
+      })),
     });
   }),
 
@@ -730,6 +920,266 @@ export const handlers = [
   http.post("http://localhost:8085/api/v1/auth/logout", async () => {
     await delay(100);
     return new HttpResponse(null, { status: 204 });
+  }),
+
+  // ==================================================
+  // 表情商城与自主发布
+  // 覆盖四态：正常（预置官方+24 个演示包）/ 空（我发布的初始为空）/
+  // 错误（非法游标 400、发布体非法 400、达 20 个上限 400、越权 403、
+  // 不存在 404）/ 加载（各 handler 统一 delay）
+  // ==================================================
+
+  // --------------------------------------------------
+  // 文件 — 申请预签名上传 URL（按类别分流；公共读类别附 public_url）
+  // POST /api/v1/files/upload-url?category=images|avatars|sticker-covers
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/files/upload-url", async ({ request }) => {
+    await delay(150);
+    const body = (await request.json()) as { filename?: string; content_type?: string };
+    const category = new URL(request.url).searchParams.get("category") ?? "images";
+    const ext =
+      body.filename && body.filename.includes(".")
+        ? body.filename.slice(body.filename.lastIndexOf("."))
+        : ".png";
+    const now = new Date();
+    const objectKey =
+      category +
+      "/" +
+      now.getUTCFullYear() +
+      "/" +
+      String(now.getUTCMonth() + 1).padStart(2, "0") +
+      "/" +
+      crypto.randomUUID() +
+      ext;
+    const data: {
+      upload_url: string;
+      object_key: string;
+      public_url?: string;
+      expires_in: number;
+    } = {
+      upload_url: "http://localhost:8085/mock-storage/" + objectKey,
+      object_key: objectKey,
+      expires_in: 3600,
+    };
+    // 公共读类别（头像/表情包封面）直接给可渲染的公共 URL；mock 里用 data URL，
+    // 让 <img> 无需 MinIO 就能真的出图
+    if (category === "avatars" || category === "sticker-covers") {
+      data.public_url = stickerDataUrl(objectKey);
+    }
+    return apiOk(data);
+  }),
+
+  // --------------------------------------------------
+  // 对象存储 — mock 直传端点（配合上面的 upload_url）
+  // PUT /mock-storage/:key…
+  // --------------------------------------------------
+  http.put("http://localhost:8085/mock-storage/*", async () => {
+    await delay(150);
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // --------------------------------------------------
+  // 举报 — 提交（本批新增 target_type=sticker_pack）
+  // POST /api/v1/reports
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/reports", async () => {
+    await delay(200);
+    return apiOk({ id: "report_" + Date.now(), status: 0 });
+  }),
+
+  // --------------------------------------------------
+  // 商城 — 列表（created_at 倒序 + created_at 游标，与服务端 Market 同口径）
+  // GET /api/v1/sticker-packs/market?cursor=&limit=
+  // 注意：静态段 market/mine 须先于 :id 注册，避免被参数路由吃掉
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/sticker-packs/market", async ({ request }) => {
+    await delay(200);
+    const qs = new URL(request.url).searchParams;
+    const limit = Math.min(50, Number(qs.get("limit")) || 20);
+    const cursor = qs.get("cursor");
+    if (cursor) {
+      // 与服务端一致：游标必须是合法 RFC3339 时间戳
+      if (Number.isNaN(Date.parse(cursor))) {
+        return apiError(400, "invalid cursor");
+      }
+    }
+    let list = visiblePacksByNewest();
+    if (cursor) list = list.filter((p) => p.created_at < cursor);
+    const page = list.slice(0, limit);
+    const hasMore = list.length > page.length;
+    return apiOk({
+      packs: page.map(toMarketPackDTO),
+      next_cursor: hasMore && page.length > 0 ? page[page.length - 1].created_at : null,
+    });
+  }),
+
+  // --------------------------------------------------
+  // 商城 — 我发布的（初始为空，发布后出现）
+  // GET /api/v1/sticker-packs/mine
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/sticker-packs/mine", async () => {
+    await delay(200);
+    return apiOk({
+      packs: mockPacks.filter((p) => p.published_by_me).map(toMyPackDTO),
+    });
+  }),
+
+  // --------------------------------------------------
+  // 商城 — 发布（一步创建即公开；达 20 个回 400 + 业务码 4003 publish limit exceeded）
+  // POST /api/v1/sticker-packs
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/sticker-packs", async ({ request }) => {
+    await delay(300);
+    const body = (await request.json()) as {
+      name?: string;
+      cover_object_key?: string;
+      sticker_sources?: Array<Record<string, unknown>>;
+    };
+    const name = (body.name ?? "").trim();
+    if (!name || name.length > 64) return apiError(400, "invalid pack name");
+    if (!Array.isArray(body.sticker_sources) || body.sticker_sources.length === 0) {
+      return apiError(400, "sticker sources must not be empty");
+    }
+    if (mockPacks.filter((p) => p.published_by_me).length >= 20) {
+      // 与真实服务端同码：400 + 业务码 4003，前端按 code 识别上限错误
+      return apiError(4003, "publish limit exceeded");
+    }
+    const stickers: MockSticker[] = [];
+    for (const src of body.sticker_sources) {
+      const resolved = resolveSource(src);
+      if (!resolved.ok) return resolved.response;
+      stickers.push(resolved.sticker);
+    }
+    const pack: MockPack = {
+      id: "pack_" + crypto.randomUUID(),
+      name,
+      // 服务端把 cover_object_key 转成公共 URL；mock 里给可渲染的 data URL
+      cover_url: body.cover_object_key ? stickerDataUrl(body.cover_object_key) : null,
+      owner_name: MOCK_USER.nickname,
+      is_official: false,
+      is_public: true,
+      published_by_me: true,
+      flagged: false,
+      taken_down: false,
+      created_at: new Date().toISOString(),
+      stickers,
+    };
+    mockPacks = [pack].concat(mockPacks);
+    return apiOk(toPackDetailDTO(pack));
+  }),
+
+  // --------------------------------------------------
+  // 商城 — 包详情（含全部贴纸与 is_owner；不存在/下架未添加回 404）
+  // GET /api/v1/sticker-packs/:id
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/sticker-packs/:id", async ({ params }) => {
+    await delay(200);
+    const id = String(params.id);
+    const pack = mockPacks.find((p) => p.id === id);
+    if (!pack || (pack.taken_down && !mockAddedPackIds.has(id))) {
+      return apiError(40404, "sticker pack not found");
+    }
+    return apiOk(toPackDetailDTO(pack));
+  }),
+
+  // --------------------------------------------------
+  // 商城 — 添加到我的表情包（幂等；下架/未公开回 404）
+  // POST /api/v1/sticker-packs/:id/add
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/sticker-packs/:id/add", async ({ params }) => {
+    await delay(200);
+    const id = String(params.id);
+    const pack = mockPacks.find((p) => p.id === id);
+    if (!pack || pack.taken_down || !(pack.is_public || pack.is_official)) {
+      return apiError(40404, "sticker pack not available");
+    }
+    mockAddedPackIds.add(id);
+    return apiOk({ message: "added" });
+  }),
+
+  // --------------------------------------------------
+  // 商城 — 从我的表情包移除（幂等，不影响包本身）
+  // DELETE /api/v1/sticker-packs/:id/add
+  // --------------------------------------------------
+  http.delete("http://localhost:8085/api/v1/sticker-packs/:id/add", async ({ params }) => {
+    await delay(200);
+    mockAddedPackIds.delete(String(params.id));
+    return apiOk({ message: "removed" });
+  }),
+
+  // --------------------------------------------------
+  // 商城 — 编辑本人发布的包（改名/换封面；非本人 403）
+  // PATCH /api/v1/sticker-packs/:id
+  // --------------------------------------------------
+  http.patch("http://localhost:8085/api/v1/sticker-packs/:id", async ({ params, request }) => {
+    await delay(250);
+    const id = String(params.id);
+    const pack = mockPacks.find((p) => p.id === id);
+    if (!pack) return apiError(40404, "sticker pack not found");
+    if (!pack.published_by_me) return apiError(403, "not the pack owner");
+    const body = (await request.json()) as {
+      name?: string;
+      cover_object_key?: string;
+    };
+    if (body.name !== undefined) {
+      const name = body.name.trim();
+      if (!name || name.length > 64) return apiError(400, "invalid pack name");
+      pack.name = name;
+    }
+    if (body.cover_object_key) pack.cover_url = stickerDataUrl(body.cover_object_key);
+    return apiOk(toPackDetailDTO(pack));
+  }),
+
+  // --------------------------------------------------
+  // 商城 — 给本人发布的包追加贴纸（collection/upload 两来源）
+  // POST /api/v1/sticker-packs/:id/stickers
+  // --------------------------------------------------
+  http.post(
+    "http://localhost:8085/api/v1/sticker-packs/:id/stickers",
+    async ({ params, request }) => {
+      await delay(250);
+      const id = String(params.id);
+      const pack = mockPacks.find((p) => p.id === id);
+      if (!pack) return apiError(40404, "sticker pack not found");
+      if (!pack.published_by_me) return apiError(403, "not the pack owner");
+      const body = (await request.json()) as Record<string, unknown>;
+      const resolved = resolveSource(body);
+      if (!resolved.ok) return resolved.response;
+      pack.stickers = [resolved.sticker].concat(pack.stickers);
+      return apiOk({ message: "added" });
+    },
+  ),
+
+  // --------------------------------------------------
+  // 商城 — 从本人发布的包移除贴纸（不动原收藏）
+  // DELETE /api/v1/sticker-packs/:id/stickers/:stickerId
+  // --------------------------------------------------
+  http.delete(
+    "http://localhost:8085/api/v1/sticker-packs/:id/stickers/:stickerId",
+    async ({ params }) => {
+      await delay(200);
+      const id = String(params.id);
+      const pack = mockPacks.find((p) => p.id === id);
+      if (!pack) return apiError(40404, "sticker pack not found");
+      if (!pack.published_by_me) return apiError(403, "not the pack owner");
+      pack.stickers = pack.stickers.filter((s) => s.id !== String(params.stickerId));
+      return apiOk({ message: "removed" });
+    },
+  ),
+
+  // --------------------------------------------------
+  // 商城 — 删除本人发布的包（级联清除添加关系；非本人 403）
+  // DELETE /api/v1/sticker-packs/:id
+  // --------------------------------------------------
+  http.delete("http://localhost:8085/api/v1/sticker-packs/:id", async ({ params }) => {
+    await delay(250);
+    const id = String(params.id);
+    const pack = mockPacks.find((p) => p.id === id);
+    if (!pack) return apiError(40404, "sticker pack not found");
+    if (!pack.published_by_me) return apiError(403, "not the pack owner");
+    mockPacks = mockPacks.filter((p) => p.id !== id);
+    mockAddedPackIds.delete(id);
+    return apiOk({ message: "deleted" });
   }),
 
   // --------------------------------------------------

@@ -71,6 +71,8 @@ func Setup(
 	// 与 fileH 的 503 降级策略一致，不因存储不可达而整条链路 500）
 	if st != nil {
 		stickerSvc.SetObjectChecker(st)
+		// 封面对象键 → 公共 URL 映射：缺失时发布会静默丢封面（对象已传但无 URL 可落库）
+		stickerSvc.SetPublicURL(st.PublicURL)
 	}
 	stickerH := handler.NewStickerHandler(stickerSvc, logger)
 
@@ -156,8 +158,11 @@ func Setup(
 		})
 	})
 
-	// 敏感词审核：命中词库的文本消息标记 flagged 进审核队列
-	msgSvc.SetModeration(service.NewModerationService(cfg.Moderation.Words))
+	// 敏感词审核：共享单例同时服务消息正文与表情包包名——实例无状态，
+	// 两处各自现场 New 会让热更新词库时只改到一处
+	moderationSvc := service.NewModerationService(cfg.Moderation.Words)
+	msgSvc.SetModeration(moderationSvc)
+	stickerSvc.SetModeration(moderationSvc)
 
 	// 好友上下线帧广播（对本实例在线好友）
 	notifyFriends := func(userID uuid.UUID, online bool) {
@@ -287,7 +292,7 @@ func Setup(
 		chat.GET("/stickers/mine", middleware.LimitByIP(20, 40), stickerH.ListMine)
 		chat.POST("/stickers", middleware.LimitByIP(10, 20), stickerH.Add)
 		chat.DELETE("/stickers/:id", middleware.LimitByIP(10, 20), stickerH.Remove)
-		chat.GET("/sticker-packs", middleware.LimitByIP(20, 40), stickerH.ListPacks)
+		registerStickerPackRoutes(chat, stickerH)
 
 		chat.POST("/reports", middleware.LimitByIP(10, 20), reportH.Create)
 
@@ -313,10 +318,34 @@ func Setup(
 		admin.GET("/messages", adminH.ListMessages)
 		admin.DELETE("/messages/:id", adminH.DeleteMessage)
 		admin.DELETE("/messages/:id/flag", adminH.ClearMessageFlag)
+		admin.GET("/sticker-packs", adminH.ListStickerPacks)
+		admin.POST("/sticker-packs/:id/takedown", adminH.TakeDownStickerPack)
+		admin.DELETE("/sticker-packs/:id/flag", adminH.ClearStickerPackFlag)
 		admin.GET("/reports", adminH.ListReports)
 		admin.POST("/reports/:id/handle", adminH.HandleReport)
 		admin.GET("/audit-logs", adminH.ListAuditLogs)
 	}
 
 	return r, wsH
+}
+
+// registerStickerPackRoutes 注册表情包商城 / 发布管理相关路由（均挂在已鉴权的分组下）。
+//
+// 单独成函数：gin 对「静态段与参数段同级」（/market、/mine 与 /:id）的支持
+// 依赖注册期的基数树构造，冲突会在启动时 panic——把注册集中到这里，
+// 测试可以直接构造空引擎验证路由表合法。
+func registerStickerPackRoutes(rg gin.IRouter, h *handler.StickerHandler) {
+	// 静态段（market / mine）注册在参数段（:id）之前，gin 按静态优先匹配
+	rg.GET("/sticker-packs", middleware.LimitByIP(20, 40), h.ListPacks)
+	rg.GET("/sticker-packs/market", middleware.LimitByIP(20, 40), h.Market)
+	rg.GET("/sticker-packs/mine", middleware.LimitByIP(20, 40), h.ListMyPacks)
+
+	rg.POST("/sticker-packs", middleware.LimitByIP(10, 20), h.Publish)
+	rg.GET("/sticker-packs/:id", middleware.LimitByIP(20, 40), h.PackDetail)
+	rg.PATCH("/sticker-packs/:id", middleware.LimitByIP(10, 20), h.UpdatePack)
+	rg.DELETE("/sticker-packs/:id", middleware.LimitByIP(10, 20), h.DeleteMinePack)
+	rg.POST("/sticker-packs/:id/add", middleware.LimitByIP(10, 20), h.AddPack)
+	rg.DELETE("/sticker-packs/:id/add", middleware.LimitByIP(10, 20), h.RemovePack)
+	rg.POST("/sticker-packs/:id/stickers", middleware.LimitByIP(10, 20), h.AddPackSticker)
+	rg.DELETE("/sticker-packs/:id/stickers/:stickerId", middleware.LimitByIP(10, 20), h.RemovePackSticker)
 }
