@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	crand "crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -11,13 +13,31 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// captchaKeyPrefix 是验证码在 Redis 中的命名空间前缀，
+// 与 auth_service 的 auth: 前缀风格一致，避免裸键互相污染。
+const captchaKeyPrefix = "captcha:"
+
+// captchaKey 把对外暴露的 captcha id 映射为带命名空间的 Redis key。
+func captchaKey(id string) string { return captchaKeyPrefix + id }
+
 // CaptchaHandler 负责图形验证码的生成与校验。
 type CaptchaHandler struct {
 	rdb *redis.Client
 }
 
+// NewCaptchaHandler 构造 CaptchaHandler。
 func NewCaptchaHandler(rdb *redis.Client) *CaptchaHandler {
 	return &CaptchaHandler{rdb: rdb}
+}
+
+// newCaptchaID 用 crypto/rand 生成 128bit 随机 id（32 位 hex），
+// 保证验证码 id 不可预测，防止枚举碰撞他人会话。
+func newCaptchaID() (string, error) {
+	var buf [16]byte
+	if _, err := crand.Read(buf[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf[:]), nil
 }
 
 // Generate 返回 SVG 算术验证码图片，并把答案存入 Redis。
@@ -48,10 +68,15 @@ func (h *CaptchaHandler) Generate(c *gin.Context) {
 		question = fmt.Sprintf("%d - %d = ?", a, b)
 	}
 
-	// 存入 Redis，5 分钟有效
-	id := fmt.Sprintf("captcha_%d", rand.IntN(1000000))
+	id, err := newCaptchaID()
+	if err != nil {
+		c.String(http.StatusInternalServerError, "captcha generation failed")
+		return
+	}
+
+	// 存入 Redis，5 分钟有效；key 带 captcha: 命名空间前缀
 	ctx := context.Background()
-	if err := h.rdb.Set(ctx, id, answer, 5*time.Minute).Err(); err != nil {
+	if err := h.rdb.Set(ctx, captchaKey(id), answer, 5*time.Minute).Err(); err != nil {
 		c.String(http.StatusInternalServerError, "captcha generation failed")
 		return
 	}
@@ -79,13 +104,17 @@ type VerifyRequest struct {
 }
 
 // Validate 用 Redis 中存的答案校验提交值。
-// 答案正确时返回 true 并删除该 key（一次性使用）。
+// 与 auth_service 的做法一致：先比较、比对成功才删除（一次性使用）；
+// 输错不作废验证码，用户可刷新后再次尝试同一验证码。
 func (h *CaptchaHandler) Validate(ctx context.Context, id string, answer int) bool {
-	val, err := h.rdb.Get(ctx, id).Int()
+	val, err := h.rdb.Get(ctx, captchaKey(id)).Int()
 	if err != nil {
 		return false
 	}
-	// 验证后立即删除，防止重复使用
-	h.rdb.Del(ctx, id)
-	return val == answer
+	if val != answer {
+		return false
+	}
+	// 比对成功才删除，防止重复使用
+	h.rdb.Del(ctx, captchaKey(id))
+	return true
 }

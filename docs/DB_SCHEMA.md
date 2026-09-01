@@ -1,331 +1,209 @@
-# 03 — 数据库设计
+# 03 — 数据库设计（按 goose 迁移序）
 
 > **前置阅读**：[ARCHITECTURE.md](./ARCHITECTURE.md)
+>
+> 本文按 `server/internal/database/migrations/` 的实际迁移序（001 → 015）重建，
+> 与代码严格同步；旧文档中的 Elasticsearch / MinIO 章节已过时，不在此保留。
 
 ---
 
-## 一、PostgreSQL 表设计
+## 一、goose 迁移工作流
 
-### 1.1 users — 用户表
-
-```sql
-CREATE TABLE users (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    phone           VARCHAR(20) UNIQUE,           -- 手机号（可选）
-    email           VARCHAR(255) UNIQUE,          -- 邮箱（可选）
-    password_hash   VARCHAR(255) NOT NULL,        -- bcrypt 哈希
-    nickname        VARCHAR(50) NOT NULL,         -- 昵称
-    avatar_url      VARCHAR(500),                 -- 头像 URL
-    bio             VARCHAR(500),                 -- 个人简介
-    gender          SMALLINT DEFAULT 0,           -- 0=未知 1=男 2=女
-    birthday        DATE,
-    status          SMALLINT DEFAULT 1,           -- 1=正常 2=禁用 3=注销
-    last_login_at   TIMESTAMPTZ,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_users_phone ON users(phone) WHERE phone IS NOT NULL;
-CREATE INDEX idx_users_email ON users(email) WHERE email IS NOT NULL;
-CREATE INDEX idx_users_nickname ON users USING gin(nickname gin_trgm_ops);
-```
-
-### 1.2 user_devices — 用户设备表
-
-```sql
-CREATE TABLE user_devices (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    device_name     VARCHAR(100),                -- 设备名称
-    device_type     SMALLINT NOT NULL,           -- 1=Web 2=Desktop 3=Android 4=iOS
-    push_token      VARCHAR(500),                -- 推送 Token
-    last_online_at  TIMESTAMPTZ,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_user_devices_user ON user_devices(user_id);
-```
-
-### 1.3 contacts — 联系人关系表
-
-```sql
-CREATE TABLE contacts (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    contact_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    remark          VARCHAR(50),                 -- 备注名
-    status          SMALLINT DEFAULT 0,          -- 0=待确认 1=已添加 2=已拒绝 3=已删除
-    source          VARCHAR(50),                 -- 来源（搜索/群组/二维码）
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(user_id, contact_user_id)
-);
-
-CREATE INDEX idx_contacts_user ON contacts(user_id);
-CREATE INDEX idx_contacts_contact ON contacts(contact_user_id);
-```
-
-### 1.4 conversations — 会话表
-
-```sql
-CREATE TABLE conversations (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    type            SMALLINT NOT NULL,           -- 1=单聊 2=群聊 3=系统
-    name            VARCHAR(100),                -- 会话名称（群聊时使用）
-    avatar_url      VARCHAR(500),                -- 会话头像
-    last_message_id UUID,                        -- 最后一条消息 ID
-    last_seq        BIGINT DEFAULT 0,            -- 最后消息序列号
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_conversations_updated ON conversations(updated_at DESC);
-```
-
-### 1.5 conversation_members — 会话成员表
-
-```sql
-CREATE TABLE conversation_members (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role            SMALLINT DEFAULT 0,          -- 0=普通成员 1=管理员 2=群主
-    joined_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_read_seq   BIGINT DEFAULT 0,            -- 最后已读序列号
-    is_muted        BOOLEAN DEFAULT FALSE,       -- 是否免打扰
-    UNIQUE(conversation_id, user_id)
-);
-
-CREATE INDEX idx_conv_members_user ON conversation_members(user_id);
-CREATE INDEX idx_conv_members_conv ON conversation_members(conversation_id);
-```
-
-### 1.6 messages — 消息表
-
-```sql
-CREATE TABLE messages (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    sender_id       UUID NOT NULL REFERENCES users(id),
-    seq             BIGINT NOT NULL,             -- 会话内递增序列号
-    message_type    SMALLINT NOT NULL,           -- 1=文本 2=图片 3=文件 4=语音 5=视频 6=系统
-    content         JSONB NOT NULL,              -- 消息内容（JSON 格式，便于扩展）
-    status          SMALLINT DEFAULT 1,          -- 1=正常 2=已撤回 3=已删除
-    reply_to_id     UUID REFERENCES messages(id),-- 引用/回复的消息
-    client_msg_id   VARCHAR(64),                 -- 客户端幂等 ID
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(conversation_id, seq)
-);
-
-CREATE INDEX idx_messages_conversation ON messages(conversation_id, seq DESC);
-CREATE INDEX idx_messages_sender ON messages(sender_id);
-CREATE INDEX idx_messages_created ON messages(created_at);
-CREATE INDEX idx_messages_content ON messages USING gin(content);
-
--- 按月分区（可选，用于消息归档）
--- CREATE TABLE messages_2026_06 PARTITION OF messages
---     FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
-```
-
-### 1.7 message_status — 消息送达/已读状态表
-
-```sql
-CREATE TABLE message_status (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    message_id      UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    status          SMALLINT NOT NULL,           -- 1=已发送 2=已送达 3=已读
-    delivered_at    TIMESTAMPTZ,
-    read_at         TIMESTAMPTZ,
-    UNIQUE(message_id, user_id)
-);
-
-CREATE INDEX idx_msg_status_user ON message_status(user_id, status);
-```
-
-### 1.8 files — 文件表
-
-```sql
-CREATE TABLE files (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    uploader_id     UUID NOT NULL REFERENCES users(id),
-    file_name       VARCHAR(255) NOT NULL,
-    file_size       BIGINT NOT NULL,             -- 字节
-    mime_type       VARCHAR(100),
-    file_type       SMALLINT NOT NULL,           -- 1=图片 2=文件 3=语音 4=视频
-    storage_path    VARCHAR(500) NOT NULL,       -- MinIO 中的路径
-    thumbnail_path  VARCHAR(500),                -- 缩略图路径（图片/视频）
-    width           INT,                         -- 图片/视频宽度
-    height          INT,                         -- 图片/视频高度
-    duration        INT,                         -- 语音/视频时长（秒）
-    md5_hash        VARCHAR(32),
-    status          SMALLINT DEFAULT 1,          -- 1=正常 2=已过期 3=已删除
-    expires_at      TIMESTAMPTZ,                 -- 过期时间
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_files_uploader ON files(uploader_id);
-CREATE INDEX idx_files_type ON files(file_type);
-```
-
-### 1.9 groups — 群组表（扩展）
-
-```sql
-CREATE TABLE groups (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    name            VARCHAR(100) NOT NULL,
-    avatar_url      VARCHAR(500),
-    description     VARCHAR(500),
-    notice          VARCHAR(1000),               -- 群公告
-    max_members     INT DEFAULT 200,
-    join_mode       SMALLINT DEFAULT 0,          -- 0=自由加入 1=审核 2=禁止加入
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-```
-
-### 1.10 verification_codes — 验证码表
-
-```sql
-CREATE TABLE verification_codes (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    target          VARCHAR(255) NOT NULL,       -- 手机号或邮箱
-    code            VARCHAR(10) NOT NULL,
-    type            SMALLINT NOT NULL,           -- 1=注册 2=登录 3=重置密码
-    expires_at      TIMESTAMPTZ NOT NULL,
-    used            BOOLEAN DEFAULT FALSE,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_vc_target_expires ON verification_codes(target, expires_at);
-```
+- **工具**：[pressly/goose](https://pressly.github.io/goose/) 嵌入式 SQL 迁移，迁移文件位于
+  `server/internal/database/migrations/`，通过 `embed` 打进二进制，服务启动时自动执行 `up`。
+- **文件命名**：`NNN_描述.sql`，内部用 `-- +goose Up` / `-- +goose Down` 注解划分升降级段落；
+  需要多语句块（如含 `;` 的 DDL）用 `-- +goose StatementBegin/StatementEnd` 包裹。
+- **幂等性**：基准迁移及多数语句使用 `IF NOT EXISTS` / `IF EXISTS`，可安全重跑。
+- **新迁移流程**：
+  1. 新建 `0NN_xxx.sql`，写 `Up`（建表/加列/建索引）与对应的 `Down`；
+  2. 本地 `pnpm dev:server` 启动时自动应用，或单独用 `cmd/migrate` 执行；
+  3. 验证 `goose status` 与业务读写正常后随代码一起提交；
+  4. 生产部署由 `cmd/migrate` 在应用启动前单独执行迁移。
+- **特殊用法**：
+  - `CREATE INDEX CONCURRENTLY` 必须放在 `-- +goose NO TRANSACTION` 迁移中（见 003），
+    避免长事务锁表；
+  - 基准迁移（001）不提供有效 `Down` —— 生产环境不应 down 到空库；
+  - 数据回填（如 015 的官方包 `is_public` 补齐）直接写在 `Up` 段内，与 DDL 同事务生效。
 
 ---
 
-## 二、Redis 数据结构
+## 二、迁移明细（001 → 015）
 
-### 2.1 在线状态
+### 001_baseline — 基准 Schema 快照
 
-```
-Key:   presence:{user_id}
-Type:  Hash
-TTL:   无
-Value: {
-    "status": 1,          // 1=在线 2=忙碌 3=离开 4=离线
-    "last_seen": timestamp,
-    "device_count": 2
-}
-```
+合并了最初的 `001_init.sql` 与 `002_contacts.sql`，是全库起点。建立扩展
+`uuid-ossp`、`pg_trgm`，并创建核心表：
 
-### 2.2 用户 ↔ 设备映射
+| 表                     | 用途      | 关键列 / 约束                                                                                                             |
+| ---------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `users`                | 用户      | `phone`/`email` 唯一、软删 `deleted_at`；昵称 `gin_trgm_ops` GIN 索引（模糊搜索）                                         |
+| `conversations`        | 会话      | `type`（1 单聊 / 2 群聊 / 3 系统）、`last_seq` 游标；软删                                                                 |
+| `conversation_members` | 会话成员  | `role`（0 成员 / 1 管理员 / 2 群主）、`last_read_seq`（已读回执）、`is_muted`（免打扰）；UNIQUE(conversation_id, user_id) |
+| `messages`             | 消息      | `seq` 会话内递增、`content JSONB`、`status`（1 正常 / 2 撤回 / 3 删除）、软删；UNIQUE(conversation_id, seq)               |
+| `message_status`       | 送达/已读 | UNIQUE(message_id, user_id)，`delivered_at` / `read_at`                                                                   |
+| `contacts`             | 好友关系  | `status`（0 待确认 / 1 已添加 / 2 已拒绝 / 3 已删除）；软删；UNIQUE(user_id, contact_user_id)                             |
+| `verification_codes`   | 验证码    | `target` + `expires_at` 索引                                                                                              |
+| `friend_requests`      | 好友申请  | UNIQUE(requester_id, target_id)，`(target_id, status)` 索引                                                               |
 
-```
-Key:   user:devices:{user_id}
-Type:  Set
-TTL:   无
-Value: {"device_id_1", "device_id_2", ...}
-```
+所有软删表均带 `deleted_at`；部分索引（如 users 的 phone/email）都带 `deleted_at IS NULL` 条件。
 
-### 2.3 WebSocket 连接映射
+### 002_v02_additions — v0.2 表情回应 / 拉黑 / @ 提及
 
-```
-Key:   ws:connection:{connection_id}
-Type:  Hash
-TTL:   30分钟（心跳续期）
-Value: {
-    "user_id": "uuid",
-    "device_id": "uuid",
-    "device_type": 1,
-    "connected_at": timestamp
-}
-```
+- 新表 `message_reactions`：UNIQUE(message_id, user_id, emoji)，一人一消息一表情只有一条。
+- 新表 `blocklists`：UNIQUE(user_id, target_id)，单聊发送拦截的依据。
+- `conversation_members` 加 `mention_unread BOOLEAN`（@ 未读角标）。
+- `messages` 补 `reply_to_id`（引用回复）、`mentions UUID[]`、`client_msg_id`（幂等 ID）。
+- 修正旧 AutoMigrate 产生的索引：重建唯一索引 `idx_conversation_seq(conversation_id, seq)`。
 
-### 2.4 离线消息队列
+### 003_message_search_index — 消息全文检索索引
 
-```
-Key:   offline:messages:{user_id}:{device_id}
-Type:  List
-TTL:   7天
-Value: 序列化的消息 JSON（最多保留 100 条）
-```
+`-- +goose NO TRANSACTION` + `CREATE INDEX CONCURRENTLY`（不锁表）：
+`idx_messages_text_trgm` — 对 `content->>'text'` 建 `gin_trgm_ops` GIN 索引，
+部分索引条件 `deleted_at IS NULL AND status = 1`，支撑 `GET /messages/search`。
 
-### 2.5 Token 黑名单
+### 004_a5_favorites — 收藏
 
-```
-Key:   token:blacklist:{jti}
-Type:  String
-TTL:   Token 剩余有效期
-Value: "1"
-```
+新表 `favorites`：快照式收藏（冗余 `conv_name` / `sender_nickname` / `message_type` /
+`content JSONB`，消息删除后收藏仍可展示）；UNIQUE(user_id, message_id)。
 
-### 2.6 速率限制
+### 005_e2_admin — 管理后台
 
-```
-Key:   ratelimit:{action}:{user_id}:{window}
-Type:  String (计数器)
-TTL:   窗口时间
-Value: 请求次数
-```
+- `users` 加 `role SMALLINT`（0 普通用户，非 0 为管理员），配合 JWT `role` 声明做双重校验。
+- 新表 `admin_action_logs`：审计日志（actor / action / target_type / target_id / detail JSONB），
+  按操作人与操作类型分别建 `(…, created_at DESC)` 索引。
 
-### 2.7 最近消息缓存
+### 006_e3_moderation — 举报与内容审核
 
-```
-Key:   messages:recent:{conversation_id}
-Type:  ZSet (sorted by seq)
-TTL:   1小时
-Value: 序列化的消息 JSON（最多保留 50 条）
-```
+- `messages` 加 `flagged BOOLEAN`，部分索引 `(flagged, created_at DESC) WHERE flagged = TRUE`
+  服务审核队列（敏感词命中只标记不阻塞发送）。
+- 新表 `reports`：举报（`target_type` = message | user，`status` 0 待处理 / 1 已保留 / 2 已删除，
+  `handled_by` / `handled_at`）。
+
+### 007_d3_web_push — Web Push 订阅
+
+新表 `push_subscriptions`：`endpoint` 唯一（同一浏览器重复订阅覆盖而非堆积），
+存 `p256dh` / `auth` 密钥与 `user_agent`。
+
+### 008_d4_e2ee — 端到端加密（X3DH + Double Ratchet）
+
+| 表                      | 用途                                                                      |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `e2ee_identities`       | 身份密钥 + signed prekey，每用户一行（PK 即 user_id），换设备/轮换时覆盖  |
+| `e2ee_one_time_prekeys` | 一次性预密钥池，UNIQUE(user_id, key_id)；分发一个即删一个（前向保密关键） |
+| `e2ee_key_backups`      | 密钥备份：客户端 PIN 派生密钥加密的 blob + KDF 盐，服务端只存不解         |
+
+### 009_a6_conversation_settings — 会话置顶
+
+`conversation_members` 加 `is_pinned BOOLEAN` + `pinned_at TIMESTAMPTZ`（按成员维度置顶）。
+
+### 010_a7_chat_experience — 群公告 / 群昵称 / 清空聊天记录
+
+- `conversation_members` 加 `cleared_before_seq BIGINT`（清空水位：历史查询按 seq 过滤）
+  与 `alias VARCHAR(30)`（群内昵称）。
+- `conversations` 加 `announcement TEXT` + `announcement_updated_at`（群公告）。
+
+### 011_h1_stickers — 贴纸 / 收藏表情
+
+| 表              | 用途                                                                                                                                  |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `sticker_packs` | 表情包（名称、封面、`is_official`、`sort`）                                                                                           |
+| `stickers`      | 单张贴纸：`pack_id` / `owner_id` 二选一外键，`object_key`（MinIO 对象），`content_hash` 内容寻址去重 — UNIQUE(owner_id, content_hash) |
+
+### 012_sticker_constraints — 贴纸归属互斥约束
+
+把「`pack_id` 与 `owner_id` 互斥」的不变量从应用层下沉到数据库：
+`chk_stickers_owner_xor_pack CHECK ((pack_id IS NULL) <> (owner_id IS NULL))`，
+防止将来新增写入路径（如表情商城）产出两者同时非空/同时为空的脏数据。
+
+### 013_object_acl_and_gc — 对象级读授权与 GC 索引
+
+为「按对象 key 反查归属」补两条索引，是下载授权（`/files/download-url`）与对象回收
+（`cmd/gc`）的共同基础：
+
+- `idx_messages_content_key` — `messages((content->>'key'))` 表达式索引；撤回会把
+  `content` 置 `'{}'`，行自然退出索引，实现「撤回即撤销访问」；
+- `idx_stickers_object_key` — 贴纸按 key 反查本人收藏/表情包归属。
+
+### 014_auth_token_version — 改密吊销旧令牌
+
+`users` 加 `token_version INT DEFAULT 0`：签发 JWT 时写入 `tv` 声明，校验方比对库中值，
+不一致即吊销。只在 token 刷新与 WS 建连处校验（REST 靠 15 分钟 access TTL 自然过期，
+避免每个请求查库）。
+
+### 015_h1b_sticker_market — 表情商城
+
+- `sticker_packs` 加 `owner_id`（发布者，注销时 `SET NULL`）、`is_public`（商城可见）、
+  `flagged`（敏感词标记，同 messages 范式）、`taken_down`（下架，已添加者保留）；
+  并回填存量官方包 `is_public = TRUE`。
+- 新表 `user_sticker_packs`：用户添加的表情包（我的列表 = 官方包 + 已添加包），
+  UNIQUE(user_id, pack_id)，按 `sort` 排序。
+- 商城列表索引 `idx_packs_public(is_public, taken_down, created_at DESC)`；
+  审核队列部分索引 `idx_packs_flagged … WHERE flagged = TRUE`。
 
 ---
 
-## 三、Elasticsearch 索引
+## 三、最终态关键表结构
 
-### 3.1 消息搜索索引
+> 仅列核心列与关系，完整 DDL 以 `server/internal/database/migrations/` 为准。
 
-```json
-{
-  "index": "yuanchat_messages",
-  "mappings": {
-    "properties": {
-      "message_id": { "type": "keyword" },
-      "conversation_id": { "type": "keyword" },
-      "sender_id": { "type": "keyword" },
-      "content_text": { "type": "text", "analyzer": "ik_max_word" },
-      "message_type": { "type": "integer" },
-      "file_name": { "type": "text" },
-      "created_at": { "type": "date" }
-    }
-  }
-}
-```
-
----
-
-## 四、MinIO 存储结构
+### 用户与关系
 
 ```
-yuanchat/
-├── avatars/           # 用户头像
-│   └── {user_id}/
-│       └── avatar_{hash}.webp
-├── images/            # 聊天图片
-│   └── {year}/{month}/
-│       ├── {file_id}.webp
-│       └── {file_id}_thumb.webp
-├── files/             # 聊天文件
-│   └── {year}/{month}/
-│       └── {file_id}_{original_name}
-├── voices/            # 语音消息
-│   └── {year}/{month}/
-│       └── {file_id}.opus
-├── videos/            # 视频消息
-│   └── {year}/{month}/
-│       ├── {file_id}.mp4
-│       └── {file_id}_thumb.jpg
-└── group_avatars/     # 群组头像
-    └── {group_id}/
-        └── avatar_{hash}.webp
+users            id, phone(uniq), email(uniq), password_hash, nickname, avatar_url,
+                 bio, gender, birthday, status, role, token_version,
+                 last_login_at, deleted_at
+contacts         user_id → users, contact_user_id → users, remark, status, deleted_at
+                 UNIQUE(user_id, contact_user_id)
+friend_requests  requester_id, target_id, message, status   UNIQUE(requester_id, target_id)
+blocklists       user_id, target_id                          UNIQUE(user_id, target_id)
+```
+
+### 会话与消息
+
+```
+conversations          id, type(1单聊/2群聊/3系统), name, avatar_url, announcement,
+                       announcement_updated_at, last_message_id, last_seq, deleted_at
+conversation_members   conversation_id, user_id, role(0/1/2), last_read_seq,
+                       is_muted, is_pinned, pinned_at, mention_unread,
+                       cleared_before_seq, alias   UNIQUE(conversation_id, user_id)
+messages               conversation_id, sender_id, seq, message_type, content JSONB,
+                       status(1/2/3), reply_to_id, mentions UUID[], client_msg_id,
+                       flagged, deleted_at        UNIQUE(conversation_id, seq)
+message_status         message_id, user_id, status, delivered_at, read_at
+message_reactions      message_id, user_id, emoji  UNIQUE(message_id, user_id, emoji)
+favorites              user_id, message_id, conversation_id, 快照字段, content JSONB
+                       UNIQUE(user_id, message_id)
+```
+
+关键索引：`idx_messages_conversation(conversation_id, seq DESC)`（历史游标分页）、
+`idx_messages_text_trgm`（全文检索）、`idx_messages_content_key`（对象反查/授权/GC）。
+
+### 平台治理
+
+```
+push_subscriptions  user_id, endpoint(uniq), p256dh, auth, user_agent
+reports             reporter_id, target_type(message|user), target_id, reason,
+                    status(0待处理/1保留/2删除), handled_by, handled_at
+admin_action_logs   actor_id, action, target_type, target_id, detail JSONB
+```
+
+### 端到端加密
+
+```
+e2ee_identities        user_id(PK), identity_dh_public_key, identity_sign_public_key,
+                       signed_prekey_*（每用户一行，覆盖式轮换）
+e2ee_one_time_prekeys  user_id, key_id, public_key   UNIQUE(user_id, key_id)（用即删）
+e2ee_key_backups       user_id(PK), cipher_blob, salt, version（服务端零知识）
+```
+
+### 贴纸与商城
+
+```
+sticker_packs       id, name, cover_url, is_official, owner_id?, is_public,
+                    flagged, taken_down, sort
+stickers            pack_id? / owner_id?（CHECK 互斥）, object_key, width, height,
+                    content_hash   UNIQUE(owner_id, content_hash)
+user_sticker_packs  user_id, pack_id, sort   UNIQUE(user_id, pack_id)
 ```
 
 ---
