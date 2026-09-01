@@ -125,7 +125,7 @@ func TestFlaggedPackDetailVisibility(t *testing.T) {
 	}
 
 	// 已添加用户的「我的表情包」（EmojiPicker 数据源）不受打标影响
-	visible, err := svc.ListPacks(ctx, added.ID)
+	visible, _, err := svc.ListPacks(ctx, added.ID, "", 0)
 	if err != nil {
 		t.Fatalf("list visible: %v", err)
 	}

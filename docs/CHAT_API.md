@@ -9,6 +9,19 @@
 - **WebSocket**：浏览器 WS API 无法携带 Header，改用 query 参数：
   `ws://<host>:8081/ws?token=<access_token>`。token 无效返回 HTTP 401，不升级连接。
 
+### POST /api/v1/auth/register / POST /api/v1/auth/login
+
+注册与登录（账号 = 手机号 / 邮箱 + 密码），统一收敛在 `/auth` 前缀下
+（与 `/auth/refresh`、`/auth/password`、`/auth/qr` 对齐；旧的
+`/users/register`、`/users/login` 已移除，不做兼容）。
+
+```json
+// POST /auth/register 请求
+{ "account": "13800138000", "password": "pass1234", "captcha_id": "...", "captcha_code": "abcd" }
+```
+
+响应与 `POST /auth/refresh` 一致（登录响应额外含 `user` 字段）。
+
 ### POST /api/v1/auth/refresh（无需 Authorization）
 
 滑动会话（轮换）：用有效的 refresh token 换**全新的 token 对**，
@@ -633,7 +646,9 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 
 1. 该 key 出现在某条**未撤回**消息的 `content.key` 里，且请求者是该会话成员，
    且该消息未被请求者自己的「清空聊天记录」水位过滤；
-2. 该 key 属于请求者的**收藏贴纸**，或属于**某个表情包**（官方包全员可发/可看）。
+2. 该 key 属于请求者的**收藏贴纸**，或属于一个**当前可用的表情包**：包未下架
+   （`taken_down=false`）、未被敏感词打标（`flagged=false`），且为官方包
+   （`is_official=true`，无需添加即可用）或发送者已添加的包。
 
 由此得到的语义与副作用：
 
@@ -657,9 +672,14 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 
 ### GET /api/v1/sticker-packs（v0.4 H1）
 
-返回**表情包列表**及各包全部贴纸（一次性下发，避免逐包再请求）。当前仅官方包
-（`is_official=true`），全体用户可见、无用户隔离；按 `sort ASC, created_at ASC` 排序。
-个人收藏不在本端点，走 `GET /api/v1/stickers/mine`。
+返回**表情包列表**（商城上线后为**官方包 + 当前用户已添加的包**）及各包全部贴纸
+（一次性下发，避免逐包再请求）。个人收藏不在本端点，走 `GET /api/v1/stickers/mine`。
+
+分页为可选（照抄 `/sticker-packs/market` 的游标范式）：
+
+- **不传 `limit`：返回全量**（向后兼容，`sort ASC, created_at ASC` 排序，`next_cursor` 为 `null`）；
+- 传 `limit`（上限 50）：按 `created_at ASC` 游标分页，`?cursor=<上一页 next_cursor>&limit=<n>`，
+  `next_cursor` 为最后一条的 `created_at`（RFC3339Nano），无下一页为 `null`；非法游标 → `400`。
 
 每个贴纸携带 `object_key`，前端用 `POST /api/v1/files/download-url` 换预签名 GET 渲染
 （同 key 的下载 URL 在前端有进程内缓存，见上文）。
@@ -678,6 +698,7 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
           "sort": 0,
           "created_at": "2026-08-09T10:00:00+08:00"
         },
+        // 分页模式下响应额外含 "next_cursor"（全量模式为 null）
         "stickers": [
           {
             "id": "uuid",
@@ -801,6 +822,8 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 
 `GET /sticker-packs`（H1 端点）语义扩展为「**官方包 + 已添加的包**」，响应结构不变——
 EmojiPicker 无需改动即可展示已添加的包。官方包与发布包贴纸行 `owner_id` 均可为 `NULL`。
+分页可选：不传 `limit` 返回全量（向后兼容）；传 `limit` 走 `created_at ASC` 游标分页
+（响应多一个 `next_cursor`，无下一页为 `null`），见上文端点说明。
 
 #### 商城浏览
 
@@ -904,15 +927,15 @@ EmojiPicker 无需改动即可展示已添加的包。官方包与发布包贴�
 
 ### 客户端 → 服务端
 
-| type           | payload                                                                                                     | 说明                                                                                                                                                                                                                                                                                           |
-| -------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `message.send` | `{conversation_id, content: {type:"text", text}, client_msg_id, reply_to_id?, mentions?}`                   | 发送文本（≤4000 字符）。`client_msg_id` 客户端生成，幂等/回执匹配用。`mentions[]`（v0.2）=被 @ 的用户 UUID 列表：仅群聊有效，全部须为群成员且不含自己，命中的成员 `mention_unread` 置 true                                                                                                     |
-| `message.send` | `{conversation_id, content: {type:"image", key, width, height, size}, client_msg_id, reply_to_id?}`         | 发送图片。`content` 走图片分支：`key`=`upload-url` 返回的 object_key，`width`/`height`=像素宽高（气泡等比占位防 CLS），`size`=字节；四者缺一或非正 → `400`（`image content requires key/width/height/size`）                                                                                   |
-| `message.send` | `{conversation_id, content: {type:"file", key, name, size}, client_msg_id, reply_to_id?}`                   | 发送文件。`name`=原始文件名（展示用，≤255 rune），三者缺一 → `400`；MIME 须在 `upload.allowed_types` 白名单内（upload-url 阶段拦截 `4001`）                                                                                                                                                    |
-| `message.send` | `{conversation_id, content: {type:"voice", key, duration, size}, client_msg_id, reply_to_id?}`              | 发送语音（webm/opus）。`duration`=秒数，**1-60s** 之外 → `400`（`voice content requires key/duration(1-60s)/size`）                                                                                                                                                                            |
-| `message.send` | `{conversation_id, content: {type:"sticker", sticker_id, key, width, height}, client_msg_id, reply_to_id?}` | 发送贴纸（v0.4 H1）。`sticker_id` 须为合法 UUID 且**属于发送者或属于某个表情包**（官方包全员可发），否则 `403`（`sticker not available to sender`）；非 UUID → `400`。服务端按 `sticker_id` 查库并用库中的 `object_key`/`width`/`height` **覆盖**客户端传值，客户端传来的 `key`/宽高一律不采信 |
-| `message.read` | `{conversation_id, seq}`                                                                                    | 上报已读进度（已读到的最大 seq，只前进不后退）                                                                                                                                                                                                                                                 |
-| `typing`       | `{conversation_id}`                                                                                         | 正在输入（客户端节流 ~3s/次）                                                                                                                                                                                                                                                                  |
+| type           | payload                                                                                                     | 说明                                                                                                                                                                                                                                                                                                                                                               |
+| -------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `message.send` | `{conversation_id, content: {type:"text", text}, client_msg_id, reply_to_id?, mentions?}`                   | 发送文本（≤4000 字符）。`client_msg_id` 客户端生成，幂等/回执匹配用。`mentions[]`（v0.2）=被 @ 的用户 UUID 列表：仅群聊有效，全部须为群成员且不含自己，命中的成员 `mention_unread` 置 true                                                                                                                                                                         |
+| `message.send` | `{conversation_id, content: {type:"image", key, width, height, size}, client_msg_id, reply_to_id?}`         | 发送图片。`content` 走图片分支：`key`=`upload-url` 返回的 object_key，`width`/`height`=像素宽高（气泡等比占位防 CLS），`size`=字节；四者缺一或非正 → `400`（`image content requires key/width/height/size`）                                                                                                                                                       |
+| `message.send` | `{conversation_id, content: {type:"file", key, name, size}, client_msg_id, reply_to_id?}`                   | 发送文件。`name`=原始文件名（展示用，≤255 rune），三者缺一 → `400`；MIME 须在 `upload.allowed_types` 白名单内（upload-url 阶段拦截 `4001`）                                                                                                                                                                                                                        |
+| `message.send` | `{conversation_id, content: {type:"voice", key, duration, size}, client_msg_id, reply_to_id?}`              | 发送语音（webm/opus）。`duration`=秒数，**1-60s** 之外 → `400`（`voice content requires key/duration(1-60s)/size`）                                                                                                                                                                                                                                                |
+| `message.send` | `{conversation_id, content: {type:"sticker", sticker_id, key, width, height}, client_msg_id, reply_to_id?}` | 发送贴纸（v0.4 H1）。`sticker_id` 须为合法 UUID 且**属于发送者收藏，或属于一个可用表情包**（未下架、未被打标，且为官方包或发送者已添加的包；未添加的非官方包贴纸拒绝），否则 `403`（`sticker not available to sender`）；非 UUID → `400`。服务端按 `sticker_id` 查库并用库中的 `object_key`/`width`/`height` **覆盖**客户端传值，客户端传来的 `key`/宽高一律不采信 |
+| `message.read` | `{conversation_id, seq}`                                                                                    | 上报已读进度（已读到的最大 seq，只前进不后退）                                                                                                                                                                                                                                                                                                                     |
+| `typing`       | `{conversation_id}`                                                                                         | 正在输入（客户端节流 ~3s/次）                                                                                                                                                                                                                                                                                                                                      |
 
 > **ContentPayload（消息体传输结构）**：`{type, text?, key?, width?, height?, size?, name?, duration?, sticker_id?}`。
 > text 帧只用 `type`/`text`；image 帧用 `key`/`width`/`height`/`size`；file 帧用 `key`/`name`/`size`；

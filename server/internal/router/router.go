@@ -108,7 +108,8 @@ func Setup(
 
 	e2eeH := handler.NewE2EEHandler(repository.NewE2EERepository(db), logger)
 
-	// 贴纸发送校验：WS 帧里的 sticker_id 必须属于发送者（或属于某个官方包），
+	// 贴纸发送校验：WS 帧里的 sticker_id 必须属于发送者收藏，或属于一个可用表情包
+	//（未下架、未被打标，且为官方包或发送者已添加的包），
 	// 且落库的 key/宽高一律取服务端权威值，不采信客户端传参。
 	wsH.SetStickerResolver(func(ctx context.Context, senderID, stickerID uuid.UUID) (string, int, int, error) {
 		st, err := stickerSvc.ResolveSendable(ctx, senderID, stickerID)
@@ -236,11 +237,12 @@ func Setup(
 		qr.POST("/:token/confirm", middleware.AuthRequired(cfg.JWT), authH.ConfirmQRSession)
 	}
 
+	// 注册/登录统一收敛到 /auth 前缀，与 /auth/refresh、/auth/password、/auth/qr 对齐
+	api.POST("/auth/register", middleware.LimitByIP(5, 10), userH.Register)
+	api.POST("/auth/login", middleware.LimitByIP(10, 20), userH.Login)
+
 	users := api.Group("/users")
 	{
-		users.POST("/register", middleware.LimitByIP(5, 10), userH.Register)
-		users.POST("/login", middleware.LimitByIP(10, 20), userH.Login)
-
 		authUsers := users.Group("", middleware.AuthRequired(cfg.JWT))
 		{
 			authUsers.GET("/me", userH.GetProfile)

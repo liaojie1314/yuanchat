@@ -322,7 +322,7 @@ func TestStickerListPacksExtended(t *testing.T) {
 		{alice.ID, official.ID, uuid.Nil},
 		{bob.ID, official.ID, mine.ID},
 	} {
-		packs, err := svc.ListPacks(ctx, u.id)
+		packs, _, err := svc.ListPacks(ctx, u.id, "", 0)
 		if err != nil {
 			t.Fatalf("ListPacks(%s): %v", u.id, err)
 		}
@@ -733,5 +733,79 @@ func TestStickerListMinePacks(t *testing.T) {
 		if p.ID == pack.ID {
 			t.Fatal("stranger must not see the pack in mine list")
 		}
+	}
+}
+
+// TestStickerListPacksPagination GET /sticker-packs 游标分页：
+// 不传 limit 返回全量（向后兼容，next_cursor 为空串）；
+// 传 limit 时按 created_at 升序取一页、next_cursor 为最后一条的 created_at，
+// 用游标续页能取到剩余全部且不重不漏；非法游标报 ErrInvalidCursor。
+func TestStickerListPacksPagination(t *testing.T) {
+	db := testDB(t)
+	migrateSvcStickerTables(t, db)
+	svc := newStickerSvc(db)
+	ctx := context.Background()
+
+	alice := newTestUser(t, db, "listp-page")
+	// 三个包：created_at 间隔 1 分钟，保证游标排序确定性
+	base := time.Now().Add(-time.Hour)
+	var ids []uuid.UUID
+	for i := 0; i < 3; i++ {
+		p := seedSvcPack(t, db, func(p *model.StickerPack) { p.IsOfficial = true })
+		if err := db.Model(p).Update("created_at", base.Add(time.Duration(i)*time.Minute)).Error; err != nil {
+			t.Fatalf("set created_at: %v", err)
+		}
+		ids = append(ids, p.ID)
+	}
+
+	// 全量模式：limit=0 返回三个包且 next_cursor 为空
+	full, next, err := svc.ListPacks(ctx, alice.ID, "", 0)
+	if err != nil || next != "" {
+		t.Fatalf("full list: %v next=%q", err, next)
+	}
+	if len(full) != 3 {
+		t.Fatalf("want 3 packs in full mode, got %d", len(full))
+	}
+
+	// 分页模式：limit=2 首页两包 + next_cursor
+	page1, next1, err := svc.ListPacks(ctx, alice.ID, "", 2)
+	if err != nil {
+		t.Fatalf("page1: %v", err)
+	}
+	if len(page1) != 2 || next1 == "" {
+		t.Fatalf("want 2 packs + next_cursor, got %d next=%q", len(page1), next1)
+	}
+	if _, err := time.Parse(time.RFC3339, next1); err != nil {
+		t.Fatalf("next_cursor should be RFC3339: %v", err)
+	}
+	// 升序：首页应为最早创建的两个包
+	if page1[0].Pack.CreatedAt.After(page1[1].Pack.CreatedAt) {
+		t.Fatalf("page should be ascending by created_at, got %+v", page1)
+	}
+
+	// 续页：游标取到剩下的一个包，next_cursor 为空
+	page2, next2, err := svc.ListPacks(ctx, alice.ID, next1, 2)
+	if err != nil {
+		t.Fatalf("page2: %v", err)
+	}
+	if len(page2) != 1 || next2 != "" {
+		t.Fatalf("want 1 pack on last page + empty cursor, got %d next=%q", len(page2), next2)
+	}
+	// 不重不漏
+	seen := map[uuid.UUID]bool{page2[0].Pack.ID: true}
+	for _, pd := range page1 {
+		if seen[pd.Pack.ID] {
+			t.Fatalf("pack %s appeared on both pages", pd.Pack.ID)
+		}
+		seen[pd.Pack.ID] = true
+	}
+	for _, id := range ids {
+		if !seen[id] {
+			t.Fatalf("pack %s missing from pagination result", id)
+		}
+	}
+
+	if _, _, err := svc.ListPacks(ctx, alice.ID, "not-a-time", 2); !errors.Is(err, ErrInvalidCursor) {
+		t.Fatalf("want ErrInvalidCursor, got %v", err)
 	}
 }

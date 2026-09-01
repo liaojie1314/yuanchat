@@ -315,7 +315,7 @@ func TestListVisible(t *testing.T) {
 		}
 	}
 
-	aliceRows, err := repo.ListVisible(ctx, alice.ID)
+	aliceRows, err := repo.ListVisible(ctx, alice.ID, nil, 0)
 	if err != nil {
 		t.Fatalf("ListVisible(alice): %v", err)
 	}
@@ -333,7 +333,7 @@ func TestListVisible(t *testing.T) {
 	}
 
 	// bob 未添加任何包：只看官方包（开发库可能存在 seed 出的既有官方包，只断言本用例的包）
-	bobRows, err := repo.ListVisible(ctx, bob.ID)
+	bobRows, err := repo.ListVisible(ctx, bob.ID, nil, 0)
 	if err != nil {
 		t.Fatalf("ListVisible(bob): %v", err)
 	}

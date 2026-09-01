@@ -90,12 +90,27 @@ func (r *StickerRepository) FindOwned(ctx context.Context, ownerID, id uuid.UUID
 	return &s, nil
 }
 
-// FindInAnyPack 查任一表情包内的指定贴纸（官方包对全体用户可用，无需归属校验）。
-func (r *StickerRepository) FindInAnyPack(ctx context.Context, id uuid.UUID) (*model.Sticker, error) {
+// FindSendableInPack 查指定贴纸是否位于一个「发送者当前可用」的表情包内，
+// 并返回该贴纸。可用口径（WS 发送校验，2026-09 收紧）：
+//   - 包未下架（taken_down=false）且未被敏感词打标（flagged=false）；
+//   - 且包为官方包（is_official=true，全员无需添加即可用），
+//     或发送者已添加该包（user_sticker_packs 有关联行）。
+//
+// 收藏贴纸（owner_id 非空）不走本方法——那部分归 FindOwned。
+func (r *StickerRepository) FindSendableInPack(ctx context.Context, senderID, id uuid.UUID) (*model.Sticker, error) {
 	var s model.Sticker
-	if err := r.db.WithContext(ctx).
-		Where("id = ? AND pack_id IS NOT NULL", id).
-		First(&s).Error; err != nil {
+	err := r.db.WithContext(ctx).
+		Model(&model.Sticker{}).
+		Joins("JOIN sticker_packs ON sticker_packs.id = stickers.pack_id").
+		Where("stickers.id = ? AND stickers.pack_id IS NOT NULL", id).
+		Where("sticker_packs.taken_down = FALSE AND sticker_packs.flagged = FALSE").
+		// 官方包全员可用；非官方包要求发送者已添加（EXISTS 防 join 出多行）
+		Where("sticker_packs.is_official = TRUE OR EXISTS (?)",
+			r.db.Model(&model.UserStickerPack{}).Select("1").
+				Where("user_sticker_packs.user_id = ?", senderID).
+				Where("user_sticker_packs.pack_id = sticker_packs.id")).
+		First(&s).Error
+	if err != nil {
 		return nil, err
 	}
 	return &s, nil
@@ -138,16 +153,29 @@ func (r *StickerRepository) ListMine(ctx context.Context, ownerID uuid.UUID, bef
 
 // ListVisible 列出「我的表情包」= 官方包 + 当前用户已添加的包（EmojiPicker 数据源）。
 //
-// 有意不过滤 is_public / taken_down：下架（taken_down）只从商城撤展示，
+// 有意不过滤 is_public / taken_down / flagged：下架（taken_down）与打标只从商城撤展示，
 // 已添加者保留（避免影响无辜用户）；官方包始终可见。
-func (r *StickerRepository) ListVisible(ctx context.Context, userID uuid.UUID) ([]model.StickerPack, error) {
-	var rows []model.StickerPack
-	err := r.db.WithContext(ctx).
+//
+// 分页为可选：limit <= 0 时返回全量（沿用既有 sort ASC, created_at ASC 排序，向后兼容）；
+// limit > 0 时按 created_at 升序游标分页（after 为游标，nil 表示从最早开始），
+// 取 limit 行——created_at 在分页模式下同时是排序键与游标键，keyset 语义正确。
+func (r *StickerRepository) ListVisible(ctx context.Context, userID uuid.UUID, after *time.Time, limit int) ([]model.StickerPack, error) {
+	q := r.db.WithContext(ctx).
 		Where("is_official = TRUE OR id IN (?)",
-			r.db.Model(&model.UserStickerPack{}).Select("pack_id").Where("user_id = ?", userID)).
-		Order("sort ASC, created_at ASC").
-		Find(&rows).Error
-	return rows, err
+			r.db.Model(&model.UserStickerPack{}).Select("pack_id").Where("user_id = ?", userID))
+	if after != nil || limit > 0 {
+		if after != nil {
+			q = q.Where("created_at > ?", *after)
+		}
+		q = q.Order("created_at ASC")
+	} else {
+		q = q.Order("sort ASC, created_at ASC")
+	}
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	var rows []model.StickerPack
+	return rows, q.Find(&rows).Error
 }
 
 // PackWithMeta 表情包及发布者昵称、贴纸数（商城/详情/我发布的共用投影）。

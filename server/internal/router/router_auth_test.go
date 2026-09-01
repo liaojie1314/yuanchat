@@ -234,10 +234,10 @@ func TestForgotPasswordFlowChangesPassword(t *testing.T) {
 	}
 
 	// 旧密码必须失效，否则「重置成功」依旧是假的
-	if w := postJSON(r, "/api/v1/users/login", `{"account":"`+phone+`","password":"`+oldPassword+`"}`); w.Code != http.StatusUnauthorized {
+	if w := postJSON(r, "/api/v1/auth/login", `{"account":"`+phone+`","password":"`+oldPassword+`"}`); w.Code != http.StatusUnauthorized {
 		t.Fatalf("旧密码登录 status = %d, want 401, body=%s", w.Code, w.Body.String())
 	}
-	if w := postJSON(r, "/api/v1/users/login", `{"account":"`+phone+`","password":"`+newPassword+`"}`); w.Code != http.StatusOK {
+	if w := postJSON(r, "/api/v1/auth/login", `{"account":"`+phone+`","password":"`+newPassword+`"}`); w.Code != http.StatusOK {
 		t.Fatalf("新密码登录 status = %d, want 200, body=%s", w.Code, w.Body.String())
 	}
 }
@@ -304,13 +304,13 @@ func TestLoginLocksAccountAfterFiveFailures(t *testing.T) {
 	phone := *user.Phone
 
 	for i := 0; i < 5; i++ {
-		w := postJSON(r, "/api/v1/users/login", `{"account":"`+phone+`","password":"`+badPassword+`"}`)
+		w := postJSON(r, "/api/v1/auth/login", `{"account":"`+phone+`","password":"`+badPassword+`"}`)
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("第 %d 次错误密码 status = %d, want 401, body=%s", i+1, w.Code, w.Body.String())
 		}
 	}
 
-	w := postJSON(r, "/api/v1/users/login", `{"account":"`+phone+`","password":"`+goodPassword+`"}`)
+	w := postJSON(r, "/api/v1/auth/login", `{"account":"`+phone+`","password":"`+goodPassword+`"}`)
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("锁定后 status = %d, want 429, body=%s", w.Code, w.Body.String())
 	}
