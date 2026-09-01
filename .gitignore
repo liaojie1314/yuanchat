@@ -96,4 +96,9 @@ test-results/
 playwright-report/
 .playwright-mcp/
 
+# ====================
+# GUI 手工验证截图（本地生成，不提交）
+# ====================
+gui-test-screenshots/
+
 .design/
