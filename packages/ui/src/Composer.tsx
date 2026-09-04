@@ -5,7 +5,7 @@
  * 聊天窗口底部的统一输入面板（与原型 composer-box 一致的一体化卡片）：
  * - 引用回复条：显示被回复人与摘要，可取消
  * - 自适应高度 textarea（最高 160px），Enter 发送 / Shift+Enter 换行
- * - 工具条：图片 / 文件 / 表情 / 语音 / 更多
+ * - 工具条：图片 / 视频 / 文件 / 表情 / 语音 / 更多
  * - 发送按钮：空内容禁用；聚焦时显示快捷键提示
  *
  * 移动端（compact 模式）收窄为单行圆角输入 + 环绕按钮，符合手机输入习惯。
@@ -14,7 +14,17 @@
  * @param compact - 移动端紧凑模式
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AtSign, Image as ImageIcon, Mic, Paperclip, Plus, Send, Smile, X } from "lucide-react";
+import {
+  AtSign,
+  Image as ImageIcon,
+  Mic,
+  Paperclip,
+  Plus,
+  Send,
+  Smile,
+  Video,
+  X,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   chatSocket,
@@ -55,6 +65,7 @@ export function Composer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const anyFileInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
   const lastTypingSentRef = useRef(0);
   const replyingTo = useMessageStore((s) => s.replyingTo);
   const setReplyingTo = useMessageStore((s) => s.setReplyingTo);
@@ -285,6 +296,23 @@ export function Composer({
     e.target.value = "";
   };
 
+  /** 打开视频选择器（仅文件选择，不含录制——录制另有独立能力，本批不做） */
+  const openVideoPicker = () => videoInputRef.current?.click();
+
+  /**
+   * 视频按钮选中文件：交给 store 的 sendVideo（乐观预览 → 抽帧 → 双次直传 → WS 帧）。
+   *
+   * @remarks 时长/体积闸门在 store 里（重试同一条路径），此处不重复判断。
+   */
+  const handleVideoPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && activeId) {
+      void useMessageStore.getState().sendVideo(activeId, file);
+    }
+    // 清空 value，才能再次选同一个文件
+    e.target.value = "";
+  };
+
   /** 隐藏的图片文件选择器（两种布局共用） */
   const fileInput = (
     <>
@@ -296,6 +324,13 @@ export function Composer({
         onChange={handleFilePick}
       />
       <input ref={anyFileInputRef} type="file" className="hidden" onChange={handleAnyFilePick} />
+      <input
+        ref={videoInputRef}
+        type="file"
+        accept="video/*"
+        className="hidden"
+        onChange={handleVideoPick}
+      />
     </>
   );
 
@@ -461,6 +496,14 @@ export function Composer({
             <ImageIcon size={20} />
           </button>
           <button
+            onClick={openVideoPicker}
+            className="md3-icon-btn text-on-surface-variant"
+            aria-label={t("chat.input.video")}
+            data-testid="send-video"
+          >
+            <Video size={20} />
+          </button>
+          <button
             onClick={openAnyFilePicker}
             className="md3-icon-btn text-on-surface-variant"
             aria-label={t("chat.input.file")}
@@ -573,6 +616,9 @@ export function Composer({
             <ToolButton label={t("chat.input.image")} onClick={openFilePicker}>
               <ImageIcon size={19} />
             </ToolButton>
+            <ToolButton label={t("chat.input.video")} onClick={openVideoPicker} testId="send-video">
+              <Video size={19} />
+            </ToolButton>
             <ToolButton label={t("chat.input.file")} onClick={openAnyFilePicker}>
               <Paperclip size={19} />
             </ToolButton>
@@ -633,11 +679,14 @@ function ToolButton({
   label,
   onClick,
   active = false,
+  testId,
   children,
 }: {
   label: string;
   onClick?: () => void;
   active?: boolean;
+  /** 可选测试锚点：文案会与顶栏按钮重名时（如「视频」）按 testid 定位更稳 */
+  testId?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -645,6 +694,7 @@ function ToolButton({
       className={cn("md3-icon-btn !h-9 !w-9", active ? "text-primary" : "text-on-surface-variant")}
       aria-label={label}
       title={label}
+      data-testid={testId}
       onMouseDown={onClick ? (e) => e.stopPropagation() : undefined}
       onClick={onClick}
     >

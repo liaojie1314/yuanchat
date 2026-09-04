@@ -204,6 +204,7 @@
   "chat.input.send": "전송",
   "chat.input.image": "사진",
   "chat.input.file": "파일",
+  "chat.input.video": "동영상",
   "chat.input.emoji": "이모지",
   "chat.input.voice": "음성 메시지",
   "chat.input.more": "더 보기",

@@ -1,8 +1,8 @@
 /**
- * MessageBubble 贴纸渲染与「添加到表情」菜单项测试
+ * MessageBubble 贴纸渲染、「添加到表情」菜单项与视频气泡测试
  */
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import i18n from "@yuanchat/design-system/i18n";
 import { MessageBubble } from "../MessageBubble";
 import type { ChatMessage } from "@yuanchat/shared";
@@ -111,5 +111,89 @@ describe("sticker rendering and add-to-favorites menu item", () => {
     });
     fireEvent.click(container.querySelector("img")!);
     expect(onImageClick).not.toHaveBeenCalled();
+  });
+});
+
+describe("video bubble", () => {
+  /** 已确认的视频消息（有对象 key 与缩略图 key，元数据齐全） */
+  function videoMsg(overrides: Partial<ChatMessage["video"]> = {}): ChatMessage {
+    return {
+      id: "mv1",
+      conversationId: "c1",
+      kind: "video",
+      isSelf: false,
+      senderName: "Bob",
+      video: {
+        duration: 75,
+        width: 1280,
+        height: 720,
+        key: "files/2026/09/a.mp4",
+        thumbKey: "images/2026/09/a.jpg",
+        name: "demo.mp4",
+        size: "2.0 MB",
+        ...overrides,
+      },
+      time: "10:00",
+      seq: 3,
+    };
+  }
+
+  it("渲染封面缩略图与 m:ss 时长角标", async () => {
+    render(<MessageBubble msg={videoMsg()} />);
+
+    // 封面按 thumbKey 签下载 URL（正片不在消息流里下载）
+    await waitFor(() => {
+      const img = document.querySelector("img");
+      expect(img?.getAttribute("src")).toBe("https://signed/images/2026/09/a.jpg");
+    });
+    expect(screen.getByText("1:15")).toBeInTheDocument();
+  });
+
+  it("点播放钮按对象 key 现签地址并打开全屏播放层", async () => {
+    render(<MessageBubble msg={videoMsg()} />);
+
+    fireEvent.click(screen.getByTestId("video-play"));
+
+    const overlay = await screen.findByRole("dialog", { name: label("media.videoPlay") });
+    await waitFor(() => {
+      expect(overlay.querySelector("video")?.getAttribute("src")).toBe(
+        "https://signed/files/2026/09/a.mp4",
+      );
+    });
+
+    // Esc 关闭（与 ImageLightbox 同键位）
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: label("media.videoPlay") }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("乐观发送态（无缩略图、时长未知）显示占位且播本地 blob", async () => {
+    const msg = videoMsg({
+      duration: 0,
+      width: 0,
+      height: 0,
+      key: undefined,
+      thumbKey: undefined,
+      localUrl: "blob:local-video",
+    });
+    render(<MessageBubble msg={msg} />);
+
+    // 没有封面对象 → 不发签名请求、不渲染 img（灰底占位 + 播放钮）
+    expect(document.querySelector("img")).toBeNull();
+    // 时长未知时不显示 0:00 角标（假信息比没信息更糟）
+    expect(screen.queryByText("0:00")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("video-play"));
+    const overlay = await screen.findByRole("dialog", { name: label("media.videoPlay") });
+    expect(overlay.querySelector("video")?.getAttribute("src")).toBe("blob:local-video");
+  });
+
+  it("视频气泡保留气泡背景（与贴纸不同），并带 data-kind 锚点", () => {
+    const { container } = render(<MessageBubble msg={videoMsg()} />);
+    expect(container.querySelector('[data-kind="video"]')).toBeTruthy();
+    expect(container.querySelector(".msg-bubble-peer")).toBeTruthy();
   });
 });

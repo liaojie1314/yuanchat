@@ -204,6 +204,7 @@
   "chat.input.send": "Send",
   "chat.input.image": "Image",
   "chat.input.file": "File",
+  "chat.input.video": "Video",
   "chat.input.emoji": "Emoji",
   "chat.input.voice": "Voice message",
   "chat.input.more": "More",

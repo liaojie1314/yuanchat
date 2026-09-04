@@ -7,6 +7,7 @@
  * - 图片（真实渲染：乐观本地预览 / 按 key 签下载 URL，点击开大图）
  * - 文件卡片（扩展名徽标 + 名称 + 大小 + 下载按钮）
  * - 语音（播放按钮 + 波形 + 时长 + "查看文字" AI 转写入口）
+ * - 视频（封面缩略图 + 时长角标 + 播放钮，点开全屏播放层）
  * - 系统消息（居中胶囊，如 "会话加密已开启"）
  *
  * 状态与元信息：
@@ -49,6 +50,7 @@ import type { ChatMessage } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
 import { MessageImage } from "./MessageImage";
+import { MessageVideo } from "./MessageVideo";
 import { StickerImage } from "./StickerImage";
 import { copyText } from "./copyText";
 import { fileIconOf } from "./fileIcon";
@@ -365,7 +367,7 @@ export function MessageBubble({
                 ? "" // 贴纸：无背景、无圆角、无内边距
                 : cn(
                     "rounded-lg",
-                    msg.kind === "image" ? "p-1.5" : "px-3.5 py-2.5",
+                    msg.kind === "image" || msg.kind === "video" ? "p-1.5" : "px-3.5 py-2.5",
                     isSelf ? "msg-bubble-self rounded-br-sm" : "msg-bubble-peer rounded-bl-sm",
                   ),
             )}
@@ -406,6 +408,8 @@ export function MessageBubble({
             )}
 
             {msg.kind === "sticker" && msg.sticker && <StickerImage sticker={msg.sticker} />}
+
+            {msg.kind === "video" && msg.video && <MessageVideo video={msg.video} />}
 
             {msg.kind === "file" && msg.file && (
               <div className="flex min-w-[220px] items-center gap-2.5">

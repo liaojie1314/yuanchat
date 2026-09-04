@@ -204,6 +204,7 @@
   "chat.input.send": "发送",
   "chat.input.image": "图片",
   "chat.input.file": "文件",
+  "chat.input.video": "视频",
   "chat.input.emoji": "表情",
   "chat.input.voice": "语音消息",
   "chat.input.more": "更多",
