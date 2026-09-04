@@ -334,14 +334,17 @@ export function ConversationMediaView({
     load(tab, 0, false);
   }, [tab, load]);
 
-  // Esc 关闭（浮层已在最上层，键盘用户无需先 Tab 到关闭按钮）
+  // Esc 关闭相册（键盘用户无需先 Tab 到关闭按钮）。
+  // 大图层/播放层各自也监听 Esc，而 keydown 会同时命中所有监听器——不加这道闸门，
+  // 一次 Esc 会把浮层和相册一起关掉（E2E 实测：关播放层后相册也没了）。
   useEffect(() => {
+    if (lightboxUrl !== null || videoUrl !== null) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [lightboxUrl, videoUrl, onClose]);
 
   // 安卓系统返回键：本层盖在会话之上，须先关自己再轮到会话
   // （视频播放层自带更上层的拦截器，故此处只需处理大图层与本层）
