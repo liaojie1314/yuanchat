@@ -29,6 +29,8 @@ export { MessageBubble, TypingIndicator } from "./MessageBubble";
 export { MessageImage } from "./MessageImage";
 export { StickerImage } from "./StickerImage";
 export { ImageLightbox } from "./ImageLightbox";
+export { VideoPlaybackOverlay } from "./VideoPlaybackOverlay";
+export { ConversationMediaView } from "./ConversationMediaView";
 export { Composer } from "./Composer";
 export { EmojiPicker } from "./EmojiPicker";
 export { EMOJI_CATEGORIES } from "./emojiData";

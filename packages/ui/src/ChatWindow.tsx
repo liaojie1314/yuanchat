@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowLeft,
+  Images,
   Loader2,
   Megaphone,
   MessageSquare,
@@ -55,6 +56,7 @@ import { ForwardModal } from "./ForwardModal";
 import { E2EEIndicator } from "./E2EEIndicator";
 import { SafetyNumberDialog } from "./SafetyNumberDialog";
 import { ImageLightbox } from "./ImageLightbox";
+import { ConversationMediaView } from "./ConversationMediaView";
 import { InConversationSearch } from "./InConversationSearch";
 import { MessageBubble, TypingIndicator } from "./MessageBubble";
 
@@ -103,6 +105,8 @@ export function ChatWindow({
   const [showSafetyNumber, setShowSafetyNumber] = useState(false);
   // 群公告全文弹层开关
   const [showAnnouncement, setShowAnnouncement] = useState(false);
+  // 会话媒体相册全屏视图开关
+  const [showMedia, setShowMedia] = useState(false);
   const selfUserId = useAuthStore((s) => s.user?.id);
 
   const items = messages ?? [];
@@ -311,6 +315,15 @@ export function ChatWindow({
           aria-label={t("chat.searchHistory")}
         >
           <Search size={19} />
+        </button>
+        <button
+          onClick={() => setShowMedia(true)}
+          className="md3-icon-btn text-on-surface-variant"
+          title={t("media.title")}
+          aria-label={t("media.title")}
+          data-testid="open-media"
+        >
+          <Images size={19} />
         </button>
         {onShowDetail && (
           <button
@@ -539,6 +552,11 @@ export function ChatWindow({
 
       {/* 图片全屏查看器（点击气泡内图片打开） */}
       {lightboxUrl && <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
+
+      {/* 会话媒体相册（顶栏相册按钮打开，全屏覆盖当前会话） */}
+      {showMedia && activeId && (
+        <ConversationMediaView conversationId={activeId} onClose={() => setShowMedia(false)} />
+      )}
 
       <ForwardModal
         open={forwardMsgId !== null}
