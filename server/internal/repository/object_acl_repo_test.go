@@ -276,3 +276,154 @@ func TestObjectACLReferencedKeys(t *testing.T) {
 		t.Fatalf("空输入应返回空集合，got %v err %v", empty, err)
 	}
 }
+
+// aclVideoFixture 建一个群会话 + 一条视频消息（content 同时带 key 与 thumb_key），
+// 返回会话与消息，供 thumb_key 授权/引用用例复用。
+func aclVideoFixture(t *testing.T, db *gorm.DB, key, thumbKey string, members ...uuid.UUID) (*model.Conversation, *model.Message) {
+	t.Helper()
+	conv := &model.Conversation{Type: model.ConversationTypeGroup, LastSeq: 1}
+	if err := db.Create(conv).Error; err != nil {
+		t.Fatalf("create conv: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM messages WHERE conversation_id = ?`, conv.ID)
+		db.Exec(`DELETE FROM conversation_members WHERE conversation_id = ?`, conv.ID)
+		db.Unscoped().Delete(conv)
+	})
+	for _, uid := range members {
+		if err := db.Create(&model.ConversationMember{ConversationID: conv.ID, UserID: uid}).Error; err != nil {
+			t.Fatalf("create member: %v", err)
+		}
+	}
+	msg := &model.Message{
+		ConversationID: conv.ID,
+		SenderID:       members[0],
+		Seq:            1,
+		MessageType:    model.MessageTypeVideo,
+		Content: fmt.Sprintf(
+			`{"key":%q,"thumb_key":%q,"name":"demo.mp4","size":2048000,"duration":15,"width":1280,"height":720}`,
+			key, thumbKey),
+		Status: model.MessageStatusNormal,
+	}
+	if err := db.Create(msg).Error; err != nil {
+		t.Fatalf("create video msg: %v", err)
+	}
+	return conv, msg
+}
+
+// TestCanReadVideoThumb 视频缩略图（content.thumb_key）与主视频（content.key）同权可读。
+//
+// 缩略图不在 content.key 上，若授权只匹配 key，相册与聊天气泡里的视频封面就换不到
+// 预签名 URL（表现为整片空白封面）；反过来撤回必须同时收回两者的可读性，
+// 否则"撤回即撤销访问"对缩略图这一半失效。
+func TestCanReadVideoThumb(t *testing.T) {
+	db := testDB(t)
+	repo := NewObjectACLRepository(db)
+	ctx := context.Background()
+
+	member := newTestUser(t, db, "aclvideomember")
+	outsider := newTestUser(t, db, "aclvideooutsider")
+	key := fmt.Sprintf("files/2026/09/%s.mp4", uuid.NewString())
+	thumbKey := fmt.Sprintf("images/2026/09/%s.jpg", uuid.NewString())
+	_, msg := aclVideoFixture(t, db, key, thumbKey, member.ID)
+
+	for name, k := range map[string]string{"主视频": key, "缩略图": thumbKey} {
+		ok, err := repo.CanRead(ctx, member.ID, k)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !ok {
+			t.Fatalf("会话成员应能读取%s（%s）", name, k)
+		}
+		ok, err = repo.CanRead(ctx, outsider.ID, k)
+		if err != nil {
+			t.Fatalf("%s outsider: %v", name, err)
+		}
+		if ok {
+			t.Fatalf("非会话成员不应能读取%s（越权签名）", name)
+		}
+	}
+
+	// 撤回（content 置 '{}'）→ 主视频与缩略图同时失效
+	if err := db.Model(&model.Message{}).Where("id = ?", msg.ID).
+		Updates(map[string]any{"status": model.MessageStatusRevoked, "content": "{}"}).Error; err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	for name, k := range map[string]string{"主视频": key, "缩略图": thumbKey} {
+		ok, err := repo.CanRead(ctx, member.ID, k)
+		if err != nil {
+			t.Fatalf("%s after recall: %v", name, err)
+		}
+		if ok {
+			t.Fatalf("撤回后不应再签得出%s的下载 URL", name)
+		}
+	}
+}
+
+// TestCanReadVideoThumbClearedByHistory 本人清空聊天记录后缩略图对本人失效、对他人不影响。
+func TestCanReadVideoThumbClearedByHistory(t *testing.T) {
+	db := testDB(t)
+	repo := NewObjectACLRepository(db)
+	ctx := context.Background()
+
+	me := newTestUser(t, db, "aclvideoclearme")
+	peer := newTestUser(t, db, "aclvideoclearpeer")
+	key := fmt.Sprintf("files/2026/09/%s.mp4", uuid.NewString())
+	thumbKey := fmt.Sprintf("images/2026/09/%s.jpg", uuid.NewString())
+	conv, _ := aclVideoFixture(t, db, key, thumbKey, me.ID, peer.ID)
+
+	// 只推进 me 的水位（消息 seq = 1）
+	if err := db.Model(&model.ConversationMember{}).
+		Where("conversation_id = ? AND user_id = ?", conv.ID, me.ID).
+		Update("cleared_before_seq", 1).Error; err != nil {
+		t.Fatalf("clear history: %v", err)
+	}
+
+	if ok, _ := repo.CanRead(ctx, me.ID, thumbKey); ok {
+		t.Fatal("本人清空后缩略图不应再可读")
+	}
+	if ok, _ := repo.CanRead(ctx, peer.ID, thumbKey); !ok {
+		t.Fatal("他人不受本人清空影响，缩略图应仍可读")
+	}
+}
+
+// TestReferencedKeysIncludesThumb GC 引用判定必须覆盖 thumb_key。
+//
+// 漏掉即 `cmd/gc -delete` 会把所有在用的视频封面当孤儿删掉（消息还在、封面 404）。
+func TestReferencedKeysIncludesThumb(t *testing.T) {
+	db := testDB(t)
+	repo := NewObjectACLRepository(db)
+	ctx := context.Background()
+
+	member := newTestUser(t, db, "aclrefthumb")
+	key := fmt.Sprintf("files/2026/09/%s.mp4", uuid.NewString())
+	thumbKey := fmt.Sprintf("images/2026/09/%s.jpg", uuid.NewString())
+	orphanKey := fmt.Sprintf("images/2026/09/%s.jpg", uuid.NewString())
+	_, msg := aclVideoFixture(t, db, key, thumbKey, member.ID)
+
+	got, err := repo.ReferencedKeys(ctx, []string{key, thumbKey, orphanKey})
+	if err != nil {
+		t.Fatalf("ReferencedKeys: %v", err)
+	}
+	for _, want := range []string{key, thumbKey} {
+		if _, ok := got[want]; !ok {
+			t.Fatalf("%s 仍被视频消息引用，应判定为在用（GC 会误删）", want)
+		}
+	}
+	if _, ok := got[orphanKey]; ok {
+		t.Fatalf("%s 无任何引用，不应出现在结果里（GC 会漏删）", orphanKey)
+	}
+
+	// 撤回后两者都不再被引用（content 置 '{}'）→ GC 可回收
+	if err := db.Model(&model.Message{}).Where("id = ?", msg.ID).
+		Updates(map[string]any{"status": model.MessageStatusRevoked, "content": "{}"}).Error; err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	got, err = repo.ReferencedKeys(ctx, []string{key, thumbKey})
+	if err != nil {
+		t.Fatalf("ReferencedKeys after recall: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("撤回后主视频与缩略图都应变成孤儿，got %v", got)
+	}
+}
