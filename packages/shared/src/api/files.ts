@@ -253,8 +253,22 @@ export interface VideoMeta {
 /** 元数据读取超时：个别 WebView 对损坏文件既不 loadedmetadata 也不 error，不设超时会永久停在「发送中」 */
 const VIDEO_META_TIMEOUT_MS = 10_000;
 
-/** 抽帧超时：seek 后 seeked 事件在个别 WebView 上不触发，故 loadeddata 兜底 + 超时 */
-const VIDEO_FRAME_TIMEOUT_MS = 10_000;
+/** 等 seeked 的超时：个别 WebView 不发该事件，超时后退化为「抓当前帧」而不是让整条消息发失败 */
+const VIDEO_SEEK_TIMEOUT_MS = 10_000;
+
+/** seeked 超时后若帧数据仍不足，额外等这么久：宁可多等一会儿，也不画一帧必然纯黑的空白 */
+const VIDEO_FRAME_GRACE_MS = 1_500;
+
+/** readyState 轮询间隔：宽限期内没有事件可依赖时靠它发现帧数据到位 */
+const READY_STATE_POLL_MS = 50;
+
+/**
+ * 可绘制的最低 readyState（`HAVE_CURRENT_DATA`）。
+ *
+ * @remarks 低于此值 `drawImage(video)` 画出来是**纯黑**——真机实测：同一视频同一时间点，
+ *   readyState=1 时抽出的 JPEG 全图 `min=0 max=0 avg=0`，readyState=4 时亮度 127。
+ */
+const HAVE_CURRENT_DATA = 2;
 
 /** 缩略图最长边：仅作气泡 poster，无需原始分辨率 */
 const THUMB_MAX_EDGE = 640;
@@ -280,7 +294,7 @@ export async function extractVideoMeta(file: Blob): Promise<VideoMeta> {
   video.muted = true;
   video.playsInline = true;
   try {
-    const metaReady = waitForVideoEvent(video, ["loadedmetadata"], VIDEO_META_TIMEOUT_MS, "meta");
+    const metaReady = waitForVideoEvent(video, "loadedmetadata", VIDEO_META_TIMEOUT_MS, "meta");
     video.src = url;
     await metaReady;
 
@@ -303,15 +317,17 @@ export async function extractVideoMeta(file: Blob): Promise<VideoMeta> {
 }
 
 /**
- * 等待一组媒体事件中最先到达的那个。
+ * 等待某个媒体事件到达。
  *
- * @param events - 任一命中即视为成功（如 `seeked` 与 `loadeddata` 互为兜底）
+ * @param event - 要等的事件名（**只等一个**：曾经把 `seeked` 与 `loadeddata` 放进
+ *   同一个竞速里"互为兜底"，而 `loadeddata` 在 readyState=1 就到，于是抽帧抽到黑屏。
+ *   兜底应当由 readyState 判定承担，不能靠更早的事件顶包）
  * @param label - 抛错信息前缀，便于区分是元数据阶段还是抽帧阶段
  * @throws Error `error` 事件或超时
  */
 function waitForVideoEvent(
   video: HTMLVideoElement,
-  events: string[],
+  event: string,
   timeoutMs: number,
   label: string,
 ): Promise<void> {
@@ -320,33 +336,76 @@ function waitForVideoEvent(
     const timer = setTimeout(() => settle(new Error(label + " timeout")), timeoutMs);
     const settle = (err?: Error) => {
       clearTimeout(timer);
-      for (const ev of events) video.removeEventListener(ev, onHit);
+      video.removeEventListener(event, onHit);
       video.removeEventListener("error", onFail);
       if (err) reject(err);
       else resolve();
     };
     const onHit = () => settle();
     const onFail = () => settle(new Error(label + " failed"));
-    for (const ev of events) video.addEventListener(ev, onHit);
+    video.addEventListener(event, onHit);
     video.addEventListener("error", onFail);
   });
 }
 
-/** seek 到指定秒后把当前帧画进 canvas 并编码 JPEG（质量 0.75） */
+/**
+ * 等 readyState 达标（或宽限用尽）。
+ *
+ * @param min - 目标 readyState 下限
+ * @param timeoutMs - 宽限上限
+ * @remarks **永不 reject**：宽限用尽后调用方仍会抽一帧（暗封面 > 发不出去）。
+ *   同时监听事件与轮询：`seeked` 缺失的 WebView 往往连 `canplay` 都不给，
+ *   只能靠轮询发现帧数据到位。
+ */
+function waitForReadyState(video: HTMLVideoElement, min: number, timeoutMs: number): Promise<void> {
+  if (video.readyState >= min) return Promise.resolve();
+  return new Promise((resolve) => {
+    const events = ["loadeddata", "canplay", "canplaythrough", "seeked", "timeupdate"];
+    const timer = setTimeout(() => finish(), timeoutMs);
+    const poll = setInterval(() => check(), READY_STATE_POLL_MS);
+    const finish = () => {
+      clearTimeout(timer);
+      clearInterval(poll);
+      for (const ev of events) video.removeEventListener(ev, check);
+      resolve();
+    };
+    const check = () => {
+      if (video.readyState >= min) finish();
+    };
+    for (const ev of events) video.addEventListener(ev, check);
+  });
+}
+
+/**
+ * seek 到指定秒后把当前帧画进 canvas 并编码 JPEG（质量 0.75）。
+ *
+ * @remarks 等待策略（真机实测踩出来的顺序）：
+ * 1. **只等 `seeked`**：真机事件序是
+ *    `loadedmetadata(rs4) → loadeddata(rs1) → canplay(rs1) → seeked(rs4)`。
+ *    原实现把 `seeked` 与 `loadeddata` 放进竞速，`loadeddata` 先到且此时
+ *    readyState=1（目标帧还没解码），画出来的 JPEG 全黑（avg=0，seeked 后为 127）——
+ *    "取 0.5s 处避免首帧纯黑"的意图被这条竞速彻底抵消。
+ * 2. `seeked` 超时/报错**不失败**：个别 WebView 不发该事件，而 `thumb_key` 是服务端
+ *    必填字段，抛错等于整条消息发不出去，故退化为「抓当下这一帧」。
+ * 3. 绘制前必须 `readyState >= HAVE_CURRENT_DATA`；不足则再宽限
+ *    {@link VIDEO_FRAME_GRACE_MS}，而不是直接画一帧必然纯黑的空白。
+ */
 async function captureVideoFrame(
   video: HTMLVideoElement,
   at: number,
   width: number,
   height: number,
 ): Promise<Blob> {
-  const frameReady = waitForVideoEvent(
-    video,
-    ["seeked", "loadeddata"],
-    VIDEO_FRAME_TIMEOUT_MS,
-    "frame",
-  );
+  const seeked = waitForVideoEvent(video, "seeked", VIDEO_SEEK_TIMEOUT_MS, "seek");
   video.currentTime = at;
-  await frameReady;
+  try {
+    await seeked;
+  } catch {
+    // 超时或 error：不放弃缩略图，交给下面的 readyState 闸门决定还要不要再等
+  }
+  if (video.readyState < HAVE_CURRENT_DATA) {
+    await waitForReadyState(video, HAVE_CURRENT_DATA, VIDEO_FRAME_GRACE_MS);
+  }
 
   const scale = Math.min(1, THUMB_MAX_EDGE / Math.max(width, height));
   const outW = Math.max(1, Math.round(width * scale));
