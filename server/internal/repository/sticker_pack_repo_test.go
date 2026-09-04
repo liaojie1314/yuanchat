@@ -511,7 +511,11 @@ func TestListPublishedBy(t *testing.T) {
 	base := time.Now().Add(-time.Hour)
 
 	older := newTestPack(t, db, func(p *model.StickerPack) { p.OwnerID = &owner.ID; p.IsPublic = true; p.CreatedAt = base })
-	newer := newTestPack(t, db, func(p *model.StickerPack) { p.OwnerID = &owner.ID; p.IsPublic = true; p.CreatedAt = base.Add(time.Minute) })
+	newer := newTestPack(t, db, func(p *model.StickerPack) {
+		p.OwnerID = &owner.ID
+		p.IsPublic = true
+		p.CreatedAt = base.Add(time.Minute)
+	})
 	newTestPack(t, db, func(p *model.StickerPack) { p.OwnerID = &stranger.ID; p.IsPublic = true })
 	newTestPackSticker(t, db, newer.ID, 1)
 
