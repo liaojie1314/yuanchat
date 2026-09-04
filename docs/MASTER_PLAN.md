@@ -256,9 +256,9 @@ yuanchat/
 - [ ] 消息编辑（已发送文本就地编辑 + 「已编辑」角标；区别于现有撤回后「重新编辑」回填）
 - [ ] 定时发送 / 稍后提醒（消息排程到指定时间）
 - [ ] 消息翻译（气泡内一键译文，接自托管机翻，不出私钥）
-- [ ] 视频消息（≤60s 短视频气泡，复用语音 MediaRecorder 范式）
-- [ ] 会话媒体相册（图片/文件聚合网格页 + 类型筛选）
-- [ ] 语音消息倍速播放（1.5x / 2x）
+- [x] 视频消息（≤120s 短视频气泡，文件选择 + 客户端抽帧封面；未做录制，见 K6 备注）
+- [x] 会话媒体相册（图片/文件/语音/视频/贴纸聚合网格页 + 类型筛选）
+- [x] 语音消息倍速播放（1x / 1.5x / 2x）
 - [ ] 贴纸 DIY（裁剪 + 加字生成贴纸，直通商城发布，候选 H1d）
 - [ ] 群投票 / 接龙（消息形态的轻投票，结果内联展示）
 - [ ] 个人状态（emoji + 一句话 + 时长，presence 扩展，会话列表角标展示）
@@ -426,6 +426,48 @@ yuanchat/
 | 债收口 | `/auth/*` 前缀统一（/users/register、/users/login 迁移，破坏性变更前后端同版处理）、WS 贴纸发送口径收紧、`GET /sticker-packs` 游标分页、B7 覆盖率门禁 | ✅   |
 | 债收口 | 限流改 Redis 原子令牌桶 + Dispatcher Redis Pub/Sub 跨实例分发（默认 inproc，单实例行为不变；env.md/DEVELOPMENT.md 已补多实例配置说明）                | ✅   |
 
+#### 2.6 K7/K6/K8 — 会话媒体相册 + 视频消息 + 语音倍速（✅ 已完成，2026-09-04）
+
+设计：[`specs/2026-09-02-media-album-video-design.md`](superpowers/specs/2026-09-02-media-album-video-design.md)
+执行：[`plans/2026-09-02-media-album-video.md`](superpowers/plans/2026-09-02-media-album-video.md)（10 Task，Stage A-E）
+分支：`feature/media-album-and-video`（自 dev @ `69f0558` 切出，`--no-ff` 合回 dev）
+**迁移号：无**（不新表不改表——相册是纯读查询，视频复用既有 `message_type=5` 与 jsonb content）
+
+已交付：
+
+- **K7 媒体相册**：`GET /conversations/:id/media?type=all|image|file|voice|video|sticker&before_seq=&limit=`，
+  `all` 展开 `[2,3,4,5,8]`（不含文本/系统/E2EE）；可见性口径与 `GetHistory` **完全一致**（成员校验 +
+  `status=1` + `seq > cleared_before_seq`），故相册里可见的对象必然签得出下载 URL；
+  前端 `ConversationMediaView`（三端共用，ChatWindow 头部入口）六 Tab + 三列方格/行列表 + seq 游标续页 +
+  骨架/空/错误/正常四态，图片复用 `ImageLightbox`、视频走 `VideoPlaybackOverlay`、语音复用 `voicePlayer` 单例
+- **K6 视频消息**：`message.send` 新增 video 分支（`key`/`thumb_key`/`name`/`size`/`duration(1-120s)`/`width`/`height`
+  全必填，golden 契约双端覆盖）；采集**仅文件选择**（裁决 M1：Android WebView 的 MediaRecorder 编码兼容不可控）；
+  封面由**客户端** canvas 抽帧生成 JPEG 落 `images/` 前缀，服务端不转码不抽帧
+- **K8 语音倍速**：全局速率 1x/1.5x/2x（显式循环表非取模），跨播放保持、`stopVoice` 不重置，按钮仅当前播放行显示
+- **对象授权与 GC 适配（必做，否则两处真实缺陷）**：`CanRead` 与 `ReferencedKeys` 双双纳入 `content->>'thumb_key'`——
+  前者不改则视频封面永远签不出 URL，后者不改则封面在 GC 宽限期后被当孤儿删掉（与 H1b「封面被 GC 误删」同一缺陷族）
+- **husky tsc 门禁**（见下方债表收口）
+
+真机实测结论（不只是单测）：
+
+| 项                       | 结论                                                                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 本地 CI 全量             | i18n(669×3) / format / lint / stylelint / theme / 两端 tsc / 单测 611 / `go vet` / `go test ./...` / `go test -race ./internal/ws/` / E2E 81 全绿 |
+| Web 真后端（playwright） | 相册六 Tab + 真实分页、视频发送落库 `message_type=5`、封面与视频双 presign 200、倍速 1x→1.5x→2x→1x、移动视口与暗色主题走查通过                    |
+| 视频封面纯黑（本批引入） | 真机发现并修复：抽帧把 `seeked` 与 `loadeddata` 放进竞速，后者在 `readyState=1` 先到 → 画出全黑帧（实测 avg=0 vs 修后 127.2、var=6932）           |
+
+本批新登记的债：
+
+| 级别 | 条目                                                                                                                                                              |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ⚪   | 视频消息**不支持录制**（裁决 M1 仅文件选择）；也不做服务端转码/多码率，等真实出现「大视频发不动」再上                                                             |
+| ⚪   | 相册无搜索 / 时间范围过滤 / 按大小排序（seq 游标够用；spec §7 明确不做）                                                                                          |
+| ⚪   | 相册 `has_more = len(items)==limit`，当页若有脏 content 被跳过会偏保守报 `false`，可能提前截断分页。脏 content 属病态数据，且「单条坏数据不使整页失败」是有意取舍 |
+| ⚪   | 转发视频消息不重建实时帧（`contentPayloadFromMessage` 对 video 返回 false，沿用既有语义）：目标会话要刷新后经 REST 历史才看到                                     |
+| 🟡   | mock 模式点播 demo 语音会 toast「播放失败」——demo 语音/文件为进相册补了对象 key，而 mock `download-url` 只回 SVG data URL。仅影响 mock 演示，真实后端已验证可播   |
+| ⚪   | 相册组件测试用 `vi.mock("@yuanchat/shared")` 而非 MSW（`packages/ui` 未引 msw 依赖）；MSW 四态由 shared 包单测与 E2E 覆盖                                         |
+| ⚪   | 视频消息不进全文检索、不进内容审核（与 image/file/voice/sticker 现状一致，审核仅对文本生效）                                                                      |
+
 #### 3. 既有代码的真实缺陷（无 plan，可随手批次收口）
 
 > 2026-09-02 admin-hardening 会话收口：captcha 两缺陷已修、compose 镜像经核实已全部钉版本、
@@ -437,7 +479,7 @@ yuanchat/
 | ✅   | `handler/captcha.go:52`             | 已修：captcha id 改 `crypto/rand` 128bit hex，Redis key 加 `captcha:` 命名空间                                      |
 | ✅   | `deploy/docker-compose.yml`         | 核实 minio/certbot/prometheus 均已钉版本号（此前登记有误）                                                          |
 | ✅   | `middleware/ratelimit.go:92-107`    | 已修：改 Redis Lua 原子令牌桶（scope 隔离各端点档位），Redis 故障 fail-open 放行并计指标                            |
-| 🟡   | `.husky/` 钩子不跑 `tsc`            | 幽灵依赖与类型错误只在 CI 暴露（pnpm 本地提升掩盖）                                                                 |
+| ✅   | `.husky/` 钩子不跑 `tsc`            | 已修（2026-09-04）：staged 含 ts/tsx 时跑 web + desktop `typecheck`（实测能挡住类型错误提交）                       |
 | ⚪   | `handler` 包 Redis 用例仍 `t.Skipf` | A8 已建 `internal/testutil.NewRedis(t)`；captcha 用例已迁移，其余用例待迁                                           |
 | ✅   | 消息分发 `Dispatcher`               | 已修：新增 RedisDispatcher（`dispatcher.backend=redis`），发布前只投本机 + host_id 去重；默认 inproc 单实例行为不变 |
 
@@ -503,9 +545,9 @@ QQ「远程协助」式的**用户级**远程桌面能力（不是管理员运�
 | K3   | 命令面板（Ctrl+K）                    | 桌面效率标签，SearchModal 升维 | S-M  | 纯前端；动作注册表供插件式扩展                             |
 | K4   | 聊天记录导出（JSON/HTML）             | 数据自主权                     | M    | 按会话全量拉取 + 媒体对象打包策略（内链 or 引用）          |
 | K5   | 消息翻译                              | 国际化延伸                     | M    | 自托管机翻服务选型（LibreTranslate/Argos），密钥不出域     |
-| K6   | 视频消息（≤60s）                      | 补齐基础消息类型               | M    | 复用语音 MediaRecorder + 压缩 + content type；缩略图抽帧   |
-| K7   | 会话媒体相册                          | 翻历史截图高频痛点             | M    | 消息按 content type 聚合查询 + 虚拟网格；复用图片 Lightbox |
-| K8   | 语音倍速播放                          | 语音重度用户                   | S    | voicePlayer 单例已收敛，加 rate 切换即可                   |
+| K6   | 视频消息（≤120s）                     | 补齐基础消息类型               | M    | ✅ 2026-09-04：文件选择（不录制）+ 客户端 canvas 抽帧封面  |
+| K7   | 会话媒体相册                          | 翻历史截图高频痛点             | M    | ✅ 2026-09-04：type 过滤 + seq 游标分页，复用图片 Lightbox |
+| K8   | 语音倍速播放                          | 语音重度用户                   | S    | ✅ 2026-09-04：1x/1.5x/2x 全局速率，跨播放保持             |
 | K9   | 贴纸 DIY（H1d）                       | 与商城闭环，差异化             | M    | 依赖 H1b ✅；canvas 裁剪/加字 → content_hash 复用收藏通道  |
 | K10  | 群投票 / 接龙                         | 群活跃基础设施                 | M    | 新消息类型 or 结构化卡片；结果实时聚合帧                   |
 | K11  | 个人状态                              | 轻社交不打扰信号               | S-M  | presence 协议扩展 + 会话列表角标                           |

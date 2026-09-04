@@ -1,6 +1,6 @@
 # 元聊 YuanChat — 开发与打包指南
 
-> **最后更新**：2026-08-23（贴纸/收藏表情 + 移动端真机实测修复：旧 WebView 兼容兜底、i18n 四语全量覆盖、长按菜单、静态门禁 `check:i18n` / `check:theme`）
+> **最后更新**：2026-09-04（会话媒体相册 + 视频消息 + 语音倍速：GC 引用来源补 `content.thumb_key`，`.husky/pre-commit` 增前端 `tsc` 门禁）
 >
 > ⚠️ **文档维护规则**：任何 `package.json` scripts、Tauri 配置、环境变量、workflow 的变更，**必须同步更新本文档**。此规则对所有会话生效。
 
@@ -326,7 +326,8 @@ go run ./cmd/gc -batch 200            # 引用判定的分批大小（默认 500
 ```
 
 判定规则：对象 `LastModified` 早于宽限期，且 key 不被 `messages.content->>'key'` /
-`stickers.object_key` / `users.avatar_url` / `conversations.avatar_url` 任何一处引用 → 可回收。
+`messages.content->>'thumb_key'`（视频封面）/ `stickers.object_key` / `users.avatar_url` /
+`conversations.avatar_url` / `sticker_packs.cover_url` 任何一处引用 → 可回收。
 宽限期是必需的——前端先传字节、后发 WS 帧，刚上传的对象可能"消息还在路上"。
 
 > **调度是独立的运维决策**：本仓不预置 cron/定时任务（改 `deploy/` 生产配置需单独评审）。
@@ -503,6 +504,21 @@ npx tauri android build --aab --split-per-abi --target aarch64
 | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `scripts/check-i18n.mjs`          | ① 三个 locale 对 zh-CN 对账（key 集合 + `%{var}` 占位符集合）<br>② 源码里静态 `t("key")` 的 key 必须存在<br>③ **死键**：locale 里的 key 必须在 `packages/`、`apps/` 中出现过 | 少翻译一门语言 → 该语言回落中文；key 写错 → 界面直接显示 key 字面量；词条堆积                |
 | `scripts/check-theme-classes.mjs` | ① 三个 app 的 Tailwind 色板必须一致（共用同一 preset）<br>② 源码里所有主题色工具类（`surface`/`primary`/`on-*`/`outline`…）必须能在色板里找到 key                            | 色板里没注册的颜色类**不产出任何 CSS**，元素静默继承父级色——次要文字与正文同色、hover 无反应 |
+
+### Git 钩子（husky）
+
+`.husky/pre-commit` 两步，提交前自动跑，**不要用 `--no-verify` 绕过**：
+
+1. `pnpm lint-staged` — 对暂存的 `.ts/.tsx` 跑 `eslint --fix` + `prettier`，`.css` 跑 `stylelint --fix`，`.json/.md` 跑 `prettier`（会把格式化结果一并写回暂存区）
+2. **暂存区含 `.ts/.tsx` 时**跑 `pnpm --filter @yuanchat/web typecheck` 与 `@yuanchat/desktop typecheck`
+
+第 2 步是全量 `tsc` 而不是只查暂存文件——`tsc` 需要整个工程的类型语义（跨文件推导、路径别名），
+只喂几个文件既漏报也误报；turbo 缓存命中后耗时接近于零。查两端 app 而非 `packages/*`，
+是因为两个 app 的 tsconfig 会传递覆盖到 `packages/shared`、`packages/ui` 的源码
+（那两个包自己没有 tsconfig，属既有技术债）。
+
+Go 侧**刻意不进钩子**（CI 已覆盖）：把 Go 全量测试塞进 pre-commit 会让每次提交多等一分钟以上，
+而这个钩子要解的是「幽灵依赖与类型错误只在 CI 才暴露」这一个具体问题——pnpm 的本地依赖提升会掩盖前者。
 
 ---
 
