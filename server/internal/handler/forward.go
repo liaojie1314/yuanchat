@@ -179,7 +179,8 @@ func contentPayloadFromMessage(m *model.Message) (ws.ContentPayload, bool) {
 		}, true
 	default:
 		// system（服务层禁转）、e2ee（服务层禁转，密文换会话后无人能解）、
-		// video（当前无任何写入路径）、以及将来新增而忘了补 case 的类型。
+		// video（已可发送，但"转发即重建实时帧"不在本批范围，见 spec M7：
+		// 转发后的视频靠刷新走 REST 历史渲染）、以及将来新增而忘了补 case 的类型。
 		return ws.ContentPayload{}, false
 	}
 }

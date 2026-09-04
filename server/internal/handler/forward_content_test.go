@@ -72,7 +72,9 @@ func TestContentPayloadFromMessage(t *testing.T) {
 		}
 	})
 
-	// system / e2ee / video：服务层已拒绝转发（system、e2ee）或没有任何写入路径（video）。
+	// system / e2ee：服务层已拒绝转发。
+	// video：已有发送通路（ws buildContent），但"转发即重建实时帧"按 spec M7 不在
+	// 本批范围，故仍显式保持 ok=false。
 	// 此处要求 ok=false 而不是"空文本"——宁可不推实时帧（刷新后由 REST 正确渲染），
 	// 也不要向全员扇出一个语义错误的空气泡。
 	for _, tc := range []struct {

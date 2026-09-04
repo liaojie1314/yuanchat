@@ -138,15 +138,91 @@ func TestBuildContentImageInvalidRejected(t *testing.T) {
 	}
 }
 
+// TestBuildContentUnsupportedTypeRejected 未支持的 content.type 一律 400。
+// 样本用 location（本仓没有该通路）；video 已是受支持类型，见下方 video 用例。
 func TestBuildContentUnsupportedTypeRejected(t *testing.T) {
 	c := newTestClient(uuid.Nil)
-	_, _, ok := new(Handler).buildContent(c, &SendPayload{Content: ContentPayload{Type: "video"}, ClientMsgID: "c-v"})
+	_, _, ok := new(Handler).buildContent(c, &SendPayload{Content: ContentPayload{Type: "location"}, ClientMsgID: "c-v"})
 	if ok {
 		t.Fatal("unsupported type must be rejected")
 	}
 	if e := decodeErr(t, c); e.Code != 400 {
 		t.Fatalf("unexpected error frame: %+v", e)
 	}
+}
+
+// TestBuildContentVideoValid 合法视频帧落库为 MessageTypeVideo，
+// 且 content JSON 与 model.MessageContentVideo 同构（thumb_key/时长/宽高往返一致）。
+func TestBuildContentVideoValid(t *testing.T) {
+	c := newTestClient(uuid.Nil)
+	p := &SendPayload{Content: ContentPayload{
+		Type: "video", Key: "files/2026/09/v.mp4", ThumbKey: "images/2026/09/t.jpg",
+		Name: "v.mp4", Size: 1024, Duration: 12, Width: 1280, Height: 720,
+	}, ClientMsgID: "c-video-1"}
+
+	mt, contentJSON, ok := new(Handler).buildContent(c, p)
+	if !ok {
+		t.Fatalf("valid video should pass, got error frame: %+v", decodeErr(t, c))
+	}
+	if mt != model.MessageTypeVideo {
+		t.Fatalf("expected MessageTypeVideo(%d), got %d", model.MessageTypeVideo, mt)
+	}
+	var stored model.MessageContentVideo
+	if err := json.Unmarshal([]byte(contentJSON), &stored); err != nil {
+		t.Fatalf("content is not MessageContentVideo json: %v", err)
+	}
+	want := model.MessageContentVideo{
+		Key: "files/2026/09/v.mp4", ThumbKey: "images/2026/09/t.jpg",
+		Name: "v.mp4", Size: 1024, Duration: 12, Width: 1280, Height: 720,
+	}
+	if stored != want {
+		t.Fatalf("video content did not round-trip: got %+v want %+v", stored, want)
+	}
+	assertNoFrame(t, c)
+}
+
+// TestBuildContentVideoInvalid 视频字段校验：缺 thumb_key / 时长为 0 / 超 120s /
+// 名称为空 / 名称超 255 字符都必须 400 且不落库。
+//
+// 时长上限取闭区间上界：120 通过、121 拒绝（spec M2）。
+func TestBuildContentVideoInvalid(t *testing.T) {
+	cases := map[string]ContentPayload{
+		"missing thumb": {Type: "video", Key: "files/k.mp4", Name: "k.mp4", Size: 1, Duration: 3, Width: 1, Height: 1},
+		"missing key":   {Type: "video", ThumbKey: "images/t.jpg", Name: "k.mp4", Size: 1, Duration: 3, Width: 1, Height: 1},
+		"zero duration": {Type: "video", Key: "files/k.mp4", ThumbKey: "images/t.jpg", Name: "k.mp4", Size: 1, Width: 1, Height: 1},
+		"over 120s":     {Type: "video", Key: "files/k.mp4", ThumbKey: "images/t.jpg", Name: "k.mp4", Size: 1, Duration: 121, Width: 1, Height: 1},
+		"empty name":    {Type: "video", Key: "files/k.mp4", ThumbKey: "images/t.jpg", Size: 1, Duration: 3, Width: 1, Height: 1},
+		"name too long": {Type: "video", Key: "files/k.mp4", ThumbKey: "images/t.jpg", Name: strings.Repeat("视", 256), Size: 1, Duration: 3, Width: 1, Height: 1},
+		"zero size":     {Type: "video", Key: "files/k.mp4", ThumbKey: "images/t.jpg", Name: "k.mp4", Duration: 3, Width: 1, Height: 1},
+		"zero width":    {Type: "video", Key: "files/k.mp4", ThumbKey: "images/t.jpg", Name: "k.mp4", Size: 1, Duration: 3, Height: 1},
+		"zero height":   {Type: "video", Key: "files/k.mp4", ThumbKey: "images/t.jpg", Name: "k.mp4", Size: 1, Duration: 3, Width: 1},
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := newTestClient(uuid.Nil)
+			p := &SendPayload{Content: content, ClientMsgID: "c-video-bad"}
+			if _, _, ok := new(Handler).buildContent(c, p); ok {
+				t.Fatalf("%s: expected rejection", name)
+			}
+			e := decodeErr(t, c)
+			if e.Code != 400 || e.ClientMsgID != "c-video-bad" {
+				t.Fatalf("%s: unexpected error frame: %+v", name, e)
+			}
+		})
+	}
+}
+
+// TestBuildContentVideoDurationBoundary 120s 恰好在上限内（闭区间上界）。
+func TestBuildContentVideoDurationBoundary(t *testing.T) {
+	c := newTestClient(uuid.Nil)
+	p := &SendPayload{Content: ContentPayload{
+		Type: "video", Key: "files/2026/09/v.mp4", ThumbKey: "images/2026/09/t.jpg",
+		Name: "v.mp4", Size: 1, Duration: 120, Width: 2, Height: 2,
+	}, ClientMsgID: "c-video-120"}
+	if _, _, ok := new(Handler).buildContent(c, p); !ok {
+		t.Fatalf("duration=120 应通过（上限为闭区间），got %+v", decodeErr(t, c))
+	}
+	assertNoFrame(t, c)
 }
 
 // TestBuildContentSticker 贴纸分支：字段齐全时落库为 MessageTypeSticker，
