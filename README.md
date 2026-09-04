@@ -38,7 +38,9 @@
 - **消息撤回**：发送后 2 分钟内可撤回；自己文本 5 分钟内可「重新编辑」回填输入框
 - **图片消息**：canvas 压缩 → MinIO 预签名直传，Lightbox 全屏查看，粘贴/选图发送，PNG 保 alpha
 - **文件消息**：任意扩展直传 MinIO，气泡按类型显示 lucide 图标（PDF/Word/表格/演示/压缩/音视频/图片/代码）+ 品类色 + 预签名下载
-- **语音消息**：MediaRecorder + audio/webm（1-60s，超 60s 自动截断），录音可暂停/续录，模块级单例播放器 + 播放中波形动画
+- **语音消息**：MediaRecorder + audio/webm（1-60s，超 60s 自动截断），录音可暂停/续录，模块级单例播放器 + 播放中波形动画，**支持 1x / 1.5x / 2x 倍速**（全局速率，跨播放保持）
+- **视频消息**：文件选择发送（≤120s / ≤100MB），封面由客户端 canvas 抽帧生成（0.5s 处取帧，避开纯黑首帧），气泡显示封面 + 时长角标，点开全屏播放
+- **会话媒体相册**：按类型聚合本会话的图片 / 文件 / 语音 / 视频 / 贴纸（`GET /conversations/:id/media`），seq 游标分页 + 滚动续页，图片复用 Lightbox、视频复用播放浮层、语音复用单例播放器；可见性口径与历史消息完全一致（成员校验 + 撤回排除 + 本人清空水位）
 - **表情回应 Reactions**：右键菜单快捷 6 emoji 条 + 气泡点击 toggle，全员实时同步 + 历史聚合回填（mine 相对请求者）
 - **贴纸/收藏表情**：官方表情包 + 图片一键转收藏（blob 内容寻址去重），贴纸消息独立 content type，前后端共用 golden 契约
 - **消息菜单**：桌面右键 / 移动端长按 500ms 呼出（位移容差 12px，抬手后的合成事件与 WebView 补发的 `contextmenu` 一并豁免）
@@ -80,14 +82,15 @@
 
 - 语音转文字
 - 音视频通话（WebRTC）、聊天机器人 / 开放 API
+- 视频消息的应用内录制（当前仅文件选择）与服务端转码
 
 ## 技术栈
 
 - **前端**：React 19 + TypeScript + Vite + Tailwind CSS + Zustand v5 + lucide-react + react-i18next
 - **桌面 + 移动**：Tauri 2（Rust 内核 + WebView，同一套 React UI 全平台复用）
 - **后端**：Go 1.25 + Gin + GORM + gorilla/websocket + MinIO SDK（单进程双端口：REST :8085 + WS :8086，另有 Prometheus :9090）
-- **存储**：PostgreSQL 16 + Redis 7 + MinIO（S3 兼容，用于图片/文件/语音/头像）
-- **测试**：vitest（前端 526）+ go test（13 包，集成测试 -race）+ Playwright E2E（63）
+- **存储**：PostgreSQL 16 + Redis 7 + MinIO（S3 兼容，用于图片/文件/语音/视频/头像）
+- **测试**：vitest（前端 611）+ go test（13 包，集成测试 -race）+ Playwright E2E（81）
 - **发版**：release-it + GitHub Actions（tag 触发 5 平台并行打包）
 
 ## 快速开始

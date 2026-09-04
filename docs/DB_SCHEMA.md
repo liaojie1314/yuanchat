@@ -124,6 +124,12 @@
   `content` 置 `'{}'`，行自然退出索引，实现「撤回即撤销访问」；
 - `idx_stickers_object_key` — 贴纸按 key 反查本人收藏/表情包归属。
 
+> 视频消息把封面存成独立对象，落在 `content->>'thumb_key'`（`images/` 前缀），
+> 于是消息侧有**两条**对象引用路径。授权（`CanRead`）与 GC（`ReferencedKeys`）都必须
+> 同时查 `key` 与 `thumb_key`，否则封面要么不可读、要么被 GC 判成孤儿删掉。
+> `thumb_key` 暂未建表达式索引：两处查询都是低频路径（下载授权按单 key、GC 按批
+> `IN`），等实测出慢查询再补 `messages((content->>'thumb_key'))`。
+
 ### 014_auth_token_version — 改密吊销旧令牌
 
 `users` 加 `token_version INT DEFAULT 0`：签发 JWT 时写入 `tv` 声明，校验方比对库中值，
@@ -185,8 +191,9 @@ favorites              user_id, message_id, conversation_id, 快照字段, conte
                        UNIQUE(user_id, message_id)
 ```
 
-关键索引：`idx_messages_conversation(conversation_id, seq DESC)`（历史游标分页）、
-`idx_messages_text_trgm`（全文检索）、`idx_messages_content_key`（对象反查/授权/GC）。
+关键索引：`idx_messages_conversation(conversation_id, seq DESC)`（历史游标分页，会话媒体
+相册的 `message_type IN (...)` 过滤复用同一条）、`idx_messages_text_trgm`（全文检索）、
+`idx_messages_content_key`（对象反查/授权/GC）。
 
 ### 平台治理
 

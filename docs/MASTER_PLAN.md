@@ -467,6 +467,7 @@ yuanchat/
 | 🟡   | mock 模式点播 demo 语音会 toast「播放失败」——demo 语音/文件为进相册补了对象 key，而 mock `download-url` 只回 SVG data URL。仅影响 mock 演示，真实后端已验证可播   |
 | ⚪   | 相册组件测试用 `vi.mock("@yuanchat/shared")` 而非 MSW（`packages/ui` 未引 msw 依赖）；MSW 四态由 shared 包单测与 E2E 覆盖                                         |
 | ⚪   | 视频消息不进全文检索、不进内容审核（与 image/file/voice/sticker 现状一致，审核仅对文本生效）                                                                      |
+| ⚪   | `content->>'thumb_key'` 无表达式索引：`CanRead` 的 `key OR thumb_key` 与 GC 的 `IN` 都走不到 `idx_messages_content_key`。两处均为低频路径，等实测慢查询再补索引   |
 
 #### 3. 既有代码的真实缺陷（无 plan，可随手批次收口）
 
