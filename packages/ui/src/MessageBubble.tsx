@@ -55,7 +55,14 @@ import { StickerImage } from "./StickerImage";
 import { copyText } from "./copyText";
 import { fileIconOf } from "./fileIcon";
 import { useLongPress } from "./useLongPress";
-import { currentPlayingId, playVoice, subscribeVoicePlayer } from "./voicePlayer";
+import {
+  getVoiceRate,
+  nextVoiceRate,
+  playVoice,
+  setVoiceRate,
+  subscribeVoicePlayer,
+  voicePlayerState,
+} from "./voicePlayer";
 
 /** 菜单快捷回应条的固定 emoji */
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🎉"];
@@ -143,12 +150,13 @@ export function MessageBubble({
     top: number;
     maxHeight?: number;
   } | null>(null);
-  // 语音播放态：模块级单例播放器广播当前播放的 messageId
-  const [voicePlayingId, setVoicePlayingId] = useState<string | null>(() => currentPlayingId());
+  // 语音播放态：模块级单例播放器广播当前播放的 messageId 与全局倍速
+  const [voiceState, setVoiceState] = useState(() => voicePlayerState());
+  const voicePlayingId = voiceState.playingId;
 
   useEffect(() => {
     if (msg.kind !== "voice") return;
-    return subscribeVoicePlayer(setVoicePlayingId);
+    return subscribeVoicePlayer(setVoiceState);
   }, [msg.kind]);
 
   const isSelf = msg.isSelf;
@@ -502,6 +510,22 @@ export function MessageBubble({
                     ))}
                   </span>
                   <span className="text-label-md tabular-nums">{msg.voice.seconds}&quot;</span>
+                  {voicePlayingId === msg.id && (
+                    <button
+                      type="button"
+                      aria-label={t("chat.voice.rate")}
+                      data-testid="voice-rate"
+                      onClick={() => setVoiceRate(nextVoiceRate(getVoiceRate()))}
+                      className={cn(
+                        "text-label-sm shrink-0 rounded-full px-1.5 py-0.5 tabular-nums transition-colors",
+                        isSelf
+                          ? "bg-white/25 text-white"
+                          : "bg-primary-container text-primary-on-container",
+                      )}
+                    >
+                      {t("chat.voice.rateValue", { rate: voiceState.rate })}
+                    </button>
+                  )}
                 </div>
                 <button
                   className={cn(

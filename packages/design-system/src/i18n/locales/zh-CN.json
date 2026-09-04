@@ -250,6 +250,8 @@
   "chat.voice.unsupported": "当前环境不支持录音",
   "chat.voice.tooShort": "说话时间太短",
   "chat.voice.playFailed": "播放失败",
+  "chat.voice.rate": "播放速度",
+  "chat.voice.rateValue": "%{rate}x",
   "chat.video.tooLong": "视频时长不能超过 2 分钟",
   "chat.video.tooLarge": "视频大小不能超过 100 MB",
   "chat.video.readFailed": "无法读取该视频，请换一个文件",

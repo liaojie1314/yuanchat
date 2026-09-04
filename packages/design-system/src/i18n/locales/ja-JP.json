@@ -250,6 +250,8 @@
   "chat.voice.unsupported": "この環境では録音できません",
   "chat.voice.tooShort": "録音時間が短すぎます",
   "chat.voice.playFailed": "再生に失敗しました",
+  "chat.voice.rate": "再生速度",
+  "chat.voice.rateValue": "%{rate}x",
   "chat.video.tooLong": "動画は 2 分以内にしてください",
   "chat.video.tooLarge": "動画は 100 MB 以内にしてください",
   "chat.video.readFailed": "この動画を読み込めません。別のファイルを選んでください",

@@ -300,7 +300,8 @@ export function ConversationMediaView({
   /** 请求序号：切 Tab / 重试后旧请求的回包一律丢弃，防串页 */
   const reqRef = useRef(0);
 
-  useEffect(() => subscribeVoicePlayer(setPlayingId), []);
+  // 订阅载荷含倍速，但相册行只用 playingId 高亮（倍速按钮在消息气泡上）
+  useEffect(() => subscribeVoicePlayer((st) => setPlayingId(st.playingId)), []);
 
   const load = useCallback(
     (type: MediaTab, beforeSeq: number, append: boolean) => {

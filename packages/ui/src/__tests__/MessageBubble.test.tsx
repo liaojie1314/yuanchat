@@ -1,10 +1,11 @@
 /**
  * MessageBubble 贴纸渲染、「添加到表情」菜单项与视频气泡测试
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import i18n from "@yuanchat/design-system/i18n";
 import { MessageBubble } from "../MessageBubble";
+import { setVoiceRate, stopVoice } from "../voicePlayer";
 import type { ChatMessage } from "@yuanchat/shared";
 
 /**
@@ -195,5 +196,73 @@ describe("video bubble", () => {
     const { container } = render(<MessageBubble msg={videoMsg()} />);
     expect(container.querySelector('[data-kind="video"]')).toBeTruthy();
     expect(container.querySelector(".msg-bubble-peer")).toBeTruthy();
+  });
+});
+
+describe("voice playback rate", () => {
+  /** 替身音频：jsdom 未实现 HTMLMediaElement.play */
+  class FakeAudio {
+    playbackRate = 1;
+    onended: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    constructor(public src: string) {}
+    play(): Promise<void> {
+      return Promise.resolve();
+    }
+    pause(): void {}
+  }
+
+  /** 一条可播放的语音消息（有对象 key，播放按钮才会去签地址） */
+  const voiceMsg: ChatMessage = {
+    id: "mv-voice",
+    conversationId: "c1",
+    kind: "voice",
+    isSelf: false,
+    senderName: "Bob",
+    voice: { seconds: 12, wave: [6, 12, 18], key: "files/2026/09/v.webm" },
+    time: "10:00",
+    seq: 2,
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal("Audio", FakeAudio);
+    // 播放器是模块级单例：用例间必须归零，否则「上一条还在播」会串态
+    stopVoice();
+    setVoiceRate(1);
+  });
+
+  afterEach(() => {
+    stopVoice();
+    setVoiceRate(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("倍速按钮只在本行正在播放时出现，且按 1 → 1.5 → 2 → 1 循环", async () => {
+    render(<MessageBubble msg={voiceMsg} />);
+
+    // 未播放：不占位、不出现（每行都挂一个倍速钮会把消息流塞满）
+    expect(screen.queryByTestId("voice-rate")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: label("chat.input.voice") }));
+
+    const rateBtn = await screen.findByTestId("voice-rate");
+    expect(rateBtn).toHaveTextContent("1x");
+
+    fireEvent.click(rateBtn);
+    expect(rateBtn).toHaveTextContent("1.5x");
+    fireEvent.click(rateBtn);
+    expect(rateBtn).toHaveTextContent("2x");
+    fireEvent.click(rateBtn);
+    expect(rateBtn).toHaveTextContent("1x");
+  });
+
+  it("另一条语音消息（未在播放）不显示倍速按钮", async () => {
+    render(<MessageBubble msg={voiceMsg} />);
+    fireEvent.click(screen.getByRole("button", { name: label("chat.input.voice") }));
+    await screen.findByTestId("voice-rate");
+
+    // 同一播放态下渲染另一条语音：倍速钮不应跟着长出来
+    render(<MessageBubble msg={{ ...voiceMsg, id: "other-voice" }} />);
+    expect(screen.getAllByTestId("voice-rate")).toHaveLength(1);
   });
 });

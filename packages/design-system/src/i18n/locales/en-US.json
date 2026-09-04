@@ -250,6 +250,8 @@
   "chat.voice.unsupported": "Recording is not supported here",
   "chat.voice.tooShort": "Too short",
   "chat.voice.playFailed": "Playback failed",
+  "chat.voice.rate": "Playback speed",
+  "chat.voice.rateValue": "%{rate}x",
   "chat.video.tooLong": "Videos can't be longer than 2 minutes",
   "chat.video.tooLarge": "Videos can't be larger than 100 MB",
   "chat.video.readFailed": "Couldn't read this video, pick another file",
