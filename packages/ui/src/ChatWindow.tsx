@@ -294,15 +294,17 @@ export function ChatWindow({
           peerId={conv.type === "private" ? conv.peerId : undefined}
           onClick={() => setShowSafetyNumber(true)}
         />
+        {/* 通话 / 搜索 / 相册在手机上收进输入区的「更多」面板：60px 高的顶栏放不下
+            五个图标又要留出群名，挤到标题被截断。桌面/平板保持全部常驻。 */}
         <button
-          className="md3-icon-btn text-on-surface-variant"
+          className="md3-icon-btn text-on-surface-variant hidden sm:grid"
           title={t("chat.voiceCall")}
           aria-label={t("chat.voiceCall")}
         >
           <Phone size={19} />
         </button>
         <button
-          className="md3-icon-btn text-on-surface-variant"
+          className="md3-icon-btn text-on-surface-variant hidden sm:grid"
           title={t("chat.videoCall")}
           aria-label={t("chat.videoCall")}
         >
@@ -318,7 +320,7 @@ export function ChatWindow({
         </button>
         <button
           onClick={() => setShowMedia(true)}
-          className="md3-icon-btn text-on-surface-variant"
+          className="md3-icon-btn text-on-surface-variant hidden sm:grid"
           title={t("media.title")}
           aria-label={t("media.title")}
           data-testid="open-media"
@@ -548,7 +550,11 @@ export function ChatWindow({
       </div>
 
       {/* 输入区 */}
-      <Composer onSend={handleSend} compact={compactComposer} />
+      <Composer
+        onSend={handleSend}
+        compact={compactComposer}
+        onOpenMedia={() => setShowMedia(true)}
+      />
 
       {/* 图片全屏查看器（点击气泡内图片打开） */}
       {lightboxUrl && <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}

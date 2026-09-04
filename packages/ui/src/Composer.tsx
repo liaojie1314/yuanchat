@@ -8,17 +8,21 @@
  * - 工具条：图片 / 视频 / 文件 / 表情 / 语音 / 更多
  * - 发送按钮：空内容禁用；聚焦时显示快捷键提示
  *
- * 移动端（compact 模式）收窄为单行圆角输入 + 环绕按钮，符合手机输入习惯。
+ * 移动端（compact 模式）改为两行：上行「输入框 + 发送」，下行工具条，
+ * 低频动作（文件 / 媒体相册 / 语音通话 / 视频通话）收进「更多」宫格面板。
  *
  * @param onSend - 发送回调，参数为去除首尾空白后的文本
  * @param compact - 移动端紧凑模式
+ * @param onOpenMedia - 打开会话媒体相册（移动端由「更多」面板触发，桌面端仍在顶栏）
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AtSign,
   Image as ImageIcon,
+  Images,
   Mic,
   Paperclip,
+  Phone,
   Plus,
   Send,
   Smile,
@@ -31,6 +35,7 @@ import {
   fetchMembers,
   isMockEnabled,
   quoteExcerptOf,
+  showToast,
   useConversationStore,
   useMessageStore,
 } from "@yuanchat/shared";
@@ -53,14 +58,18 @@ const TYPING_THROTTLE_MS = 3000;
 export function Composer({
   onSend,
   compact = false,
+  onOpenMedia,
 }: {
   /** 发送回调：text 为去除首尾空白后的正文，mentions 为收集到的 @ 用户 ID+昵称 */
   onSend: (text: string, mentions: MentionRef[]) => void;
   compact?: boolean;
+  /** 打开媒体相册（移动端「更多」面板入口；缺省时该项不渲染） */
+  onOpenMedia?: () => void;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
   const [showEmoji, setShowEmoji] = useState(false);
+  const [showMore, setShowMore] = useState(false);
   const [recording, setRecording] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -145,8 +154,21 @@ export function Composer({
    */
   const toggleEmoji = () => {
     const next = !showEmoji;
-    if (next) textareaRef.current?.blur();
+    if (next) {
+      textareaRef.current?.blur();
+      setShowMore(false); // 表情与「更多」两个面板占同一块位置，互斥
+    }
     setShowEmoji(next);
+  };
+
+  /** 开合「更多」宫格面板（与表情面板互斥，同样先收键盘） */
+  const toggleMore = () => {
+    const next = !showMore;
+    if (next) {
+      textareaRef.current?.blur();
+      setShowEmoji(false);
+    }
+    setShowMore(next);
   };
 
   /** 在光标处插入 emoji，并在下一帧恢复焦点与光标位置 */
@@ -470,12 +492,16 @@ export function Composer({
   );
 
   if (compact) {
-    // 移动端：单行胶囊输入 + 附件/表情/发送
+    // 移动端：两行布局 —— 上行「输入框 + 发送」，下行工具条（图标均分）。
+    //
+    // 早先是六个控件（图片/视频/文件/输入框/表情/语音）挤在同一行：390px 宽的机型上
+    // 输入框只剩百来像素，中文两行就顶到 max-h。把工具移到独立一行后输入框可以整宽，
+    // 图标之间也有了可点面积（44px 触达区不再互相挤压）。
     if (recording) {
       return <div className="bg-surface-container-low shrink-0 px-2.5 pt-2 pb-3">{voiceBar}</div>;
     }
     return (
-      <div className="bg-surface-container-low relative shrink-0 px-2.5 pt-2 pb-3">
+      <div className="bg-surface-container-low relative shrink-0 px-2.5 pt-2 pb-2">
         {mentionQuery && filteredMembers.length > 0 && (
           <div className="animate-slide-up absolute bottom-full left-2.5 z-20 mb-1 w-56">
             <MentionPicker
@@ -487,29 +513,7 @@ export function Composer({
           </div>
         )}
         {replyBar}
-        <div className="flex items-end gap-1.5">
-          <button
-            onClick={openFilePicker}
-            className="md3-icon-btn text-on-surface-variant"
-            aria-label={t("chat.input.image")}
-          >
-            <ImageIcon size={20} />
-          </button>
-          <button
-            onClick={openVideoPicker}
-            className="md3-icon-btn text-on-surface-variant"
-            aria-label={t("chat.input.video")}
-            data-testid="send-video"
-          >
-            <Video size={20} />
-          </button>
-          <button
-            onClick={openAnyFilePicker}
-            className="md3-icon-btn text-on-surface-variant"
-            aria-label={t("chat.input.file")}
-          >
-            <Paperclip size={20} />
-          </button>
+        <div className="flex items-end gap-2">
           <textarea
             ref={textareaRef}
             rows={1}
@@ -521,37 +525,69 @@ export function Composer({
             }}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            // 点输入框要打字 → 收表情面板（键盘要上来，二者互斥）
-            onFocus={() => setShowEmoji(false)}
+            // 点输入框要打字 → 收起两个面板（键盘要上来，三者互斥）
+            onFocus={() => {
+              setShowEmoji(false);
+              setShowMore(false);
+            }}
             placeholder={t("chat.input.placeholder")}
             aria-label={t("chat.input.placeholder")}
             className="bg-surface-container-high text-body-lg text-on-surface placeholder:text-on-surface-variant/70 max-h-28 min-w-0 flex-1 resize-none rounded-lg px-4 py-2.5 focus:outline-none"
           />
+          {/* 发送按钮常驻：位置固定下来，不再与语音按钮抢同一个槽位（否则一打字按钮就换脸） */}
           <button
+            onClick={send}
+            disabled={!canSend}
+            aria-label={t("chat.input.send")}
+            className={cn(
+              "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white transition-transform",
+              canSend ? "brand-gradient active:scale-90" : "bg-outline-variant",
+            )}
+          >
+            <Send size={17} />
+          </button>
+        </div>
+        {/* 工具条：高频四项常驻（语音 / 图片 / 表情 / 更多），其余收进「更多」面板 */}
+        <div className="mt-1 flex items-center justify-around">
+          <button
+            onClick={() => setRecording(true)}
             className="md3-icon-btn text-on-surface-variant"
+            aria-label={t("chat.input.voice")}
+          >
+            <Mic size={21} />
+          </button>
+          <button
+            onClick={openFilePicker}
+            className="md3-icon-btn text-on-surface-variant"
+            aria-label={t("chat.input.image")}
+          >
+            <ImageIcon size={21} />
+          </button>
+          <button
+            onClick={openVideoPicker}
+            className="md3-icon-btn text-on-surface-variant"
+            aria-label={t("chat.input.video")}
+            data-testid="send-video"
+          >
+            <Video size={21} />
+          </button>
+          <button
+            className={cn("md3-icon-btn", showEmoji ? "text-primary" : "text-on-surface-variant")}
             aria-label={t("chat.input.emoji")}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={toggleEmoji}
           >
-            <Smile size={20} />
+            <Smile size={21} />
           </button>
-          {canSend ? (
-            <button
-              onClick={send}
-              aria-label={t("chat.input.send")}
-              className="brand-gradient flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white transition-transform active:scale-90"
-            >
-              <Send size={17} />
-            </button>
-          ) : (
-            <button
-              onClick={() => setRecording(true)}
-              className="md3-icon-btn text-on-surface-variant"
-              aria-label={t("chat.input.voice")}
-            >
-              <Mic size={20} />
-            </button>
-          )}
+          <button
+            className={cn("md3-icon-btn", showMore ? "text-primary" : "text-on-surface-variant")}
+            aria-label={t("chat.input.more")}
+            data-testid="composer-more"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={toggleMore}
+          >
+            <Plus size={21} />
+          </button>
         </div>
         {/* 移动端：面板行内渲染在输入行下方，推高布局（不悬浮，规避安卓键盘 fixed 定位坑） */}
         {showEmoji && (
@@ -562,6 +598,43 @@ export function Composer({
               onClose={() => setShowEmoji(false)}
               onPickSticker={sendSticker}
             />
+          </div>
+        )}
+        {/* 「更多」宫格：低频动作从顶栏与工具条收拢到这里（顶栏在手机上只留返回/标题/详情）。
+            高度与表情面板一致（h-72）：两者切换时输入行不跳动，键盘顶起的高度也一致。 */}
+        {showMore && (
+          <div className="animate-slide-up mt-2 h-72 overflow-y-auto">
+            <div className="grid grid-cols-4 gap-2 pt-2">
+              <MoreItem
+                icon={<Paperclip size={22} />}
+                label={t("chat.input.file")}
+                onClick={() => {
+                  setShowMore(false);
+                  openAnyFilePicker();
+                }}
+              />
+              {onOpenMedia && (
+                <MoreItem
+                  icon={<Images size={22} />}
+                  label={t("media.title")}
+                  testId="more-media"
+                  onClick={() => {
+                    setShowMore(false);
+                    onOpenMedia();
+                  }}
+                />
+              )}
+              <MoreItem
+                icon={<Phone size={22} />}
+                label={t("chat.voiceCall")}
+                onClick={() => showToast("info", t("common.comingSoon"))}
+              />
+              <MoreItem
+                icon={<Video size={22} />}
+                label={t("chat.videoCall")}
+                onClick={() => showToast("info", t("common.comingSoon"))}
+              />
+            </div>
           </div>
         )}
         {fileInput}
@@ -699,6 +772,40 @@ function ToolButton({
       onClick={onClick}
     >
       {children}
+    </button>
+  );
+}
+
+/**
+ * 移动端「更多」宫格里的一格：图标方块 + 文字标签。
+ *
+ * @param icon - lucide 图标节点
+ * @param label - 标签文案（同时作为 aria-label，图标本身对读屏无意义）
+ * @param onClick - 点击回调
+ * @param testId - 可选测试锚点
+ */
+function MoreItem({
+  icon,
+  label,
+  onClick,
+  testId,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  testId?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      data-testid={testId}
+      className="flex flex-col items-center gap-1.5 py-1"
+    >
+      <span className="bg-surface-container-high text-on-surface-variant flex h-14 w-14 items-center justify-center rounded-lg transition-transform active:scale-95">
+        {icon}
+      </span>
+      <span className="text-label-sm text-on-surface-variant">{label}</span>
     </button>
   );
 }

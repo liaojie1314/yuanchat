@@ -116,7 +116,11 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
 
         {!hideMobileNav && (
           <nav
-            className="border-outline-variant bg-surface-container-low flex h-20 shrink-0 border-t pb-4"
+            /* 不写死高度：由「胶囊 36 + 间距 4 + 标签」自然撑开，配 pt-2 / pb-2 收紧留白。
+               底部安全区走 env()：安卓侧 MainActivity 已按 systemBars 给 WebView 加过
+               bottom padding，env() 在那里取 0，不会二次叠加（先前写死 pb-4 就是叠加出来的
+               那截空白）；iOS Safari / PWA 没有原生下发，靠 env() 避开手势条。 */
+            className="border-outline-variant bg-surface-container-low flex shrink-0 border-t pt-2 pb-[calc(env(safe-area-inset-bottom,0px)+0.5rem)]"
             aria-label={t("chat.title")}
           >
             {MOBILE_NAV_ITEMS.map(({ to, icon: Icon, labelKey }) => {
@@ -127,13 +131,16 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
                   key={to}
                   to={to}
                   className={cn(
-                    "text-label-sm flex flex-1 flex-col items-center gap-1 pt-3 font-medium transition-colors",
+                    "text-label-sm flex flex-1 flex-col items-center gap-1 font-medium transition-colors",
                     active ? "text-on-surface" : "text-on-surface-variant",
                   )}
                 >
+                  {/* 选中态胶囊用**像素**高度而非 h-9：本仓 root font-size 是 14px，
+                      h-9(2.25rem) 只有 31.5px，22px 图标上下各剩 4.7px 仍贴边。
+                      38px 留出 8px 呼吸量；宽度 64px 维持椭圆比例。 */}
                   <span
                     className={cn(
-                      "relative flex h-8 min-w-[60px] items-center justify-center rounded-full transition-colors",
+                      "relative flex h-[38px] min-w-[64px] items-center justify-center rounded-full transition-colors",
                       active && "bg-primary-container text-primary-on-container",
                     )}
                   >
