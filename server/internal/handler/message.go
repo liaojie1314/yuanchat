@@ -72,6 +72,59 @@ func (h *MessageHandler) History(c *gin.Context) {
 	})
 }
 
+// Media 返回会话媒体相册（按 message_type 过滤，seq 降序游标分页）。
+//
+//	@Summary		会话媒体相册
+//	@Tags			chat
+//	@Security		BearerAuth
+//	@Param			id			path	string	true	"会话 id"
+//	@Param			type		query	string	false	"媒体类型 all|image|file|voice|video|sticker，默认 all"
+//	@Param			before_seq	query	int		false	"拉取 seq < before_seq 的媒体；0 表示最新"
+//	@Param			limit		query	int		false	"每页条数，默认 30，上限 100"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/conversations/{id}/media [get]
+func (h *MessageHandler) Media(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		Unauthorized(c, "unauthorized")
+		return
+	}
+
+	convID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid conversation id")
+		return
+	}
+
+	typeFilter := c.DefaultQuery("type", "all")
+	beforeSeq, _ := strconv.ParseInt(c.DefaultQuery("before_seq", "0"), 10, 64)
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "30"))
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+
+	items, err := h.svc.GetMedia(c.Request.Context(), userID, convID, typeFilter, beforeSeq, limit)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotMember):
+			Error(c, http.StatusForbidden, 403, "not a conversation member")
+		case errors.Is(err, service.ErrInvalidMediaType):
+			BadRequest(c, "invalid media type")
+		default:
+			h.logger.Error("get media failed", zap.Error(err))
+			InternalError(c, "failed to load media")
+		}
+		return
+	}
+
+	// 满页说明可能还有更早的媒体（与 History 的 has_more 同口径：
+	// limit 在 service 层同样做过归一，故这里比较的 limit 与实际取数一致）
+	Success(c, gin.H{
+		"items":    items,
+		"has_more": len(items) == limit,
+	})
+}
+
 // Recall 撤回消息（发送者本人、2 分钟窗口内）。
 //
 //	@Summary		撤回消息

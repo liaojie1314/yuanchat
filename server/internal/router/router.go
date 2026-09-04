@@ -271,6 +271,7 @@ func Setup(
 		chat.GET("/conversations", convH.List)
 		chat.POST("/conversations", convH.Create)
 		chat.GET("/conversations/:id/messages", msgH.History)
+		chat.GET("/conversations/:id/media", msgH.Media)
 		chat.GET("/conversations/:id/members", convH.Members)
 		chat.PATCH("/conversations/:id", convH.Rename)
 		chat.PUT("/conversations/:id/settings", convH.UpdateSettings)

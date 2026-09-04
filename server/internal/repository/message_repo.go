@@ -79,6 +79,47 @@ func (r *MessageRepository) ListBefore(ctx context.Context, convID uuid.UUID, be
 	return rows, err
 }
 
+// MediaItemWithSender 媒体相册条目：完整消息 + 发送者昵称（群聊取群昵称，与 ListBefore 同口径）。
+type MediaItemWithSender struct {
+	model.Message
+	SenderNickname string `gorm:"column:sender_nickname" json:"sender_nickname"`
+}
+
+// ListMedia 拉取会话内指定类型的媒体消息（seq 降序，游标 beforeSeq）。
+//
+// types 为空表示"无任何媒体类型"，直接返回空且不查库（否则 `IN ()` 是语法错误）。
+// beforeSeq ≤ 0 表示从最新一条开始；minSeq 为调用方的 cleared_before_seq 水位（0 不过滤）。
+// 与 ListBefore 共用成员署名投影（COALESCE 群昵称），且只回 status=1 的未撤回消息——
+// 撤回会把 content 置 '{}'，相册若放行就会渲染出一堆空条目。
+func (r *MessageRepository) ListMedia(
+	ctx context.Context,
+	convID uuid.UUID,
+	types []int16,
+	beforeSeq, minSeq int64,
+	limit int,
+) ([]MediaItemWithSender, error) {
+	if len(types) == 0 {
+		return nil, nil
+	}
+	q := r.db.WithContext(ctx).
+		Table("messages m").
+		Select(`m.*, COALESCE(NULLIF(cm.alias, ''), u.nickname) AS sender_nickname`).
+		Joins("JOIN users u ON u.id = m.sender_id").
+		Joins("LEFT JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = m.sender_id").
+		Where("m.conversation_id = ? AND m.deleted_at IS NULL AND m.status = ? AND m.message_type IN ?",
+			convID, model.MessageStatusNormal, types)
+	if beforeSeq > 0 {
+		q = q.Where("m.seq < ?", beforeSeq)
+	}
+	if minSeq > 0 {
+		q = q.Where("m.seq > ?", minSeq)
+	}
+
+	var rows []MediaItemWithSender
+	err := q.Order("m.seq DESC").Limit(limit).Scan(&rows).Error
+	return rows, err
+}
+
 // FindByID 按 ID 查消息（含软删过滤），不存在返回 nil。
 func (r *MessageRepository) FindByID(ctx context.Context, id uuid.UUID) (*model.Message, error) {
 	var msg model.Message
