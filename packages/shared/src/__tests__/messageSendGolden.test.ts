@@ -139,6 +139,33 @@ describe("message.send 黄金契约（前端产出 == contracts/message-send.gol
     expectMatchesGolden("voice");
   });
 
+  it("video", async () => {
+    // node 环境没有视频解码，且 golden 的 duration/width/height 必须逐字一致：
+    // 把「读元数据 + 抽帧」整体打桩（真实实现另有 files.ts 的单测覆盖）
+    vi.spyOn(filesApi, "extractVideoMeta").mockResolvedValue({
+      duration: 15,
+      width: 1280,
+      height: 720,
+      thumbnail: new Blob(["jpegthumb"], { type: "image/jpeg" }),
+    });
+    // 两次直传：先视频（files/ 前缀）后缩略图（images/ 前缀），顺序即帧里两个 key 的来源
+    vi.spyOn(filesApi, "getUploadUrl")
+      .mockResolvedValueOnce({
+        uploadUrl: "https://put",
+        objectKey: "files/2026/08/0f5a1c00-0005.mp4",
+      })
+      .mockResolvedValueOnce({
+        uploadUrl: "https://put",
+        objectKey: "images/2026/08/0f5a1c00-0006.jpg",
+      });
+    vi.spyOn(filesApi, "uploadToTicket").mockResolvedValue(undefined);
+
+    // size 取真实字节数：golden 里写死 2048000
+    const file = new File([new Uint8Array(2048000)], "demo.mp4", { type: "video/mp4" });
+    await useMessageStore.getState().sendVideo(CONV, file);
+    expectMatchesGolden("video");
+  });
+
   it("sticker", () => {
     useMessageStore.getState().sendSticker(CONV, {
       id: STICKER_ID,
@@ -202,6 +229,7 @@ describe("message.send 黄金契约（前端产出 == contracts/message-send.gol
       "image",
       "file",
       "voice",
+      "video",
       "sticker",
       "e2ee_subsequent",
       "e2ee_first_message",

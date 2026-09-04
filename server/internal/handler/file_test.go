@@ -35,6 +35,7 @@ func testUploadCfg() config.UploadConfig {
 		AllowedTypes: []string{
 			"image/jpeg", "image/png", "image/gif", "image/webp",
 			"application/pdf", "text/plain",
+			"video/mp4", "video/webm", "video/quicktime",
 		},
 	}
 }
@@ -106,16 +107,40 @@ func doJSON(t *testing.T, r *gin.Engine, method, target string, body any) (*http
 // --- 纯 handler 校验逻辑单测（无需 MinIO）---
 
 // TestUploadURL_UnsupportedType 非白名单 content_type → 400 code=4001。
+//
+// 样本用 video/x-msvideo(.avi)：视频上传只开放 mp4/webm/quicktime 三种，
+// 其余容器（avi 等）仍在白名单外——这正是白名单扩容后需要守住的边界。
 func TestUploadURL_UnsupportedType(t *testing.T) {
 	r := newFileEngine(nil, &stubACL{allow: true})
 	w, resp := doJSON(t, r, http.MethodPost, "/files/upload-url", gin.H{
-		"filename": "clip.mp4", "content_type": "video/mp4", "size": 1024,
+		"filename": "clip.avi", "content_type": "video/x-msvideo", "size": 1024,
 	})
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
 	}
 	if resp.Code != 4001 {
 		t.Fatalf("code = %d, want 4001", resp.Code)
+	}
+}
+
+// TestUploadURL_VideoTypesAllowed 三种视频 MIME 通过白名单与键自洽校验。
+//
+// storage 为 nil，故通过全部校验后必然停在 503（签名阶段）——用 503 而非 400
+// 来证明"没被白名单/扩展名拦下"，无需真实 MinIO。
+func TestUploadURL_VideoTypesAllowed(t *testing.T) {
+	r := newFileEngine(nil, &stubACL{allow: true})
+	for _, tc := range []struct{ filename, contentType string }{
+		{"clip.mp4", "video/mp4"},
+		{"clip.webm", "video/webm"},
+		{"clip.mov", "video/quicktime"},
+	} {
+		w, resp := doJSON(t, r, http.MethodPost, "/files/upload-url", gin.H{
+			"filename": tc.filename, "content_type": tc.contentType, "size": 2048000,
+		})
+		if w.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s: status = %d (code=%d msg=%q), want 503（说明已过白名单校验）",
+				tc.contentType, w.Code, resp.Code, resp.Message)
+		}
 	}
 }
 
@@ -211,6 +236,9 @@ func TestResolveCategory(t *testing.T) {
 		{"application/pdf", "images", "images"},
 		{"image/png", "sticker-covers", "sticker-covers"}, // 封面：仅显式指定，不靠 content-type 推断
 		{"image/png", "bogus", "files"},                   // 非法 query 回落 files
+		{"video/mp4", "", "files"},                        // 视频归 files，不进 images/
+		{"video/webm", "", "files"},
+		{"video/quicktime", "", "files"},
 	}
 	for _, tc := range cases {
 		if got := resolveCategory(tc.contentType, tc.query); got != tc.want {

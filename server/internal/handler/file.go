@@ -232,6 +232,13 @@ func resolveCategory(contentType, query string) string {
 	if strings.HasPrefix(contentType, "image/") {
 		return "images"
 	}
+	// video/* 显式归 files：视频不进 images/ 前缀——那个前缀装的是可直接当图片渲染的对象
+	// （含视频自己的 JPEG 封面 thumb_key），把主视频混进去会让"取封面"与"取原片"
+	// 无法按前缀区分。下载侧同样走私有 + 预签名（与 file/voice 同口径）。
+	// 默认分支本就回落 files，此处显式声明是为了防未来重构顺手把 video 并进 images。
+	if strings.HasPrefix(contentType, "video/") {
+		return "files"
+	}
 	return "files"
 }
 

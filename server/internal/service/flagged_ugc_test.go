@@ -44,7 +44,7 @@ func countFlaggedUGC(t *testing.T, db *gorm.DB, ugcType string) int64 {
 // TestUpdateProfileFlagsSensitiveNicknameAndBio 昵称 / bio 命中敏感词：
 // 写入照常成功（打标不阻塞），同时各记一条命中记录；未命中的更新不产生记录。
 // TestRegisterFlagsSensitiveNickname 注册昵称命中敏感词：注册照常成功
-//（打标不阻塞），命中记入 flagged_ugc 台账并关联新用户；干净昵称不产生记录。
+// （打标不阻塞），命中记入 flagged_ugc 台账并关联新用户；干净昵称不产生记录。
 func TestRegisterFlagsSensitiveNickname(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()

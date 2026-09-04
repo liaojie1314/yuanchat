@@ -287,7 +287,54 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 ```
 
 - 非会话成员访问返回 `403`。
-- `content` 是 JSONB 字符串；`message_type`：1=文本 2=图片 3=文件 4=语音 5=视频 6=系统。
+- `content` 是 JSONB 字符串；`message_type`：1=文本 2=图片 3=文件 4=语音 5=视频 6=系统 7=E2EE 密文 8=贴纸。
+
+### GET /api/v1/conversations/:id/media
+
+会话媒体相册：按消息类型聚合本会话的图片/文件/语音/视频/贴纸，seq 降序游标分页。
+与历史消息**同一套可见性口径**（成员校验、撤回排除、本人清空水位），因此相册里
+看得到的东西，`files/download-url` 一定签得出来。
+
+| Query 参数   | 说明                                                                             |
+| ------------ | -------------------------------------------------------------------------------- |
+| `type`       | `all`（默认）\| `image` \| `file` \| `voice` \| `video` \| `sticker`；非法值 400 |
+| `before_seq` | 取 `seq < before_seq` 的媒体；`0`（默认）表示从最新开始                          |
+| `limit`      | 页大小，默认 30，最大 100                                                        |
+
+`all` 展开为 `[2,3,4,5,8]`，**不含**文本(1)/系统(6)/E2EE(7)——前两者不是媒体，
+E2EE 密文服务端无法解读其对象键。
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "items": [
+      {
+        "message_id": "uuid",
+        "seq": 42,
+        "message_type": 5,
+        "sender_nickname": "张伟",
+        "created_at": "2026-09-02T10:00:00+08:00",
+        "key": "files/2026/09/xxx.mp4",
+        "thumb_key": "images/2026/09/yyy.jpg",
+        "name": "demo.mp4",
+        "size": 2048000,
+        "duration": 15,
+        "width": 1280,
+        "height": 720
+      }
+    ],
+    "has_more": true
+  }
+}
+```
+
+- 字段按类型填充，未用字段整个不下发（`omitempty`）：`thumb_key` 仅视频；
+  `name` 见于文件/视频；`duration` 见于语音/视频；`width`/`height` 见于图片/视频/贴纸；
+  `sticker_id` 仅贴纸。
+- 非会话成员 `403`；`type` 非白名单 `400`。
+- 不含表情回应聚合（相册是内容视图，不是消息列表）。
 
 ### POST /api/v1/messages/:id/recall
 
@@ -592,7 +639,8 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 
 ```json
 // 请求
-// content_type 须在白名单内（image/jpeg|png|gif|webp、application/pdf|msword|docx、text/plain）；
+// content_type 须在白名单内（image/jpeg|png|gif|webp、video/mp4|webm|quicktime、
+// application/pdf|msword|docx、text/plain）；
 // size 为字节数，超上限（默认 100MB）回 4002
 { "filename": "photo.png", "content_type": "image/png", "size": 20480 }
 
@@ -608,7 +656,7 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 }
 ```
 
-- Query `category`：显式 `images` / `avatars` / `files`；缺省按 `content_type` 推断（`image/*` → images，其余 → files）。
+- Query `category`：显式 `images` / `avatars` / `files`；缺省按 `content_type` 推断（`image/*` → images，其余含 `video/*` → files）。
 - **头像专用**：`?category=avatars` 时对象落在 `avatars/` 前缀（匿名公共读），响应额外返回
   `public_url`（形如 `http://<endpoint>/<bucket>/avatars/…`），前端直接存库，**无需再签下载**。
 - `object_key` 形如 `{category}/{yyyy}/{mm}/{uuid}.{ext}`：uuid 防碰撞、隐藏原始文件名，扩展名统一小写。
@@ -644,7 +692,8 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 `avatars/` 前缀直接放行（桶策略本就是匿名公共读，签与不签都能取）；**其余前缀逐个校验归属**，
 命中任一条即放行，否则 `403`（`object not accessible`）：
 
-1. 该 key 出现在某条**未撤回**消息的 `content.key` 里，且请求者是该会话成员，
+1. 该 key 出现在某条**未撤回**消息的 `content.key` **或 `content.thumb_key`** 里
+   （后者是视频消息的缩略图，K6 起），且请求者是该会话成员，
    且该消息未被请求者自己的「清空聊天记录」水位过滤；
 2. 该 key 属于请求者的**收藏贴纸**，或属于一个**当前可用的表情包**：包未下架
    （`taken_down=false`）、未被敏感词打标（`flagged=false`），且为官方包
@@ -652,7 +701,7 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 
 由此得到的语义与副作用：
 
-- **撤回即撤销**：撤回把 `content` 置 `{}`，key 随之从判定中消失，此后签不出新 URL。
+- **撤回即撤销**：撤回把 `content` 置 `{}`，key（含视频 `thumb_key`）随之从判定中消失，此后签不出新 URL。
 - **清空即对本人撤销**：本人水位推进后本人失效，其他成员不受影响。
 - **退群/被踢即失效**：不再是会话成员 → 该会话的媒体一律签不出（本地已缓存的图不受影响）。
 - 已签发的 URL **无法追回**，因此 TTL 从 24h 收到 **2h**——TTL 就是撤销的最坏延迟。
@@ -988,15 +1037,16 @@ friend_requests_week, otp_today, otp_week}, "runtime": {online_connections}}`。
 
 ### 客户端 → 服务端
 
-| type           | payload                                                                                                     | 说明                                                                                                                                                                                                                                                                                                                                                               |
-| -------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `message.send` | `{conversation_id, content: {type:"text", text}, client_msg_id, reply_to_id?, mentions?}`                   | 发送文本（≤4000 字符）。`client_msg_id` 客户端生成，幂等/回执匹配用。`mentions[]`（v0.2）=被 @ 的用户 UUID 列表：仅群聊有效，全部须为群成员且不含自己，命中的成员 `mention_unread` 置 true                                                                                                                                                                         |
-| `message.send` | `{conversation_id, content: {type:"image", key, width, height, size}, client_msg_id, reply_to_id?}`         | 发送图片。`content` 走图片分支：`key`=`upload-url` 返回的 object_key，`width`/`height`=像素宽高（气泡等比占位防 CLS），`size`=字节；四者缺一或非正 → `400`（`image content requires key/width/height/size`）                                                                                                                                                       |
-| `message.send` | `{conversation_id, content: {type:"file", key, name, size}, client_msg_id, reply_to_id?}`                   | 发送文件。`name`=原始文件名（展示用，≤255 rune），三者缺一 → `400`；MIME 须在 `upload.allowed_types` 白名单内（upload-url 阶段拦截 `4001`）                                                                                                                                                                                                                        |
-| `message.send` | `{conversation_id, content: {type:"voice", key, duration, size}, client_msg_id, reply_to_id?}`              | 发送语音（webm/opus）。`duration`=秒数，**1-60s** 之外 → `400`（`voice content requires key/duration(1-60s)/size`）                                                                                                                                                                                                                                                |
-| `message.send` | `{conversation_id, content: {type:"sticker", sticker_id, key, width, height}, client_msg_id, reply_to_id?}` | 发送贴纸（v0.4 H1）。`sticker_id` 须为合法 UUID 且**属于发送者收藏，或属于一个可用表情包**（未下架、未被打标，且为官方包或发送者已添加的包；未添加的非官方包贴纸拒绝），否则 `403`（`sticker not available to sender`）；非 UUID → `400`。服务端按 `sticker_id` 查库并用库中的 `object_key`/`width`/`height` **覆盖**客户端传值，客户端传来的 `key`/宽高一律不采信 |
-| `message.read` | `{conversation_id, seq}`                                                                                    | 上报已读进度（已读到的最大 seq，只前进不后退）                                                                                                                                                                                                                                                                                                                     |
-| `typing`       | `{conversation_id}`                                                                                         | 正在输入（客户端节流 ~3s/次）                                                                                                                                                                                                                                                                                                                                      |
+| type           | payload                                                                                                                        | 说明                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `message.send` | `{conversation_id, content: {type:"text", text}, client_msg_id, reply_to_id?, mentions?}`                                      | 发送文本（≤4000 字符）。`client_msg_id` 客户端生成，幂等/回执匹配用。`mentions[]`（v0.2）=被 @ 的用户 UUID 列表：仅群聊有效，全部须为群成员且不含自己，命中的成员 `mention_unread` 置 true                                                                                                                                                                                                                                                |
+| `message.send` | `{conversation_id, content: {type:"image", key, width, height, size}, client_msg_id, reply_to_id?}`                            | 发送图片。`content` 走图片分支：`key`=`upload-url` 返回的 object_key，`width`/`height`=像素宽高（气泡等比占位防 CLS），`size`=字节；四者缺一或非正 → `400`（`image content requires key/width/height/size`）                                                                                                                                                                                                                              |
+| `message.send` | `{conversation_id, content: {type:"file", key, name, size}, client_msg_id, reply_to_id?}`                                      | 发送文件。`name`=原始文件名（展示用，≤255 rune），三者缺一 → `400`；MIME 须在 `upload.allowed_types` 白名单内（upload-url 阶段拦截 `4001`）                                                                                                                                                                                                                                                                                               |
+| `message.send` | `{conversation_id, content: {type:"voice", key, duration, size}, client_msg_id, reply_to_id?}`                                 | 发送语音（webm/opus）。`duration`=秒数，**1-60s** 之外 → `400`（`voice content requires key/duration(1-60s)/size`）                                                                                                                                                                                                                                                                                                                       |
+| `message.send` | `{conversation_id, content: {type:"video", key, thumb_key, name, size, duration, width, height}, client_msg_id, reply_to_id?}` | 发送视频（K6）。`key`=视频对象键（`files/` 前缀），`thumb_key`=**客户端** canvas 抽帧生成的 JPEG 缩略图对象键（`images/` 前缀，作 poster）；`duration`=秒数，**1-120s** 之外 → `400`；`name` ≤255 rune；任一字段缺失/非正 → `400`（`video content requires key/thumb_key/name/size(1-120s)/width/height`）。服务端不转码、不生成缩略图，`thumb_key` 仅透传落库；对象授权与 GC 均已把 `thumb_key` 计入引用（撤回消息即同时收回两者可读性） |
+| `message.send` | `{conversation_id, content: {type:"sticker", sticker_id, key, width, height}, client_msg_id, reply_to_id?}`                    | 发送贴纸（v0.4 H1）。`sticker_id` 须为合法 UUID 且**属于发送者收藏，或属于一个可用表情包**（未下架、未被打标，且为官方包或发送者已添加的包；未添加的非官方包贴纸拒绝），否则 `403`（`sticker not available to sender`）；非 UUID → `400`。服务端按 `sticker_id` 查库并用库中的 `object_key`/`width`/`height` **覆盖**客户端传值，客户端传来的 `key`/宽高一律不采信                                                                        |
+| `message.read` | `{conversation_id, seq}`                                                                                                       | 上报已读进度（已读到的最大 seq，只前进不后退）                                                                                                                                                                                                                                                                                                                                                                                            |
+| `typing`       | `{conversation_id}`                                                                                                            | 正在输入（客户端节流 ~3s/次）                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 > **ContentPayload（消息体传输结构）**：`{type, text?, key?, width?, height?, size?, name?, duration?, sticker_id?}`。
 > text 帧只用 `type`/`text`；image 帧用 `key`/`width`/`height`/`size`；file 帧用 `key`/`name`/`size`；

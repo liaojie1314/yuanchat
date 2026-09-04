@@ -102,3 +102,8 @@ playwright-report/
 gui-test-screenshots/
 
 .design/
+
+# ====================
+# understand everything
+# ====================
+.ua/

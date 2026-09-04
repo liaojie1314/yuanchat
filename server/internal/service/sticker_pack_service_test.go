@@ -60,9 +60,9 @@ func TestStickerMarketCursorAndAdded(t *testing.T) {
 		p.IsPublic = true
 		p.CreatedAt = base.Add(time.Minute)
 	})
-	seedSvcPack(t, db, func(p *model.StickerPack) { p.IsPublic = true; p.TakenDown = true })   // 隐藏
-	seedSvcPack(t, db, func(p *model.StickerPack) { p.CreatedAt = base.Add(time.Minute) })    // 未公开，隐藏
-	seedSvcPack(t, db, func(p *model.StickerPack) { p.IsPublic = true; p.Flagged = true })    // 打标不影响展示
+	seedSvcPack(t, db, func(p *model.StickerPack) { p.IsPublic = true; p.TakenDown = true }) // 隐藏
+	seedSvcPack(t, db, func(p *model.StickerPack) { p.CreatedAt = base.Add(time.Minute) })   // 未公开，隐藏
+	seedSvcPack(t, db, func(p *model.StickerPack) { p.IsPublic = true; p.Flagged = true })   // 打标不影响展示
 
 	if err := svc.AddPack(ctx, alice.ID, p1.ID); err != nil {
 		t.Fatalf("add pack: %v", err)
@@ -518,7 +518,10 @@ func TestStickerPublishGuards(t *testing.T) {
 	if !detail.Pack.Flagged {
 		t.Fatal("pack name hit should be flagged")
 	}
-	t.Cleanup(func() { db.Exec(`DELETE FROM stickers WHERE pack_id = ?`, detail.Pack.ID); db.Unscoped().Delete(&model.StickerPack{}, "id = ?", detail.Pack.ID) })
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM stickers WHERE pack_id = ?`, detail.Pack.ID)
+		db.Unscoped().Delete(&model.StickerPack{}, "id = ?", detail.Pack.ID)
+	})
 }
 
 // TestStickerPublishCoverURL 注入 publicURL 后封面转公共 URL 落库。

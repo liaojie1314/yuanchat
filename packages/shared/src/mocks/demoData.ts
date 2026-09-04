@@ -136,7 +136,12 @@ export const DEMO_MESSAGES: Record<string, ChatMessage[]> = {
       kind: "voice",
       isSelf: false,
       senderName: "王芳",
-      voice: { seconds: 12, wave: [6, 12, 18, 9, 14, 20, 8, 12, 16, 6] },
+      // key 同 m2 的理由：媒体相册按对象 key 聚合，缺 key 的样本在「语音」tab 里恒不出现
+      voice: {
+        seconds: 12,
+        wave: [6, 12, 18, 9, 14, 20, 8, 12, 16, 6],
+        key: "files/2026/08/deadbeef-0004.webm",
+      },
       time: "09:24",
       seq: 5,
     },
@@ -145,7 +150,12 @@ export const DEMO_MESSAGES: Record<string, ChatMessage[]> = {
       conversationId: "1",
       kind: "file",
       isSelf: true,
-      file: { name: "发布评审_v3.pdf", size: "3.2 MB", ext: "PDF" },
+      file: {
+        name: "发布评审_v3.pdf",
+        size: "3.2 MB",
+        ext: "PDF",
+        key: "files/2026/08/deadbeef-0005.pdf",
+      },
       time: "09:26",
       status: "sent",
       seq: 6,
@@ -186,6 +196,25 @@ export const DEMO_MESSAGES: Record<string, ChatMessage[]> = {
       text: "陈曦 撤回了一条消息",
       time: "14:34",
       seq: 8,
+    },
+    {
+      id: "m9",
+      conversationId: "1",
+      kind: "video",
+      isSelf: false,
+      senderName: "李四",
+      // 视频气泡与相册「视频」tab 的唯一演示样本：thumbKey 供 poster，key 供播放弹层
+      video: {
+        duration: 15,
+        width: 1280,
+        height: 720,
+        key: "files/2026/08/deadbeef-0006.mp4",
+        thumbKey: "images/2026/08/deadbeef-0007.jpg",
+        name: "发布演示.mp4",
+        size: "2.0 MB",
+      },
+      time: "14:36",
+      seq: 9,
     },
   ],
   "3": [

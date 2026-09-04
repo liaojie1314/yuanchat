@@ -1,1 +1,16 @@
 pnpm lint-staged
+
+# 前端类型检查：staged 含 ts/tsx 时跑两端 app 的 tsc。
+#
+# 为什么是全量而非只查 staged 文件：tsc 需要整个工程的类型语义（跨文件推导、
+# 声明合并、路径别名），只喂几个文件既会漏报也会误报。turbo 缓存命中后近零耗时。
+#
+# 为什么查 web + desktop 两端而非 packages/*：两个 app 的 tsconfig 会传递覆盖到
+# packages/shared 与 packages/ui 的源码（那两个包自己没有 tsconfig，是既有的债）。
+#
+# 为什么不在这里跑 go vet / go test：Go 侧由 CI 门禁覆盖，把整套 Go 测试塞进
+# pre-commit 会让每次提交多等一分钟以上，而本钩子要解的是「幽灵依赖与类型错误
+# 只在 CI 暴露」这一个具体问题（pnpm 本地提升会掩盖前者）。
+if git diff --cached --name-only --diff-filter=ACMR | grep -qE '\.(ts|tsx)$'; then
+  pnpm --filter @yuanchat/web typecheck && pnpm --filter @yuanchat/desktop typecheck
+fi

@@ -192,7 +192,7 @@ type PackWithMeta struct {
 // packMetaSelect 商城/详情共用的投影与聚合：发布者昵称 LEFT JOIN + 贴纸计数。
 // GROUP BY p.id（主键）即可带出 sticker_packs 全列（PG 函数依赖）；u.nickname 须显式列出。
 const packMetaSelect = "sticker_packs.*, users.nickname AS owner_name, COUNT(stickers.id) AS sticker_count, " +
-		"(ARRAY_AGG(stickers.object_key ORDER BY stickers.created_at, stickers.id))[1] AS first_sticker_key"
+	"(ARRAY_AGG(stickers.object_key ORDER BY stickers.created_at, stickers.id))[1] AS first_sticker_key"
 
 // ListMarket 商城列表：公开 + 未下架 + 未被敏感词打标，按 created_at 倒序游标分页
 // （before 为 nil 表示从最新开始；limit 由调用方钳制）。

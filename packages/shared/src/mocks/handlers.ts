@@ -10,7 +10,8 @@
  * @see https://mswjs.io/docs/
  */
 import { http, HttpResponse, passthrough, delay } from "msw";
-import { DEMO_FRIENDS } from "./demoData";
+import { DEMO_FRIENDS, DEMO_MESSAGES } from "./demoData";
+import type { ChatMessage, ChatMessageKind } from "../store/messageStore";
 
 // ========================================
 // Mock 数据
@@ -439,6 +440,94 @@ function visiblePacksByNewest(): MockPack[] {
  * images/ 锚定正则与 64 位十六进制 hash（与服务端同口径）。
  * 校验失败返回错误响应，成功返回要新建的贴纸行。
  */
+// ========================================
+// 媒体相册 Mock（由 DEMO_MESSAGES 过滤映射，与消息流同源）
+// ========================================
+
+/** 相册 type 参数 → 允许的消息 kind（与后端 message_type 白名单一致） */
+const MEDIA_KINDS_BY_TYPE: Record<string, ChatMessageKind[]> = {
+  all: ["image", "file", "voice", "video", "sticker"],
+  image: ["image"],
+  file: ["file"],
+  voice: ["voice"],
+  video: ["video"],
+  sticker: ["sticker"],
+};
+
+/** 消息 kind → 后端 message_type */
+const MEDIA_TYPE_BY_KIND: Record<string, 2 | 3 | 4 | 5 | 8> = {
+  image: 2,
+  file: 3,
+  voice: 4,
+  video: 5,
+  sticker: 8,
+};
+
+/**
+ * demo 文件/视频消息的字节数。
+ *
+ * @remarks 相册 DTO 的 `size` 是**字节数**，而 demo 数据里的 `file.size` / `video.size`
+ *   是 "3.2 MB" 这类展示文案——直接 parseFloat 会把 3.2 当字节发出去（前端再格式化成 "3 B"）。
+ *   故此处给出与展示文案自洽的真实字节数。
+ */
+const DEMO_MEDIA_BYTES: Record<string, number> = { file: 3355443, video: 2048000 };
+
+/** 相册条目 DTO（与 api/chat.ts 的 MediaItemDTO 同构，omitempty 语义靠 undefined 表达） */
+interface MockMediaItem {
+  message_id: string;
+  seq: number;
+  message_type: 2 | 3 | 4 | 5 | 8;
+  sender_nickname: string;
+  created_at: string;
+  key?: string;
+  thumb_key?: string;
+  name?: string;
+  size?: number;
+  duration?: number;
+  width?: number;
+  height?: number;
+  sticker_id?: string;
+}
+
+/** demo 消息 → 相册条目；按类型只填该类型有的字段（无 key 的样本由调用方过滤掉） */
+function toMockMediaItem(m: ChatMessage): MockMediaItem {
+  const base = {
+    message_id: m.id,
+    seq: m.seq ?? 0,
+    message_type: MEDIA_TYPE_BY_KIND[m.kind],
+    sender_nickname: m.senderName ?? MOCK_USER.nickname,
+    created_at: new Date(m.createdAtMs ?? Date.now()).toISOString(),
+  };
+  if (m.kind === "image") {
+    return { ...base, key: m.image?.key, width: m.image?.width, height: m.image?.height };
+  }
+  if (m.kind === "file") {
+    return { ...base, key: m.file?.key, name: m.file?.name, size: DEMO_MEDIA_BYTES.file };
+  }
+  if (m.kind === "voice") {
+    return { ...base, key: m.voice?.key, duration: m.voice?.seconds };
+  }
+  if (m.kind === "video") {
+    return {
+      ...base,
+      key: m.video?.key,
+      thumb_key: m.video?.thumbKey,
+      name: m.video?.name,
+      size: DEMO_MEDIA_BYTES.video,
+      duration: m.video?.duration,
+      width: m.video?.width,
+      height: m.video?.height,
+    };
+  }
+  return {
+    ...base,
+    key: m.sticker?.key,
+    sticker_id: m.sticker?.stickerId,
+    width: m.sticker?.width,
+    height: m.sticker?.height,
+  };
+}
+
 function resolveSource(src: {
   source?: string;
   sticker_id?: string;
@@ -591,6 +680,38 @@ export const handlers = [
   http.delete("http://localhost:8085/api/v1/conversations/:id/messages", async () => {
     await delay(200);
     return apiOk({});
+  }),
+
+  // --------------------------------------------------
+  // 会话 — 媒体相册（按类型聚合，seq 降序）
+  // GET /api/v1/conversations/:id/media?type=&before_seq=&limit=
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/conversations/:id/media", async ({ params, request }) => {
+    // 300ms 延迟：让骨架屏（加载态）在演示与 E2E 里真的能看见
+    await delay(300);
+    const url = new URL(request.url);
+    // ?error=1 仅 mock 支持，供错误态+重试联调（真实后端会忽略该参数）
+    if (url.searchParams.get("error") === "1") {
+      return apiError(500, "media load failed");
+    }
+    const type = url.searchParams.get("type") ?? "all";
+    const kinds = MEDIA_KINDS_BY_TYPE[type];
+    // 非白名单 type 与后端同口径回 400，避免前端在 mock 下写出真实后端会拒的调用
+    if (!kinds) return apiError(400, "invalid media type");
+
+    const beforeSeq = Number(url.searchParams.get("before_seq") ?? "0") || 0;
+    const limit = Math.min(100, Number(url.searchParams.get("limit") ?? "30") || 30);
+    const source = DEMO_MESSAGES[String(params.id)] ?? [];
+    const all = source
+      .filter((m) => kinds.indexOf(m.kind) >= 0)
+      .map(toMockMediaItem)
+      // 无对象 key 的样本（历史遗留 demo 条目）不构成媒体，签不出下载 URL
+      .filter((i) => !!i.key)
+      .filter((i) => beforeSeq <= 0 || i.seq < beforeSeq)
+      .sort((a, b) => b.seq - a.seq);
+    const page = all.slice(0, limit);
+    // has_more 与后端同口径：满页即视为「可能还有更早的」（见 handler/message.go 的 Media）
+    return apiOk({ items: page, has_more: page.length === limit });
   }),
 
   // --------------------------------------------------

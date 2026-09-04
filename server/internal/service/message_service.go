@@ -373,6 +373,124 @@ func (s *MessageService) GetHistory(
 	return messages, nil
 }
 
+// ErrInvalidMediaType 相册 type 参数不在白名单内。
+var ErrInvalidMediaType = errors.New("invalid media type")
+
+// mediaTypeGroups 相册 type 参数 → 消息类型集合。
+//
+// 刻意不含 text(1)/system(6)/e2ee(7)：前两者没有对象可展示，E2EE 密文服务端无法解读
+// （content 里没有 key），放进来只会得到点不开的空格子。
+var mediaTypeGroups = map[string][]int16{
+	"all": {
+		model.MessageTypeImage, model.MessageTypeFile, model.MessageTypeVoice,
+		model.MessageTypeVideo, model.MessageTypeSticker,
+	},
+	"image":   {model.MessageTypeImage},
+	"file":    {model.MessageTypeFile},
+	"voice":   {model.MessageTypeVoice},
+	"video":   {model.MessageTypeVideo},
+	"sticker": {model.MessageTypeSticker},
+}
+
+// MediaItemView 相册条目（handler 直接序列化的形状，omitempty 字段按消息类型填充）。
+type MediaItemView struct {
+	MessageID      uuid.UUID `json:"message_id"`
+	Seq            int64     `json:"seq"`
+	MessageType    int16     `json:"message_type"`
+	SenderNickname string    `json:"sender_nickname"`
+	CreatedAt      time.Time `json:"created_at"`
+	Key            string    `json:"key"`
+	ThumbKey       string    `json:"thumb_key,omitempty"`
+	Name           string    `json:"name,omitempty"`
+	Size           int64     `json:"size,omitempty"`
+	Duration       int       `json:"duration,omitempty"`
+	Width          int       `json:"width,omitempty"`
+	Height         int       `json:"height,omitempty"`
+	StickerID      string    `json:"sticker_id,omitempty"`
+}
+
+// GetMedia 拉取会话媒体相册：校验成员身份与 type 参数，按 seq 游标倒序分页。
+//
+// 可见性口径与 GetHistory 完全一致——成员才可读（否则 ErrNotMember），
+// 并以成员行的 cleared_before_seq 为下界（单侧清空后旧媒体对本人不可见）。
+// filter 不在 mediaTypeGroups 内时返回 ErrInvalidMediaType（handler 映射 400）。
+func (s *MessageService) GetMedia(
+	ctx context.Context,
+	userID, convID uuid.UUID,
+	filter string,
+	beforeSeq int64,
+	limit int,
+) ([]MediaItemView, error) {
+	member, ok, err := s.convRepo.GetMember(ctx, convID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("check membership: %w", err)
+	}
+	if !ok {
+		return nil, ErrNotMember
+	}
+
+	types, ok := mediaTypeGroups[filter]
+	if !ok {
+		return nil, ErrInvalidMediaType
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+
+	rows, err := s.msgRepo.ListMedia(ctx, convID, types, beforeSeq, member.ClearedBeforeSeq, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list media: %w", err)
+	}
+
+	items := make([]MediaItemView, 0, len(rows))
+	for _, r := range rows {
+		item := MediaItemView{
+			MessageID:      r.ID,
+			Seq:            r.Seq,
+			MessageType:    r.MessageType,
+			SenderNickname: r.SenderNickname,
+			CreatedAt:      r.CreatedAt,
+		}
+		// content 是 jsonb 自由结构，按类型取字段而非按 struct 反序列化：
+		// 一次遍历要同时处理 image/file/voice/video/sticker 五种形状。
+		var content map[string]any
+		if err := json.Unmarshal([]byte(r.Content), &content); err != nil {
+			// 脏数据跳过而非整页失败：相册是浏览视图，单条坏 content 不该让整页 500。
+			s.logger.Warn("media item has invalid content json",
+				zap.String("message_id", r.ID.String()), zap.Error(err))
+			continue
+		}
+		if k, _ := content["key"].(string); k != "" {
+			item.Key = k
+		}
+		if tk, _ := content["thumb_key"].(string); tk != "" {
+			item.ThumbKey = tk
+		}
+		if n, _ := content["name"].(string); n != "" {
+			item.Name = n
+		}
+		// jsonb 数字经 encoding/json 一律落 float64，故先取 float64 再收窄
+		if sz, _ := content["size"].(float64); sz > 0 {
+			item.Size = int64(sz)
+		}
+		if d, _ := content["duration"].(float64); d > 0 {
+			item.Duration = int(d)
+		}
+		if w, _ := content["width"].(float64); w > 0 {
+			item.Width = int(w)
+		}
+		if h, _ := content["height"].(float64); h > 0 {
+			item.Height = int(h)
+		}
+		// 局部变量不叫 s：那会遮蔽 *MessageService 接收者
+		if sid, _ := content["sticker_id"].(string); sid != "" {
+			item.StickerID = sid
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
 // MarkRead 推进用户已读进度并返回会话成员（供推送已读回执）。
 func (s *MessageService) MarkRead(ctx context.Context, userID, convID uuid.UUID, seq int64) ([]uuid.UUID, error) {
 	ok, err := s.convRepo.IsMember(ctx, convID, userID)

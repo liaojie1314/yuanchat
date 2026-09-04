@@ -108,8 +108,8 @@ func TestGoldenCoversEveryContentType(t *testing.T) {
 		seen[probe.Content.Type] = true
 	}
 
-	// buildContent 支持的全部 case（video 无任何写入路径，故不在契约内）
-	for _, want := range []string{"text", "image", "file", "voice", "sticker", "e2ee"} {
+	// buildContent 支持的全部 case
+	for _, want := range []string{"text", "image", "file", "voice", "sticker", "video", "e2ee"} {
 		if !seen[want] {
 			t.Errorf("黄金样本缺少 content.type = %q 的用例", want)
 		}

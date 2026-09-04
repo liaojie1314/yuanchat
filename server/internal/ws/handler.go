@@ -394,6 +394,35 @@ func (h *Handler) buildContent(c *Client, p *SendPayload) (int16, string, bool) 
 			return 0, "", false
 		}
 		return model.MessageTypeVoice, string(raw), true
+	case "video":
+		// 视频消息：与 image/file/voice 同构。key 为主视频对象键（files/ 前缀），
+		// thumb_key 为客户端生成的 JPEG 封面键（images/ 前缀）。
+		// 时长上限 120s（spec M2）；体积上限不在此校验——上传阶段的
+		// max_file_size（100MB）已经拦住，这里再判一遍只会两处口径漂移。
+		if p.Content.Key == "" || p.Content.ThumbKey == "" || p.Content.Name == "" ||
+			p.Content.Size <= 0 || p.Content.Duration <= 0 || p.Content.Duration > 120 ||
+			p.Content.Width <= 0 || p.Content.Height <= 0 {
+			c.sendError(400, "video content requires key/thumb_key/name/size(1-120s)/width/height", p.ClientMsgID)
+			return 0, "", false
+		}
+		if len([]rune(p.Content.Name)) > 255 {
+			c.sendError(400, "video name too long", p.ClientMsgID)
+			return 0, "", false
+		}
+		raw, err := json.Marshal(model.MessageContentVideo{
+			Key:      p.Content.Key,
+			ThumbKey: p.Content.ThumbKey,
+			Name:     p.Content.Name,
+			Size:     p.Content.Size,
+			Duration: p.Content.Duration,
+			Width:    p.Content.Width,
+			Height:   p.Content.Height,
+		})
+		if err != nil {
+			c.sendError(400, "invalid video content", p.ClientMsgID)
+			return 0, "", false
+		}
+		return model.MessageTypeVideo, string(raw), true
 	case "e2ee":
 		// 端到端加密：服务端不理解密文语义，只校验结构完整性后原样落库。
 		// 任何字段都不参与索引/搜索/审核——这是 E2EE 的设计前提。

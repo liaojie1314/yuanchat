@@ -77,3 +77,19 @@ type MessageContentFile struct {
 	FileSize int64     `json:"file_size"`
 	URL      string    `json:"url"`
 }
+
+// MessageContentVideo 视频消息内容 JSON 结构（落库 jsonb 的真实形状）。
+//
+// 与 MessageContentImage/File 那两个遗留结构（带 file_id/url）不同，本结构就是
+// WS buildContent 写入的字段本身：Key 指向主视频对象，ThumbKey 指向客户端生成的
+// JPEG 缩略图（images/ 前缀）。缩略图与消息共存亡——对象授权与 GC 都按 thumb_key
+// 反查消息，故撤回消息即同时收回视频与缩略图的可读性。
+type MessageContentVideo struct {
+	Key      string `json:"key"`
+	ThumbKey string `json:"thumb_key"`
+	Name     string `json:"name"`
+	Size     int64  `json:"size"`
+	Duration int    `json:"duration"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+}

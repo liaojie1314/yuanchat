@@ -378,10 +378,10 @@ func TestPublishEndpoint(t *testing.T) {
 	packRouterState.current = alice.ID
 	const hash = "5b6642cf4331eb911b475ea8fb19d09cbc073c73b55a10134928984daee7fc41"
 	body := gin.H{
-		"name":              "端点发布包",
-		"cover_object_key":  "sticker-covers/2026/08/cafebabe.png",
-		"cover_width":       300,
-		"cover_height":      300,
+		"name":             "端点发布包",
+		"cover_object_key": "sticker-covers/2026/08/cafebabe.png",
+		"cover_width":      300,
+		"cover_height":     300,
 		"sticker_sources": []gin.H{
 			{"source": "upload", "object_key": "images/2026/08/abcd1234.png", "width": 96, "height": 96, "content_hash": hash},
 		},

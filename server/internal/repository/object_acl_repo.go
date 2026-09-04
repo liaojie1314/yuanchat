@@ -32,9 +32,13 @@ func NewObjectACLRepository(db *gorm.DB) *ObjectACLRepository {
 // CanRead 判定 userID 能否读取 objectKey。
 //
 // 命中任一条件即可：
-//  1. key 出现在某条**未撤回**消息的 content.key 里，且 userID 是该会话成员，
-//     且该消息未被 userID 自己的清空水位过滤；
+//  1. key 出现在某条**未撤回**消息的 content.key 或 content.thumb_key 里，
+//     且 userID 是该会话成员，且该消息未被 userID 自己的清空水位过滤；
 //  2. key 属于 userID 的收藏贴纸，或属于某个表情包（官方包全员可发/可看）。
+//
+// thumb_key 与 key 同权：视频消息的封面是独立对象（images/ 前缀），只匹配 key
+// 会让封面永远签不出 URL；反之撤回必须同时收回两者，否则"撤回即撤销访问"
+// 对缩略图这一半失效。
 //
 // 头像（avatars/ 前缀）不走本方法：桶策略对该前缀开放匿名公共读，
 // 调用方（handler）直接放行。
@@ -46,10 +50,10 @@ func (r *ObjectACLRepository) CanRead(ctx context.Context, userID uuid.UUID, obj
 			FROM messages m
 			JOIN conversation_members cm
 			  ON cm.conversation_id = m.conversation_id AND cm.user_id = ?
-			WHERE m.content ->> 'key' = ?
+			WHERE (m.content ->> 'key' = ? OR m.content ->> 'thumb_key' = ?)
 			  AND m.status = 1
 			  AND m.seq > cm.cleared_before_seq
-		)`, userID, objectKey).Scan(&viaMessage).Error
+		)`, userID, objectKey, objectKey).Scan(&viaMessage).Error
 	if err != nil {
 		return false, fmt.Errorf("acl via message: %w", err)
 	}
@@ -71,8 +75,9 @@ func (r *ObjectACLRepository) CanRead(ctx context.Context, userID uuid.UUID, obj
 
 // ReferencedKeys 从给定候选集中筛出**仍被引用**的 key（GC 用，见 cmd/gc）。
 //
-// 引用来源四处：消息内容（含已撤回消息——撤回把 content 置 '{}'，故自然不再算引用）、
-// 贴纸表、表情包封面 URL、用户/会话头像 URL（后两者存的是完整 URL，故用后缀匹配）。
+// 引用来源四处：消息内容（content.key 与 content.thumb_key 都算；已撤回消息把 content
+// 置 '{}'，故自然不再算引用）、贴纸表、表情包封面 URL、用户/会话头像 URL
+// （后两者存的是完整 URL，故用后缀匹配）。
 // 返回集合之外的候选即"无人引用"，GC 结合宽限期决定是否删除。
 //
 // 按批查询（调用方分批传入）而非一次性把全库 key 拉进内存：对象数随消息量线性增长，
@@ -83,9 +88,11 @@ func (r *ObjectACLRepository) ReferencedKeys(ctx context.Context, keys []string)
 		return referenced, nil
 	}
 
-	collect := func(sql string) error {
+	// collect 变参而非固定一个 keys：UNION 查询里每个分支各带一个 IN 占位符，
+	// 占位符数量与实参必须一一对应，否则 GORM 展开出的 SQL 参数错位（运行期报错）。
+	collect := func(sql string, args ...any) error {
 		var found []string
-		if err := r.db.WithContext(ctx).Raw(sql, keys).Scan(&found).Error; err != nil {
+		if err := r.db.WithContext(ctx).Raw(sql, args...).Scan(&found).Error; err != nil {
 			return err
 		}
 		for _, k := range found {
@@ -94,10 +101,16 @@ func (r *ObjectACLRepository) ReferencedKeys(ctx context.Context, keys []string)
 		return nil
 	}
 
-	if err := collect(`SELECT DISTINCT content ->> 'key' FROM messages WHERE content ->> 'key' IN ?`); err != nil {
+	// 视频消息的封面存在 content.thumb_key（独立对象），漏掉会被 GC 判成孤儿删掉
+	//（消息还在、封面 404）。两个分支各自过滤，故 UNION 的结果里不会出现 NULL。
+	if err := collect(`
+		SELECT DISTINCT content ->> 'key' FROM messages WHERE content ->> 'key' IN ?
+		UNION
+		SELECT DISTINCT content ->> 'thumb_key' FROM messages WHERE content ->> 'thumb_key' IN ?`,
+		keys, keys); err != nil {
 		return nil, fmt.Errorf("referenced by messages: %w", err)
 	}
-	if err := collect(`SELECT DISTINCT object_key FROM stickers WHERE object_key IN ?`); err != nil {
+	if err := collect(`SELECT DISTINCT object_key FROM stickers WHERE object_key IN ?`, keys); err != nil {
 		return nil, fmt.Errorf("referenced by stickers: %w", err)
 	}
 

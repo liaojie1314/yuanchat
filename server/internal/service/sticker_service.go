@@ -301,7 +301,7 @@ type PackDTO struct {
 // 后在内存分组，避免逐包查询的 N+1。
 //
 // 分页为可选（照抄 Market 的游标范式）：limit <= 0 时返回全量、nextCursor 为空串
-//（向后兼容）；limit > 0 时钳制到 maxVisiblePageSize，按 created_at 升序取一页，
+// （向后兼容）；limit > 0 时钳制到 maxVisiblePageSize，按 created_at 升序取一页，
 // 还有下一页时 nextCursor 为最后一条的 created_at（RFC3339Nano）。
 // cursor 为非法 RFC3339 时报 ErrInvalidCursor。
 func (s *StickerService) ListPacks(ctx context.Context, userID uuid.UUID, cursor string, limit int) ([]PackDTO, string, error) {

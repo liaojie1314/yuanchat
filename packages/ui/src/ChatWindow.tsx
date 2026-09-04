@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowLeft,
+  Images,
   Loader2,
   Megaphone,
   MessageSquare,
@@ -55,6 +56,7 @@ import { ForwardModal } from "./ForwardModal";
 import { E2EEIndicator } from "./E2EEIndicator";
 import { SafetyNumberDialog } from "./SafetyNumberDialog";
 import { ImageLightbox } from "./ImageLightbox";
+import { ConversationMediaView } from "./ConversationMediaView";
 import { InConversationSearch } from "./InConversationSearch";
 import { MessageBubble, TypingIndicator } from "./MessageBubble";
 
@@ -103,6 +105,8 @@ export function ChatWindow({
   const [showSafetyNumber, setShowSafetyNumber] = useState(false);
   // 群公告全文弹层开关
   const [showAnnouncement, setShowAnnouncement] = useState(false);
+  // 会话媒体相册全屏视图开关
+  const [showMedia, setShowMedia] = useState(false);
   const selfUserId = useAuthStore((s) => s.user?.id);
 
   const items = messages ?? [];
@@ -290,15 +294,17 @@ export function ChatWindow({
           peerId={conv.type === "private" ? conv.peerId : undefined}
           onClick={() => setShowSafetyNumber(true)}
         />
+        {/* 通话 / 搜索 / 相册在手机上收进输入区的「更多」面板：60px 高的顶栏放不下
+            五个图标又要留出群名，挤到标题被截断。桌面/平板保持全部常驻。 */}
         <button
-          className="md3-icon-btn text-on-surface-variant"
+          className="md3-icon-btn text-on-surface-variant hidden sm:grid"
           title={t("chat.voiceCall")}
           aria-label={t("chat.voiceCall")}
         >
           <Phone size={19} />
         </button>
         <button
-          className="md3-icon-btn text-on-surface-variant"
+          className="md3-icon-btn text-on-surface-variant hidden sm:grid"
           title={t("chat.videoCall")}
           aria-label={t("chat.videoCall")}
         >
@@ -311,6 +317,15 @@ export function ChatWindow({
           aria-label={t("chat.searchHistory")}
         >
           <Search size={19} />
+        </button>
+        <button
+          onClick={() => setShowMedia(true)}
+          className="md3-icon-btn text-on-surface-variant hidden sm:grid"
+          title={t("media.title")}
+          aria-label={t("media.title")}
+          data-testid="open-media"
+        >
+          <Images size={19} />
         </button>
         {onShowDetail && (
           <button
@@ -535,10 +550,19 @@ export function ChatWindow({
       </div>
 
       {/* 输入区 */}
-      <Composer onSend={handleSend} compact={compactComposer} />
+      <Composer
+        onSend={handleSend}
+        compact={compactComposer}
+        onOpenMedia={() => setShowMedia(true)}
+      />
 
       {/* 图片全屏查看器（点击气泡内图片打开） */}
       {lightboxUrl && <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
+
+      {/* 会话媒体相册（顶栏相册按钮打开，全屏覆盖当前会话） */}
+      {showMedia && activeId && (
+        <ConversationMediaView conversationId={activeId} onClose={() => setShowMedia(false)} />
+      )}
 
       <ForwardModal
         open={forwardMsgId !== null}
