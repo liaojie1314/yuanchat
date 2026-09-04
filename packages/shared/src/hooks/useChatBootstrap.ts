@@ -149,6 +149,7 @@ function wireSocket() {
       const isFile = p.content.type === "file";
       const isVoice = p.content.type === "voice";
       const isSticker = p.content.type === "sticker";
+      const isVideo = p.content.type === "video";
 
       const kind: ChatMessage["kind"] = isSystem
         ? "system"
@@ -158,9 +159,11 @@ function wireSocket() {
             ? "file"
             : isVoice
               ? "voice"
-              : isSticker
-                ? "sticker"
-                : "text";
+              : isVideo
+                ? "video"
+                : isSticker
+                  ? "sticker"
+                  : "text";
       const msg: ChatMessage = {
         id: p.message_id,
         conversationId: p.conversation_id,
@@ -184,6 +187,20 @@ function wireSocket() {
               seconds: p.content.duration ?? 0,
               wave: pseudoWave(p.content.duration ?? 0),
               key: p.content.key,
+            }
+          : undefined,
+        video: isVideo
+          ? {
+              duration: p.content.duration ?? 0,
+              width: p.content.width ?? 0,
+              height: p.content.height ?? 0,
+              key: p.content.key,
+              thumbKey: p.content.thumb_key,
+              name: p.content.name,
+              size:
+                p.content.size !== undefined
+                  ? formatFileMeta(p.content.name ?? "", p.content.size).size
+                  : undefined,
             }
           : undefined,
         sticker: isSticker

@@ -29,6 +29,18 @@ export type ClientContent =
   | { type: "image"; key: string; width: number; height: number; size: number }
   | { type: "file"; key: string; name: string; size: number }
   | { type: "voice"; key: string; duration: number; size: number }
+  | {
+      type: "video";
+      key: string;
+      /** 客户端生成的 JPEG 缩略图对象键（images/ 前缀，作 poster 用） */
+      thumb_key: string;
+      name: string;
+      size: number;
+      /** 时长（秒），服务端上限 120 */
+      duration: number;
+      width: number;
+      height: number;
+    }
   | { type: "sticker"; sticker_id: string; key: string; width: number; height: number }
   | {
       type: "e2ee";
@@ -94,7 +106,8 @@ export interface ServerFrames {
     sender_id: string;
     sender_nickname: string;
     // text 帧只用 type/text；image 帧带 key/width/height/size；file 帧带 key/name/size；
-    // voice 帧带 key/duration/size；sticker 帧带 sticker_id/key/width/height（后端 omitempty，不污染文本）
+    // voice 帧带 key/duration/size；video 帧带 key/thumb_key/name/duration/width/height/size；
+    // sticker 帧带 sticker_id/key/width/height（后端 omitempty，不污染文本）
     content: {
       type: string;
       text?: string;
@@ -105,6 +118,8 @@ export interface ServerFrames {
       name?: string;
       duration?: number;
       sticker_id?: string;
+      /** video: 缩略图对象键 */
+      thumb_key?: string;
       // e2ee 密文（服务端原样透传，不解析语义）
       ratchet_key?: string;
       n?: number;

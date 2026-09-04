@@ -13,6 +13,9 @@ import {
   parseImageContent,
   parseFileContent,
   parseVoiceContent,
+  parseVideoContent,
+  formatMediaDuration,
+  fetchConversationMedia,
   pseudoWave,
   fetchMembers,
   recallMessage,
@@ -523,5 +526,132 @@ describe("mapMessage e2ee history", () => {
     expect(msg.text).toBeTruthy();
     // 必须是真有翻译的文案，而不是原始 key
     expect(msg.text).not.toMatch(/^e2ee\./);
+  });
+});
+
+describe("video message mapping", () => {
+  const dto: MessageDTO = {
+    id: "m-video",
+    conversation_id: "c1",
+    sender_id: "u2",
+    seq: 12,
+    message_type: 5,
+    content: JSON.stringify({
+      key: "files/2026/09/a.mp4",
+      thumb_key: "images/2026/09/a.jpg",
+      name: "发布演示.mp4",
+      size: 3355443,
+      duration: 15,
+      width: 1280,
+      height: 720,
+    }),
+    status: 1,
+    created_at: "2026-09-02T10:00:00+08:00",
+    sender_nickname: "李四",
+  };
+
+  it("parseVideoContent 解析全部字段，非法 JSON 回退零值", () => {
+    expect(parseVideoContent(dto.content)).toEqual({
+      key: "files/2026/09/a.mp4",
+      thumbKey: "images/2026/09/a.jpg",
+      name: "发布演示.mp4",
+      size: 3355443,
+      duration: 15,
+      width: 1280,
+      height: 720,
+    });
+    expect(parseVideoContent("broken")).toEqual({ duration: 0, width: 0, height: 0 });
+  });
+
+  it("message_type=5 映射为 video 气泡，size 走文件大小口径", () => {
+    const msg = mapMessage(dto, "u1");
+    expect(msg.kind).toBe("video");
+    expect(msg.video).toEqual({
+      duration: 15,
+      width: 1280,
+      height: 720,
+      key: "files/2026/09/a.mp4",
+      thumbKey: "images/2026/09/a.jpg",
+      name: "发布演示.mp4",
+      size: "3.2 MB",
+    });
+    // 视频不是文本消息：text 必须为空，否则气泡会同时渲染正文
+    expect(msg.text).toBeUndefined();
+  });
+
+  it("formatMediaDuration 输出 m:ss，异常值按 0 处理", () => {
+    expect(formatMediaDuration(15)).toBe("0:15");
+    expect(formatMediaDuration(65)).toBe("1:05");
+    expect(formatMediaDuration(600)).toBe("10:00");
+    expect(formatMediaDuration(0)).toBe("0:00");
+    expect(formatMediaDuration(-1)).toBe("0:00");
+    expect(formatMediaDuration(Infinity)).toBe("0:00");
+  });
+});
+
+describe("fetchConversationMedia", () => {
+  beforeEach(() => vi.unstubAllGlobals());
+
+  function mockFetchOnce(data: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ json: () => Promise.resolve({ code: 0, message: "ok", data }) }),
+    );
+  }
+
+  it("按 type/before_seq/limit 拼查询串并映射 snake_case 条目", async () => {
+    mockFetchOnce({
+      items: [
+        {
+          message_id: "m1",
+          seq: 42,
+          message_type: 5,
+          sender_nickname: "张伟",
+          created_at: "2026-09-02T10:00:00+08:00",
+          key: "files/2026/09/x.mp4",
+          thumb_key: "images/2026/09/y.jpg",
+          name: "demo.mp4",
+          size: 2048000,
+          duration: 15,
+          width: 1280,
+          height: 720,
+        },
+      ],
+      has_more: true,
+    });
+
+    const { items, hasMore } = await fetchConversationMedia("conv-1", "video", 50, 30);
+    expect(hasMore).toBe(true);
+    expect(items).toEqual([
+      {
+        messageId: "m1",
+        seq: 42,
+        messageType: 5,
+        senderNickname: "张伟",
+        createdAt: "2026-09-02T10:00:00+08:00",
+        key: "files/2026/09/x.mp4",
+        thumbKey: "images/2026/09/y.jpg",
+        name: "demo.mp4",
+        size: 2048000,
+        duration: 15,
+        width: 1280,
+        height: 720,
+        stickerId: undefined,
+      },
+    ]);
+
+    const call = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toContain("/api/v1/conversations/conv-1/media?");
+    expect(call[0]).toContain("type=video");
+    expect(call[0]).toContain("before_seq=50");
+    expect(call[0]).toContain("limit=30");
+  });
+
+  it("items 缺失时返回空列表且 hasMore=false（不抛错）", async () => {
+    mockFetchOnce({});
+    expect(await fetchConversationMedia("conv-1", "all", 0, 30)).toEqual({
+      items: [],
+      hasMore: false,
+    });
   });
 });

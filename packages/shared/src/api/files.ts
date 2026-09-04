@@ -9,6 +9,7 @@
  *   避免同一张图在消息流反复渲染时重复签名
  * - `compressImage` 发送前在 canvas 上等比缩到最长边 2560，降体积；gif 原样透传（保留动图）
  * - `cropAvatar` 头像专用：中心裁方 + 缩到 512 方图，统一编码 jpeg（动图转静态）
+ * - `extractVideoMeta` 视频专用：读时长/宽高 + canvas 抽首帧编码 jpeg 缩略图（服务端不转码）
  *
  * 兼容性：产物经 es2019 转译；createImageBitmap 在 Chrome 74 WebView 可用，
  * 不可用时回退 new Image() + objectURL。
@@ -232,6 +233,133 @@ function canvasToBlob(
   return new Promise((resolve) => {
     canvas.toBlob((b) => resolve(b), type, quality);
   });
+}
+
+// ========================================
+// 视频元数据与抽帧缩略图
+// ========================================
+
+/** 视频元数据 + 首帧缩略图（服务端不转码不抽帧，两者全由客户端产出） */
+export interface VideoMeta {
+  /** 时长（整秒；服务端只接受 1-120s，故不足 1 秒按 1 秒上报） */
+  duration: number;
+  /** 像素尺寸（气泡等比占位，防 CLS） */
+  width: number;
+  height: number;
+  /** JPEG 缩略图，上传后作为 `thumb_key`（video 帧必填字段） */
+  thumbnail: Blob;
+}
+
+/** 元数据读取超时：个别 WebView 对损坏文件既不 loadedmetadata 也不 error，不设超时会永久停在「发送中」 */
+const VIDEO_META_TIMEOUT_MS = 10_000;
+
+/** 抽帧超时：seek 后 seeked 事件在个别 WebView 上不触发，故 loadeddata 兜底 + 超时 */
+const VIDEO_FRAME_TIMEOUT_MS = 10_000;
+
+/** 缩略图最长边：仅作气泡 poster，无需原始分辨率 */
+const THUMB_MAX_EDGE = 640;
+
+/**
+ * 读取视频元数据并抽首帧编码为 JPEG 缩略图。
+ *
+ * @param file - 用户选中的视频文件
+ * @returns 整秒时长、像素宽高与 JPEG 缩略图 blob
+ * @throws Error 元数据不可读（超时 / 解码失败 / 宽高或时长为 0）或抽帧失败
+ * @remarks
+ * - 缩略图**不可缺省**：`message.send` 的 video 帧要求 `thumb_key` 非空（服务端缺字段直接 400），
+ *   故抽帧失败在此抛错，由调用方 toast + 置消息失败——宁可本地失败并提示，
+ *   也不发一帧注定被服务端拒收的消息。
+ * - 兼容性：只用 `<video>` + `URL.createObjectURL` + `canvas.drawImage`，Chrome 74 WebView 均可用
+ *   （不依赖 requestVideoFrameCallback / createImageBitmap(video)）。
+ */
+export async function extractVideoMeta(file: Blob): Promise<VideoMeta> {
+  const url = URL.createObjectURL(file);
+  const video = document.createElement("video");
+  video.preload = "metadata";
+  // 静音 + 内联播放：部分 WebView 对带声音的媒体有手势限制，会卡在 seek 不出帧
+  video.muted = true;
+  video.playsInline = true;
+  try {
+    const metaReady = waitForVideoEvent(video, ["loadedmetadata"], VIDEO_META_TIMEOUT_MS, "meta");
+    video.src = url;
+    await metaReady;
+
+    const width = video.videoWidth;
+    const height = video.videoHeight;
+    const rawDuration = video.duration;
+    if (!width || !height || !isFinite(rawDuration) || rawDuration <= 0) {
+      throw new Error("video metadata unreadable");
+    }
+
+    // 取 0.5s 处的帧（短视频取中点）：首帧常是纯黑，做封面看不出内容
+    const thumbnail = await captureVideoFrame(video, Math.min(0.5, rawDuration / 2), width, height);
+    return { duration: Math.max(1, Math.round(rawDuration)), width, height, thumbnail };
+  } finally {
+    // 解绑 src 并 load() 让 WebView 立即释放解码器，再撤销 blob URL
+    video.removeAttribute("src");
+    video.load();
+    URL.revokeObjectURL(url);
+  }
+}
+
+/**
+ * 等待一组媒体事件中最先到达的那个。
+ *
+ * @param events - 任一命中即视为成功（如 `seeked` 与 `loadeddata` 互为兜底）
+ * @param label - 抛错信息前缀，便于区分是元数据阶段还是抽帧阶段
+ * @throws Error `error` 事件或超时
+ */
+function waitForVideoEvent(
+  video: HTMLVideoElement,
+  events: string[],
+  timeoutMs: number,
+  label: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // 定时器先建、settle 后定义：两者互相引用，而回调都在本轮同步代码之后才执行
+    const timer = setTimeout(() => settle(new Error(label + " timeout")), timeoutMs);
+    const settle = (err?: Error) => {
+      clearTimeout(timer);
+      for (const ev of events) video.removeEventListener(ev, onHit);
+      video.removeEventListener("error", onFail);
+      if (err) reject(err);
+      else resolve();
+    };
+    const onHit = () => settle();
+    const onFail = () => settle(new Error(label + " failed"));
+    for (const ev of events) video.addEventListener(ev, onHit);
+    video.addEventListener("error", onFail);
+  });
+}
+
+/** seek 到指定秒后把当前帧画进 canvas 并编码 JPEG（质量 0.75） */
+async function captureVideoFrame(
+  video: HTMLVideoElement,
+  at: number,
+  width: number,
+  height: number,
+): Promise<Blob> {
+  const frameReady = waitForVideoEvent(
+    video,
+    ["seeked", "loadeddata"],
+    VIDEO_FRAME_TIMEOUT_MS,
+    "frame",
+  );
+  video.currentTime = at;
+  await frameReady;
+
+  const scale = Math.min(1, THUMB_MAX_EDGE / Math.max(width, height));
+  const outW = Math.max(1, Math.round(width * scale));
+  const outH = Math.max(1, Math.round(height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("canvas 2d context unavailable");
+  ctx.drawImage(video, 0, 0, outW, outH);
+  const blob = await canvasToBlob(canvas, "image/jpeg", 0.75);
+  if (!blob) throw new Error("thumbnail encode failed");
+  return blob;
 }
 
 // ========================================

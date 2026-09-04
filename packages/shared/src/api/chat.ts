@@ -311,6 +311,57 @@ export function parseStickerContent(content: string): {
   }
 }
 
+/**
+ * content JSON → 视频载荷（key/thumb_key/name/size/duration/width/height）
+ *
+ * @param content - 落库的 content JSON 字符串
+ * @returns 解析结果；非法 JSON 时回退 0 时长 / 0 尺寸（容错口径同 parseImageContent）
+ */
+export function parseVideoContent(content: string): {
+  key?: string;
+  thumbKey?: string;
+  name?: string;
+  size?: number;
+  duration: number;
+  width: number;
+  height: number;
+} {
+  try {
+    const parsed = JSON.parse(content) as {
+      key?: string;
+      thumb_key?: string;
+      name?: string;
+      size?: number;
+      duration?: number;
+      width?: number;
+      height?: number;
+    };
+    return {
+      key: typeof parsed.key === "string" ? parsed.key : undefined,
+      thumbKey: typeof parsed.thumb_key === "string" ? parsed.thumb_key : undefined,
+      name: typeof parsed.name === "string" ? parsed.name : undefined,
+      size: typeof parsed.size === "number" ? parsed.size : undefined,
+      duration: typeof parsed.duration === "number" ? parsed.duration : 0,
+      width: typeof parsed.width === "number" ? parsed.width : 0,
+      height: typeof parsed.height === "number" ? parsed.height : 0,
+    };
+  } catch {
+    return { duration: 0, width: 0, height: 0 };
+  }
+}
+
+/**
+ * 秒 → `m:ss` 时长文案（视频时长角标、相册语音/视频行共用）
+ *
+ * @param totalSeconds - 时长秒数；非正/非有限值按 0 处理（元数据不可读时不显示 NaN）
+ */
+export function formatMediaDuration(totalSeconds: number): string {
+  const safe = isFinite(totalSeconds) && totalSeconds > 0 ? Math.round(totalSeconds) : 0;
+  const m = Math.floor(safe / 60);
+  const s = safe % 60;
+  return String(m) + ":" + (s < 10 ? "0" : "") + String(s);
+}
+
 /** duration 为种子生成固定伪波形（12-20 根，高度 6-18px 确定性伪随机） */
 export function pseudoWave(duration: number): number[] {
   const bars = Math.min(20, Math.max(12, duration + 8));
@@ -328,6 +379,7 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     2: "image",
     3: "file",
     4: "voice",
+    5: "video",
     6: "system",
     8: "sticker",
   };
@@ -346,6 +398,21 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
   if (isVoice) {
     const parsed = parseVoiceContent(dto.content);
     voice = { seconds: parsed.duration, wave: pseudoWave(parsed.duration), key: parsed.key };
+  }
+  const isVideo = dto.message_type === 5;
+  let video: ChatMessage["video"];
+  if (isVideo) {
+    const parsed = parseVideoContent(dto.content);
+    video = {
+      duration: parsed.duration,
+      width: parsed.width,
+      height: parsed.height,
+      key: parsed.key,
+      thumbKey: parsed.thumbKey,
+      name: parsed.name,
+      // 展示用大小文案复用文件气泡口径（仓库无 formatFileSize，size 由 formatFileMeta 产出）
+      size: parsed.size != null ? formatFileMeta(parsed.name ?? "", parsed.size).size : undefined,
+    };
   }
   const isSticker = dto.message_type === 8;
   // E2EE 密文（type 7）：本设备不保存历史明文，且双棘轮状态早已推进，
@@ -370,6 +437,7 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     image: isImage ? parseImageContent(dto.content) : undefined,
     file,
     voice,
+    video,
     sticker: isSticker ? parseStickerContent(dto.content) : undefined,
     reactions: dto.reactions,
     seq: dto.seq,
@@ -429,6 +497,91 @@ export async function fetchMessages(
   // 后端返回 seq 降序，前端消息流按时间升序展示
   const messages = (data.messages || []).map((m) => mapMessage(m, selfUserId)).reverse();
   return { messages, hasMore: !!data.has_more };
+}
+
+/** 相册可筛选的媒体类型（与后端 type 白名单一一对应，非白名单值后端回 400） */
+export type MediaType = "all" | "image" | "file" | "voice" | "video" | "sticker";
+
+/** 媒体相册条目（服务端 MediaItemView 的映射；字段按消息类型填充） */
+export interface MediaItem {
+  messageId: string;
+  seq: number;
+  /** 2=image 3=file 4=voice 5=video 8=sticker（不含 text/system/e2ee） */
+  messageType: 2 | 3 | 4 | 5 | 8;
+  senderNickname: string;
+  createdAt: string;
+  key: string;
+  /** 缩略图对象键，仅视频 */
+  thumbKey?: string;
+  /** 原始文件名，见于文件/视频 */
+  name?: string;
+  /** 字节数（不是展示文案），见于文件/视频/图片 */
+  size?: number;
+  /** 秒数，见于语音/视频 */
+  duration?: number;
+  /** 像素尺寸，见于图片/视频/贴纸 */
+  width?: number;
+  height?: number;
+  /** 贴纸 ID，仅贴纸 */
+  stickerId?: string;
+}
+
+interface MediaItemDTO {
+  message_id: string;
+  seq: number;
+  message_type: number;
+  sender_nickname: string;
+  created_at: string;
+  key: string;
+  thumb_key?: string;
+  name?: string;
+  size?: number;
+  duration?: number;
+  width?: number;
+  height?: number;
+  sticker_id?: string;
+}
+
+/**
+ * 拉取会话媒体相册（seq 降序游标分页，与 fetchMessages 同构）。
+ *
+ * @param conversationId - 会话 ID
+ * @param type - all|image|file|voice|video|sticker（非白名单值后端 400）
+ * @param beforeSeq - 0 表示最新一页；下一页传上一页的最小 seq
+ * @param limit - 页大小（后端上限 100）
+ * @returns 相册条目（seq 降序）与是否还有更早的数据
+ * @throws ApiError 403 非会话成员 · 400 type 非法
+ */
+export async function fetchConversationMedia(
+  conversationId: string,
+  type: MediaType,
+  beforeSeq: number,
+  limit: number,
+): Promise<{ items: MediaItem[]; hasMore: boolean }> {
+  const qs = new URLSearchParams({
+    type,
+    before_seq: String(beforeSeq),
+    limit: String(limit),
+  });
+  const data = await apiGet<{ items: MediaItemDTO[]; has_more: boolean }>(
+    "/api/v1/conversations/" + conversationId + "/media?" + qs.toString(),
+  );
+  const items = (data.items || []).map((dto) => ({
+    messageId: dto.message_id,
+    seq: dto.seq,
+    messageType: dto.message_type as MediaItem["messageType"],
+    senderNickname: dto.sender_nickname,
+    createdAt: dto.created_at,
+    key: dto.key,
+    thumbKey: dto.thumb_key,
+    name: dto.name,
+    size: dto.size,
+    duration: dto.duration,
+    width: dto.width,
+    height: dto.height,
+    stickerId: dto.sticker_id,
+  }));
+  return { items, hasMore: !!data.has_more };
 }
 
 export interface ConversationMember {
