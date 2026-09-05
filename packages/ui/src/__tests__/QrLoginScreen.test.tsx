@@ -299,6 +299,28 @@ describe("QrLoginScreen", () => {
     expect(screen.queryByText("QR code expired")).not.toBeInTheDocument();
   });
 
+  it("轮询到 canceled 时停止轮询，提示已在手机上取消并给出刷新入口", async () => {
+    // canceled 的会话仍然存活（不是 404），不显式识别就会一直轮到自然过期
+    reply(POLL_PREFIX + QR_TOKEN, ok({ status: "canceled", expires_in: 96 }));
+    renderScreen();
+    await flush();
+    await tick(2);
+
+    expect(screen.getByText("Canceled on your phone")).toBeInTheDocument();
+    expect(screen.queryByText("QR code expired")).not.toBeInTheDocument();
+    const pollsWhenCanceled = pollCalls().length;
+    await tick(6);
+    expect(pollCalls()).toHaveLength(pollsWhenCanceled);
+
+    // 取消后必须能重新生成二维码，否则用户被卡在这一屏
+    reply(SESSION, sessionReply(), sessionReply());
+    reply(POLL_PREFIX + QR_TOKEN, ok({ status: "pending", expires_in: 120 }));
+    fireEvent.click(screen.getByRole("button", { name: /Refresh QR code/ }));
+    await flush();
+    expect(calls.filter((c) => c.path === SESSION)).toHaveLength(2);
+    expect(screen.queryByText("Canceled on your phone")).not.toBeInTheDocument();
+  });
+
   it("轮询密钥不匹配的 403 停止轮询并显示扫码失败文案", async () => {
     reply(POLL_PREFIX + QR_TOKEN, fail(403, "auth.qrFailed"));
     renderScreen();

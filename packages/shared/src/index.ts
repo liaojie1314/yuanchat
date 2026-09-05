@@ -53,7 +53,7 @@ export { useVoiceRecorder } from "./hooks/useVoiceRecorder";
 export type { VoiceRecorderState } from "./hooks/useVoiceRecorder";
 export { initSentry, captureException } from "./observability/sentry";
 export { previewBodyOf, quoteExcerptOf } from "./utils/messagePreview";
-export { isServerConfirmed } from "./utils/messageActions";
+export { isServerConfirmed, canEdit, EDIT_WINDOW_MS } from "./utils/messageActions";
 export { registerBackInterceptor, runBackInterceptors } from "./utils/androidBack";
 export type { BackInterceptor } from "./utils/androidBack";
 export type { ActionableMessage } from "./utils/messageActions";

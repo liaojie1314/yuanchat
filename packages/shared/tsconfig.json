@@ -1,0 +1,30 @@
+{
+  // packages/shared 的独立类型门禁（package.json 的 typecheck 脚本）。
+  //
+  // target/lib 钉在 ES2019 而不是抄两端 app 的 ES2021：本包源码要能跑在
+  // 安卓旧 WebView 上，两端 vite 的 build.target 就是 es2019；lib 抬高一档，
+  // tsc 就再也拦不住 replaceAll 这类旧 WebView 没有的内建方法。
+  //
+  // strict 之外还开了 noUnusedLocals / noUnusedParameters —— 比两端 app 更严
+  // （app 侧刻意关掉了这两项），本包作为被三端共用的库，多余符号必须当场清掉。
+  "compilerOptions": {
+    "target": "ES2019",
+    "lib": ["ES2019", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    // 只引 vitest 的全局断言：本包不依赖 vite，因此没有 vite/client 的
+    // ImportMetaEnv，用到 VITE_* 的文件各自声明自己需要的那几个键
+    "types": ["vitest/globals"]
+  },
+  "include": ["src"]
+}

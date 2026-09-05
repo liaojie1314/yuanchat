@@ -35,6 +35,7 @@ const (
 	TypeContactAccepted     = "contact.accepted"
 	TypeConversationCreated = "conversation.created"
 	TypeMessageRecalled     = "message.recalled"
+	TypeMessageEdited       = "message.edited"
 	TypeConversationUpdated = "conversation.updated"
 	TypeConversationRemoved = "conversation.removed"
 	TypeMessageReaction     = "message.reaction"
@@ -111,6 +112,19 @@ type MessageRecalledPayload struct {
 	Seq              int64     `json:"seq"`
 	OperatorID       uuid.UUID `json:"operator_id"`
 	OperatorNickname string    `json:"operator_nickname"`
+}
+
+// MessageEditedPayload 消息编辑推送，推给会话全部成员（含操作者自己，实现多端同步）。
+//
+// 带上编辑后正文而非只给 message_id：省掉收件人一次回查往返，与 message.receive
+// 直接下发内容的既有做法一致。E2EE 消息永不进这条路径（Edit 入口已拒）。
+type MessageEditedPayload struct {
+	MessageID      uuid.UUID `json:"message_id"`
+	ConversationID uuid.UUID `json:"conversation_id"`
+	Seq            int64     `json:"seq"`
+	Text           string    `json:"text"`
+	EditedAt       time.Time `json:"edited_at"`
+	EditCount      int16     `json:"edit_count"`
 }
 
 // UserBrief 联系人相关帧中携带的用户摘要。

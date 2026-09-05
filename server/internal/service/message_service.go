@@ -219,15 +219,8 @@ func (s *MessageService) SendContent(
 		ReplyToID:      replyTo,
 	}
 	// 敏感词审核：命中标记 flagged 进审核队列，消息正常发送（不阻塞）
-	if s.moderation != nil && messageType == model.MessageTypeText {
-		var tc model.MessageContentText
-		if err := json.Unmarshal([]byte(contentJSON), &tc); err == nil {
-			if hit := s.moderation.Check(tc.Text); hit != "" {
-				msg.Flagged = true
-				s.logger.Info("message flagged by moderation",
-					zap.String("word", hit), zap.String("sender", senderID.String()))
-			}
-		}
+	if s.textHitsModeration(messageType, contentJSON, senderID) {
+		msg.Flagged = true
 	}
 	if len(validMentions) > 0 {
 		strs := make(pq.StringArray, len(validMentions))
@@ -272,6 +265,27 @@ func (s *MessageService) SendContent(
 		MemberIDs:        memberIDs,
 		MentionedMembers: validMentions,
 	}, nil
+}
+
+// textHitsModeration 判定文本是否命中敏感词并记日志，命中返回 true。
+//
+// 发送与编辑两条路径共用：若编辑不走这里，「先发干净文本 → 编辑成敏感词」
+// 就能完全绕过内容审核。命中只打标不拦截，沿用既有「打标不阻塞」范式。
+func (s *MessageService) textHitsModeration(messageType int16, contentJSON string, actorID uuid.UUID) bool {
+	if s.moderation == nil || messageType != model.MessageTypeText {
+		return false
+	}
+	var tc model.MessageContentText
+	if err := json.Unmarshal([]byte(contentJSON), &tc); err != nil {
+		return false
+	}
+	hit := s.moderation.Check(tc.Text)
+	if hit == "" {
+		return false
+	}
+	s.logger.Info("message flagged by moderation",
+		zap.String("word", hit), zap.String("actor", actorID.String()))
+	return true
 }
 
 // Forward 一次转发到多个目标会话：source 与所有 target 都必须是 actor 参与的会话。

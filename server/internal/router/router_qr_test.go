@@ -311,3 +311,80 @@ func TestQRBannedScannerReturns403(t *testing.T) {
 		t.Fatalf("被封禁用户推进了状态: %s", w.Body.String())
 	}
 }
+
+// TestQRCancelStopsFlowForScanner 扫码端取消后，被扫端轮询到 canceled，且授权再也换不出令牌。
+func TestQRCancelStopsFlowForScanner(t *testing.T) {
+	env := newQREnv(t)
+	user := newResetUser(t, env.db, "Qrpass123")
+	bearer := env.bearerFor(t, user)
+	qrToken, pollSecret := env.newQRSession(t, "web")
+
+	if w := postAuthed(env.r, bearer, "/api/v1/auth/qr/"+qrToken+"/scan"); w.Code != http.StatusOK {
+		t.Fatalf("scan status = %d, want 200, body=%s", w.Code, w.Body.String())
+	}
+
+	w := postAuthed(env.r, bearer, "/api/v1/auth/qr/"+qrToken+"/cancel")
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("cancel status = %d, want 204, body=%s", w.Code, w.Body.String())
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("204 不应带响应体，got %q", w.Body.String())
+	}
+
+	// 被扫端必须能看到 canceled：这是它得知「手机上按了取消」的唯一途径
+	w = getPoll(env.r, qrToken, pollSecret)
+	if w.Code != http.StatusOK {
+		t.Fatalf("poll status = %d, want 200, body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"status":"canceled"`) {
+		t.Fatalf("poll body = %s, want status canceled", w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "access_token") {
+		t.Fatalf("canceled 响应泄露了令牌: %s", w.Body.String())
+	}
+
+	// canceled 是终态：取消后再确认必须 409，否则用户按下的取消形同虚设
+	if w := postAuthed(env.r, bearer, "/api/v1/auth/qr/"+qrToken+"/confirm"); w.Code != http.StatusConflict {
+		t.Fatalf("取消后 confirm status = %d, want 409, body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestQRCancelRequiresScannerIdentity 取消端点必须带 Bearer，且只有扫码的那个账号能取消。
+//
+// 少了这两道校验，任何拿到二维码的人都能把别人正在进行的登录会话废掉。
+func TestQRCancelRequiresScannerIdentity(t *testing.T) {
+	env := newQREnv(t)
+	scanner := newResetUser(t, env.db, "Qrpass123")
+	attacker := newResetUser(t, env.db, "Qrpass456")
+	qrToken, pollSecret := env.newQRSession(t, "web")
+
+	if w := postAuthed(env.r, "", "/api/v1/auth/qr/"+qrToken+"/cancel"); w.Code != http.StatusUnauthorized {
+		t.Fatalf("匿名 cancel status = %d, want 401, body=%s", w.Code, w.Body.String())
+	}
+	// 尚未被扫的会话没有扫码端，取消无从谈起
+	if w := postAuthed(env.r, env.bearerFor(t, scanner),
+		"/api/v1/auth/qr/"+qrToken+"/cancel"); w.Code != http.StatusConflict {
+		t.Fatalf("pending 阶段 cancel status = %d, want 409, body=%s", w.Code, w.Body.String())
+	}
+
+	if w := postAuthed(env.r, env.bearerFor(t, scanner),
+		"/api/v1/auth/qr/"+qrToken+"/scan"); w.Code != http.StatusOK {
+		t.Fatalf("scan status = %d, want 200, body=%s", w.Code, w.Body.String())
+	}
+
+	w := postAuthed(env.r, env.bearerFor(t, attacker), "/api/v1/auth/qr/"+qrToken+"/cancel")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("他人 cancel status = %d, want 403, body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "auth.qrWrongUser") {
+		t.Fatalf("body = %s, want auth.qrWrongUser", w.Body.String())
+	}
+	// 外人的取消不得改动状态：扫码者本人仍能正常确认
+	if w := getPoll(env.r, qrToken, pollSecret); !strings.Contains(w.Body.String(), `"status":"scanned"`) {
+		t.Fatalf("外人取消改动了状态: %s", w.Body.String())
+	}
+	if w := postAuthed(env.r, env.bearerFor(t, scanner),
+		"/api/v1/auth/qr/"+qrToken+"/confirm"); w.Code != http.StatusNoContent {
+		t.Fatalf("confirm status = %d, want 204, body=%s", w.Code, w.Body.String())
+	}
+}

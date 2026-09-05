@@ -19,6 +19,8 @@
  * - `poll_secret` 只在建会话的响应里出现一次，轮询时必须放进 `X-Qr-Poll-Secret` 请求头；
  *   它不在二维码里，正是「轮询者就是建会话的那一端」的唯一证明。缺失或错误一律 403。
  * - 令牌只能被取走一次，取走即销毁会话；同一个码的第二次轮询是 404。
+ * - 扫码端可以在确认之前取消，会话随即进入 `canceled` 终态但**不被销毁**：
+ *   被扫端只有轮询到这个状态才能区分「手机上按了取消」与「二维码已过期」。
  */
 import { apiPost, request } from "./client";
 
@@ -78,8 +80,8 @@ export async function resetPassword(resetTicket: string, newPassword: string): P
 /** 轮询密钥的请求头名；走请求头而非 query，避免密钥落进服务端 access log */
 const POLL_SECRET_HEADER = "X-Qr-Poll-Secret";
 
-/** 扫码会话状态；只能单向前进，`confirmed` 是终态 */
-export type QrStatus = "pending" | "scanned" | "confirmed";
+/** 扫码会话状态；只能单向前进，`confirmed` 与 `canceled` 都是终态 */
+export type QrStatus = "pending" | "scanned" | "confirmed" | "canceled";
 
 /** 扫码会话：被扫端建会话后拿到的全部内容 */
 export interface QrSession {
@@ -104,7 +106,7 @@ export interface QrTokens {
 /** 一次轮询的结果 */
 export interface QrPollResult {
   status: QrStatus;
-  /** **会话**剩余存活秒数；`confirmed` 时固定 0（会话已销毁） */
+  /** **会话**剩余存活秒数；`confirmed` 时固定 0（会话已销毁），`canceled` 时仍是真实余量 */
   expiresIn: number;
   /** 仅在 `confirmed` 的那一次出现，取走即销毁会话 */
   tokens?: QrTokens;
@@ -214,6 +216,19 @@ export async function scanQr(qrToken: string): Promise<QrScanIdentity> {
  */
 export async function confirmQr(qrToken: string): Promise<void> {
   await apiPost<void>("/api/v1/auth/qr/" + encodeURIComponent(qrToken) + "/confirm", {});
+}
+
+/**
+ * 取消登录（扫码端，需已登录）
+ *
+ * @param qrToken - 与 `scanQr` 同一个会话凭据
+ * @remarks 把会话从 `scanned` 推进到 `canceled` 终态，被扫端下一次轮询即看到该状态并停止轮询。
+ *   会话不会被销毁 —— 否则被扫端只会看到与过期一致的 404，两种终止原因就分不开了。
+ *   取消者必须是扫描者本人，否则抛 403 `auth.qrWrongUser`；尚未扫描（`pending`）或已终结的会话
+ *   抛 409 `auth.qrBadState`。成功是 204 空响应。
+ */
+export async function cancelQr(qrToken: string): Promise<void> {
+  await apiPost<void>("/api/v1/auth/qr/" + encodeURIComponent(qrToken) + "/cancel", {});
 }
 
 /**

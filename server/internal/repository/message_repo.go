@@ -138,6 +138,78 @@ func (r *MessageRepository) Recall(ctx context.Context, id uuid.UUID) (bool, err
 	return res.RowsAffected > 0, res.Error
 }
 
+// EditWithHistory 在单事务内更新正文并写入编辑历史。
+//
+// 两步一体：先 CAS 更新 messages，再把旧 content 插入 message_edits
+// （version = expectCount+1）。CAS 条件带 edit_count —— 并发双写时只有一方成功，
+// 另一方 RowsAffected=0 返回 false 且整事务回滚，历史表不留脏版本。
+//
+// 顺序上 CAS 必须在插入之前：过期的 expectCount 算出的 version 与已有历史行撞
+// (message_id, version) 唯一索引，若先插入，过期编辑会以「唯一键冲突」报错收场，
+// 而不是走 false 这条预期分支。唯一索引因此退居第二道防线。
+// flagged 只在命中敏感词时置 true，不会把已有的 true 改回 false
+// （清标是 admin 的动作，用户不能自助洗白）。
+func (r *MessageRepository) EditWithHistory(
+	ctx context.Context,
+	id uuid.UUID,
+	oldContent, newContent string,
+	expectCount int16,
+	flagged bool,
+	editedAt time.Time,
+) (bool, error) {
+	var flipped bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updates := map[string]any{
+			"content":    newContent,
+			"edited_at":  editedAt,
+			"edit_count": expectCount + 1,
+		}
+		if flagged {
+			updates["flagged"] = true
+		}
+		res := tx.Model(&model.Message{}).
+			Where("id = ? AND status = ? AND edit_count = ?", id, model.MessageStatusNormal, expectCount).
+			Updates(updates)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			// CAS 失败：回滚整个事务，历史行不会落库
+			flipped = false
+			return gorm.ErrRecordNotFound
+		}
+
+		// EditedAt 无 gorm default tag 也不属 GORM 自动维护的时间字段，
+		// 不显式赋值会把 Go 零值写进 INSERT，库里的 DEFAULT now() 不生效。
+		hist := &model.MessageEdit{
+			MessageID:  id,
+			OldContent: oldContent,
+			Version:    expectCount + 1,
+			EditedAt:   editedAt,
+		}
+		if err := tx.Create(hist).Error; err != nil {
+			return err
+		}
+		flipped = true
+		return nil
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// CAS 失败是预期分支，不是错误
+		return false, nil
+	}
+	return flipped, err
+}
+
+// ListEdits 取一条消息的全部历史版本，按 version 升序。
+func (r *MessageRepository) ListEdits(ctx context.Context, messageID uuid.UUID) ([]model.MessageEdit, error) {
+	var edits []model.MessageEdit
+	err := r.db.WithContext(ctx).
+		Where("message_id = ?", messageID).
+		Order("version ASC").
+		Find(&edits).Error
+	return edits, err
+}
+
 // GetLastMessage 取会话最后一条消息（会话列表预览用）。
 // minSeq 为调用方的 cleared_before_seq 水位：清空后列表预览同步失效（0 表示不过滤）。
 func (r *MessageRepository) GetLastMessage(ctx context.Context, convID uuid.UUID, minSeq int64) (*MessageWithSender, error) {

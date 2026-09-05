@@ -134,6 +134,8 @@ let mockResetTicketUsed = false;
 let mockQrPollCount = 0;
 /** 令牌是否已被取走，取走后会话即销毁（再轮询回 404） */
 let mockQrTokensClaimed = false;
+/** 扫码端是否已取消；canceled 是终态，会话仍在但轮询只回该状态 */
+let mockQrCanceled = false;
 
 // ========================================
 // 辅助函数
@@ -184,6 +186,36 @@ function stickerDataUrl(key: string): string {
   for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) % 360;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><rect width="96" height="96" rx="12" fill="hsl(${hash}, 70%, 88%)"/><circle cx="36" cy="40" r="6" fill="hsl(${hash}, 60%, 30%)"/><circle cx="60" cy="40" r="6" fill="hsl(${hash}, 60%, 30%)"/><path d="M32 60 Q48 74 64 60" stroke="hsl(${hash}, 60%, 30%)" stroke-width="5" fill="none" stroke-linecap="round"/></svg>`;
   return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+}
+
+/**
+ * 约 1 毫秒静音单声道 8kHz 8bit WAV 的 data URL（44 字节头 + 8 个静音采样，共 52 字节）。
+ *
+ * @remarks 供 mock 模式的语音/视频占位，使播放器能成功 decode 而不报错。
+ *   刻意取最短长度：只为让 `<audio>`/`<video>` 走通 loadeddata，不承载可听内容。
+ */
+const SILENT_WAV_DATA_URL =
+  "data:audio/wav;base64,UklGRiwAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQgAAACAgICAgICAgA==";
+
+/**
+ * 按对象 key 的后缀给出可用的 data URL。
+ *
+ * @remarks mock 模式没有 MinIO，此前对任何 key 都回内联 SVG，导致点播 demo
+ *   语音/视频时 `<audio>`/`<video>` 拿到图片必然报错、toast「播放失败」。
+ *   这里按后缀分派：音频给一段极短的静音 WAV，视频暂时也给静音音频
+ *   （只为让播放器不报错，演示中不会有画面），其余仍给 SVG 贴纸。
+ *   data URL 均为占位，不是真实媒体内容。
+ */
+function mockObjectDataUrl(key: string): string {
+  const lower = key.toLowerCase();
+  const isAudio =
+    lower.indexOf(".webm") >= 0 ||
+    lower.indexOf(".mp3") >= 0 ||
+    lower.indexOf(".m4a") >= 0 ||
+    lower.indexOf(".wav") >= 0;
+  const isVideo = lower.indexOf(".mp4") >= 0 || lower.indexOf(".mov") >= 0;
+  if (isAudio || isVideo) return SILENT_WAV_DATA_URL;
+  return stickerDataUrl(key);
 }
 
 /** 官方表情包（唯一一个，8 张，与后端 seed 的规模一致）。 */
@@ -754,13 +786,60 @@ export const handlers = [
   }),
 
   // --------------------------------------------------
+  // 消息 — 编辑正文（四态：正常 / 窗口过期 / 次数超限 / 延迟）
+  // PATCH /api/v1/messages/:id
+  // --------------------------------------------------
+  http.patch("http://localhost:8085/api/v1/messages/:id", async ({ request }) => {
+    await delay(200);
+    const url = new URL(request.url);
+    // ?error= 仅 mock 支持，供错误态联调（真实后端忽略该参数）
+    const err = url.searchParams.get("error");
+    if (err === "window") return apiError(4032, "edit window expired");
+    if (err === "limit") return apiError(4033, "edit limit exceeded");
+    const body = (await request.json()) as { text?: string };
+    if (!body.text || body.text.trim() === "") return apiError(4004, "message not editable");
+    return apiOk({ edited_at: new Date().toISOString(), edit_count: 1 });
+  }),
+
+  // --------------------------------------------------
+  // 消息 — 编辑历史（四态：正常 / 空 / 错误 / 延迟）
+  // GET /api/v1/messages/:id/edits
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/messages/:id/edits", async ({ request }) => {
+    // 300ms 延迟：让骨架屏在演示与 E2E 里真的能看见
+    await delay(300);
+    const url = new URL(request.url);
+    if (url.searchParams.get("error") === "1") return apiError(500, "load edit history failed");
+    if (url.searchParams.get("empty") === "1") return apiOk({ versions: [] });
+    return apiOk({
+      versions: [
+        { version: 1, text: "最初发出的版本", edited_at: "2026-09-05T09:58:00Z" },
+        { version: 2, text: "第一次修改", edited_at: "2026-09-05T09:59:00Z" },
+        { version: 3, text: "当前版本", edited_at: "2026-09-05T10:00:00Z", current: true },
+      ],
+    });
+  }),
+
+  // --------------------------------------------------
+  // 消息 — 撤回（此前缺失 mock，随编辑功能一并补上）
+  // POST /api/v1/messages/:id/recall
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/messages/:id/recall", async ({ request }) => {
+    await delay(150);
+    if (new URL(request.url).searchParams.get("error") === "expired") {
+      return apiError(4031, "recall window expired");
+    }
+    return apiOk({ message: "recalled" });
+  }),
+
+  // --------------------------------------------------
   // 文件 — 换取下载 URL（mock 模式无 MinIO，直接给 data URL）
   // GET /api/v1/files/download-url?key=...
   // --------------------------------------------------
   http.get("http://localhost:8085/api/v1/files/download-url", ({ request }) => {
     const key = new URL(request.url).searchParams.get("key") ?? "";
     if (!key) return apiError(40010, "key required");
-    return apiOk({ url: stickerDataUrl(key), expires_in: 3600 });
+    return apiOk({ url: mockObjectDataUrl(key), expires_in: 3600 });
   }),
 
   // --------------------------------------------------
@@ -974,6 +1053,7 @@ export const handlers = [
     await delay(200);
     mockQrPollCount = 0;
     mockQrTokensClaimed = false;
+    mockQrCanceled = false;
     return apiOk({
       qr_token: MOCK_QR_TOKEN,
       qr_payload: "yuanchat://login?t=" + MOCK_QR_TOKEN,
@@ -998,6 +1078,10 @@ export const handlers = [
 
     mockQrPollCount += 1;
     const remaining = Math.max(0, MOCK_QR_TTL_SECONDS - mockQrPollCount * 2);
+    // 取消是终态且会话不销毁：被扫端只有轮询到它才能区分「手机上按了取消」与「已过期」
+    if (mockQrCanceled) {
+      return apiOk({ status: "canceled", expires_in: remaining });
+    }
     if (mockQrPollCount === 1) {
       return apiOk({ status: "pending", expires_in: remaining });
     }
@@ -1038,6 +1122,20 @@ export const handlers = [
     if (String(params.token) !== MOCK_QR_TOKEN) {
       return HttpResponse.json({ code: 404, message: "auth.qrExpired" }, { status: 404 });
     }
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // --------------------------------------------------
+  // 扫码登录 — 取消（扫码端，需 Bearer 令牌）
+  // POST /api/v1/auth/qr/:token/cancel
+  // 会话进入 canceled 终态但不销毁，被扫端下一次轮询即看到该状态
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/auth/qr/:token/cancel", async ({ params }) => {
+    await delay(150);
+    if (String(params.token) !== MOCK_QR_TOKEN) {
+      return HttpResponse.json({ code: 404, message: "auth.qrExpired" }, { status: 404 });
+    }
+    mockQrCanceled = true;
     return new HttpResponse(null, { status: 204 });
   }),
 

@@ -97,7 +97,7 @@ func Setup(
 	adminRepo := repository.NewAdminRepository(db)
 	flaggedUGCRepo := repository.NewFlaggedUGCRepository(db)
 	adminSvc := service.NewAdminService(adminRepo, convRepo, userRepo, flaggedUGCRepo, logger)
-	adminH := handler.NewAdminHandler(adminSvc, hub, st, logger)
+	adminH := handler.NewAdminHandler(adminSvc, hub, st, msgSvc, logger)
 	reportH := handler.NewReportHandler(adminSvc, logger)
 
 	pushRepo := repository.NewPushRepository(db)
@@ -249,6 +249,8 @@ func Setup(
 		// 扫码端必须已登录：它是用自己的身份为被扫端授权
 		qr.POST("/:token/scan", middleware.AuthRequired(cfg.JWT), authH.ScanQRSession)
 		qr.POST("/:token/confirm", middleware.AuthRequired(cfg.JWT), authH.ConfirmQRSession)
+		// 取消同样限扫码端本人：它是把已扫的会话推进到终态，与确认是同一类写操作
+		qr.POST("/:token/cancel", middleware.AuthRequired(cfg.JWT), authH.CancelQRSession)
 	}
 
 	// 注册/登录统一收敛到 /auth 前缀，与 /auth/refresh、/auth/password、/auth/qr 对齐
@@ -286,6 +288,8 @@ func Setup(
 		chat.PATCH("/conversations/:id/announcement", convH.UpdateAnnouncement)
 		chat.PUT("/conversations/:id/my-alias", convH.UpdateMyAlias)
 		chat.POST("/messages/:id/recall", msgH.Recall)
+		chat.PATCH("/messages/:id", msgH.Edit)
+		chat.GET("/messages/:id/edits", msgH.EditHistory)
 		chat.POST("/messages/:id/reactions", msgH.React)
 		chat.POST("/messages/:id/forward", forwardH.Forward)
 		chat.GET("/messages/search", middleware.LimitByIP(20, 40), msgH.Search)
@@ -350,6 +354,7 @@ func Setup(
 		admin.GET("/reports", adminH.ListReports)
 		admin.POST("/reports/:id/handle", adminH.HandleReport)
 		admin.GET("/messages/:id/media", adminH.MessageMedia)
+		admin.GET("/messages/:id/edits", adminH.MessageEditHistory)
 		admin.GET("/flagged-ugc", adminH.ListFlaggedUGC)
 		admin.POST("/flagged-ugc/:id/reset", adminH.ResetFlaggedUGC)
 		admin.DELETE("/flagged-ugc/:id", adminH.DismissFlaggedUGC)

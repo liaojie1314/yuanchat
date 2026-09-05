@@ -2,7 +2,7 @@
 
 > **前置阅读**：[ARCHITECTURE.md](./ARCHITECTURE.md)
 >
-> 本文按 `server/internal/database/migrations/` 的实际迁移序（001 → 016）重建，
+> 本文按 `server/internal/database/migrations/` 的实际迁移序（001 → 017）重建，
 > 与代码严格同步；旧文档中的 Elasticsearch / MinIO 章节已过时，不在此保留。
 
 ---
@@ -27,7 +27,7 @@
 
 ---
 
-## 二、迁移明细（001 → 015）
+## 二、迁移明细（001 → 017）
 
 ### 001_baseline — 基准 Schema 快照
 
@@ -156,6 +156,20 @@
 - 待处理队列部分索引 `idx_flagged_ugc_pending(created_at DESC) WHERE handled_at IS NULL`；
   类型过滤索引 `idx_flagged_ugc_type(ugc_type, created_at DESC)`。
 
+### 017_message_edit — 消息编辑与编辑历史
+
+- `messages` 加两列：`edited_at TIMESTAMPTZ`（NULL = 从未编辑，非 NULL 即前端「已编辑」角标依据）、
+  `edit_count SMALLINT NOT NULL DEFAULT 0`（累计编辑次数，等于 `message_edits` 中该消息的历史行数）。
+- 新表 `message_edits`：**只存被替换掉的历史版本**，当前生效版本始终在 `messages.content` 里。
+  列：`message_id`、`old_content JSONB`（被替换掉的整个 content）、`version SMALLINT`、
+  `edited_at`（**该版本被替换掉的时刻**，不是它被写下的时刻）、`created_at`。
+- 唯一索引 `idx_message_edits_msg_ver(message_id, version)`：既防重复版本号，
+  也是 CAS 事务的并发闸门。
+- **刻意不加 `message_id → messages(id)` 外键**：messages 是软删除（`deleted_at`），
+  外键会与软删语义冲突；同仓内 `favorites` / `flagged_ugc` 也是这个取舍。
+- 编辑走「先 CAS 更新 `messages`（`WHERE ... AND edit_count = ?`）再 INSERT 历史行」的单事务。
+  反序会先撞上面的唯一索引报 SQLSTATE 23505，把契约里的「CAS 失败 = `(false, nil)`」变成 error。
+
 ---
 
 ## 三、最终态关键表结构
@@ -184,7 +198,10 @@ conversation_members   conversation_id, user_id, role(0/1/2), last_read_seq,
                        cleared_before_seq, alias   UNIQUE(conversation_id, user_id)
 messages               conversation_id, sender_id, seq, message_type, content JSONB,
                        status(1/2/3), reply_to_id, mentions UUID[], client_msg_id,
-                       flagged, deleted_at        UNIQUE(conversation_id, seq)
+                       flagged, edited_at, edit_count, deleted_at
+                       UNIQUE(conversation_id, seq)
+message_edits          message_id, old_content JSONB, version, edited_at
+                       UNIQUE(message_id, version)   -- 只存被替换掉的历史版本
 message_status         message_id, user_id, status, delivered_at, read_at
 message_reactions      message_id, user_id, emoji  UNIQUE(message_id, user_id, emoji)
 favorites              user_id, message_id, conversation_id, 快照字段, content JSONB

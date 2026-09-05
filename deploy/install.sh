@@ -39,7 +39,7 @@ fi
 # shellcheck disable=SC1091
 set -a; source .env; set +a
 
-for var in DOMAIN_APP DOMAIN_API DOMAIN_WS DOMAIN_ADMIN ADMIN_EMAIL; do
+for var in DOMAIN_APP DOMAIN_API DOMAIN_WS DOMAIN_ADMIN DOMAIN_STORAGE ADMIN_EMAIL; do
   value="${!var:-}"
   [ -n "$value" ] || die ".env 缺少 $var"
   case "$value" in
@@ -69,8 +69,8 @@ gen_secret GRAFANA_PASSWORD 24
 
 # ---------- 3. 渲染 nginx.conf ----------
 info "渲染 nginx 配置"
-export DOMAIN_APP DOMAIN_API DOMAIN_WS DOMAIN_ADMIN
-envsubst '${DOMAIN_APP} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN}' \
+export DOMAIN_APP DOMAIN_API DOMAIN_WS DOMAIN_ADMIN DOMAIN_STORAGE
+envsubst '${DOMAIN_APP} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN} ${DOMAIN_STORAGE}' \
   < nginx/nginx.conf.template > nginx/nginx.conf
 
 # ---------- 4. 首次签发证书 ----------
@@ -84,7 +84,7 @@ if ! docker volume inspect yuanchat_certbot_conf >/dev/null 2>&1 || \
   # 通过 80 端口完成 ACME 校验后再换成真证书
   docker run --rm -v yuanchat_certbot_conf:/etc/letsencrypt alpine sh -c "
     apk add --no-cache openssl >/dev/null 2>&1
-    for d in ${DOMAIN_APP} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN}; do
+    for d in ${DOMAIN_APP} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN} ${DOMAIN_STORAGE}; do
       mkdir -p /etc/letsencrypt/live/\$d
       openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
         -keyout /etc/letsencrypt/live/\$d/privkey.pem \
@@ -96,7 +96,7 @@ if ! docker volume inspect yuanchat_certbot_conf >/dev/null 2>&1 || \
   docker compose -f docker-compose.prod.yml up -d nginx
   sleep 5
 
-  for domain in "$DOMAIN_APP" "$DOMAIN_API" "$DOMAIN_WS" "$DOMAIN_ADMIN"; do
+  for domain in "$DOMAIN_APP" "$DOMAIN_API" "$DOMAIN_WS" "$DOMAIN_ADMIN" "$DOMAIN_STORAGE"; do
     info "签发 $domain"
     docker compose -f docker-compose.prod.yml run --rm --entrypoint certbot certbot \
       certonly --webroot -w /var/www/certbot \

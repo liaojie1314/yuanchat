@@ -177,6 +177,133 @@ func (h *MessageHandler) Recall(c *gin.Context) {
 	Success(c, gin.H{"message": "recalled"})
 }
 
+// EditBody 编辑消息请求体。
+//
+// max 与 service.MaxEditTextLen 同值（validator 对字符串按 rune 计数，口径一致）；
+// 前置拦截省掉一次库往返，服务层仍独立校验，两道都在。
+type EditBody struct {
+	Text string `json:"text" binding:"required,max=4000"`
+}
+
+// Edit 编辑一条文本消息（发送者本人、EditWindow 内、累计不超 MaxEditCount 次），
+// 成功后向会话全员推 message.edited 帧。
+//
+//	@Summary		编辑消息
+//	@Tags			chat
+//	@Security		BearerAuth
+//	@Param			id		path		string		true	"消息 id"
+//	@Param			body	body		EditBody	true	"新正文"
+//	@Success		200		{object}	Response
+//	@Router			/api/v1/messages/{id} [patch]
+func (h *MessageHandler) Edit(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		Unauthorized(c, "unauthorized")
+		return
+	}
+	msgID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid message id")
+		return
+	}
+	var body EditBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		BadRequest(c, "invalid text")
+		return
+	}
+
+	result, err := h.svc.Edit(c.Request.Context(), userID, msgID, body.Text)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrMessageNotFound):
+			NotFound(c, "message not found")
+		case errors.Is(err, service.ErrNotSender):
+			Error(c, http.StatusForbidden, 403, "only the sender can edit")
+		case errors.Is(err, service.ErrEditWindowExpired):
+			// 业务码 4032：紧邻 recall 的 4031，前端按 code 识别并提示窗口过期
+			Error(c, http.StatusForbidden, 4032, "edit window expired")
+		case errors.Is(err, service.ErrEditLimitExceeded):
+			Error(c, http.StatusBadRequest, 4033, "edit limit exceeded")
+		// 以下四类共用 4004（前端一律提示「无法保存」），message 各自区分便于排查。
+		// ErrEditTextTooLong 必须显式列出：落进 default 会返 500，
+		// 把「文本太长」误报成服务器故障。
+		case errors.Is(err, service.ErrNotEditable):
+			Error(c, http.StatusBadRequest, 4004, "message not editable")
+		case errors.Is(err, service.ErrEditNoChange):
+			Error(c, http.StatusBadRequest, 4004, "text unchanged")
+		case errors.Is(err, service.ErrEditEmptyText):
+			Error(c, http.StatusBadRequest, 4004, "text must not be empty")
+		case errors.Is(err, service.ErrEditTextTooLong):
+			Error(c, http.StatusBadRequest, 4004, "text too long")
+		default:
+			h.logger.Error("edit failed", zap.Error(err))
+			InternalError(c, "edit failed")
+		}
+		return
+	}
+
+	// 组帧前必须判 nil：MessageEditedPayload.EditedAt 是值类型，而
+	// model.Message.EditedAt 是指针。service 层保证成功路径上必已赋值，
+	// 这里只是兜底 —— handler 里一次 panic 会打挂整个请求，
+	// 宁可少推一帧（HTTP 仍 200，与 Recall 的「encode 失败只记日志」同姿态）。
+	if result.Message.EditedAt == nil {
+		h.logger.Error("edited_at is nil, skip message.edited push",
+			zap.String("message_id", result.Message.ID.String()))
+	} else if frame, err := ws.Encode(ws.TypeMessageEdited, ws.MessageEditedPayload{
+		MessageID:      result.Message.ID,
+		ConversationID: result.Message.ConversationID,
+		Seq:            result.Message.Seq,
+		Text:           result.Text,
+		EditedAt:       *result.Message.EditedAt,
+		EditCount:      result.Message.EditCount,
+	}); err == nil {
+		h.dispatcher.SendToUsers(result.MemberIDs, frame)
+	} else {
+		h.logger.Error("encode message.edited failed", zap.Error(err))
+	}
+
+	Success(c, gin.H{
+		"edited_at":  result.Message.EditedAt,
+		"edit_count": result.Message.EditCount,
+	})
+}
+
+// EditHistory 取一条消息的编辑历史（会话成员可见，可见性口径同拉历史）。
+//
+//	@Summary		消息编辑历史
+//	@Tags			chat
+//	@Security		BearerAuth
+//	@Param			id	path		string	true	"消息 id"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/messages/{id}/edits [get]
+func (h *MessageHandler) EditHistory(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		Unauthorized(c, "unauthorized")
+		return
+	}
+	msgID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid message id")
+		return
+	}
+
+	versions, err := h.svc.EditHistory(c.Request.Context(), userID, msgID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrMessageNotFound):
+			NotFound(c, "message not found")
+		case errors.Is(err, service.ErrNotMember):
+			Error(c, http.StatusForbidden, 403, "not a conversation member")
+		default:
+			h.logger.Error("load edit history failed", zap.Error(err))
+			InternalError(c, "load edit history failed")
+		}
+		return
+	}
+	Success(c, gin.H{"versions": versions})
+}
+
 // ReactBody 表情回应请求体。
 type ReactBody struct {
 	Emoji string `json:"emoji" binding:"required"`

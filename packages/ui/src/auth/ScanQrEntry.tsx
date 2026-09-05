@@ -9,18 +9,27 @@
  * 菜单点开后会随点击外部而关闭，若把本组件连按钮一起塞进菜单，确认框会随菜单一起卸载，
  * 用户就没机会点确认了。
  *
- * 两处安全要点：
+ * 三处要点：
  * 1. **必须校验 scheme**。原生扫描返回的是任意字符串，不校验就等于把任意二维码里的内容
  *    当会话凭据提交给后端。只接受 `yuanchat://login?t=<token>`。
  * 2. **确认前必须让用户看到账号**。令牌是在 `confirmQr` 这一步签发给被扫端的，
  *    确认动作等于把自己的登录态交给另一台设备，必须先展示是哪个账号再由用户显式确认。
+ * 3. **放弃确认必须回报服务端**（`cancelQr`）。会话此时已是 `scanned`，被扫端正停在
+ *    「请在手机上确认」那一屏；不回报的话它要一直等到会话过期才恢复，
+ *    而且看到的是「二维码已过期」而不是「已在手机上取消」。
  *
  * 扫描能力只在移动端存在，组件因此接受注入式 `scan`：由宿主 app 传入
  * `@tauri-apps/plugin-barcode-scanner` 的实现。这样 packages/ui 不依赖 Tauri，单测也无需真机。
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { scanQr, confirmQr, registerBackInterceptor, type QrScanIdentity } from "@yuanchat/shared";
+import {
+  scanQr,
+  confirmQr,
+  cancelQr,
+  registerBackInterceptor,
+  type QrScanIdentity,
+} from "@yuanchat/shared";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { mapAuthError } from "./mapAuthError";
 import { parseLoginQr } from "./parseLoginQr";
@@ -95,21 +104,38 @@ export function ScanQrEntry({ scan, cancelScan, active, onClose }: ScanQrEntryPr
     };
   }, [active, scan, onClose, t]);
 
+  /**
+   * 放弃这次授权：关掉确认框并把 `canceled` 回报给服务端
+   *
+   * 取消是尽力而为，失败不上屏报错：会话最多 120 秒后自行过期，
+   * 而用户此刻的意图就是离开这条链路，弹一个他无法处置的错误只会碍事。
+   */
+  const dismiss = useCallback(
+    (token: string) => {
+      setPending(null);
+      onClose();
+      void cancelQr(token).catch(() => {});
+    },
+    [onClose],
+  );
+
   // 安卓返回键：相机取景中按返回应当取消扫描并关掉相机，确认框开着时按返回等于放弃确认。
   // 两者都不拦的话返回会穿透到路由层，相机还留在开着的状态。
+  //
+  // 确认框那一支必须与点「取消」走同一条收尾：按返回同样是放弃授权，
+  // 只把弹层关掉而不回报服务端，被扫端就会一直停在「请在手机上确认」直到会话过期。
   useEffect(() => {
     if (!active && pending === null) return;
     return registerBackInterceptor(() => {
       if (pending !== null) {
-        setPending(null);
-        onClose();
+        dismiss(pending.token);
         return true;
       }
       cancelScan?.();
       onClose();
       return true;
     });
-  }, [active, pending, cancelScan, onClose]);
+  }, [active, pending, cancelScan, onClose, dismiss]);
 
   async function handleConfirm() {
     const current = pending;
@@ -122,11 +148,6 @@ export function ScanQrEntry({ scan, cancelScan, active, onClose }: ScanQrEntryPr
     } finally {
       onClose();
     }
-  }
-
-  function handleCancel() {
-    setPending(null);
-    onClose();
   }
 
   return (
@@ -148,7 +169,7 @@ export function ScanQrEntry({ scan, cancelScan, active, onClose }: ScanQrEntryPr
         message={t("auth.qrConfirmMessage", { nickname: pending?.who.nickname ?? "" })}
         confirmLabel={t("auth.qrConfirmLogin")}
         onConfirm={handleConfirm}
-        onCancel={handleCancel}
+        onCancel={() => pending !== null && dismiss(pending.token)}
       />
     </>
   );

@@ -291,6 +291,25 @@ function wireSocket() {
       }
     },
 
+    "message.edited": (p) => {
+      useMessageStore.getState().applyEdited(p.conversation_id, p.message_id, p.text, p.edit_count);
+      // 编辑最后一条时会话列表预览必须同步刷新，否则实时下预览停在旧文本
+      //（刷新页面后服务端 GetLastMessage 实时查库会给出新文本，此处只补实时缺口）
+      const convStore = useConversationStore.getState();
+      const conv = convStore.conversations.find((c) => c.id === p.conversation_id);
+      if (!conv || conv.lastSeq !== p.seq) return;
+      // 群聊里他人的消息预览带"昵称: "前缀（口径同 message.receive）。edited 帧不含昵称，
+      // 改从本地这条消息上取——applyEdited 刚刚更新过它，昵称必然在位。
+      const edited = (useMessageStore.getState().messagesByConv[p.conversation_id] ?? []).find(
+        (m) => m.id === p.message_id,
+      );
+      const prefix =
+        conv.type === "group" && edited && !edited.isSelf && edited.senderName
+          ? edited.senderName + ": "
+          : "";
+      convStore.updateConversation(p.conversation_id, { lastMessage: prefix + p.text });
+    },
+
     typing: (p) => {
       useMessageStore.getState().setTyping(p.conversation_id, p.nickname);
     },
@@ -413,11 +432,18 @@ function injectDemoData() {
   }
   const msgState = useMessageStore.getState();
   if (Object.keys(msgState.messagesByConv).length === 0) {
-    // demo 消息无 created_at，统一按"今天"补 dateKey，保证分隔线正常渲染
+    // demo 消息无 created_at：dateKey 统一按"今天"补（分隔线要用），createdAtMs 按"刚刚"补。
+    // 后者不补的话撤回（2 分钟）与编辑（5 分钟）的窗口判定拿不到发送时间，一律判成不可用 ——
+    // mock 模式下这两个菜单项恒不出现，演示与 E2E 都测不到（见 canEdit / recallStillOpen）
     const todayKey = dateKeyOf(new Date());
+    const nowMs = Date.now();
     const withDateKey: Record<string, ChatMessage[]> = {};
     for (const [convId, list] of Object.entries(DEMO_MESSAGES)) {
-      withDateKey[convId] = list.map((m) => ({ ...m, dateKey: todayKey }));
+      withDateKey[convId] = list.map((m) => ({
+        ...m,
+        dateKey: todayKey,
+        createdAtMs: m.createdAtMs ?? nowMs,
+      }));
     }
     useMessageStore.setState({ messagesByConv: withDateKey, typingByConv: DEMO_TYPING });
   }
