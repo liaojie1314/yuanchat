@@ -17,7 +17,7 @@
 - **GitFlow**：本计划全程在 `feature/message-edit` 分支（已自 dev @ `3985bfc` 切出）。禁直提 `dev`/`main`。完成后 `--no-ff` 合回 dev，**禁 squash**。
 - **Commit**：Conventional Commits `<type>(<scope>): <subject>`，**不带版本号前缀**（不写 `feat(v0.4/K1):`）。完成一个完整工作单元再提交，禁逐点提交。
 - **i18n**：用户可见文案禁硬编码，走 `react-i18next` 的 `t()`。四语必须同步：`packages/design-system/src/i18n/locales/{zh-CN,en-US,ja-JP,ko-KR}.json`。**插值用 `%{var}`（Rails 风格），不是 `{{var}}`**。`node scripts/check-i18n.mjs` 是 CI 门禁，会挡漏翻/错 key/死键。
-- **浏览器兼容**：`build.target=es2019`。**禁用 `?.` 和 `??`**（旧 Android WebView Chrome 74 解析期 SyntaxError → 白屏）。新增 Web API 前确认 Chrome 74+ 支持。
+- **浏览器兼容**：`build.target=es2019` 不得改动。源码**允许** `?.` / `??`（由 build.target 转译，仓内既有代码已普遍使用）；禁止的是使用未在 Chrome 74+ WebView 验证过的 Web API。Task 16 Step 6 会 grep 构建产物兜底。
 - **UI 圆角**：上限 `rounded-lg`（8px），禁 `rounded-xl`/`rounded-2xl`（`rounded-full` 圆形除外）。
 - **注释**：只用中文。导出函数/组件/Store/Hook 必须 JSDoc，Go 导出函数/包必须 godoc。禁在注释里写进度/批次号。
 - **MSW**：新增 API 调用须 Mock 覆盖正常/空/错误/加载四态。错误态用 query 参数触发（`?error=1`），加载态用 `await delay(300)`。
@@ -1950,7 +1950,7 @@ Expected: 全部 PASS
     },
 ```
 
-**注意**：用 `for` 循环而非 `Array.prototype.find`（`find` 在 Chrome 74 可用，但此处用循环与文件内既有风格一致）；**禁用 `?.`**（es2019 门禁），故用显式 `target &&` 判空。核对 `useConversationStore` 的导入是否已在文件顶部，以及 `lastSeq` 字段名与 `updateConversation` 签名（`conversationStore.ts:99`）。
+**注意**：用 `for` 循环而非 `Array.prototype.find`，与文件内既有风格一致。核对 `useConversationStore` 的导入是否已在文件顶部，以及 `lastSeq` 字段名与 `updateConversation` 签名（`conversationStore.ts:99`）。
 
 - [ ] **Step 8: 加 API 函数与 mapMessage 映射**
 
@@ -2037,11 +2037,12 @@ git commit -m "feat(message): 共享层编辑 action、闸门判定与 API 客�
 
 - Modify: `packages/design-system/src/i18n/locales/{zh-CN,en-US,ja-JP,ko-KR}.json`
 - Modify: `packages/shared/src/mocks/handlers.ts:758-763`
+- Modify: `packages/shared/src/mocks/demoData.ts`（m6 样本补 `editCount`）
 
 **Interfaces:**
 
 - Consumes: Task 5 的端点与业务码；Task 6 的 API 函数
-- Produces: 11 个 i18n key；三个端点的 MSW mock
+- Produces: 13 个 i18n key（11 个 chat.message.\* + 2 个 common.\*）；三个端点的 MSW mock；可点角标所需的 demo 数据
 
 - [ ] **Step 1: 四份 locale 加 key**
 
@@ -2113,12 +2114,22 @@ ko-KR：
 
 **不要加 `chat.message.edited`** —— 四语已存在（:326）。
 
-- [ ] **Step 2: 跑 i18n 门禁**
+**另需补两个通用 key**（预检核实 `common.retry` 已存在于 zh-CN.json:11，但下面两个**不存在**，而 Task 9 用 `common.empty`、Task 10 用 `common.error`）：
+
+| key            | zh-CN    | en-US            | ja-JP              | ko-KR               |
+| -------------- | -------- | ---------------- | ------------------ | ------------------- |
+| `common.empty` | 暂无内容 | No content       | 内容がありません   | 내용이 없습니다     |
+| `common.error` | 操作失败 | Operation failed | 操作に失敗しました | 작업에 실패했습니다 |
+
+加之前先确认它们确实不存在（`grep -n '"common.empty"\|"common.error"' packages/design-system/src/i18n/locales/zh-CN.json`）；若已被别的任务加过则跳过。
+
+- [ ] **Step 2: 记录 i18n 门禁现状（非门禁步）**
 
 Run: `node scripts/check-i18n.mjs`
-Expected: 报**死键**（新 key 还没被代码使用）。这是预期的 —— 记下报告内容，Task 9/10 用上这些 key 后必须回来重跑至全绿。
 
-若门禁把死键判为硬失败而阻断，则把本 Step 移到 Task 10 之后执行，Step 1 的 key 先加着不提交。
+此时新 key 尚无代码引用，**预期报死键**。这是加 key 与用 key 跨任务的必然中间态 ——
+预检已核实 `.husky/pre-commit` 只跑 lint-staged + 两端 typecheck、**不跑 check-i18n**，
+故本步不阻塞提交。记下输出即可。**真正的 i18n 门禁在 Task 10 Step 5**（那时 key 已被引用，必须全绿）。
 
 - [ ] **Step 3: 补三个端点的 MSW mock**
 
@@ -2221,18 +2232,29 @@ const SILENT_WAV_DATA_URL =
 
 **注意**：`.webm` 既可能是语音（`files/*.webm`）也可能是视频，都回音频占位即可（播放器不报错优先）。上面的 base64 需实测能被 Chrome decode —— 若不行，用 Node 生成一个最小合法 WAV 再替换。
 
-- [ ] **Step 5: 验证 mock 模式语音可播**
+- [ ] **Step 5: demo 数据补 editCount（Task 12 的前置）**
+
+`packages/shared/src/mocks/demoData.ts` 的 m6 样本现在只有 `edited: true`（约 :177），**没有 `editCount`**。
+而 Task 10 的「已编辑」角标仅在 `editCount > 0` 时才渲染成可点按钮 —— 不补的话 Task 12 的
+「点角标打开历史弹层」用例必然失败。在 `edited: true` 那行后追加：
+
+```ts
+      editCount: 2,
+```
+
+- [ ] **Step 6: 验证 mock 模式语音可播**
 
 Run: `pnpm dev:web:mock`，浏览器打开 `http://localhost:5173`，登录进第一个会话，点播 demo 语音消息。
 Expected: 不再出现「播放失败」toast（可能无声，因为是静音占位）
 
 Run: `pnpm dev:stop`
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add packages/design-system/src/i18n/locales/ \
-        packages/shared/src/mocks/handlers.ts
+        packages/shared/src/mocks/handlers.ts \
+        packages/shared/src/mocks/demoData.ts
 git commit -m "feat(i18n): 消息编辑四语文案；fix(mock): download-url 按后缀给可播放占位"
 ```
 
@@ -2591,7 +2613,7 @@ export function MessageEditHistoryDialog(props: MessageEditHistoryDialogProps) {
 
 **注意**：
 
-- `common.retry` / `common.empty` 需确认四语已存在 —— Run `grep -n '"common.retry"\|"common.empty"' packages/design-system/src/i18n/locales/zh-CN.json`。不存在则改用已有的等价 key，或在 Task 7 的 key 列表里补上。
+- `common.retry` 已核实存在（zh-CN.json:11）；`common.empty` 由 Task 7 补齐（见 Task 7 Step 1 的通用 key 表）。若 Task 7 因故未加，本任务自行补进四份 locale，不要改用别的 key 绕过。
 - 颜色工具类必须在色板内（`pnpm check:theme` 门禁）—— 上面的 `bg-surface`/`text-fg`/`text-fg-muted`/`border-border`/`bg-muted`/`text-accent` 需逐个核对是否在 `packages/design-system` 的色板里，不在则换成实际存在的类名。
 
 - [ ] **Step 4: 运行测试确认通过**
@@ -2637,7 +2659,17 @@ git commit -m "feat(ui): 消息编辑历史弹层（四态 + Esc 关闭）"
 - Consumes: Task 6 的 `canEdit`/`editMessage`；Task 9 的 `MessageEditHistoryDialog`；Task 7 的 i18n key
 - Produces: 用户可见的完整编辑流
 
-- [ ] **Step 1: MessageBubble 加编辑菜单项与可点角标**
+- [ ] **Step 1: MessageBubble 加编辑菜单项、可点角标与 data-self**
+
+先补一个 E2E 需要的属性：`MessageBubble.tsx:371` 现有 `data-kind={msg.kind}`（挂在气泡本体、
+即右键菜单的宿主元素上），**但没有区分自己/对方的属性**。Task 12 的 E2E 要用
+`[data-kind="text"][data-self="true"]` 精确选中「自己发的文本消息」，故在 `data-kind` 那行旁追加：
+
+```tsx
+            data-self={msg.isSelf ? "true" : "false"}
+```
+
+挂在同一宿主元素上，与 `data-kind` 既有注释里「E2E 既能按形态计数」的意图一致。
 
 `MessageBubble.tsx` 的 props 接口加：
 
