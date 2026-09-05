@@ -7,7 +7,7 @@
  */
 import { apiGet, apiPatch, apiPost, apiPut } from "./client";
 import i18n from "@yuanchat/design-system/i18n";
-import { previewBodyOf } from "../utils/messagePreview";
+import { previewBodyOf, quoteExcerptOf } from "../utils/messagePreview";
 import type { Conversation } from "../store/conversationStore";
 import type { ChatMessage } from "../store/messageStore";
 
@@ -464,6 +464,42 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
   };
 }
 
+/**
+ * 给一页历史消息就地回填引用快照（`quote`）。
+ *
+ * @param messages - 同一页已映射好的消息（顺序不限，函数自建 id 索引）
+ * @remarks `quote` 原先只在 `sendText` 时由前端按当时的 UI 快照填入，REST 历史
+ *   路径从不产出 —— 刷新页面后引用块整体消失。这里在同一页内按 `replyToId`
+ *   找原消息并现场拼快照，兑现 `ChatMessage.replyToId` 注释里承诺的「惰性拉取」。
+ *
+ *   只在**本页内**查找：三条 REST 路径（loadHistory / loadMore / seekToMessage）
+ *   里 store 都不可能提供本页缺的原消息 —— loadHistory 仅在该会话消息为空时才发请求，
+ *   loadMore / seekToMessage 拿的是更早的页而 store 里存的是更晚的消息，
+ *   而引用目标必然早于引用者。原消息不在本页时保持 `undefined`，不编造内容。
+ *
+ *   已撤回的原消息也跳过：服务端撤回时把 content 清成 `{}`，摘要必为空串，
+ *   拼出来只会是「昵称 + 一行空白」的空引用块。
+ *
+ *   就地改动而非返回新数组：入参是 `fetchMessages` 刚 map 出来的临时对象，
+ *   尚未被任何 store 观察到，复制一遍没有收益。
+ */
+export function backfillQuotes(messages: ChatMessage[]): void {
+  const byId: Record<string, ChatMessage> = {};
+  for (let i = 0; i < messages.length; i++) byId[messages[i].id] = messages[i];
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (!m.replyToId || m.quote) continue;
+    const src = byId[m.replyToId];
+    if (!src || src.recalled) continue;
+    m.quote = {
+      messageId: src.id,
+      // sender_nickname 后端必给，兜底只为防空串渲染出无名引用
+      senderName: src.senderName || (src.isSelf ? i18n.t("common.me") : ""),
+      excerpt: quoteExcerptOf(src),
+    };
+  }
+}
+
 // ========================================
 // API 调用
 // ========================================
@@ -508,6 +544,7 @@ export async function fetchMessages(
   );
   // 后端返回 seq 降序，前端消息流按时间升序展示
   const messages = (data.messages || []).map((m) => mapMessage(m, selfUserId)).reverse();
+  backfillQuotes(messages);
   return { messages, hasMore: !!data.has_more };
 }
 
