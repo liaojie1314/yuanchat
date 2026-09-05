@@ -33,6 +33,7 @@ import {
   addFavorite,
   addSticker,
   ApiError,
+  editMessage,
   formatDateDivider,
   getDownloadUrl,
   hashBlob,
@@ -40,6 +41,7 @@ import {
   quoteExcerptOf,
   recallMessage,
   RE_EDIT_WINDOW_MS,
+  registerBackInterceptor,
   reportMessage,
   showToast,
   toggleReaction,
@@ -48,7 +50,7 @@ import {
   useMessageStore,
 } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
-import type { MentionRef } from "@yuanchat/shared";
+import type { ChatMessage, MentionRef } from "@yuanchat/shared";
 import { Avatar } from "./Avatar";
 import { AnnouncementDialog } from "./AnnouncementDialog";
 import { Composer } from "./Composer";
@@ -59,6 +61,7 @@ import { ImageLightbox } from "./ImageLightbox";
 import { ConversationMediaView } from "./ConversationMediaView";
 import { InConversationSearch } from "./InConversationSearch";
 import { MessageBubble, TypingIndicator } from "./MessageBubble";
+import { MessageEditHistoryDialog } from "./MessageEditHistoryDialog";
 
 export function ChatWindow({
   onBack,
@@ -107,6 +110,10 @@ export function ChatWindow({
   const [showAnnouncement, setShowAnnouncement] = useState(false);
   // 会话媒体相册全屏视图开关
   const [showMedia, setShowMedia] = useState(false);
+  // 正在编辑的消息 id（null 表示非编辑态）：底部输入区据此把发送切成保存语义
+  const [editingId, setEditingId] = useState<string | null>(null);
+  // 编辑历史弹层的目标消息 id（null 表示关闭）
+  const [historyId, setHistoryId] = useState<string | null>(null);
   const selfUserId = useAuthStore((s) => s.user?.id);
 
   const items = messages ?? [];
@@ -162,6 +169,25 @@ export function ChatWindow({
     // rowVirtualizer 引用稳定，不加入 deps 防止无限循环
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightMsgId, setHighlightMsgId, items]);
+
+  /**
+   * 退出编辑态：清掉编辑目标，并把先前塞进输入框的原文一并清空。
+   *
+   * @remarks 不清空的话原文会留在输入框里，下一次回车就被当成一条新消息发出去。
+   */
+  const exitEditing = useCallback(() => {
+    setEditingId(null);
+    useMessageStore.getState().setComposerInsert("");
+  }, []);
+
+  // 安卓系统返回键：编辑态下先退出编辑。不拦的话这一按会被当成「已在标签根页面」而退出应用
+  useEffect(() => {
+    if (!editingId) return;
+    return registerBackInterceptor(() => {
+      exitEditing();
+      return true;
+    });
+  }, [editingId, exitEditing]);
 
   // 滚动到顶部时向上翻页
   const handleScroll = useCallback(() => {
@@ -241,6 +267,37 @@ export function ChatWindow({
         showToast("error", t("common.opFailed"));
       }
     });
+  };
+
+  /**
+   * 进入编辑态：记住正在编辑哪一条，并把原文送进底部输入区。
+   *
+   * @remarks 刻意不在气泡里内嵌 textarea——消息流是虚拟滚动，行高在输入过程中突变会让
+   *   列表跳动，移动端还要跟软键盘顶起搏斗；复用底部 Composer 两个问题都不存在。
+   */
+  const handleEdit = (msg: ChatMessage) => {
+    if (!msg.text) return;
+    setEditingId(msg.id);
+    useMessageStore.getState().setComposerInsert(msg.text);
+  };
+
+  /**
+   * 保存编辑：成功与失败都退出编辑态；气泡正文不乐观翻转，
+   * 等服务端 message.edited 帧统一走 applyEdited，保证各端一致（同 handleRecall 的姿态）。
+   */
+  const handleSaveEdit = (text: string) => {
+    const id = editingId;
+    if (!id) return;
+    editMessage(id, text)
+      .then(() => exitEditing())
+      .catch((err) => {
+        exitEditing();
+        const code = err instanceof ApiError ? err.code : 0;
+        if (code === 4032) showToast("error", t("chat.message.editExpired"));
+        else if (code === 4033) showToast("error", t("chat.message.editLimitReached"));
+        else if (code === 4004) showToast("error", t("chat.message.editEmpty"));
+        else showToast("error", t("common.error"));
+      });
   };
 
   /**
@@ -514,6 +571,10 @@ export function ChatWindow({
                             }
                           : undefined
                       }
+                      // 编辑资格（本人 / 已确认 / 纯文本 / 5 分钟内）由 canEdit 在气泡内现算，
+                      // 这里无条件给回调，闸门不在此处重复一遍
+                      onEdit={handleEdit}
+                      onShowEditHistory={setHistoryId}
                       onAvatarClick={
                         // 自己的消息点自己的头像看自己的资料（乐观发送的本地条目没有
                         // senderId，用登录态的 userId 兜底）
@@ -554,6 +615,9 @@ export function ChatWindow({
         onSend={handleSend}
         compact={compactComposer}
         onOpenMedia={() => setShowMedia(true)}
+        editingMessageId={editingId}
+        onCancelEdit={exitEditing}
+        onSaveEdit={handleSaveEdit}
       />
 
       {/* 图片全屏查看器（点击气泡内图片打开） */}
@@ -579,6 +643,17 @@ export function ChatWindow({
           peerName={conv.name}
           open={showSafetyNumber}
           onClose={() => setShowSafetyNumber(false)}
+        />
+      )}
+
+      {/* 编辑历史弹层：首版时间只能取消息本身的发送时间（历史每行的 editedAt 是
+          该版本被替换掉的时刻，首版拿它会显示成第二版的生效时间） */}
+      {historyId && (
+        <MessageEditHistoryDialog
+          messageId={historyId}
+          open
+          createdAtMs={items.find((m) => m.id === historyId)?.createdAtMs}
+          onClose={() => setHistoryId(null)}
         />
       )}
 

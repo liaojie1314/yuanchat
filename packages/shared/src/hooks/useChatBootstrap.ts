@@ -432,11 +432,18 @@ function injectDemoData() {
   }
   const msgState = useMessageStore.getState();
   if (Object.keys(msgState.messagesByConv).length === 0) {
-    // demo 消息无 created_at，统一按"今天"补 dateKey，保证分隔线正常渲染
+    // demo 消息无 created_at：dateKey 统一按"今天"补（分隔线要用），createdAtMs 按"刚刚"补。
+    // 后者不补的话撤回（2 分钟）与编辑（5 分钟）的窗口判定拿不到发送时间，一律判成不可用 ——
+    // mock 模式下这两个菜单项恒不出现，演示与 E2E 都测不到（见 canEdit / recallStillOpen）
     const todayKey = dateKeyOf(new Date());
+    const nowMs = Date.now();
     const withDateKey: Record<string, ChatMessage[]> = {};
     for (const [convId, list] of Object.entries(DEMO_MESSAGES)) {
-      withDateKey[convId] = list.map((m) => ({ ...m, dateKey: todayKey }));
+      withDateKey[convId] = list.map((m) => ({
+        ...m,
+        dateKey: todayKey,
+        createdAtMs: m.createdAtMs ?? nowMs,
+      }));
     }
     useMessageStore.setState({ messagesByConv: withDateKey, typingByConv: DEMO_TYPING });
   }

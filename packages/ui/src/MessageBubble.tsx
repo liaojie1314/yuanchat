@@ -24,6 +24,8 @@
  * @param onImageClick - 点击图片气泡打开全屏查看器的回调，参数为当前展示 URL
  * @param onFavorite - 收藏消息回调（仅服务端已确认消息提供，撤回/系统消息不可收藏）
  * @param onAvatarClick - 点头像进入用户详情页（自己的消息点自己的头像；缺省则头像不可点）
+ * @param onEdit - 点「编辑」菜单项：把这条消息交给父层，由父层把原文送进底部输入区
+ * @param onShowEditHistory - 点「已编辑」角标：打开该消息的编辑历史弹层（缺省则角标不可点）
  */
 import {
   Check,
@@ -34,6 +36,7 @@ import {
   Forward,
   Loader2,
   Pause,
+  Pencil,
   Play,
   Reply,
   RotateCcw,
@@ -45,7 +48,7 @@ import {
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { getDownloadUrl, showToast } from "@yuanchat/shared";
+import { canEdit, getDownloadUrl, showToast } from "@yuanchat/shared";
 import type { ChatMessage } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
@@ -78,6 +81,19 @@ const MENU_MIN_HEIGHT = 96;
 
 /** 气泡纵向位移超过该像素才因滚动关闭菜单，容忍「零位移」滚动事件与真机抖动 */
 const SCROLL_CLOSE_DELTA = 8;
+
+/**
+ * 开菜单瞬间求得的限时菜单项可用性（撤回 2 分钟 / 编辑 5 分钟）。
+ *
+ * @remarks 两项都要拿当前时间和消息发送时间比，结果随时间变化，
+ *   故只能在右键/长按事件里求值一次并存进 state，不能在 render 期算。
+ */
+interface TimedWindows {
+  /** 撤回项可用 */
+  recall: boolean;
+  /** 编辑项可用 */
+  edit: boolean;
+}
 
 /** 把文本中的所有 @昵称 段切成高亮 token（只在消息 mentions 非空时启用） */
 function renderTextWithMentions(text: string, mentions?: string[]) {
@@ -112,6 +128,8 @@ export function MessageBubble({
   onAddSticker,
   onReport,
   onAvatarClick,
+  onEdit,
+  onShowEditHistory,
 }: {
   msg: ChatMessage;
   compact?: boolean;
@@ -126,6 +144,10 @@ export function MessageBubble({
   onAddSticker?: () => void;
   onReport?: () => void;
   onAvatarClick?: () => void;
+  /** 点编辑菜单项：进入编辑态（父层把原文送进 Composer） */
+  onEdit?: (msg: ChatMessage) => void;
+  /** 点「已编辑」角标：打开历史弹层 */
+  onShowEditHistory?: (messageId: string) => void;
 }) {
   const { t } = useTranslation();
   // 气泡内联操作菜单（右键 / 长按弹出，点外部关闭）
@@ -133,6 +155,8 @@ export function MessageBubble({
   // 撤回项是否在 2 分钟窗口内——在打开菜单的事件里用 Date.now() 求值并存下，
   // 避免在 render 里调用 Date.now()（不纯，react-hooks/purity 禁止）
   const [recallInWindow, setRecallInWindow] = useState(false);
+  // 编辑项是否可用——理由同 recallInWindow：判定含时间比较，只能在开菜单的事件里求值
+  const [editInWindow, setEditInWindow] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
   // 菜单锚点（视口坐标）：右键落点或长按触点。
@@ -171,8 +195,9 @@ export function MessageBubble({
   const showRecall = recallEligible && recallInWindow;
 
   /** 菜单是否有任何可用项：一项都没有就不弹 */
-  const hasMenuItem = (withinWindow: boolean) =>
-    withinWindow ||
+  const hasMenuItem = (windows: TimedWindows) =>
+    windows.recall ||
+    windows.edit ||
     canCopy ||
     canReply ||
     !!onReact ||
@@ -186,9 +211,16 @@ export function MessageBubble({
   /** 撤回是否还在 2 分钟窗口内（Date.now 不纯，只能在事件里求值，不能在 render 调用） */
   const recallStillOpen = () => recallEligible && Date.now() - (msg.createdAtMs ?? 0) < 120_000;
 
+  /** 编辑是否还可用：本人、服务端已确认、纯文本且在 5 分钟窗口内（判定同样含时间比较） */
+  const editStillOpen = () => !!onEdit && canEdit(msg, Date.now());
+
+  /** 取当下的限时项可用性快照：「有没有可用项」与菜单渲染共用同一份，避免两处判定漂移 */
+  const timedWindows = (): TimedWindows => ({ recall: recallStillOpen(), edit: editStillOpen() });
+
   /** 在给定视口坐标处打开菜单 */
-  const openMenuAt = (withinWindow: boolean, x: number, y: number) => {
-    setRecallInWindow(withinWindow);
+  const openMenuAt = (windows: TimedWindows, x: number, y: number) => {
+    setRecallInWindow(windows.recall);
+    setEditInWindow(windows.edit);
     setMenuAnchor({ x, y });
     bubbleTopAtOpen.current = bubbleRef.current?.getBoundingClientRect().top ?? 0;
     // 先清掉上一次的定位与限高，让 layout effect 量到未被裁的原始尺寸
@@ -197,17 +229,17 @@ export function MessageBubble({
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
-    const withinWindow = recallStillOpen();
-    if (!hasMenuItem(withinWindow)) return;
+    const windows = timedWindows();
+    if (!hasMenuItem(windows)) return;
     e.preventDefault();
-    openMenuAt(withinWindow, e.clientX, e.clientY);
+    openMenuAt(windows, e.clientX, e.clientY);
   };
 
-  /** 长按达成：按当下的撤回窗口重新判定可用项，再在触点处弹菜单 */
+  /** 长按达成：按当下的撤回/编辑窗口重新判定可用项，再在触点处弹菜单 */
   const handleLongPress = (x: number, y: number) => {
-    const withinWindow = recallStillOpen();
-    if (!hasMenuItem(withinWindow)) return;
-    openMenuAt(withinWindow, x, y);
+    const windows = timedWindows();
+    if (!hasMenuItem(windows)) return;
+    openMenuAt(windows, x, y);
   };
 
   // 触屏长按手势：位移容差 + 抬手后的合成事件豁免都在 hook 里，详见 useLongPress
@@ -307,6 +339,11 @@ export function MessageBubble({
     onReply?.();
   };
 
+  const handleEdit = () => {
+    setMenuOpen(false);
+    onEdit?.(msg);
+  };
+
   const handleForward = () => {
     setMenuOpen(false);
     onForward?.();
@@ -369,6 +406,9 @@ export function MessageBubble({
             // data-kind 挂在气泡本体（右键菜单的宿主元素）上：E2E 既能按形态计数，
             // 也能直接右键定位到会弹菜单的那个节点。原 E2E 用的选择器应用里不存在。
             data-kind={msg.kind}
+            // 自己/对方也挂在同一宿主上：E2E 用 [data-kind="text"][data-self="true"]
+            // 精确选中「自己发的文本消息」（编辑入口只对这一类出现）
+            data-self={msg.isSelf ? "true" : "false"}
             className={cn(
               "relative w-fit max-w-full break-words select-text",
               msg.kind === "sticker"
@@ -592,6 +632,16 @@ export function MessageBubble({
                       <Reply size={15} /> {t("chat.message.reply")}
                     </button>
                   )}
+                  {editInWindow && (
+                    <button
+                      role="menuitem"
+                      data-testid="msg-menu-edit"
+                      onClick={handleEdit}
+                      className="text-body-md text-on-surface hover:bg-surface-container-highest flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors"
+                    >
+                      <Pencil size={15} /> {t("chat.message.edit")}
+                    </button>
+                  )}
                   {canForward && (
                     <button
                       role="menuitem"
@@ -685,7 +735,21 @@ export function MessageBubble({
           ) : (
             <>
               <span className="tabular-nums">{msg.time}</span>
-              {msg.edited && <span className="opacity-65">· {t("chat.message.edited")}</span>}
+              {msg.edited &&
+                // editCount 为 0 时点开只会是一份空列表（历史表无行），故仍渲染成纯文本
+                (onShowEditHistory && (msg.editCount ?? 0) > 0 ? (
+                  <button
+                    type="button"
+                    data-testid="msg-edited-badge"
+                    className="underline-offset-2 opacity-65 hover:underline"
+                    aria-label={t("chat.message.editHistory")}
+                    onClick={() => onShowEditHistory(msg.id)}
+                  >
+                    · {t("chat.message.edited")}
+                  </button>
+                ) : (
+                  <span className="opacity-65">· {t("chat.message.edited")}</span>
+                ))}
               {isSelf && msg.status === "sending" && (
                 <Loader2 size={12} className="animate-spin" aria-label={t("chat.status.sending")} />
               )}

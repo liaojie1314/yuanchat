@@ -14,6 +14,9 @@
  * @param onSend - 发送回调，参数为去除首尾空白后的文本
  * @param compact - 移动端紧凑模式
  * @param onOpenMedia - 打开会话媒体相册（移动端由「更多」面板触发，桌面端仍在顶栏）
+ * @param editingMessageId - 非空即编辑态：顶部出提示条、发送按钮语义变「保存」、提交改走 onSaveEdit
+ * @param onCancelEdit - 退出编辑态（提示条的取消按钮与 Esc 键触发）
+ * @param onSaveEdit - 保存编辑（编辑态下替代 onSend；回车与发送按钮两条入口都走这里）
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -55,16 +58,37 @@ import { VoiceRecorderBar } from "./VoiceRecorderBar";
 /** typing 帧节流间隔：输入期间最多每 3s 上报一次 */
 const TYPING_THROTTLE_MS = 3000;
 
+/**
+ * 按内容同步 textarea 高度（上限 160px，超出后内部滚动）。
+ *
+ * @param el - 目标 textarea
+ * @remarks 放模块级而非组件内：它只吃传入的元素、不读组件状态，
+ *   组件内的话每次 render 都是新函数，effect 里用它就得进依赖数组。
+ */
+function autoGrow(el: HTMLTextAreaElement) {
+  el.style.height = "auto";
+  el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+}
+
 export function Composer({
   onSend,
   compact = false,
   onOpenMedia,
+  editingMessageId,
+  onCancelEdit,
+  onSaveEdit,
 }: {
   /** 发送回调：text 为去除首尾空白后的正文，mentions 为收集到的 @ 用户 ID+昵称 */
   onSend: (text: string, mentions: MentionRef[]) => void;
   compact?: boolean;
   /** 打开媒体相册（移动端「更多」面板入口；缺省时该项不渲染） */
   onOpenMedia?: () => void;
+  /** 非空表示编辑态：显示提示条，发送按钮语义变「保存」 */
+  editingMessageId?: string | null;
+  /** 取消编辑 */
+  onCancelEdit?: () => void;
+  /** 保存编辑（编辑态下替代 onSend） */
+  onSaveEdit?: (text: string) => void;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -129,12 +153,19 @@ export function Composer({
 
   const canSend = value.trim().length > 0;
 
-  // 撤回重新编辑：composerInsert 非空 → 覆盖输入框值 + 聚焦，随即清空该字段
+  // 撤回重新编辑 / 进入编辑态：composerInsert 非空 → 覆盖输入框值 + 聚焦，随即清空该字段
   useEffect(() => {
     if (composerInsert === null) return;
     setValue(composerInsert);
     useMessageStore.getState().setComposerInsert(null);
-    requestAnimationFrame(() => textareaRef.current?.focus());
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      // 送进来的原文可能是多行：高度只随 onChange 长大，不同步这一次就停在一行，
+      // 用户得在一行高的框里滚动着改；清空（编辑退出）时同理要缩回去
+      autoGrow(el);
+    });
   }, [composerInsert]);
 
   // 表情面板打开时，监听 document mousedown：点击面板外部即关闭
@@ -213,6 +244,13 @@ export function Composer({
   const send = () => {
     const text = value.trim();
     if (!text) return;
+    // 编辑态：回车与发送按钮共用这一个出口，必须整条改走保存，
+    // 否则会出现「按钮能保存、回车却发出一条新消息」。清空输入框交给父层
+    // （保存成功与失败都要退出编辑态，由父层统一收口）
+    if (editingMessageId) {
+      onSaveEdit?.(text);
+      return;
+    }
     // 只保留仍出现在正文里的 mentions（避免用户回删 @ 后仍上送）
     const alive = pickedMentions.filter((m) => text.includes("@" + m.name));
     onSend(text, alive);
@@ -381,6 +419,12 @@ export function Composer({
         return;
       }
     }
+    // 编辑态 Esc 退出（@ 选择器打开时 Esc 归它消费，上面那段已经 return 了）
+    if (e.key === "Escape" && editingMessageId) {
+      e.preventDefault();
+      onCancelEdit?.();
+      return;
+    }
     // @提及整体删除：光标紧邻 "@昵称" 时，一次退格/删除清掉整段（连尾随空格），
     // 而不是逐字符啃出 "@李" 这种发不出去的残片。
     // 正在敲 @query（选择器判定中）时不整体处理：此刻用户是在编辑昵称本身
@@ -455,11 +499,6 @@ export function Composer({
     }
   };
 
-  const autoGrow = (el: HTMLTextAreaElement) => {
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-  };
-
   /** 引用回复条（两种模式共用） */
   const replyBar = replyingTo && (
     <div className="border-primary bg-surface-container mb-2 flex items-center gap-2 rounded-lg border-l-[3px] px-3 py-2">
@@ -476,6 +515,24 @@ export function Composer({
         className="md3-icon-btn text-on-surface-variant !h-7 !w-7"
       >
         <X size={14} />
+      </button>
+    </div>
+  );
+
+  /** 编辑态提示条（两种布局共用）：说明正在编辑 + 取消入口 */
+  const editingBar = editingMessageId && (
+    <div
+      data-testid="composer-editing-hint"
+      className="border-primary bg-surface-container text-label-md text-on-surface-variant mb-2 flex items-center justify-between gap-2 rounded-lg border-l-[3px] px-3 py-2"
+    >
+      <span>{t("chat.message.editing")}</span>
+      <button
+        type="button"
+        data-testid="composer-cancel-edit"
+        onClick={onCancelEdit}
+        className="text-primary font-medium"
+      >
+        {t("chat.message.editCancel")}
       </button>
     </div>
   );
@@ -512,6 +569,7 @@ export function Composer({
             />
           </div>
         )}
+        {editingBar}
         {replyBar}
         <div className="flex items-end gap-2">
           <textarea
@@ -538,7 +596,7 @@ export function Composer({
           <button
             onClick={send}
             disabled={!canSend}
-            aria-label={t("chat.input.send")}
+            aria-label={editingMessageId ? t("chat.message.editSave") : t("chat.input.send")}
             className={cn(
               "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white transition-transform",
               canSend ? "brand-gradient active:scale-90" : "bg-outline-variant",
@@ -665,6 +723,7 @@ export function Composer({
           />
         </div>
       )}
+      {editingBar}
       {replyBar}
       {recording ? (
         voiceBar
@@ -730,7 +789,7 @@ export function Composer({
             <button
               onClick={send}
               disabled={!canSend}
-              aria-label={t("chat.input.send")}
+              aria-label={editingMessageId ? t("chat.message.editSave") : t("chat.input.send")}
               className={cn(
                 "brand-gradient flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white transition-all",
                 canSend
