@@ -133,6 +133,14 @@ func (s *AdminService) DeleteMessage(ctx context.Context, actorID, messageID uui
 	return nil
 }
 
+// AuditMessageEditsView 记录「管理员查看消息编辑历史」这一取证动作。
+//
+// 历史内容本身由 MessageService.EditHistoryForAdmin 提供，本方法只负责留痕 ——
+// 审计写入统一收在 AdminService，不散到 handler 里。
+func (s *AdminService) AuditMessageEditsView(ctx context.Context, actorID, messageID uuid.UUID) {
+	s.audit(ctx, actorID, model.AdminActionViewMessageEdits, "message", messageID.String(), nil)
+}
+
 // ListLogs 分页列出审计日志。
 func (s *AdminService) ListLogs(ctx context.Context, actorID *uuid.UUID, action string, page, size int) ([]repository.LogWithActor, int64, error) {
 	return s.repo.ListLogs(ctx, actorID, action, (page-1)*size, size)

@@ -37,4 +37,6 @@ const (
 	AdminActionClearPackFlag   = "clear_sticker_pack_flag"
 	// AdminActionResetAvatar 管理端重置用户头像（avatar_url 置空，恢复默认头像）。
 	AdminActionResetAvatar = "reset_avatar"
+	// AdminActionViewMessageEdits 管理员查看消息编辑历史（取证动作，须留痕）。
+	AdminActionViewMessageEdits = "view_message_edits"
 )

@@ -21,12 +21,23 @@ type AdminHandler struct {
 	hub        *ws.Hub
 	dispatcher ws.Dispatcher
 	// st 对象存储句柄：管理端媒体预览签发预签名 GET 用，可能为 nil（MinIO 不可达时降级 503）。
-	st     *storage.Storage
+	st *storage.Storage
+	// msgSvc 消息服务：编辑历史取证复用其 EditHistoryForAdmin，
+	// 避免在 AdminService 里重写一份版本拼装（与 buildVersions 重复且易漂移）。
+	msgSvc *service.MessageService
 	logger *zap.Logger
 }
 
-func NewAdminHandler(svc *service.AdminService, hub *ws.Hub, st *storage.Storage, logger *zap.Logger) *AdminHandler {
-	return &AdminHandler{svc: svc, hub: hub, dispatcher: hub, st: st, logger: logger}
+// NewAdminHandler 装配管理端 handler。st / msgSvc 允许为 nil，
+// 对应端点各自降级（媒体预览 503、编辑历史 503），不影响其余端点。
+func NewAdminHandler(
+	svc *service.AdminService,
+	hub *ws.Hub,
+	st *storage.Storage,
+	msgSvc *service.MessageService,
+	logger *zap.Logger,
+) *AdminHandler {
+	return &AdminHandler{svc: svc, hub: hub, dispatcher: hub, st: st, msgSvc: msgSvc, logger: logger}
 }
 
 // mediaURLTTL 管理端预签名下载 URL 有效期。
@@ -576,6 +587,42 @@ func (h *AdminHandler) MessageMedia(c *gin.Context) {
 		"height":       media.Height,
 		"duration":     media.Duration,
 	})
+}
+
+// MessageEditHistory 取消息编辑历史（管理端取证，跳过成员与清空水位校验）。
+//
+// 查看动作本身写审计：编辑历史含用户已改掉的原文，属敏感取证数据，
+// 谁看过必须留痕（与其余 /admin/* 写操作同口径）。
+//
+//	@Summary		管理端：消息编辑历史
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Param			id	path		string	true	"消息 id"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/messages/{id}/edits [get]
+func (h *AdminHandler) MessageEditHistory(c *gin.Context) {
+	actorID, _ := middleware.GetUserID(c)
+	messageID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid message id")
+		return
+	}
+	if h.msgSvc == nil {
+		Error(c, http.StatusServiceUnavailable, 503, "message service unavailable")
+		return
+	}
+	versions, err := h.msgSvc.EditHistoryForAdmin(c.Request.Context(), messageID)
+	if err != nil {
+		if errors.Is(err, service.ErrMessageNotFound) {
+			NotFound(c, "message not found")
+			return
+		}
+		h.logger.Error("admin load edit history failed", zap.Error(err))
+		InternalError(c, "load edit history failed")
+		return
+	}
+	h.svc.AuditMessageEditsView(c.Request.Context(), actorID, messageID)
+	Success(c, gin.H{"versions": versions})
 }
 
 // ListFlaggedUGC 分页列出 UGC 敏感词命中记录（昵称 / bio / 群名 / 群公告）。
