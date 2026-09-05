@@ -253,7 +253,7 @@ yuanchat/
 - [x] 表情回应 Reactions（快捷 6 emoji 条 + 气泡 toggle + 历史聚合回填）
 - [x] 消息转发（一次最多 9 个会话）/ `@` 提及 / 消息收藏
 - [x] 贴纸与收藏表情（blob 内容寻址去重，独立 content type，前后端共用 golden 契约）
-- [ ] 消息编辑（已发送文本就地编辑 + 「已编辑」角标；区别于现有撤回后「重新编辑」回填）
+- [x] 消息编辑（已发送文本就地编辑 + 「已编辑」角标 + 全量编辑历史；5 分钟窗口 / 20 次上限 / 编辑重跑敏感词审核；区别于撤回后「重新编辑」回填）
 - [ ] 定时发送 / 稍后提醒（消息排程到指定时间）
 - [ ] 消息翻译（气泡内一键译文，接自托管机翻，不出私钥）
 - [x] 视频消息（≤120s 短视频气泡，文件选择 + 客户端抽帧封面；未做录制，见 K6 备注）
@@ -469,20 +469,102 @@ yuanchat/
 | ⚪   | 视频消息不进全文检索、不进内容审核（与 image/file/voice/sticker 现状一致，审核仅对文本生效）                                                                      |
 | ⚪   | `content->>'thumb_key'` 无表达式索引：`CanRead` 的 `key OR thumb_key` 与 GC 的 `IN` 都走不到 `idx_messages_content_key`。两处均为低频路径，等实测慢查询再补索引   |
 
+#### 2.7 K1 — 消息编辑与编辑历史（✅ 已完成，2026-09-05）
+
+设计：[`specs/2026-09-05-message-edit-design.md`](superpowers/specs/2026-09-05-message-edit-design.md)
+执行：[`plans/2026-09-05-message-edit.md`](superpowers/plans/2026-09-05-message-edit.md)（17 Task）
+分支：`feature/message-edit`（自 dev 切出，`--no-ff` 合回 dev）
+**迁移号：017**（`messages` 加 `edited_at` / `edit_count`，新表 `message_edits`）
+
+已交付：
+
+- **编辑闸门**（服务层，顺序即失败优先级）：文本非空且 ≤4000 字 → 消息存在 → 本人发送 →
+  `message_type=text` → `status=normal` → 发送起 5 分钟内（`EditWindow`）→ 累计 ≤20 次
+  （`MaxEditCount`）→ 与原文有差异。**编辑窗口 5 分钟刻意宽于撤回的 2 分钟**：编辑不改变
+  「对方已看到过什么」的事实，危害面小于撤回
+- **仅纯文本可编辑**：媒体 content 无 caption 可改且 `content->>'key'` 是对象授权与 GC 的凭据，
+  E2EE 服务端无明文，system 非用户产出
+- **单事务 CAS**：`WHERE ... AND edit_count = ?` 乐观并发，先 CAS 更新正文再写历史行
+  （反序会先撞 `(message_id, version)` 唯一索引报 23505，把契约里的 `(false, nil)` 变成 error）
+- **编辑重跑敏感词审核**：抽出 `textHitsModeration` 供发送与编辑共用。不重跑的话
+  「先发干净文本 → 编辑成敏感词」可完全绕过内容审核，且 admin 检索实时读 `content->>'text'`，
+  编辑掉敏感词即从审核队列消失。**反向不清标** —— 清 `flagged` 是 admin 的动作，
+  用户不能靠再编辑自助洗白
+- **REST**：`PATCH /messages/:id`（业务码 4032 窗口过期 / 4033 次数超限 / 4004 不可编辑）、
+  `GET /messages/:id/edits`（可见性口径与 `GetHistory` 完全一致：成员校验 + `cleared_before_seq` 水位）、
+  admin 取证入口 `GET /admin/messages/:id/edits`（跳过成员与水位校验）
+- **WS**：新增 `message.edited` 帧（`message_id`/`conversation_id`/`seq`/`text`/`edited_at`/`edit_count`），
+  全会话成员扇出；气泡正文**不做乐观翻转**，等服务端帧统一走 `applyEdited`，保证各端一致（同 `handleRecall` 姿态）
+- **前端**：长按/右键菜单「编辑」项（`canEdit` 闸门与服务端同口径）、底部 Composer 复用为编辑器
+  （刻意不在气泡内嵌 textarea——虚拟滚动行高突变会让列表跳动，移动端还要与软键盘搏斗）、
+  「已编辑」角标点开编辑历史弹窗、安卓返回键两层拦截（编辑态 → 退出编辑；弹窗 → 关弹窗）
+- **编辑历史时间口径**：`message_edits.edited_at` 语义是「该版本**被替换掉**的时刻」，
+  故首版显示消息的**发送时间**（调用方从 store 传 `createdAtMs`），其余版本显示该行 `edited_at`。
+  逐行照搬会让首版显示成第二版的生效时间
+- **双向 golden 契约**：新建 `contracts/server-frames.golden.json`（服务端→客户端方向，
+  既有 `message-send.golden.json` 是反方向且绑定 `SendPayload`）。除 `DisallowUnknownFields`
+  拦「契约多字段」外，另加反射比对字段集**完全相等**的测试——只靠解码挡不住「struct 加了字段
+  而契约漏登记」（JSON 缺字段只留零值，解码照样成功），而契约是双端唯一真源
+
+搭车完成的债收口（详见上文各债表已改 ✅）：生产对象存储对外端点（🔴）、扫码会话 `canceled` 终态、
+`packages/shared` + `packages/ui` 补 `tsconfig.json`、`.husky/pre-commit` 改跑 `pnpm turbo typecheck`。
+
+真机与真后端实测结论（不只是单测）：
+
+| 项                     | 结论                                                                                                                                                                             |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 本地 CI 全量           | i18n(683×4) / format / lint / stylelint / theme / `turbo typecheck` 8 包 / 单测 659 / 前后端覆盖率门禁 / `go vet` / `go test ./...` 14 包 / `-race ./internal/ws/` / E2E 91 全绿 |
+| Web 真后端（双上下文） | Alice 编辑 → Bob 侧气泡**原地**更新、出现角标、可查两版历史、会话列表预览同步；抓到 Bob socket 上的真实 `message.edited` 帧，六个字段与 golden 契约逐一对上                      |
+| 审核绕过闭环           | 干净文本落库 `flagged=f` → 编辑成含「赌博」→ 库里 `flagged=t`、`edit_count=1`、历史行存原文，服务端日志 `word=赌博`                                                              |
+| 服务端闸门（curl）     | 超窗 4032 / 非本人 403 / 空文本 4004 / 超长 400 / 语音消息 4004，逐条实测                                                                                                        |
+| UI 闸门                | 超窗后长按菜单里「编辑」与「撤回」同时消失（两个窗口各自到期）                                                                                                                   |
+| 首版时间语义           | 故意让发送与编辑跨分钟：第 1 版显示 19:49（发送时刻）、第 2 版 19:50（编辑时刻）；桌面端 20:09/20:11、安卓 20:41/20:43 三端一致                                                  |
+| 暗色主题               | 编辑提示条对比度 9.75:1（AA 通过），取色全走主题 token，圆角 `rounded-lg`                                                                                                        |
+| 375×667 窄屏           | 菜单/编辑条/弹窗均在视口内，无横向溢出；历史列表 `max-h-[50vh] overflow-y-auto`                                                                                                  |
+| 桌面端 Tauri           | 真窗口内长按菜单 → 编辑 → 保存 → 角标 → 弹窗 → Esc 关闭全链路走通，CSP 违规 0 行、console 错误 0 行                                                                              |
+| Android 模拟器         | 长按菜单出「Edit」、软键盘顶起后编辑条与输入框都不被遮挡、返回键两层语义正确（收键盘 → 退编辑态；弹窗打开时先关弹窗且不退应用）                                                  |
+| 生产构建产物           | 41 个 JS 文件，应用 bundle **零** `?.` / `??` / `\|\|=` / `replaceAll` / `.at()`，`globalThis` 两处均有 `typeof` 守卫（且 Chrome 71+ 即有），es2019 底线守住                     |
+
+真机实测发现并修掉的缺陷（本批引入 + 既有）：
+
+| 缺陷                               | 说明                                                                                                                                                                                                                            |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 编辑态光标停在 0（既有路径）       | 程序化 `setValue` + `focus` 后光标在 0，接着打字变成往原文**前面**插（安卓实测：输入 `-EDITED` 得到 `-EDITEDandroid-edit-orig`）。显式 `setSelectionRange` 到末尾；撤回后「重新编辑」复用同一条 `composerInsert` 路径，一并受益 |
+| 「已编辑」角标触控目标 21px        | 低于 WCAG 2.5.8 的 24px 下限。修法必须写死 `min-h-[24px]`：`global.css` 把 html 根字号设成 **14px**，rem 刻度整体缩水 14/16，`min-h-6`(1.5rem) 只有 21px                                                                        |
+| mock 模式下编辑/撤回菜单项永不出现 | `DEMO_MESSAGES` 全部条目没有 `createdAtMs`，而 `canEdit`/`canRecall` 都有 `if (!created) return false`。撤回项其实一直是坏的，只是没人发现                                                                                      |
+| REST 历史丢引用（既有）            | 刷新后引用回复的被引内容消失（WS 路径有、REST 路径无）。补 `backfillQuotes` 页内回填，跳过已撤回的源消息                                                                                                                        |
+| viper 静默丢环境变量（既有）       | `AutomaticEnv` 不把未知 key 注册进 `AllKeys()`，而 `Unmarshal` 只遍历 `AllKeys()` → `minio.public_endpoint`（从不在 config.yaml 里）被直接丢掉，`rewriteHost` 成永久空操作、整个生产存储修复等于没做。必须配 `SetDefault`       |
+
+本批新登记的债：
+
+| 级别 | 条目                                                                                                                                                                                                                                                          |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🟡   | **CAS 并发路径无真并发测试**：两层（repo/service）都只按 READ COMMITTED 语义推理，没有并发压测证明「两个编辑同时到达时恰好一个成功、另一个得 `ErrEditNoChange`」。补法是起 N 个 goroutine 同时 `Edit` 同一条并断言成功数恰为 1                                |
+| 🟡   | **`edited_at` 两条出口序列化不一致**：WS 帧走 `time.Now().UTC()` → `2026-09-05T11:47:28.914103355Z`（UTC，纳秒），REST 走 DB 回读 → `2026-09-05T19:47:28.914103+08:00`（+08:00，微秒）。同一绝对时刻、`new Date()` 解析结果相同，属口径与精度不齐，非功能缺陷 |
+| 🟡   | **两端 app 的 tsconfig `target` 仍是 ES2021**，与 vite `build.target=es2019` 不一致；两个 package 已钉 ES2019。app 侧要么跟着降到 ES2019，要么明确写清「靠 vite 转译兜底」                                                                                    |
+| 🟡   | **`packages/design-system` 无 tsconfig / typecheck 脚本**（同 shared/ui 修掉前的状态），`turbo typecheck` 覆盖 8 包里没有它                                                                                                                                   |
+| ⚪   | **超长文本无专用提示**：编辑走 REST 被 `binding:"max=4000"` 拦成通用 `400 invalid text`（服务层的 `ErrEditTextTooLong` 因此在 REST 路径上不可达，仅作纵深防御），前端落到通用错误 toast；发送路径同样只有通用提示。Composer 也没有 `maxLength` 前置约束       |
+| ⚪   | **WS 断连噪声进 Sentry**：页面卸载时在建的 WS 握手被浏览器中止，`chatSocket` 的 `onerror` 把它当异常 `captureException` 上报（每次页面跳转一条）。属既有行为，收紧需区分「卸载中止」与「真实故障」                                                            |
+| ⚪   | **同一对象 key 的 `download-url` 不去重**：单页实测同一 key 连发 8 次请求。属既有行为，加一层 key→URL 的短期缓存即可                                                                                                                                          |
+| ⚪   | **`mockServiceWorker.js` 进了生产 dist**：它是 `public/` 静态资源原样复制，未经 vite 转译（内含 `?.`），但 MSW 启动被 `import.meta.env.DEV` 静态门禁掉、生产从不注册它，故只是 ~8KB 死重量，不构成 es2019 违规                                                |
+| ⚪   | **编辑不改 `seq`、不重排消息位置**（有意：编辑不是新消息），故编辑一条旧消息不会把它顶到会话底部；会话列表预览仅当被编辑的是最后一条时才变                                                                                                                    |
+| ⚪   | **编辑历史无分页**：`MaxEditCount=20` 已是天然上限，一次全量返回                                                                                                                                                                                              |
+| ⚪   | **E2EE 消息不可编辑**（服务端无明文，无法重跑审核也无法比对差异），与撤回一致                                                                                                                                                                                 |
+
 #### 3. 既有代码的真实缺陷（无 plan，可随手批次收口）
 
 > 2026-09-02 admin-hardening 会话收口：captcha 两缺陷已修、compose 镜像经核实已全部钉版本、
 > B8 测试夹具已建（见下节）。剩余条目为限流/分发多实例化与 husky tsc。
 
-| 级别 | 位置                                | 问题                                                                                                                |
-| ---- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| ✅   | `handler/captcha.go:83-90`          | 已修：`Validate` 改为比对成功才删，输错不再作废验证码                                                               |
-| ✅   | `handler/captcha.go:52`             | 已修：captcha id 改 `crypto/rand` 128bit hex，Redis key 加 `captcha:` 命名空间                                      |
-| ✅   | `deploy/docker-compose.yml`         | 核实 minio/certbot/prometheus 均已钉版本号（此前登记有误）                                                          |
-| ✅   | `middleware/ratelimit.go:92-107`    | 已修：改 Redis Lua 原子令牌桶（scope 隔离各端点档位），Redis 故障 fail-open 放行并计指标                            |
-| ✅   | `.husky/` 钩子不跑 `tsc`            | 已修（2026-09-04）：staged 含 ts/tsx 时跑 web + desktop `typecheck`（实测能挡住类型错误提交）                       |
-| ⚪   | `handler` 包 Redis 用例仍 `t.Skipf` | A8 已建 `internal/testutil.NewRedis(t)`；captcha 用例已迁移，其余用例待迁                                           |
-| ✅   | 消息分发 `Dispatcher`               | 已修：新增 RedisDispatcher（`dispatcher.backend=redis`），发布前只投本机 + host_id 去重；默认 inproc 单实例行为不变 |
+| 级别 | 位置                                | 问题                                                                                                                                                                                  |
+| ---- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ✅   | `handler/captcha.go:83-90`          | 已修：`Validate` 改为比对成功才删，输错不再作废验证码                                                                                                                                 |
+| ✅   | `handler/captcha.go:52`             | 已修：captcha id 改 `crypto/rand` 128bit hex，Redis key 加 `captcha:` 命名空间                                                                                                        |
+| ✅   | `deploy/docker-compose.yml`         | 核实 minio/certbot/prometheus 均已钉版本号（此前登记有误）                                                                                                                            |
+| ✅   | `middleware/ratelimit.go:92-107`    | 已修：改 Redis Lua 原子令牌桶（scope 隔离各端点档位），Redis 故障 fail-open 放行并计指标                                                                                              |
+| ✅   | `.husky/` 钩子不跑 `tsc`            | 已修（2026-09-04）：staged 含 ts/tsx 时跑 typecheck。**2026-09-05 扩到 `pnpm turbo typecheck` 全量 8 包** —— 原先只跑 web + desktop，会用 app 的宽松设置盖掉 shared/ui 两包新加的门禁 |
+| ⚪   | `handler` 包 Redis 用例仍 `t.Skipf` | A8 已建 `internal/testutil.NewRedis(t)`；captcha 用例已迁移，其余用例待迁                                                                                                             |
+| ✅   | 消息分发 `Dispatcher`               | 已修：新增 RedisDispatcher（`dispatcher.backend=redis`），发布前只投本机 + host_id 去重；默认 inproc 单实例行为不变                                                                   |
 
 #### 4. J 泳道 — 用户体验与无障碍（新增，未立项）
 
@@ -537,11 +619,11 @@ QQ「远程协助」式的**用户级**远程桌面能力（不是管理员运�
 
 发散讨论产出的功能候选（阶段三 / 阶段四清单里的对应 checkbox 是同一批东西的勾选视图，
 细节与依赖以本表为准）；立项时从本表挑项展开 plan，做完把状态改为 ✅ 并同步勾选。
-规模：S ≤ 2 天 / M 3-5 天。推荐优先级（价值密度）：**K3、K7、K12、K17 → K1、K6 → K16**。
+规模：S ≤ 2 天 / M 3-5 天。推荐优先级（价值密度）：**K3、K12、K17 → K16**（K1/K6/K7/K8 已完成）。
 
 | 编号 | 条目                                  | 价值                           | 规模 | 依赖 / 备注                                                |
 | ---- | ------------------------------------- | ------------------------------ | ---- | ---------------------------------------------------------- |
-| K1   | 消息编辑（就地编辑 + 「已编辑」角标） | 高频刚需，撤回体验补完         | M    | 需 golden 契约扩展 `message.edited` 帧；编辑窗口时长需讨论 |
+| K1   | 消息编辑（就地编辑 + 「已编辑」角标） | 高频刚需，撤回体验补完         | M    | ✅ 2026-09-05：5 分钟窗口 + 全量编辑历史 + 编辑重跑审核    |
 | K2   | 定时发送 / 稍后提醒                   | 跨时区异步协作                 | M    | 服务端定时器 + 延迟投递语义；离线场景投递保证              |
 | K3   | 命令面板（Ctrl+K）                    | 桌面效率标签，SearchModal 升维 | S-M  | 纯前端；动作注册表供插件式扩展                             |
 | K4   | 聊天记录导出（JSON/HTML）             | 数据自主权                     | M    | 按会话全量拉取 + 媒体对象打包策略（内链 or 引用）          |

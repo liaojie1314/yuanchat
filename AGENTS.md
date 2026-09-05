@@ -56,9 +56,14 @@
 - 消息类型：文本、图片（canvas 压缩 + 预签名直传 + Lightbox）、文件（任意扩展 →
   `fileIconOf` 按类型出图标 + 预签名下载）、语音（MediaRecorder + audio/webm，
   1-60s 自动截断）、贴纸/收藏表情（blob 内容寻址去重，独立 content type，
-  前后端共用 `contracts/` golden 契约）
+  前后端共用 `contracts/` golden 契约。契约按方向分两份：
+  `message-send.golden.json` 是客户端→服务端、`server-frames.golden.json` 是服务端→客户端；
+  新增服务端帧必须同时登记进后者与 `ws/golden_server_frames_test.go` 的 `payloadPrototypes`，
+  否则字段集比对测试直接失败）
 - 消息操作：撤回（2 分钟窗口 → `message.recalled` 全员推送 + 气泡占位，
-  自己文本 5 分钟内可「重新编辑」）、引用回复、表情回应（`message.reaction` 帧
+  自己文本 5 分钟内可「重新编辑」）、**编辑**（纯文本、5 分钟窗口、累计 20 次上限 →
+  `message.edited` 全员推送 + 「已编辑」角标 + 全量编辑历史弹窗；编辑重跑敏感词审核，
+  否则「先发干净文本再改成敏感词」可绕过审核）、引用回复、表情回应（`message.reaction` 帧
   实时 + 历史聚合回填，mine 相对请求者）、转发（一次最多 9 个会话）、
   `@` 提及（落 `mention_unread` → 会话列表角标）、收藏
 - 消息搜索：全局 + 会话内，`GET /messages/search`，PostgreSQL `pg_trgm` GIN 索引，
