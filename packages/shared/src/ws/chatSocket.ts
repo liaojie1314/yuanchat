@@ -144,6 +144,16 @@ export interface ServerFrames {
     operator_id: string;
     operator_nickname: string;
   };
+  /** 消息被编辑：就地替换正文，带服务端累计编辑次数 */
+  "message.edited": {
+    message_id: string;
+    conversation_id: string;
+    seq: number;
+    text: string;
+    /** 最后一次编辑时刻（ISO8601，时区表示随端点而异，一律 new Date() 后再比较） */
+    edited_at: string;
+    edit_count: number;
+  };
   "message.reaction": {
     message_id: string;
     conversation_id: string;

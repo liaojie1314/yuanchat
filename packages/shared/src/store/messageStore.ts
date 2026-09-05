@@ -146,6 +146,8 @@ export interface ChatMessage {
   dateKey?: string;
   status?: ChatMessageStatus;
   edited?: boolean;
+  /** 累计编辑次数：>0 时「已编辑」角标可点开历史 */
+  editCount?: number;
   /** 已撤回：气泡渲染灰字系统占位，忽略 kind/text */
   recalled?: boolean;
   /** 撤回前的原文本（仅本端自己的 text 消息保留，供「重新编辑」回填） */
@@ -223,6 +225,17 @@ interface MessageState {
    */
   applyRecall: (convId: string, messageId: string, operatorName: string) => void;
   /**
+   * WebSocket message.edited：就地替换一条消息的正文。
+   *
+   * @param convId - 会话 id
+   * @param messageId - 服务端消息 id
+   * @param text - 编辑后正文
+   * @param editCount - 服务端累计编辑次数，供角标判断能否点开历史
+   * @remarks 不做乐观翻转 —— 与 applyRecall 同姿态：本端保存后也等帧回来才更新，
+   *   保证多端与收件人看到的时序一致。未命中的 id 原样返回，不产生新引用。
+   */
+  applyEdited: (convId: string, messageId: string, text: string, editCount: number) => void;
+  /**
    * WebSocket message.reaction：更新消息的 emoji 回应聚合。
    * @param mine 仅当操作者是自己时传 reacted（true/false）；他人操作传 undefined 保持原 mine
    */
@@ -285,7 +298,12 @@ const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const ACK_TIMEOUT_MS = 5000;
 const TYPING_CLEAR_MS = 4000;
 
-/** 撤回后可重新编辑的时间窗口（5 分钟） */
+/**
+ * 撤回后可重新编辑的时间窗口（5 分钟）。
+ *
+ * @remarks 与 `utils/messageActions` 的 `EDIT_WINDOW_MS`（消息编辑窗口）同值，
+ *   两者刻意各自定义（utils 不依赖 store），相等性由 `messageEdit.test.ts` 锁住。
+ */
 export const RE_EDIT_WINDOW_MS = 5 * 60_000;
 
 const now = () =>
@@ -813,6 +831,21 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
               ...(keepText ? { recalledText: keepText, recalledAtMs: Date.now() } : {}),
             };
           }),
+        },
+      };
+    }),
+
+  applyEdited: (convId, messageId, text, editCount) =>
+    set((s) => {
+      const list = s.messagesByConv[convId];
+      // 未命中直接返回原 state：Zustand 比较引用，返回新对象会让整条列表无谓重渲染
+      if (!list || !list.some((m) => m.id === messageId)) return s;
+      return {
+        messagesByConv: {
+          ...s.messagesByConv,
+          [convId]: list.map((m) =>
+            m.id === messageId ? { ...m, text, edited: true, editCount } : m,
+          ),
         },
       };
     }),

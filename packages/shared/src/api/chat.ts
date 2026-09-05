@@ -5,7 +5,7 @@
  * 后端返回的是数据库风格的 snake_case DTO（seq、message_type、content JSON 字符串），
  * 此处统一转换为 UI 直接消费的 `Conversation` / `ChatMessage` 结构。
  */
-import { apiGet, apiPost, apiPut } from "./client";
+import { apiGet, apiPatch, apiPost, apiPut } from "./client";
 import i18n from "@yuanchat/design-system/i18n";
 import { previewBodyOf } from "../utils/messagePreview";
 import type { Conversation } from "../store/conversationStore";
@@ -66,6 +66,10 @@ export interface MessageDTO {
   mentions?: string[] | null;
   client_msg_id?: string | null;
   created_at: string;
+  /** 最后一次编辑时刻（ISO8601）；缺省/为 null 即从未编辑过 */
+  edited_at?: string | null;
+  /** 累计编辑次数；未编辑过为 0 */
+  edit_count?: number;
   sender_nickname: string;
   sender_avatar_url?: string | null;
   /** 表情回应聚合（mine 相对请求者） */
@@ -372,6 +376,12 @@ export function pseudoWave(duration: number): number[] {
   return wave;
 }
 
+/**
+ * 服务端消息 DTO → UI 层 `ChatMessage`。
+ *
+ * @param dto - `GET /conversations/:id/messages` 返回的单条消息
+ * @param selfUserId - 当前登录用户 id，用于判定气泡左右
+ */
 export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
   const isSelf = dto.sender_id === selfUserId;
   const kindMap: Record<number, ChatMessage["kind"]> = {
@@ -445,6 +455,8 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     dateKey: dateKeyOf(new Date(dto.created_at)),
     createdAtMs: new Date(dto.created_at).getTime(),
     recalled: recalled ? true : undefined,
+    edited: !!dto.edited_at,
+    editCount: dto.edit_count ?? 0,
     replyToId: dto.reply_to_id ?? undefined,
     mentions: dto.mentions ?? undefined,
     // 历史消息不区分 sent/read（read 回执只对新消息实时生效），统一视为已读
@@ -625,6 +637,67 @@ export async function fetchMembers(conversationId: string): Promise<Conversation
  */
 export async function recallMessage(messageId: string): Promise<void> {
   await apiPost<Record<string, never>>("/api/v1/messages/" + messageId + "/recall", {});
+}
+
+/** 消息编辑历史的一个版本 */
+export interface EditVersion {
+  /** 版本号，从 1 起，升序 */
+  version: number;
+  text: string;
+  /**
+   * 该版本被替换的时刻（ISO8601），**不是该版本被写下的时刻**。
+   *
+   * @remarks `message_edits` 每行记录的是"这段旧文本什么时候被替换掉"，
+   *   因此首版的这个值等于第二版的生效时刻 —— 一条只编辑过 1 次的消息，
+   *   version 1 与 version 2 的 `editedAt` 完全相同。按「编辑于 xx」逐版本
+   *   渲染时首版时间会看着不对，需要 UI 侧特殊处理。
+   *   另外时区表示随端点而异（PATCH 直出 UTC、本端点带 +08:00 偏移），
+   *   比较一律先 `new Date(s).getTime()`，禁止对字符串做大小/相等比较。
+   */
+  editedAt: string;
+  /** 当前生效版本（仅末项为 true） */
+  current?: boolean;
+}
+
+/**
+ * 编辑一条文本消息（仅发送者、5 分钟内、累计不超 20 次，窗口判定由后端兜底）。
+ *
+ * @param messageId - 服务端消息 id（乐观消息的 clientMsgId 会 404）
+ * @param text - 编辑后正文，非空且不超 4000 字
+ * @returns 服务端的最后编辑时刻与累计编辑次数
+ * @remarks 前端不做乐观翻转：后端广播 `message.edited` 帧后统一在 applyEdited
+ *   更新，保证双端一致（同 recallMessage 的姿态）。
+ * @throws ApiError code=4032 超过编辑窗口；code=4033 编辑次数超限；
+ *   code=4004 类型不可编辑 / 内容未变化 / 内容为空 / 超长；403 非发送者；404 消息不存在。
+ */
+export async function editMessage(
+  messageId: string,
+  text: string,
+): Promise<{ editedAt: string; editCount: number }> {
+  const data = await apiPatch<{ edited_at: string; edit_count: number }>(
+    "/api/v1/messages/" + messageId,
+    { text },
+  );
+  return { editedAt: data.edited_at, editCount: data.edit_count };
+}
+
+/**
+ * 取一条消息的编辑历史（version 升序，末项为当前版本）。
+ *
+ * @param messageId - 服务端消息 id
+ * @throws ApiError 403 非会话成员；404 消息不存在或在本人清空水位以下。
+ */
+export async function fetchMessageEdits(messageId: string): Promise<EditVersion[]> {
+  const data = await apiGet<{
+    versions: Array<{ version: number; text: string; edited_at: string; current?: boolean }>;
+  }>("/api/v1/messages/" + messageId + "/edits");
+  const out: EditVersion[] = [];
+  const versions = data.versions || [];
+  for (let i = 0; i < versions.length; i++) {
+    const v = versions[i];
+    out.push({ version: v.version, text: v.text, editedAt: v.edited_at, current: v.current });
+  }
+  return out;
 }
 
 /** 切换自己对消息的某个 emoji 回应（结果由 message.reaction 帧驱动，不乐观更新） */
