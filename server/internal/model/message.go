@@ -24,9 +24,9 @@ type Message struct {
 	Mentions    pq.StringArray `gorm:"type:uuid[]" json:"mentions,omitempty"`
 	ClientMsgID *string        `gorm:"type:varchar(64)" json:"client_msg_id,omitempty"`
 	// EditedAt 最后一次编辑时间；非 nil 即「已编辑」，前端据此显示角标。
-	EditedAt *time.Time `json:"edited_at,omitempty"`
+	EditedAt *time.Time `gorm:"column:edited_at" json:"edited_at,omitempty"`
 	// EditCount 累计编辑次数，等于 message_edits 中该消息的历史行数。
-	EditCount int16          `gorm:"not null;default:0" json:"edit_count"`
+	EditCount int16          `gorm:"type:smallint;not null;default:0" json:"edit_count"`
 	CreatedAt time.Time      `json:"created_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }

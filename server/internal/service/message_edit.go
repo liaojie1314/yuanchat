@@ -25,9 +25,10 @@ const MaxEditCount int16 = 20
 
 // MaxEditTextLen 编辑后正文的字符（rune）上限，与发送路径的文本上限对齐。
 //
-// 发送侧的 4000 字上限只落在 ws 帧解析层（ws.buildContent），服务层没有兜底。
+// 发送侧的 4000 字上限只落在 ws 帧解析层（ws.maxTextLen），服务层没有兜底。
 // 编辑若不自己拦，就能把远超上限的正文写进 messages.content 并向全会话扇出，
 // 等于绕开发送侧的长度限制 —— 与「编辑绕过敏感词审核」同一类缺口。
+// 取值必须与 ws.maxTextLen 保持一致，改一处要同步另一处。
 const MaxEditTextLen = 4000
 
 var (

@@ -291,10 +291,14 @@ export function ChatWindow({
     editMessage(id, text)
       .then(() => exitEditing())
       .catch((err) => {
-        exitEditing();
         const code = err instanceof ApiError ? err.code : 0;
-        if (code === 4032) showToast("error", t("chat.message.editExpired"));
-        else if (code === 4033) showToast("error", t("chat.message.editLimitReached"));
+        // 只有窗口过期才退出编辑态：那是「再也存不上了」，留着只让人徒劳重试。
+        // 其余失败（次数超限 / 内容被拒 / 网络抖动）保留编辑态与输入框内容 ——
+        // 用户刚改的文本此刻只存在于输入框里，清掉等于让人白打一遍。
+        if (code === 4032) {
+          exitEditing();
+          showToast("error", t("chat.message.editExpired"));
+        } else if (code === 4033) showToast("error", t("chat.message.editLimitReached"));
         else if (code === 4004) showToast("error", t("chat.message.editEmpty"));
         else showToast("error", t("common.error"));
       });

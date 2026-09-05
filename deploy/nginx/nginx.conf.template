@@ -110,7 +110,9 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_STORAGE}/privkey.pem;
     include /etc/nginx/ssl-params.conf;
 
-    # 图片/语音/视频经预签名 URL 直传，须容纳与 max_file_size 相当的体积
+    # 图片/语音/视频经预签名 URL 直传，须容纳与后端 upload.max_file_size 相当的体积。
+    # 已核对 server/config/config.yaml:72 的 max_file_size = 104857600（100MB），两者一致；
+    # 后端调大上限时这里必须同步，否则本块会成为新的上传截断点（大视频传到一半 413）。
     client_max_body_size 100m;
 
     location / {

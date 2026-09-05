@@ -20,6 +20,9 @@ import (
 const opTimeout = 5 * time.Second
 
 // maxTextLen 文本消息最大长度（字符数）。
+//
+// 与 service.MaxEditTextLen 是同一口径的两处闸门（发送走这里，编辑走服务层），
+// 改动其中一个必须同步另一个，否则两条入口的上限会漂移。
 const maxTextLen = 4000
 
 // TokenVersionReader 读取用户当前的令牌吊销版本号。
