@@ -148,7 +148,9 @@ describe("ForgotPasswordScreen", () => {
     // 后端对两种手机号都回 204 空体，前端无从区分，也绝不能造出可区分的表现
     const { container: first } = renderScreen();
     await gotoStep2("13800138000");
-    const registered = first.innerHTML.replaceAll("13800138000", "PHONE");
+    // split/join 而不是 replaceAll：本包的 tsconfig 钉在 ES2019（对齐 build.target），
+    // replaceAll 是 ES2021 的方法，用它会连带把 lib 抬高、让源码里的兼容问题失去门禁
+    const registered = first.innerHTML.split("13800138000").join("PHONE");
     expect(countCalls(OTP)).toBe(1);
     expect(calls).toEqual([OTP]);
     cleanup();
@@ -156,7 +158,7 @@ describe("ForgotPasswordScreen", () => {
     calls = [];
     const { container: second } = renderScreen();
     await gotoStep2("13900139000");
-    const unregistered = second.innerHTML.replaceAll("13900139000", "PHONE");
+    const unregistered = second.innerHTML.split("13900139000").join("PHONE");
 
     expect(unregistered).toBe(registered);
     expect(calls).toEqual([OTP]);

@@ -18,6 +18,16 @@
 import { setupWorker } from "msw/browser";
 import { handlers } from "./handlers";
 
+/**
+ * 本包只声明用到的那几个 Vite 环境变量
+ *
+ * 与 api/client.ts、ws/chatSocket.ts 同一写法：packages/shared 不依赖 vite，
+ * 因此没有 `vite/client` 的全局类型，直接写 `import.meta.env` 是类型错误。
+ */
+interface ImportMetaEnv {
+  VITE_ENABLE_MOCK?: string;
+}
+
 let started = false;
 
 /**
@@ -28,7 +38,7 @@ let started = false;
  */
 export async function startMockWorker(): Promise<void> {
   // 通过环境变量手动关闭 Mock
-  if (import.meta.env.VITE_ENABLE_MOCK === "false") return;
+  if ((import.meta as { env?: ImportMetaEnv }).env?.VITE_ENABLE_MOCK === "false") return;
   if (started) return;
 
   const worker = setupWorker(...handlers);

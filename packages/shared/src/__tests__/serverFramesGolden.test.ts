@@ -48,6 +48,8 @@ function seed(convId: string, msg: Partial<ChatMessage> & { id: string }): void 
     kind: "text",
     isSelf: true,
     status: "sent",
+    // time 是 ChatMessage 的必填字段，本契约只断言编辑/撤回相关字段，给个占位值即可
+    time: "00:00",
     ...msg,
   };
   useMessageStore.setState({ messagesByConv: { [convId]: [full] } });

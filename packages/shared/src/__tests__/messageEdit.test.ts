@@ -95,7 +95,8 @@ describe("canEdit", () => {
 describe("backfillQuotes", () => {
   /** 造一条已映射好的历史消息（字段只给回填用得到的那几个） */
   function msg(over: Partial<ChatMessage> & { id: string }): ChatMessage {
-    return { conversationId: "c1", kind: "text", isSelf: false, ...over };
+    // time 是 ChatMessage 的必填字段，回填逻辑不看它，给个占位值即可
+    return { conversationId: "c1", kind: "text", isSelf: false, time: "00:00", ...over };
   }
 
   it("原消息在同一页时拼出引用快照", () => {
