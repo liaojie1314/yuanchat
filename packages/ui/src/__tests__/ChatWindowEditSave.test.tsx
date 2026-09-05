@@ -129,3 +129,34 @@ describe("ChatWindow 编辑保存失败后的编辑态存续", () => {
     await waitFor(() => expect(screen.queryByTestId("composer-editing-hint")).toBeNull());
   });
 });
+
+describe("进入编辑态时的光标位置", () => {
+  beforeEach(() => {
+    editMessageMock.mockReset();
+    setupWithOwnText();
+  });
+
+  // 安卓真机实测发现：程序化 setValue + focus 会把光标留在 0，
+  // 用户接着打字变成往原文**前面**插（输入 -EDITED 得到 -EDITEDandroid-edit-orig）。
+  //
+  // 断言的是「组件显式调了 setSelectionRange」而不是 selectionStart 的最终值：
+  // jsdom 给 textarea 赋值时自己就把 selectionStart 挪到末尾，拿最终值断言的话
+  // 去掉修复照样通过（已实测），等于白测。
+  it("显式把光标移到预填原文末尾 —— 否则接着打字会插到原文前面", async () => {
+    const spy = vi.spyOn(HTMLTextAreaElement.prototype, "setSelectionRange");
+    try {
+      render(<ChatWindow />);
+      const bubble = screen.getByText("原始文本").closest("[data-kind]") as HTMLElement;
+      fireEvent.contextMenu(bubble);
+      fireEvent.click(await screen.findByTestId("msg-menu-edit"));
+
+      await waitFor(() => {
+        expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("原始文本");
+      });
+      const end = "原始文本".length;
+      await waitFor(() => expect(spy).toHaveBeenCalledWith(end, end));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

@@ -162,6 +162,11 @@ export function Composer({
       const el = textareaRef.current;
       if (!el) return;
       el.focus();
+      // 光标必须显式移到末尾：程序化 setValue 后 focus 会把光标留在 0，
+      // 用户接着打字变成「往原文前面插」（安卓真机实测：输入 -EDITED 得到
+      // -EDITEDandroid-edit-orig）。取 composerInsert.length 而非 el.value.length，
+      // 不依赖 React 提交时序。
+      el.setSelectionRange(composerInsert.length, composerInsert.length);
       // 送进来的原文可能是多行：高度只随 onChange 长大，不同步这一次就停在一行，
       // 用户得在一行高的框里滚动着改；清空（编辑退出）时同理要缩回去
       autoGrow(el);

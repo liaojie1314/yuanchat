@@ -741,7 +741,10 @@ export function MessageBubble({
                   <button
                     type="button"
                     data-testid="msg-edited-badge"
-                    className="underline-offset-2 opacity-65 hover:underline"
+                    // 触控目标最小 24px（WCAG 2.5.8）：文字本身只有 21px 高。
+                    // 必须写死 px 而不能用 min-h-6：global.css 把 html 根字号设成
+                    // 14px，rem 刻度整体缩水 14/16，min-h-6(1.5rem) 只有 21px。
+                    className="inline-flex min-h-[24px] items-center underline-offset-2 opacity-65 hover:underline"
                     aria-label={t("chat.message.editHistory")}
                     onClick={() => onShowEditHistory(msg.id)}
                   >
