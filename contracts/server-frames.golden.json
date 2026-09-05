@@ -1,0 +1,41 @@
+{
+  "$comment": [
+    "服务端 → 客户端 WS 帧的黄金契约。",
+    "与 message-send.golden.json（客户端 → 服务端）方向相反、骨架独立：",
+    "后者绑定 SendPayload + buildContent，塞不进 S→C 帧。",
+    "Go 侧 server/internal/ws/golden_server_frames_test.go 用 DisallowUnknownFields",
+    "反序列化每个 payload，证明服务端 struct 能完整表达契约、且无契约未声明的字段。",
+    "前端 packages/shared/src/__tests__/serverFramesGolden.test.ts 把同一份 payload",
+    "喂进 chatSocket 的 handler 表，断言 store 状态按预期变化。",
+    "改动本文件必须双端同时通过。"
+  ],
+  "cases": [
+    {
+      "name": "message.edited 文本消息编辑",
+      "frame": {
+        "type": "message.edited",
+        "payload": {
+          "message_id": "11111111-1111-4111-8111-111111111111",
+          "conversation_id": "22222222-2222-4222-8222-222222222222",
+          "seq": 42,
+          "text": "编辑后的正文",
+          "edited_at": "2026-09-05T10:00:00Z",
+          "edit_count": 1
+        }
+      }
+    },
+    {
+      "name": "message.recalled 消息撤回",
+      "frame": {
+        "type": "message.recalled",
+        "payload": {
+          "message_id": "33333333-3333-4333-8333-333333333333",
+          "conversation_id": "22222222-2222-4222-8222-222222222222",
+          "seq": 41,
+          "operator_id": "44444444-4444-4444-8444-444444444444",
+          "operator_nickname": "Alice"
+        }
+      }
+    }
+  ]
+}
