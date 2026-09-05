@@ -175,6 +175,8 @@ export const DEMO_MESSAGES: Record<string, ChatMessage[]> = {
       ],
       time: "14:32",
       edited: true,
+      // 「已编辑」角标仅在 editCount > 0 时可点开编辑历史，demo 需要一个可点样本
+      editCount: 2,
       seq: 7,
     },
     {
