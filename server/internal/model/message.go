@@ -23,8 +23,12 @@ type Message struct {
 	// 群消息设置这里的成员会触发 conversation_members.mention_unread=true。
 	Mentions    pq.StringArray `gorm:"type:uuid[]" json:"mentions,omitempty"`
 	ClientMsgID *string        `gorm:"type:varchar(64)" json:"client_msg_id,omitempty"`
-	CreatedAt   time.Time      `json:"created_at"`
-	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
+	// EditedAt 最后一次编辑时间；非 nil 即「已编辑」，前端据此显示角标。
+	EditedAt *time.Time `json:"edited_at,omitempty"`
+	// EditCount 累计编辑次数，等于 message_edits 中该消息的历史行数。
+	EditCount int16          `gorm:"not null;default:0" json:"edit_count"`
+	CreatedAt time.Time      `json:"created_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // TableName 指定表名
