@@ -40,16 +40,33 @@
 
 ### 对象存储（MinIO / S3）
 
-| 变量                        | 默认值           | 说明                     |
-| --------------------------- | ---------------- | ------------------------ |
-| `YUANCHAT_MINIO_ENDPOINT`   | `localhost:9002` | 服务地址（不含 scheme）  |
-| `YUANCHAT_MINIO_ACCESS_KEY` | —                | 访问密钥                 |
-| `YUANCHAT_MINIO_SECRET_KEY` | —                | 私有密钥                 |
-| `YUANCHAT_MINIO_BUCKET`     | `yuanchat`       | 桶名（首次连接自动创建） |
-| `YUANCHAT_MINIO_USE_SSL`    | `false`          | 生产走 HTTPS 时设 `true` |
+| 变量                             | 默认值           | 说明                                                    |
+| -------------------------------- | ---------------- | ------------------------------------------------------- |
+| `YUANCHAT_MINIO_ENDPOINT`        | `localhost:9002` | **服务端建连**地址（不含 scheme），生产是 `minio:9000`  |
+| `YUANCHAT_MINIO_ACCESS_KEY`      | —                | 访问密钥                                                |
+| `YUANCHAT_MINIO_SECRET_KEY`      | —                | 私有密钥                                                |
+| `YUANCHAT_MINIO_BUCKET`          | `yuanchat`       | 桶名（首次连接自动创建）                                |
+| `YUANCHAT_MINIO_USE_SSL`         | `false`          | 建连是否走 HTTPS                                        |
+| `YUANCHAT_MINIO_PUBLIC_ENDPOINT` | 空               | **下发给客户端**的对外地址（不含 scheme），**生产必填** |
+| `YUANCHAT_MINIO_PUBLIC_USE_SSL`  | `false`          | 对外地址是否走 HTTPS，生产经 nginx 终止 TLS 时设 `true` |
 
-> 预签名 URL 里的 host 来自 `endpoint`。真机/公网访问时必须填**客户端可达**的地址，
-> 填 `localhost` 会导致客户端连自己而非服务器。
+`endpoint` 与 `public_endpoint` 必须分开理解：
+
+- `endpoint` 是**服务端进程**拿去连 MinIO 的地址。生产它是 compose 内网主机名 `minio:9000`。
+- `public_endpoint` 是**拼进下发给客户端的 URL**（预签名 URL 与头像直链）的地址。
+  留空则回落到 `endpoint` —— 单机开发正是这条路径，行为与从前一致。
+
+> **生产不填 `public_endpoint` 会导致头像、图片、语音、视频、贴纸封面全部加载失败**：
+> 客户端拿到的 URL host 是 `minio:9000`，浏览器和手机都解析不了这个内网名。
+
+> **三处必须写同一个域名**，否则预签名 URL 的 SigV4 签名校验失败（直接 403，不是静默降级
+> —— 签名把 Host 头也算进去了）：
+>
+> 1. 后端 `YUANCHAT_MINIO_PUBLIC_ENDPOINT`
+> 2. MinIO 容器的 `MINIO_SERVER_URL`
+> 3. nginx 存储子域的 `server_name`（该 location 须 `proxy_set_header Host $host` 透传）
+>
+> 生产用 `docker-compose.prod.yml` 时这三处都由 `.env` 的 `DOMAIN_STORAGE` 推导，无需手动对齐。
 
 ### 日志
 
@@ -107,14 +124,14 @@
 
 供 `docker-compose.prod.yml` 与 `install.sh` 使用，见 [`deploy/.env.prod.example`](../../deploy/.env.prod.example)。
 
-| 变量                                                        | 说明                                                             |
-| ----------------------------------------------------------- | ---------------------------------------------------------------- |
-| `DOMAIN_APP` / `DOMAIN_API` / `DOMAIN_WS` / `DOMAIN_ADMIN`  | 四个子域名，须已解析到本机                                       |
-| `ADMIN_EMAIL`                                               | Let's Encrypt 到期通知邮箱                                       |
-| `DB_PASSWORD` / `REDIS_PASSWORD` / `JWT_SECRET` / `MINIO_*` | 留空则 `install.sh` 自动生成随机值                               |
-| `PRESENCE_BACKEND`                                          | 多实例部署改 `redis`                                             |
-| `DISPATCHER_BACKEND`                                        | 多实例部署改 `redis`（默认 `inproc` 仅影响实时帧跨实例投递）     |
-| `APP_VERSION`                                               | 自建镜像 tag，**必填**（禁止 `latest`；未设置 compose 直接报错） |
-| `TZ`                                                        | 容器时区，默认 `Asia/Shanghai`                                   |
+| 变量                                                                          | 说明                                                                                                 |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `DOMAIN_APP` / `DOMAIN_API` / `DOMAIN_WS` / `DOMAIN_ADMIN` / `DOMAIN_STORAGE` | 五个子域名，须已解析到本机；`DOMAIN_STORAGE` 是对象存储对外域名（客户端下载图片/语音/视频/头像走它） |
+| `ADMIN_EMAIL`                                                                 | Let's Encrypt 到期通知邮箱                                                                           |
+| `DB_PASSWORD` / `REDIS_PASSWORD` / `JWT_SECRET` / `MINIO_*`                   | 留空则 `install.sh` 自动生成随机值                                                                   |
+| `PRESENCE_BACKEND`                                                            | 多实例部署改 `redis`                                                                                 |
+| `DISPATCHER_BACKEND`                                                          | 多实例部署改 `redis`（默认 `inproc` 仅影响实时帧跨实例投递）                                         |
+| `APP_VERSION`                                                                 | 自建镜像 tag，**必填**（禁止 `latest`；未设置 compose 直接报错）                                     |
+| `TZ`                                                                          | 容器时区，默认 `Asia/Shanghai`                                                                       |
 
 > `deploy/.env` 含明文凭据，已被 `.gitignore` 排除，**切勿提交**。

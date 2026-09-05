@@ -14,11 +14,16 @@ import (
 )
 
 // Storage 持有 MinIO 客户端与默认桶信息，供上层生成预签名 URL。
+//
+// endpoint / useSSL 是服务端建连用的地址；publicEndpoint / publicUseSSL 是下发给
+// 客户端的对外地址。生产环境两者必然不同（前者是 compose 内网主机名），故分开保存。
 type Storage struct {
-	client   *minio.Client
-	bucket   string
-	endpoint string
-	useSSL   bool
+	client         *minio.Client
+	bucket         string
+	endpoint       string
+	useSSL         bool
+	publicEndpoint string
+	publicUseSSL   bool
 }
 
 // New 建立 MinIO 连接，确保默认桶存在，并为匿名公共读前缀开放访问。
@@ -33,10 +38,12 @@ func New(cfg config.MinIOConfig) (*Storage, error) {
 	}
 
 	s := &Storage{
-		client:   client,
-		bucket:   cfg.Bucket,
-		endpoint: cfg.Endpoint,
-		useSSL:   cfg.UseSSL,
+		client:         client,
+		bucket:         cfg.Bucket,
+		endpoint:       cfg.Endpoint,
+		useSSL:         cfg.UseSSL,
+		publicEndpoint: cfg.PublicEndpoint,
+		publicUseSSL:   cfg.PublicUseSSL,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -95,6 +102,28 @@ func (s *Storage) applyPublicReadPolicy(ctx context.Context) error {
 	return nil
 }
 
+// rewriteHost 把 URL 的 scheme 与 host 换成对外端点，其余（路径、查询串）原样保留。
+//
+// 未配置对外端点时原样返回。注意：预签名 URL 的 SigV4 签名覆盖 Host 头，
+// 因此对外域名必须由 nginx 反代到 MinIO 并透传 Host（proxy_set_header Host $host），
+// 且 MINIO_SERVER_URL 要与对外域名一致 —— 否则签名校验失败（不是静默降级）。
+func (s *Storage) rewriteHost(rawURL string) string {
+	if s.publicEndpoint == "" {
+		return rawURL
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	u.Host = s.publicEndpoint
+	if s.publicUseSSL {
+		u.Scheme = "https"
+	} else {
+		u.Scheme = "http"
+	}
+	return u.String()
+}
+
 // PresignPut 生成有时效的预签名上传 URL，客户端可用 HTTP PUT 直传，无需服务端中转。
 // contentType 目前仅作调用方语义占位，MinIO PresignedPutObject 不绑定 Content-Type。
 func (s *Storage) PresignPut(ctx context.Context, objectKey, contentType string, expires time.Duration) (string, error) {
@@ -102,7 +131,7 @@ func (s *Storage) PresignPut(ctx context.Context, objectKey, contentType string,
 	if err != nil {
 		return "", fmt.Errorf("failed to presign put %q: %w", objectKey, err)
 	}
-	return u.String(), nil
+	return s.rewriteHost(u.String()), nil
 }
 
 // PresignGet 生成有时效的预签名下载 URL，用于私有对象（如图片消息）的受控读取。
@@ -111,7 +140,7 @@ func (s *Storage) PresignGet(ctx context.Context, objectKey string, expires time
 	if err != nil {
 		return "", fmt.Errorf("failed to presign get %q: %w", objectKey, err)
 	}
-	return u.String(), nil
+	return s.rewriteHost(u.String()), nil
 }
 
 // PutObject 服务端直接写入对象（供内部工具如 seed 使用；
@@ -139,12 +168,23 @@ func (s *Storage) ObjectExists(ctx context.Context, objectKey string) (bool, err
 
 // PublicURL 拼出对象的公共访问 URL，形如 scheme://endpoint/bucket/key。
 // 仅对已开放匿名读的前缀（avatars/、sticker-covers/）有效。
+//
+// 配了对外端点就用它，否则回落到内网建连地址（dev 环境即此路径）。
 func (s *Storage) PublicURL(objectKey string) string {
+	host := s.endpoint
 	scheme := "http"
 	if s.useSSL {
 		scheme = "https"
 	}
-	return fmt.Sprintf("%s://%s/%s/%s", scheme, s.endpoint, s.bucket, objectKey)
+	if s.publicEndpoint != "" {
+		host = s.publicEndpoint
+		if s.publicUseSSL {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+	return fmt.Sprintf("%s://%s/%s/%s", scheme, host, s.bucket, objectKey)
 }
 
 // ObjectInfo 对象清单条目（GC 用：判定引用要 key，判定宽限期要 LastModified）。

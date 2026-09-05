@@ -1,4 +1,4 @@
-# 前置 nginx：TLS 终止 + 四域名反向代理
+# 前置 nginx：TLS 终止 + 五域名反向代理
 #
 # 由 install.sh 用 envsubst 把 ${DOMAIN_*} 替换后生成 nginx.conf。
 # 首次签发证书前 certbot 需要 HTTP-01 challenge，故 80 端口先放行
@@ -8,11 +8,12 @@ upstream yuanchat_api  { server yuanchat-server:8085; }
 upstream yuanchat_ws   { server yuanchat-server:8086; }
 upstream yuanchat_app  { server yuanchat-web:80; }
 upstream yuanchat_adm  { server yuanchat-admin:80; }
+upstream yuanchat_s3   { server minio:9000; }
 
 # ---------- HTTP：ACME 校验 + 全站跳 HTTPS ----------
 server {
     listen 80;
-    server_name ${DOMAIN_APP} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN};
+    server_name ${DOMAIN_APP} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN} ${DOMAIN_STORAGE};
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -94,5 +95,29 @@ server {
     location / {
         proxy_pass http://yuanchat_adm;
         include /etc/nginx/proxy-params.conf;
+    }
+}
+
+# ---------- storage：MinIO 对象存储对外端点 ----------
+# 预签名 URL 的 SigV4 签名覆盖 Host 头，故必须透传 $host 且
+# MINIO_SERVER_URL 与本域名一致，否则签名校验失败。
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN_STORAGE};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN_STORAGE}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_STORAGE}/privkey.pem;
+    include /etc/nginx/ssl-params.conf;
+
+    # 图片/语音/视频经预签名 URL 直传，须容纳与 max_file_size 相当的体积
+    client_max_body_size 100m;
+
+    location / {
+        proxy_pass http://yuanchat_s3;
+        include /etc/nginx/proxy-params.conf;
+        # proxy-params.conf 已设 Host $host；此处显式重申以标明它对签名是必需的，
+        # 将来改动通用参数时不要把它一并去掉
+        proxy_set_header Host $host;
     }
 }

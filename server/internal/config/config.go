@@ -151,6 +151,13 @@ type MinIOConfig struct {
 	SecretKey string `mapstructure:"secret_key"` // 私有密钥
 	Bucket    string `mapstructure:"bucket"`     // 默认桶名
 	UseSSL    bool   `mapstructure:"use_ssl"`    // 是否使用 HTTPS
+
+	// PublicEndpoint 下发给客户端的对外地址（不含 scheme），形如 storage.example.com。
+	// 与 Endpoint 严格分开：后者是服务端建连用的内网地址（生产是 compose 主机名
+	// minio:9000，客户端根本解析不了）。留空时回落到 Endpoint，dev 行为不变。
+	PublicEndpoint string `mapstructure:"public_endpoint"`
+	// PublicUseSSL 对外地址是否走 HTTPS（生产经 nginx 终止 TLS 时为 true）。
+	PublicUseSSL bool `mapstructure:"public_use_ssl"`
 }
 
 // Load 加载配置文件，支持环境变量覆盖
@@ -169,6 +176,13 @@ func Load(configPath string) (*Config, error) {
 	v.SetEnvPrefix("YUANCHAT")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
+
+	// 对象存储对外端点只在生产由环境变量下发，配置文件里不出现。
+	// AutomaticEnv 不会把未知 key 登记进 AllKeys，而 Unmarshal 只遍历 AllKeys，
+	// 因此必须显式声明默认值让 key 可见，否则环境变量会被静默丢弃
+	// （客户端就又会拿到内网主机名的 URL）。
+	v.SetDefault("minio.public_endpoint", "")
+	v.SetDefault("minio.public_use_ssl", false)
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
