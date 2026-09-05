@@ -1,4 +1,4 @@
-// 扫码登录承载 pending → scanned → confirmed 状态机。
+// 扫码登录承载 pending → scanned → confirmed 状态机，scanned 还可被扫码端取消到 canceled。
 //
 // 状态全程只活在 Redis：会话是 120 秒即焚的临时凭据，落库只会留下一张需要清理的垃圾表。
 
@@ -22,11 +22,14 @@ import (
 // QRStatus 是扫码会话的状态。
 type QRStatus string
 
-// 扫码会话的三个状态。状态只能单向前进，跳级或回退一律拒绝。
+// 扫码会话的四个状态。状态只能单向前进，跳级或回退一律拒绝；
+// confirmed 与 canceled 都是终态，进入其中之一后不再接受任何迁移。
 const (
 	QRPending   QRStatus = "pending"
 	QRScanned   QRStatus = "scanned"
 	QRConfirmed QRStatus = "confirmed"
+	// QRCanceled 扫码端主动取消，被扫端轮询到此状态即停止并提示重新生成
+	QRCanceled QRStatus = "canceled"
 )
 
 // 扫码会话的时限与格式约定，取自设计文档，改动直接影响安全边界。
@@ -280,6 +283,26 @@ func (s *AuthService) ConfirmQRSession(ctx context.Context, qrToken string, user
 
 	s.logger.Info("扫码会话已确认授权",
 		zap.String("user_id", userID.String()), zap.String("device_id", deviceID))
+	return nil
+}
+
+// CancelQRSession 把会话从 scanned 迁到 canceled，仅扫码者本人可取消。
+//
+// 状态与归属的判定全交给原子脚本：外人的取消会撞上归属校验，
+// pending 阶段的取消会撞上状态校验 —— 都不会改动会话，
+// 否则拍到二维码的人就能把别人的登录会话逐个废掉。
+//
+// 刻意不校验账号是否被封禁：取消是撤回授权而非授予授权，
+// 让封禁用户也能把自己误扫的会话收回来，比多一道拦截更安全。
+// 同样刻意不删会话键：被扫端只有轮询到 canceled 才知道「手机上按了取消」，
+// 删键会退化成与过期同样的 404，两种终止原因就分不开了。
+func (s *AuthService) CancelQRSession(ctx context.Context, qrToken string, userID uuid.UUID) error {
+	if err := s.qrAdvanceState(ctx, qrToken, QRScanned, QRCanceled, userID,
+		"canceled_at", time.Now().UTC().Format(time.RFC3339)); err != nil {
+		return err
+	}
+
+	s.logger.Info("扫码会话已被扫码端取消", zap.String("user_id", userID.String()))
 	return nil
 }
 

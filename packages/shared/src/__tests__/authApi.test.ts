@@ -13,6 +13,7 @@ import {
   resetPassword,
   createQrSession,
   pollQrSession,
+  cancelQr,
 } from "../api/auth";
 
 /** 模拟一次 204 响应：无 body，`res.json()` 与浏览器一致地抛 SyntaxError */
@@ -127,6 +128,25 @@ describe("api/auth 扫码链路", () => {
     expect(req.url).toBe("http://localhost:8085/api/v1/auth/qr/tk");
     expect(req.method).toBe("GET");
     expect(req.headers["X-Qr-Poll-Secret"]).toBe("sec");
+  });
+
+  it("cancelQr 打 /cancel 且发空对象请求体，204 解析为 undefined", async () => {
+    mockNoContentOnce();
+    await expect(cancelQr("tk")).resolves.toBeUndefined();
+    const req = sentRequest();
+    expect(req.url).toBe("http://localhost:8085/api/v1/auth/qr/tk/cancel");
+    expect(req.method).toBe("POST");
+    expect(req.body).toEqual({});
+  });
+
+  it("pollQrSession 认得 canceled 状态：会话未销毁，仍带真实剩余秒数", async () => {
+    // canceled 与过期不同：会话还活着，因此有剩余秒数且不是 404
+    mockEnvelopeOnce({ status: "canceled", expires_in: 96 });
+    await expect(pollQrSession("tk", "sec")).resolves.toEqual({
+      status: "canceled",
+      expiresIn: 96,
+      tokens: undefined,
+    });
   });
 
   it("pollQrSession 未确认时不带 tokens，已确认时映射令牌对", async () => {

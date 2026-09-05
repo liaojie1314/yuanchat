@@ -5,7 +5,7 @@
  * 建会话 → 渲染二维码 → 每 2 秒轮询 → `confirmed` 时把换出的令牌写进登录态。
  * web 与桌面共用这一份实现，两端页面只做端差异注入。
  *
- * 四条与后端契约绑死的行为：
+ * 五条与后端契约绑死的行为：
  * 1. **二维码内容原样取服务端的 `qr_payload`**，前端不拼 scheme —— 拼错扫码端就认不出来。
  * 2. **轮询必须带 `X-Qr-Poll-Secret`**。密钥只在建会话的响应里出现，不在二维码里；
  *    没有它，任何拍到二维码的人都能在用户点确认的那一刻抢先取走令牌。
@@ -14,6 +14,9 @@
  *    `data.tokens.expires_in` 是 **access 令牌**寿命（登录态用它），两者不可互换。
  * 4. **拿到令牌、会话过期或出错后立即停止轮询**。令牌只能取一次，会话已被销毁；
  *    继续轮询只会得到 404，还会在用户切页后留下一个持续打接口的定时器。
+ * 5. **`canceled` 与过期是两回事**。扫码端在手机上按取消后会话进入 `canceled` 终态
+ *    却仍然存活（不会变成 404），因此必须显式识别这个状态并停止轮询，
+ *    否则会一直轮到会话自然过期为止，用户也看不到「是我自己取消的」。
  */
 import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -116,6 +119,12 @@ export function QrLoginScreen({ topSlot, onLoggedIn }: QrLoginScreenProps) {
             setPhase("confirmed");
             await useAuthStore.getState().sessionFromTokens(res.tokens);
             onLoggedIn?.();
+            return;
+          }
+          if (res.status === "canceled") {
+            // 会话还活着但已是终态，继续轮只是白打接口；文案要说清是手机上取消的
+            setStopReason(t("auth.qrCanceled"));
+            setPhase("stopped");
             return;
           }
           setSecondsLeft(res.expiresIn);

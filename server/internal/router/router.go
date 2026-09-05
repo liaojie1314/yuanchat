@@ -249,6 +249,8 @@ func Setup(
 		// 扫码端必须已登录：它是用自己的身份为被扫端授权
 		qr.POST("/:token/scan", middleware.AuthRequired(cfg.JWT), authH.ScanQRSession)
 		qr.POST("/:token/confirm", middleware.AuthRequired(cfg.JWT), authH.ConfirmQRSession)
+		// 取消同样限扫码端本人：它是把已扫的会话推进到终态，与确认是同一类写操作
+		qr.POST("/:token/cancel", middleware.AuthRequired(cfg.JWT), authH.CancelQRSession)
 	}
 
 	// 注册/登录统一收敛到 /auth 前缀，与 /auth/refresh、/auth/password、/auth/qr 对齐

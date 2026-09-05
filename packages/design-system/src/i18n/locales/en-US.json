@@ -157,6 +157,7 @@
   "auth.qrConfirmLogin": "Confirm login",
   "auth.qrFailed": "QR sign-in failed, please refresh the code",
   "auth.qrWrongUser": "Confirm with the account that scanned the code",
+  "auth.qrCanceled": "Canceled on your phone",
   "auth.backToPasswordLogin": "Back to password sign in",
   "validation.passwordMinLength": "Password must be at least 8 characters",
   "validation.passwordMaxLength": "Password must be at most 64 bytes",

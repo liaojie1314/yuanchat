@@ -157,6 +157,7 @@
   "auth.qrConfirmLogin": "로그인 확인",
   "auth.qrFailed": "QR 로그인에 실패했습니다. QR 코드를 새로 고치세요",
   "auth.qrWrongUser": "스캔한 계정으로 로그인을 확인하세요",
+  "auth.qrCanceled": "휴대폰에서 취소했습니다",
   "auth.backToPasswordLogin": "비밀번호 로그인으로 돌아가기",
   "validation.passwordMinLength": "비밀번호는 8자 이상이어야 합니다",
   "validation.passwordMaxLength": "비밀번호는 64바이트 이하여야 합니다",

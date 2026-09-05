@@ -134,6 +134,8 @@ let mockResetTicketUsed = false;
 let mockQrPollCount = 0;
 /** 令牌是否已被取走，取走后会话即销毁（再轮询回 404） */
 let mockQrTokensClaimed = false;
+/** 扫码端是否已取消；canceled 是终态，会话仍在但轮询只回该状态 */
+let mockQrCanceled = false;
 
 // ========================================
 // 辅助函数
@@ -1051,6 +1053,7 @@ export const handlers = [
     await delay(200);
     mockQrPollCount = 0;
     mockQrTokensClaimed = false;
+    mockQrCanceled = false;
     return apiOk({
       qr_token: MOCK_QR_TOKEN,
       qr_payload: "yuanchat://login?t=" + MOCK_QR_TOKEN,
@@ -1075,6 +1078,10 @@ export const handlers = [
 
     mockQrPollCount += 1;
     const remaining = Math.max(0, MOCK_QR_TTL_SECONDS - mockQrPollCount * 2);
+    // 取消是终态且会话不销毁：被扫端只有轮询到它才能区分「手机上按了取消」与「已过期」
+    if (mockQrCanceled) {
+      return apiOk({ status: "canceled", expires_in: remaining });
+    }
     if (mockQrPollCount === 1) {
       return apiOk({ status: "pending", expires_in: remaining });
     }
@@ -1115,6 +1122,20 @@ export const handlers = [
     if (String(params.token) !== MOCK_QR_TOKEN) {
       return HttpResponse.json({ code: 404, message: "auth.qrExpired" }, { status: 404 });
     }
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // --------------------------------------------------
+  // 扫码登录 — 取消（扫码端，需 Bearer 令牌）
+  // POST /api/v1/auth/qr/:token/cancel
+  // 会话进入 canceled 终态但不销毁，被扫端下一次轮询即看到该状态
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/auth/qr/:token/cancel", async ({ params }) => {
+    await delay(150);
+    if (String(params.token) !== MOCK_QR_TOKEN) {
+      return HttpResponse.json({ code: 404, message: "auth.qrExpired" }, { status: 404 });
+    }
+    mockQrCanceled = true;
     return new HttpResponse(null, { status: 204 });
   }),
 

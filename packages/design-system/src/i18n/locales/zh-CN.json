@@ -157,6 +157,7 @@
   "auth.qrConfirmLogin": "确认登录",
   "auth.qrFailed": "扫码登录失败，请刷新二维码",
   "auth.qrWrongUser": "请用扫码的那个账号确认登录",
+  "auth.qrCanceled": "已在手机上取消",
   "auth.backToPasswordLogin": "返回密码登录",
   "validation.passwordMinLength": "密码长度至少 8 位",
   "validation.passwordMaxLength": "密码长度不能超过 64 字节",

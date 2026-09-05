@@ -1,4 +1,4 @@
-// 扫码登录的四个端点：被扫端建会话与轮询，扫码端标记已扫与确认授权。
+// 扫码登录的五个端点：被扫端建会话与轮询，扫码端标记已扫、确认授权与主动取消。
 
 package handler
 
@@ -145,6 +145,39 @@ func (h *AuthHandler) ConfirmQRSession(c *gin.Context) {
 	}
 
 	if err := h.svc.ConfirmQRSession(c.Request.Context(), qrToken, userID); err != nil {
+		h.qrError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// CancelQRSession 由扫码端主动放弃这次授权，被扫端下一次轮询即看到 canceled。
+//
+// 与 confirm 同样要求 Bearer 且必须是扫码的那个账号：取消同样是对他人会话的写操作。
+//
+//	@Summary		取消扫码登录授权
+//	@Security		BearerAuth
+//	@Tags			auth
+//	@Param			token	path	string	true	"会话凭据"
+//	@Success		204
+//	@Failure		403	{object}	Response
+//	@Failure		404	{object}	Response
+//	@Failure		409	{object}	Response
+//	@Router			/api/v1/auth/qr/{token}/cancel [post]
+func (h *AuthHandler) CancelQRSession(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		Unauthorized(c, "authorization token required")
+		return
+	}
+	qrToken := c.Param("token")
+	if len(qrToken) > qrTokenMaxLen {
+		Error(c, http.StatusNotFound, 404, "auth.qrExpired")
+		return
+	}
+
+	if err := h.svc.CancelQRSession(c.Request.Context(), qrToken, userID); err != nil {
 		h.qrError(c, err)
 		return
 	}
