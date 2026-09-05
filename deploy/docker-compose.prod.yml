@@ -6,7 +6,8 @@
 #
 # 与开发用 docker-compose.yml 的区别：
 # - 应用自身（server/web/admin）也容器化，不再本机 go run / vite dev
-# - 前置 nginx 做 TLS 终止 + 四域名反代；数据库/Redis/MinIO 不暴露公网端口
+# - 前置 nginx 做 TLS 终止 + 五域名反代；数据库/Redis 不暴露公网端口，
+#   MinIO 也不映射端口，但客户端要下载对象，故经 nginx 的存储子域反代对外
 # - 全部凭据来自 .env，无硬编码默认密码
 
 name: yuanchat
@@ -53,8 +54,9 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
-      # 预签名 URL 里的 host 必须是客户端可达的公网地址
-      MINIO_SERVER_URL: https://${DOMAIN_API}/s3
+      # 预签名 URL 里的 host 必须是客户端可达的公网地址，且要与 nginx 上
+      # 存储子域的 server_name 完全一致 —— SigV4 签名覆盖 Host 头，不一致会签名校验失败
+      MINIO_SERVER_URL: https://${DOMAIN_STORAGE}
     volumes:
       - minio_data:/data
     healthcheck:
@@ -91,6 +93,10 @@ services:
       YUANCHAT_MINIO_ENDPOINT: minio:9000
       YUANCHAT_MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       YUANCHAT_MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      # 下发给客户端的对外地址：ENDPOINT 是 compose 内网主机名，浏览器/手机解析不了。
+      # 必须与 minio 的 MINIO_SERVER_URL、nginx 存储子域三者一致
+      YUANCHAT_MINIO_PUBLIC_ENDPOINT: ${DOMAIN_STORAGE}
+      YUANCHAT_MINIO_PUBLIC_USE_SSL: "true"
       YUANCHAT_LOG_FORMAT: json
       YUANCHAT_LOG_OUTPUT: stdout
       YUANCHAT_PRESENCE_BACKEND: ${PRESENCE_BACKEND:-local}

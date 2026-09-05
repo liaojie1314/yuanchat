@@ -9,19 +9,20 @@
 | 服务器 | 2 vCPU / 4 GB 内存 / 40 GB 磁盘起（含对象存储）           |
 | 系统   | Ubuntu 22.04+、Debian 12+（任何支持 Docker 的发行版均可） |
 | Docker | 20.10+，含 compose v2 插件                                |
-| 域名   | 4 个子域名，均已 A 记录解析到本机公网 IP                  |
+| 域名   | 5 个子域名，均已 A 记录解析到本机公网 IP                  |
 | 端口   | 80 / 443 对公网开放（证书签发与服务访问）                 |
 
 ### 域名规划
 
-| 子域名                  | 用途           |
-| ----------------------- | -------------- |
-| `app.your-domain.com`   | Web 端         |
-| `api.your-domain.com`   | REST API       |
-| `ws.your-domain.com`    | WebSocket 长连 |
-| `admin.your-domain.com` | 管理后台       |
+| 子域名                    | 用途                                      |
+| ------------------------- | ----------------------------------------- |
+| `app.your-domain.com`     | Web 端                                    |
+| `api.your-domain.com`     | REST API                                  |
+| `ws.your-domain.com`      | WebSocket 长连                            |
+| `admin.your-domain.com`   | 管理后台                                  |
+| `storage.your-domain.com` | 对象存储（图片 / 语音 / 视频 / 头像下载） |
 
-> 四个域名必须**先解析生效**再执行安装，否则 Let's Encrypt 的 HTTP-01 校验会失败。
+> 五个域名必须**先解析生效**再执行安装，否则 Let's Encrypt 的 HTTP-01 校验会失败。
 > 验证：`dig +short app.your-domain.com` 应返回你的服务器 IP。
 
 ### 安装 Docker
@@ -61,16 +62,17 @@ vim deploy/.env
 
 | 容器                | 作用                           | 对外端口 |
 | ------------------- | ------------------------------ | -------- |
-| `yuanchat-nginx`    | TLS 终止 + 四域名反代          | 80 / 443 |
+| `yuanchat-nginx`    | TLS 终止 + 五域名反代          | 80 / 443 |
 | `yuanchat-server`   | Go 后端（REST 8085 / WS 8086） | 仅内网   |
 | `yuanchat-web`      | Web 端静态资源                 | 仅内网   |
 | `yuanchat-admin`    | 管理后台静态资源               | 仅内网   |
 | `yuanchat-postgres` | 数据库                         | 仅内网   |
 | `yuanchat-redis`    | 缓存 / presence Pub/Sub        | 仅内网   |
-| `yuanchat-minio`    | 对象存储（图片/文件/头像）     | 仅内网   |
+| `yuanchat-minio`    | 对象存储（图片/文件/头像）     | 经 nginx |
 | `yuanchat-certbot`  | 证书自动续期                   | —        |
 
-数据库、Redis、MinIO **不映射宿主机端口**，只能经内网访问。
+数据库与 Redis **不映射宿主机端口**，只能经内网访问。
+MinIO 同样不映射端口，但客户端要下载对象，故经 nginx 的 `storage` 子域反代对外。
 
 ### 可观测（可选）
 
@@ -178,9 +180,33 @@ $COMPOSE start minio
 
 ### 图片上传失败 / 预签名 URL 打不开
 
-MinIO 的 `MINIO_SERVER_URL` 决定预签名 URL 的 host，必须是客户端可达的公网地址。
-默认走 `https://${DOMAIN_API}/s3`，如果你改了架构，需同步调整
-`docker-compose.prod.yml` 的 `MINIO_SERVER_URL` 与 nginx 转发规则。
+下发给客户端的 URL 用的是**对外**地址 `DOMAIN_STORAGE`，与服务端建连用的内网
+`minio:9000` 是两个不同的配置项。预签名 URL 的 SigV4 签名把 Host 头也算进签名，
+所以下面三处必须是同一个域名，任一处不一致都会得到 403 签名校验失败（不会静默降级）：
+
+1. 后端 `YUANCHAT_MINIO_PUBLIC_ENDPOINT`
+2. MinIO 容器的 `MINIO_SERVER_URL`
+3. nginx `storage` 子域的 `server_name`（该 location 须 `proxy_set_header Host $host`）
+
+用默认的 `docker-compose.prod.yml` 时三处都由 `.env` 的 `DOMAIN_STORAGE` 推导，天然一致。
+排查步骤：
+
+```bash
+dig +short storage.your-domain.com          # 是否解析到本机
+$COMPOSE exec nginx ls /etc/letsencrypt/live/  # storage 子域证书是否已签发
+grep -n 'DOMAIN_STORAGE' deploy/.env           # 是否仍是 example.com 示例值
+```
+
+若客户端报的 URL host 是 `minio:9000`，说明 `YUANCHAT_MINIO_PUBLIC_ENDPOINT` 没生效
+（回落到了内网建连地址），检查该环境变量是否真的传进了容器：
+`$COMPOSE exec yuanchat-server env | grep MINIO`。
+
+### 桌面端加载不出图片（Tauri CSP）
+
+桌面端的 CSP 白名单只列真实可达的主机，不用 `https:` 通配放行。自建部署后需要把你的
+存储域名加进 `apps/desktop/src-tauri/tauri.conf.json` 的 `app.security.csp`，
+在 `img-src`、`media-src`、`connect-src` 三处各加上 `https://storage.your-domain.com`，
+然后重新构建桌面包。不改的话图片与语音会被 CSP 拦掉（控制台报 CSP 违规，网络面板无请求）。
 
 ### 后端起不来
 
