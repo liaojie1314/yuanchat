@@ -47,6 +47,7 @@ import {
 import type { ConversationMember } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
+import { startCall } from "./callActions";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { InviteMembersModal } from "./InviteMembersModal";
 
@@ -258,7 +259,11 @@ export function ChatDetail({
         ) : (
           <>
             <QuickAction icon={<MessageCircle size={19} />} label={t("detail.sendMessage")} />
-            <QuickAction icon={<Phone size={19} />} label={t("chat.voiceCall")} />
+            <QuickAction
+              icon={<Phone size={19} />}
+              label={t("chat.voiceCall")}
+              onClick={() => void startCall(conv.id, "audio", [])}
+            />
           </>
         )}
       </div>

@@ -48,6 +48,13 @@ export { MentionPicker } from "./MentionPicker";
 export { ForwardModal } from "./ForwardModal";
 export { UserProfileView } from "./UserProfileView";
 
+// 通话组件
+export { CallView } from "./CallView";
+export { startCall, joinCall } from "./callActions";
+export { CallHost } from "./CallHost";
+export { CallInviteModal, MAX_CALL_INVITEES } from "./CallInviteModal";
+export { formatCallDuration, callRecordKey } from "./callFormat";
+
 // 通讯录组件
 export { ContactsScreen } from "./ContactsScreen";
 export { ContactsPanel } from "./ContactsPanel";

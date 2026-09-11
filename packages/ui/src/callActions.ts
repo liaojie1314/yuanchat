@@ -1,0 +1,119 @@
+/**
+ * 通话动作 — 发起 / 加入 与本地媒体交接
+ *
+ * @description
+ * 与 {@link CallView} 分家的理由有两条：入口散在四处（顶栏按钮、「更多」宫格、
+ * 会话详情、联系人详情），它们只需要这两个函数而不需要整个视图；且
+ * `react-refresh` 规则要求组件文件只导出组件。
+ *
+ * **本地流的交接**：`getUserMedia` 必须在发 `call.invite` / `call.answer`
+ * **之前**完成 —— 设备被占用或权限被拒时若邀请已发出，对方会响铃而本端永远接不通。
+ * 取到的流经模块级 holder 交给 `CallView`，避免同一次通话连开两次摄像头。
+ * holder 刻意不进 zustand：`MediaStream` 不可序列化，进 store 会让 devtools 与
+ * React 的浅比较双双失效。
+ */
+import i18n from "@yuanchat/design-system/i18n";
+import { chatSocket, MAX_CALL_PARTICIPANTS, showToast, useCallStore } from "@yuanchat/shared";
+import type { CallMedia } from "@yuanchat/shared";
+
+/** 视频通话的采集约束：640×480 足够 mesh 四路并发，再高就是旧机型发热掉帧 */
+export const VIDEO_CONSTRAINTS: MediaTrackConstraints = {
+  width: { ideal: 640 },
+  height: { ideal: 480 },
+  facingMode: "user",
+};
+
+/** 按媒体形态给出 `getUserMedia` 约束。 */
+export function constraintsOf(media: CallMedia): MediaStreamConstraints {
+  return media === "video" ? { audio: true, video: VIDEO_CONSTRAINTS } : { audio: true };
+}
+
+/** 停掉一路流的全部轨道（不 stop 的话摄像头指示灯会一直亮着）。 */
+export function stopStream(stream: MediaStream | null): void {
+  if (!stream) return;
+  const tracks = stream.getTracks();
+  for (let i = 0; i < tracks.length; i++) tracks[i].stop();
+}
+
+let pendingLocalStream: MediaStream | null = null;
+
+/**
+ * 取走预取的本地流。
+ *
+ * @returns 预取的流；没有则 null（桌面通话窗口是独立 JS 上下文，取不到主窗口
+ *   这里的值 —— 那条路径由 `CallView` 自己现取）
+ * @remarks 只能取一次，避免两处共用同一路轨道各自 `stop()`。
+ */
+export function takeLocalStream(): MediaStream | null {
+  const s = pendingLocalStream;
+  pendingLocalStream = null;
+  return s;
+}
+
+/**
+ * 取本地媒体并存进 holder，失败出 toast 并返回 false。
+ *
+ * 发起 / 接听 / 加入三条路径共用：取不到设备就绝不能进房间 —— 那会让对方响铃却
+ * 永远接不通，或在房里多一个静音黑屏的参与者把房间撑到 60s 超时。
+ */
+export async function probeLocalMedia(media: CallMedia): Promise<boolean> {
+  const devices = typeof navigator === "undefined" ? undefined : navigator.mediaDevices;
+  if (!devices) {
+    showToast("error", i18n.t("call.failedMedia"));
+    return false;
+  }
+  try {
+    const stream = await devices.getUserMedia(constraintsOf(media));
+    stopStream(pendingLocalStream); // 上一轮遗留（呼叫未接通就被取消）
+    pendingLocalStream = stream;
+    return true;
+  } catch {
+    showToast("error", i18n.t("call.failedMedia"));
+    return false;
+  }
+}
+
+/**
+ * 发起一通电话（四个入口共用）。
+ *
+ * @param conversationId - 目标会话
+ * @param media - 语音或视频
+ * @param inviteeIds - 群通话选中的成员；单聊传空数组（服务端默认取对端）
+ */
+export async function startCall(
+  conversationId: string,
+  media: CallMedia,
+  inviteeIds: string[],
+): Promise<void> {
+  const store = useCallStore.getState();
+  if (store.phase !== "idle") return; // 已在通话里，忽略重复点击
+  if (!(await probeLocalMedia(media))) return;
+  store.startOutgoing(conversationId, media, inviteeIds);
+  chatSocket.send("call.invite", {
+    conversation_id: conversationId,
+    media,
+    invitee_ids: inviteeIds.length > 0 ? inviteeIds : undefined,
+  });
+}
+
+/**
+ * 加入一通已在进行的群通话（会话横幅的「加入」）。
+ *
+ * @remarks 复用 `call.answer{accept:true}` —— 服务端不区分「接听」与「主动加入」，
+ *   两者对房间都是「这个人进来了」。满员在这里前置拦住：等服务端回「人数已满」的话，
+ *   用户已经交出了麦克风权限。
+ * @param banner - 会话横幅携带的房间信息
+ */
+export async function joinCall(banner: {
+  callId: string;
+  media: CallMedia;
+  joinedCount: number;
+}): Promise<void> {
+  if (useCallStore.getState().phase !== "idle") return;
+  if (banner.joinedCount >= MAX_CALL_PARTICIPANTS) {
+    showToast("error", i18n.t("call.full"));
+    return;
+  }
+  if (!(await probeLocalMedia(banner.media))) return;
+  chatSocket.send("call.answer", { call_id: banner.callId, accept: true });
+}
