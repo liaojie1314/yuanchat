@@ -100,7 +100,9 @@ class CallForegroundService : Service() {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
       )
     return NotificationCompat.Builder(this, CHANNEL_ID)
-      .setSmallIcon(android.R.drawable.stat_sys_phone_call)
+      // 用应用自己的图标而不是 android.R.drawable.stat_sys_phone_call：
+      // 后者自 API 35 起是 deprecated，且通知栏里挂一个系统电话图标与应用身份不符
+      .setSmallIcon(R.mipmap.ic_launcher)
       .setContentTitle(title.ifEmpty { getString(R.string.app_name) })
       .setContentText(text)
       .setContentIntent(pending)
