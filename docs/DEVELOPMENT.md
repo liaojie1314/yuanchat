@@ -47,6 +47,17 @@ yuanchat/
 pnpm install                # 安装所有 workspace 依赖
 ```
 
+**Linux 桌面端（WebKitGTK）额外依赖**：
+
+```bash
+sudo apt install gstreamer1.0-nice   # WebRTC 的 ICE 代理（语音/视频通话必需）
+```
+
+WebKitGTK 的 WebRTC 走 GstWebRTC，ICE 代理由 `libgstnice.so` 提供。缺这个包时
+`RTCPeerConnection` 存在但收集不到任何候选，通话表现为「一直连接中」且无任何报错。
+编解码所需的 `gstreamer1.0-plugins-{good,bad}`（webrtcbin / dtls / srtp / rtpmanager）
+通常随桌面环境预装，可用 `ls /usr/lib/x86_64-linux-gnu/gstreamer-1.0/ | grep -E 'webrtc|dtls|srtp|nice'` 核对。
+
 ---
 
 ## 零、一键启动（推荐入口）
