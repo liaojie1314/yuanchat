@@ -1,0 +1,27 @@
+{
+  // packages/design-system 的独立类型门禁（package.json 的 typecheck 脚本）。
+  //
+  // 与 packages/shared/tsconfig.json 同一套口径：target/lib 钉 ES2019 对齐两端
+  // vite 的 build.target，否则 tsc 拦不住 replaceAll 这类旧 WebView 没有的内建方法；
+  // 本包的 legacyWebViewCompat.ts 正是为旧 WebView 兜底的，更不能自己用上新语法。
+  //
+  // noUnusedLocals / noUnusedParameters 比两端 app 更严：本包是三端共用的库。
+  "compilerOptions": {
+    "target": "ES2019",
+    "lib": ["ES2019", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "types": ["vitest/globals"]
+  },
+  "include": ["src"]
+}

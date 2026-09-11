@@ -126,7 +126,10 @@ func (s *MessageService) Edit(
 	// 且 admin 检索实时读 content->>'text'，编辑掉敏感词即从审核队列消失。
 	// 反向不清标 —— 清 flagged 是 admin 的动作，用户不能靠再编辑自助洗白。
 	flagged := s.textHitsModeration(msg.MessageType, string(newContent), userID)
-	editedAt := time.Now().UTC()
+	// 截到微秒再写：Postgres 的 timestamptz 只存到微秒，不截的话内存副本
+	// （message.edited 帧与本次 REST 响应用的就是它）带着纳秒尾数，
+	// 而别人回头拉历史拿到的是被库抹掉尾数的值，同一次编辑出现两个 edited_at。
+	editedAt := time.Now().UTC().Truncate(time.Microsecond)
 
 	ok, err := s.msgRepo.EditWithHistory(ctx, messageID,
 		msg.Content, string(newContent), msg.EditCount, flagged, editedAt)

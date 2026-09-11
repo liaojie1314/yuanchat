@@ -57,6 +57,22 @@ func (r *MessageRepository) CreateWithSeq(ctx context.Context, msg *model.Messag
 	})
 }
 
+// utcTime 把驱动按连接时区（`Asia/Shanghai`）还原出来的时间换算回 UTC。
+//
+// 时刻本身不变，变的是序列化出来的字面量：不换算的话，同一次编辑在
+// message.edited 帧里是 `...Z`（内存值，本就是 UTC），拉历史却是 `...+08:00`，
+// 客户端拿字符串比对/去重就会判成两个不同的时间。
+func utcTime(t time.Time) time.Time { return t.UTC() }
+
+// utcTimePtr 同 utcTime，针对可空列（edited_at 未编辑过时为 NULL）。
+func utcTimePtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
+}
+
 // ListBefore 取会话中 seq < beforeSeq 且 seq > minSeq 的最新 limit 条消息（seq 降序）。
 // beforeSeq ≤ 0 表示从最新一条开始取。
 // minSeq 为调用方的 cleared_before_seq 水位（0 表示不过滤）；群会话署名用成员 alias 覆盖 nickname。
@@ -76,6 +92,9 @@ func (r *MessageRepository) ListBefore(ctx context.Context, convID uuid.UUID, be
 
 	var rows []MessageWithSender
 	err := q.Order("m.seq DESC").Limit(limit).Scan(&rows).Error
+	for i := range rows {
+		rows[i].EditedAt = utcTimePtr(rows[i].EditedAt)
+	}
 	return rows, err
 }
 
@@ -127,6 +146,7 @@ func (r *MessageRepository) FindByID(ctx context.Context, id uuid.UUID) (*model.
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
+	msg.EditedAt = utcTimePtr(msg.EditedAt)
 	return &msg, err
 }
 
@@ -207,6 +227,9 @@ func (r *MessageRepository) ListEdits(ctx context.Context, messageID uuid.UUID) 
 		Where("message_id = ?", messageID).
 		Order("version ASC").
 		Find(&edits).Error
+	for i := range edits {
+		edits[i].EditedAt = utcTime(edits[i].EditedAt)
+	}
 	return edits, err
 }
 
@@ -259,5 +282,8 @@ func (r *MessageRepository) Search(
 
 	var rows []SearchResult
 	err := q.Order("m.created_at DESC").Limit(limit).Scan(&rows).Error
+	for i := range rows {
+		rows[i].EditedAt = utcTimePtr(rows[i].EditedAt)
+	}
 	return rows, err
 }
