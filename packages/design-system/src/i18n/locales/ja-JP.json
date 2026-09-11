@@ -217,6 +217,7 @@
   "call.restore": "通話に戻る",
   "call.connecting": "接続中…",
   "call.gone": "通話はすでに終了しています",
+  "call.unsupported": "このクライアントは通話に対応していません（システム WebView に WebRTC がありません）",
   "call.ongoing": "通話中",
   "call.inviteTitle": "参加者を選択",
   "call.inviteHint": "あと %{n} 人まで",

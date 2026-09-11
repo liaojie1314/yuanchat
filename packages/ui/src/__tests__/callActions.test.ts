@@ -1,24 +1,35 @@
 /**
- * callActions 承载器（CallLauncher）测试
+ * callActions 承载器（CallLauncher）与 WebRTC 能力闸门测试
  *
- * 测试范围：桌面端注册承载器后，四个入口的发起动作必须被**整体**拦下 ——
- * 既不取媒体也不发信令。
- *
- * 这条线错了的症状极难定位：房间建得起来、对方也会响铃，但服务端登记的是
- * 主窗口那条连接，而视频渲染在通话窗口里，双方永远都看不到对方的画面。
+ * 测试范围：
+ * 1. 桌面端注册承载器后，四个入口的发起动作必须被**整体**拦下 —— 既不取媒体也不发信令。
+ *    这条线错了的症状极难定位：房间建得起来、对方也会响铃，但服务端登记的是主窗口那条
+ *    连接，而视频渲染在通话窗口里，双方永远都看不到对方的画面。
+ * 2. `RTCPeerConnection` 不存在时一步都不许往下走。采集能力与连接能力在各端的
+ *    WebView 上会分别缺失（getUserMedia 能出流而 RTCPeerConnection 整个类不存在
+ *    是实测见过的形态）；不拦住的话摄像头亮起、邀请发出、对方响铃，
+ *    本端却永远建不出连接。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chatSocket, useCallStore } from "@yuanchat/shared";
 import { joinCall, setCallLauncher, startCall, type CallLaunchRequest } from "../callActions";
 
 const sent: Array<{ type: string; payload: unknown }> = [];
 const getUserMedia = vi.fn(async () => ({ getTracks: () => [] }) as unknown as MediaStream);
 
+/** jsdom 没有 RTCPeerConnection，能力闸门默认会拦死；除非用例明确要测那条分支 */
+function stubWebRTC(available: boolean) {
+  const g = globalThis as unknown as Record<string, unknown>;
+  if (available) g.RTCPeerConnection = function () {} as unknown;
+  else delete g.RTCPeerConnection;
+}
+
 beforeEach(() => {
   sent.length = 0;
   getUserMedia.mockClear();
   setCallLauncher(null);
   useCallStore.getState().reset();
+  stubWebRTC(true);
   vi.spyOn(chatSocket, "send").mockImplementation(((type: string, payload: unknown) => {
     sent.push({ type, payload });
   }) as typeof chatSocket.send);
@@ -27,6 +38,10 @@ beforeEach(() => {
     configurable: true,
     writable: true,
   });
+});
+
+afterEach(() => {
+  stubWebRTC(false);
 });
 
 describe("CallLauncher", () => {
@@ -90,5 +105,37 @@ describe("CallLauncher", () => {
     await startCall("conv-2", "audio", []);
 
     expect(sent.map((f) => f.type)).toEqual(["call.invite"]);
+  });
+});
+
+describe("WebRTC 能力闸门", () => {
+  it("没有 RTCPeerConnection 时 startCall 不取媒体、不发邀请", async () => {
+    stubWebRTC(false);
+
+    await startCall("conv-1", "audio", []);
+
+    // 摄像头/麦克风不许亮：这台机器根本连不通，白要一次权限
+    expect(getUserMedia).not.toHaveBeenCalled();
+    expect(sent).toHaveLength(0);
+    expect(useCallStore.getState().phase).toBe("idle");
+  });
+
+  it("没有 RTCPeerConnection 时闸门先于承载器，桌面端不会开出一个连不通的窗口", async () => {
+    stubWebRTC(false);
+    const launcher = vi.fn(() => true);
+    setCallLauncher(launcher);
+
+    await startCall("conv-1", "video", ["u1"]);
+
+    expect(launcher).not.toHaveBeenCalled();
+  });
+
+  it("没有 RTCPeerConnection 时 joinCall 同样拦下", async () => {
+    stubWebRTC(false);
+
+    await joinCall({ callId: "c-1", conversationId: "conv-1", media: "audio", joinedCount: 1 });
+
+    expect(getUserMedia).not.toHaveBeenCalled();
+    expect(sent).toHaveLength(0);
   });
 });

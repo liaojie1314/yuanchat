@@ -27,6 +27,16 @@ import type { FrameHandler } from "../ws/chatSocket";
  */
 export const callFrameHandlers: FrameHandler = {
   "call.incoming": (p) => {
+    // 本端建不出 PeerConnection 就当场回绝，不要摆出一个接了也接不通的来电界面。
+    // 主叫据此立刻拿到 rejected，而不是干等 60s 振铃超时。
+    //
+    // 判的是运行时能力而非平台：四端的 WebView 各自决定支持度，且采集与连接会
+    // 分别缺失 —— getUserMedia 能用而 RTCPeerConnection 不存在是实测见过的形态
+    // （见 packages/ui/src/callActions.ts 的 canUseWebRTC）。
+    if (typeof window === "undefined" || typeof window.RTCPeerConnection !== "function") {
+      chatSocket.send("call.answer", { call_id: p.call_id, accept: false });
+      return;
+    }
     useCallStore.getState().applyIncoming(p);
   },
   "call.state": (p) => {

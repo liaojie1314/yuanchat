@@ -11,6 +11,12 @@
 /// 宿主还需装 `gstreamer1.0-nice`：WebKitGTK 的 WebRTC 走 GstWebRTC，
 /// ICE 代理由该插件提供，缺它 `RTCPeerConnection` 收集不到任何候选。
 ///
+/// 注意这两个开关只是**必要条件**：WebKitGTK 是否编进了 GstWebRTC 后端由发行版的
+/// 构建选项决定，编掉的话 `enable-webrtc` 读回来仍是 true 而 `RTCPeerConnection`
+/// 整个类不存在（本机 2.50.4 实测即如此，见设计文档 §3.11）。前端因此不按平台
+/// 判断，而是运行时探测 `RTCPeerConnection` 再决定是否放行通话入口
+/// （`packages/ui/src/callActions.ts` 的 `canUseWebRTC`）。
+///
 /// @param window - 主窗口（需要拿到底层 WebKitWebView）
 #[cfg(target_os = "linux")]
 fn allow_media(window: &tauri::WebviewWindow) {

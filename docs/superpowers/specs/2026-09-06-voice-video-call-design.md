@@ -404,27 +404,79 @@ PeerConnection 就必须建在通话窗口里；PC 需要信令，信令就得�
 实现：`CallService` 维护 `conn_id → call_id` 的 Redis 反向索引（`call:conn:{conn_id}`，与房间同 TTL），
 `Unregister` 时查一次即可，不需要遍历房间。
 
-### 3.11 Linux 桌面（F0 spike 的核心）
+### 3.11 Linux 桌面（F0 spike 的核心）—— 实测结论：(b) 不通，按能力降级
 
-`apps/desktop/src-tauri/src/lib.rs` 两处改动：
+`apps/desktop/src-tauri/src/lib.rs` 两处改动已实施并保留（对 WebRTC 可用的宿主是必要条件）：
 
 ```rust
 settings.set_enable_media_stream(true);
-settings.set_enable_webrtc(true);              // 新增：WebKitGTK 2.38+ 默认关闭 WebRTC
+settings.set_enable_webrtc(true);              // WebKitGTK 2.38+ 默认关闭 WebRTC
 // permission 放行从「仅音频」扩到「音频或视频」
 ```
 
 `set_enable_webrtc` 需要 `webkit2gtk` crate 的 `v2_38` feature；`Cargo.toml` 已钉 `v2_40`（包含它）。
 
-**宿主依赖**：WebKitGTK 的 WebRTC 走 GstWebRTC，ICE 代理由 `gstreamer1.0-nice`
-（`libgstnice.so`）提供。本机已装 `plugins-bad`（webrtcbin/dtls/srtp）、`plugins-good`（rtpmanager）、
-`vpx`/`openh264`，**独缺 `gstreamer1.0-nice`** —— 缺它 `RTCPeerConnection` 收集不到任何候选。
-需 `sudo apt install gstreamer1.0-nice`，并写进 `docs/DEVELOPMENT.md`。
+#### 实测结论
 
-**F0 spike 的产出是二选一**：
-(a) 实测通 → 三端全量支持，本节即最终结论；
-(b) 实测不通 → 桌面端按平台隐藏通话入口（`isLinuxDesktop()` 判定），把失败现象与已试手段写进本文档，
-并在 MASTER_PLAN 登记待办。**不允许"看起来应该能行"就当通过**。
+**spike 结果是 (b)：本机 WebKitGTK 上 `RTCPeerConnection` 不存在，Linux 桌面端打不了电话。**
+
+复现与定位（本机 WebKitGTK 2.50.4 / GStreamer 1.20.3）：
+
+| 步骤                                                               | 观测                                                                                                         |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Tauri 窗口内求值                                                   | `RTCPeerConnection=undefined`、`RTCDataChannel=undefined`，而 `navigator.mediaDevices.getUserMedia=function` |
+| Rust 侧回读设置                                                    | `media_stream=true webrtc=true` —— 开关确实设上了                                                            |
+| 纯 GTK+WebKit 最小程序（脱离 Tauri，创建前就设好 `enable-webrtc`） | 同样 `RTCPeerConnection=undefined`                                                                           |
+| `webkit_settings_get_all_features()` 465 项                        | 无 `PeerConnectionEnabled` 之类的运行时开关可翻                                                              |
+| `objdump -p libwebkit2gtk-4.1.so`                                  | NEEDED 有 10 个 GStreamer **API 库**，独缺 `libgstwebrtc-1.0` / `libgstsdp-1.0`                              |
+| `strings` 查 `gst_webrtc_*` 符号                                   | 0 个 —— 没有任何 GstWebRTC API 调用                                                                          |
+| 查 `webrtcbin` / `gstwebrtc` 字面量                                | 0 个                                                                                                         |
+| GTK4 版 `libwebkitgtk-6.0.so.4` 同样检查                           | 同样 0 个（换 ABI 无救）                                                                                     |
+| 查运行时强制开关 `WEBKIT_FORCE_ENABLE_FEATURES`                    | 该机制在 2.50.4 里不存在                                                                                     |
+
+即：该 WebKitGTK **构建时就没编进 GstWebRTC 后端**，`enable-webrtc` 是个读回 true 的空开关。
+
+**证据链要按库的性质分开看**（这里容易推错）：GStreamer 的**插件**是运行时 dlopen 的，
+所以 `libgstnice.so` 不在 NEEDED 里属正常，不能据此下结论；而 `libgstwebrtc-1.0.so.0`
+是**API 库**（由 `libgstreamer-plugins-bad1.0-0` 提供），编了后端就必然直接链接。
+它**装在系统里**却不在 NEEDED 中 —— 排除「缺依赖」，坐实「没编进去」。
+对照：确实编进的 `libgstreamer-1.0`/`libgstvideo-1.0`/`libgstgl-1.0` 等 10 个都列在 NEEDED，
+说明该检查方法有效。
+
+与 `gstreamer1.0-nice` 无关：系统里 `webrtcbin`、`libgstnice.so`、`gstdtls`、`gstsrtp` 插件
+都在且可用，`libgstwebrtc-1.0.so.0` 也在，只是 WebKit 从不引用它们。
+**应用侧无法绕过**：换 Tauri API、改设置时机、创建前设好设置、重载页面、换 GTK4 ABI 都试过，均无效。
+
+**可行的出路（都需改环境，不在应用范围内）**：把 WebKitGTK 换成编进了 GstWebRTC 的构建
+（发行版较新者或自行编译），或让桌面端不走 WebView 的 WebRTC 而改用原生 GStreamer/libwebrtc。
+在未换之前，Linux 桌面端的通话入口按下面的能力探测自动关闭。
+
+#### 因此的处理：能力探测，不是平台判断
+
+刻意**不**按 `isLinuxDesktop()` 隐藏入口。理由是这不是「Linux 的属性」而是「某个 WebView 构建的属性」：
+同为 Linux，换一个编进了 GstWebRTC 的 WebKitGTK 就能用；反过来旧版 Android System WebView
+也出现过同样形态。四端跑的分别是 WebView2 / WKWebView / Android System WebView / WebKitGTK，
+支持度由宿主系统的版本与构建选项决定，应用侧无从枚举。
+
+落点是 `packages/ui/src/callActions.ts` 的 `canUseWebRTC()`：只问这一个运行时有没有
+`RTCPeerConnection`，三端共用一份判断，新平台新版本都不必回来改。三条路径各挡一次：
+
+- **发起**（`startCall`）：闸门在承载器之前 —— 否则桌面端会开出一个连不通的空窗口再自己关掉；
+- **加入**（`joinCall`）：同上，且在要麦克风权限之前；
+- **接听**（`callFrameHandlers["call.incoming"]`）：**当场回绝**而不是摆出接不通的来电界面，
+  主叫据此立刻拿到 rejected，不必干等 60s 振铃超时。
+
+拦下时出 `call.unsupported` 文案（四语言齐备）。**采集能力与连接能力必须分开判**：
+本例正是 `getUserMedia` 能出流而 `RTCPeerConnection` 不存在，合并判断会漏。
+
+单测：`packages/ui/src/__tests__/callActions.test.ts`（3 例）、
+`packages/shared/src/__tests__/callFrameHandlers.test.ts`（2 例），均已做变异验证。
+
+#### 宿主依赖（对 WebRTC 可用的宿主仍然成立）
+
+WebKitGTK 的 WebRTC 走 GstWebRTC，ICE 代理由 `gstreamer1.0-nice`（`libgstnice.so`）提供，
+缺它 `RTCPeerConnection` 收集不到任何候选。需 `sudo apt install gstreamer1.0-nice`。
+但**装了也救不了本机**：问题在 WebKitGTK 构建本身，不在插件缺失。
 
 ### 3.12 Android
 

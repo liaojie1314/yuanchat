@@ -217,6 +217,7 @@
   "call.restore": "Back to call",
   "call.connecting": "Connecting…",
   "call.gone": "This call has already ended",
+  "call.unsupported": "Calls are not supported on this client (system WebView lacks WebRTC)",
   "call.ongoing": "Call in progress",
   "call.inviteTitle": "Select participants",
   "call.inviteHint": "Up to %{n} more",

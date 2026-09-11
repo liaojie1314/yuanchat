@@ -50,7 +50,7 @@ export { UserProfileView } from "./UserProfileView";
 
 // 通话组件
 export { CallView } from "./CallView";
-export { startCall, joinCall, probeLocalMedia, setCallLauncher } from "./callActions";
+export { startCall, joinCall, probeLocalMedia, canUseWebRTC, setCallLauncher } from "./callActions";
 export type { CallLaunchRequest, CallLauncher } from "./callActions";
 export { CallHost } from "./CallHost";
 export { CallInviteModal, MAX_CALL_INVITEES } from "./CallInviteModal";

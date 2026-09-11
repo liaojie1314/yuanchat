@@ -85,12 +85,37 @@ export function takeLocalStream(): MediaStream | null {
 }
 
 /**
+ * 本端能否真的建立通话连接。
+ *
+ * @remarks 与 {@link probeLocalMedia} 分开判，因为**采集能力与连接能力是两件事**，
+ *   在各端的 WebView 上会分别缺失：三端跑的分别是 WebView2 / WKWebView /
+ *   Android System WebView / WebKitGTK，各自的 WebRTC 支持由宿主系统的版本与
+ *   构建选项决定，应用侧无从假定。典型形态是 `getUserMedia` 能出流、
+ *   `RTCPeerConnection` 却整个类不存在（旧版 Android WebView 与部分 Linux 发行版
+ *   打包的 WebKitGTK 都实测到过），此时摄像头会亮起、`call.invite` 会发出、
+ *   对方会响铃，本端却永远建不出连接，直到 60s 振铃超时 —— 最难排查的那种失败。
+ *
+ *   因此这里按**能力探测**而不是平台判断：不枚举系统与版本，只问这一个运行时
+ *   有没有 `RTCPeerConnection`。新平台、新版本都不需要回来改这里。
+ */
+export function canUseWebRTC(): boolean {
+  return typeof window !== "undefined" && typeof window.RTCPeerConnection === "function";
+}
+
+/**
  * 取本地媒体并存进 holder，失败出 toast 并返回 false。
  *
  * 发起 / 接听 / 加入三条路径共用：取不到设备就绝不能进房间 —— 那会让对方响铃却
  * 永远接不通，或在房里多一个静音黑屏的参与者把房间撑到 60s 超时。
+ *
+ * 先判连接能力再要采集权限：反过来的话用户白交一次麦克风/摄像头权限，
+ * 还要看着指示灯亮起后才被告知这台机器打不了电话。
  */
 export async function probeLocalMedia(media: CallMedia): Promise<boolean> {
+  if (!canUseWebRTC()) {
+    showToast("error", i18n.t("call.unsupported"));
+    return false;
+  }
   const devices = typeof navigator === "undefined" ? undefined : navigator.mediaDevices;
   if (!devices) {
     showToast("error", i18n.t("call.failedMedia"));
@@ -121,6 +146,12 @@ export async function startCall(
 ): Promise<void> {
   const store = useCallStore.getState();
   if (store.phase !== "idle") return; // 已在通话里，忽略重复点击
+  // 能力判定必须在承载器之前：桌面端若开了独立窗口才发现连不通，
+  // 用户看到的是一个空窗口自己闪一下关掉，比一条明确提示糟糕得多
+  if (!canUseWebRTC()) {
+    showToast("error", i18n.t("call.unsupported"));
+    return;
+  }
   // 承载器优先：媒体与信令都必须发生在真正承载这通电话的上下文里
   if (launcher !== null && launcher({ role: "caller", media, conversationId, inviteeIds })) return;
   if (!(await probeLocalMedia(media))) return;
@@ -149,6 +180,10 @@ export async function joinCall(banner: {
   if (useCallStore.getState().phase !== "idle") return;
   if (banner.joinedCount >= MAX_CALL_PARTICIPANTS) {
     showToast("error", i18n.t("call.full"));
+    return;
+  }
+  if (!canUseWebRTC()) {
+    showToast("error", i18n.t("call.unsupported"));
     return;
   }
   if (
