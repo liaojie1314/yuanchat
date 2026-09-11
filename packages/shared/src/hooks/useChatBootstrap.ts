@@ -43,6 +43,8 @@ import { resetChatStores, revokeAllLocalPreviews } from "../store/resetStores";
 import { showToast } from "../store/toastStore";
 import { previewBodyOf } from "../utils/messagePreview";
 import type { ChatMessage } from "../store/messageStore";
+import { ringtone } from "../webrtc/ringtone";
+import { callFrameHandlers } from "./useCallSocket";
 import { chatSocket } from "../ws/chatSocket";
 
 interface ImportMetaEnv {
@@ -211,6 +213,8 @@ function wireSocket() {
               height: p.content.height ?? 96,
             }
           : undefined,
+        // 通话记录：系统消息带 call 键时气泡走 i18n 渲染，不带则回退 text
+        call: isSystem ? p.content.call : undefined,
         seq: p.seq,
         time: formatMessageTime(iso),
         dateKey: dateKeyOf(new Date(p.timestamp)),
@@ -396,6 +400,9 @@ function wireSocket() {
       useConversationStore.getState().applyPresence(p.user_id, p.online);
       usePresenceStore.getState().applyPresence(p.user_id, p.online);
     },
+
+    // 四个通话帧与桌面通话窗口共用同一份处理器（见 useCallSocket）
+    ...callFrameHandlers,
   });
 
   chatSocket.onReconnect = () => {
@@ -454,6 +461,10 @@ function injectDemoData() {
 
 export function useChatBootstrap() {
   useEffect(() => {
+    // 被叫侧响铃时没有任何用户手势，AudioContext 会停在 suspended —— 静音来电
+    // 与「没收到来电」在用户看来完全一样。这里借应用的首个 pointerdown 预热
+    ringtone.primeOnFirstGesture();
+
     if (isMockEnabled()) {
       injectDemoData();
       return;

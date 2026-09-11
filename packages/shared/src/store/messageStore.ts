@@ -133,6 +133,16 @@ export interface ChatMessage {
    * - key：对象存储 key（签下载 URL 渲染）
    */
   sticker?: { stickerId?: string; key?: string; width: number; height: number };
+  /**
+   * 通话记录载荷（仅 `kind === "system"`）。
+   *
+   * 服务端把它放在系统消息的 `content.call` 里，同时保留兜底 `text`：
+   * 有 `call` 就按 `result` 走 i18n 渲染（图标 + 本地化文案 + mm:ss），
+   * 没有就沿用 `text` —— 老版本客户端因此不会白屏。
+   * `result ∈ {answered, missed, rejected, canceled, busy}`，非 answered 时
+   * `duration` 为 0。
+   */
+  call?: { media: "audio" | "video"; result: string; duration: number };
   quote?: QuoteRef;
   reactions?: Reaction[];
   /** @提及的用户 ID 列表（渲染时高亮相应昵称段） */
