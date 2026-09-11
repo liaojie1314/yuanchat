@@ -64,6 +64,26 @@ func TestGoldenServerFramesDecodeIntoPayloadStructs(t *testing.T) {
 				if err := dec.Decode(&p); err != nil {
 					t.Fatalf("decode into MessageRecalledPayload: %v", err)
 				}
+			case TypeCallIncoming:
+				var p CallIncomingPayload
+				if err := dec.Decode(&p); err != nil {
+					t.Fatalf("decode into CallIncomingPayload: %v", err)
+				}
+			case TypeCallState:
+				var p CallStatePayload
+				if err := dec.Decode(&p); err != nil {
+					t.Fatalf("decode into CallStatePayload: %v", err)
+				}
+			case TypeCallSignal:
+				var p CallSignalPayload
+				if err := dec.Decode(&p); err != nil {
+					t.Fatalf("decode into CallSignalPayload: %v", err)
+				}
+			case TypeCallEnded:
+				var p CallEndedPayload
+				if err := dec.Decode(&p); err != nil {
+					t.Fatalf("decode into CallEndedPayload: %v", err)
+				}
 			default:
 				t.Fatalf("契约含未知帧类型 %q —— 新增帧须同时在本 switch 注册", c.Frame.Type)
 			}
@@ -77,6 +97,10 @@ func payloadPrototypes() map[string]any {
 	return map[string]any{
 		TypeMessageEdited:   MessageEditedPayload{},
 		TypeMessageRecalled: MessageRecalledPayload{},
+		TypeCallIncoming:    CallIncomingPayload{},
+		TypeCallState:       CallStatePayload{},
+		TypeCallSignal:      CallSignalPayload{},
+		TypeCallEnded:       CallEndedPayload{},
 	}
 }
 
