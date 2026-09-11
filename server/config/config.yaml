@@ -119,3 +119,15 @@ codesender:
   # 验证码下发通道。log = 打码后写日志（开发/测试）。
   # 填未知值时进程启动即失败，不会静默退回 log 通道。
   provider: log
+
+turn:
+  # WebRTC 通话的 TURN/STUN。enabled=false 或密钥为空时 ice-servers 端点只返回 STUN 项。
+  enabled: true
+  # 客户端可达的主机名/IP —— 不是容器内网名（浏览器解析不了）。
+  # 安卓模拟器走 TURN over TCP 经 adb reverse 到宿主，同样填 localhost。
+  host: "localhost"
+  port: 3478
+  realm: "yuanchat"
+  # 与 coturn 的 static-auth-secret 同值。生产从 YUANCHAT_TURN_STATIC_AUTH_SECRET 下发。
+  static_auth_secret: "yuanchat-dev-turn-secret"
+  credential_ttl: 1h

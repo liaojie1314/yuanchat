@@ -127,6 +127,18 @@ services:
       - yuanchat-net
     restart: unless-stopped
 
+  # ==================== coturn（WebRTC TURN/STUN）====================
+  coturn:
+    image: coturn/coturn:4.7.0
+    container_name: yuanchat-coturn
+    # host 网络：TURN relay 要一整段 UDP 端口，bridge 模式下逐个发布既慢又易错；
+    # 开发环境本就跑在本机，host 模式与生产链路等价且免去端口映射的坑。
+    network_mode: host
+    volumes:
+      - ./coturn/turnserver.dev.conf:/etc/coturn/turnserver.conf:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    restart: unless-stopped
+
 volumes:
   postgres_data:
     driver: local

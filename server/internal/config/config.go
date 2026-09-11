@@ -24,6 +24,7 @@ type Config struct {
 	Dispatcher DispatcherConfig `mapstructure:"dispatcher"`
 	Push       PushConfig       `mapstructure:"push"`
 	CodeSender CodeSenderConfig `mapstructure:"codesender"`
+	Turn       TurnConfig       `mapstructure:"turn"`
 }
 
 type ServerConfig struct {
@@ -134,6 +135,21 @@ type DispatcherConfig struct {
 	Channel string `mapstructure:"channel"` // redis 模式的分发 channel，默认 ws:dispatch
 }
 
+// TurnConfig WebRTC 通话的 TURN/STUN 配置。
+//
+// StaticAuthSecret 与 coturn 的 use-auth-secret 模式共享同一个密钥：服务端用它签发
+// 带过期时间的临时凭据，coturn 侧用同一密钥复算校验，双方都不需要 TURN 用户表。
+// Host 是【客户端可达】的地址，不能填容器内网主机名 —— 那是浏览器解析不了的
+// （与 MinIO 的 Endpoint / PublicEndpoint 分离同一个道理）。
+type TurnConfig struct {
+	Enabled          bool          `mapstructure:"enabled"`
+	Host             string        `mapstructure:"host"`
+	Port             int           `mapstructure:"port"`
+	Realm            string        `mapstructure:"realm"`
+	StaticAuthSecret string        `mapstructure:"static_auth_secret"`
+	CredentialTTL    time.Duration `mapstructure:"credential_ttl"`
+}
+
 // ModerationConfig 内容审核配置。
 type ModerationConfig struct {
 	Words []string `mapstructure:"words"` // 敏感词库；命中的消息标记 flagged 进审核队列
@@ -183,6 +199,11 @@ func Load(configPath string) (*Config, error) {
 	// （客户端就又会拿到内网主机名的 URL）。
 	v.SetDefault("minio.public_endpoint", "")
 	v.SetDefault("minio.public_use_ssl", false)
+
+	// TURN 密钥与对外主机同理：生产只由环境变量下发，配置文件里不出现真值。
+	v.SetDefault("turn.static_auth_secret", "")
+	v.SetDefault("turn.host", "localhost")
+	v.SetDefault("turn.realm", "yuanchat")
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)

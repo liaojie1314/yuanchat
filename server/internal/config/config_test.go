@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // writeConfig 写一份最小可加载的配置文件，返回其路径。
@@ -63,5 +64,45 @@ func TestLoadMinIOPublicEndpointDefaultsEmpty(t *testing.T) {
 	}
 	if cfg.MinIO.PublicUseSSL {
 		t.Error("PublicUseSSL = true, want false")
+	}
+}
+
+// TestLoadTurnFromEnv 钉住「turn 段能被环境变量注入」，与上面 MinIO 那两条同一道防线：
+// TURN 密钥在生产只由环境变量下发，配置文件里不出现真值，
+// 一旦 SetDefault 退化，签出的凭据就是空密钥算的 —— 全部通话打不通。
+func TestLoadTurnFromEnv(t *testing.T) {
+	path := writeConfig(t, "turn:\n  enabled: true\n  port: 3478\n  credential_ttl: 1h\n")
+	t.Setenv("YUANCHAT_TURN_STATIC_AUTH_SECRET", "from-env")
+	t.Setenv("YUANCHAT_TURN_HOST", "turn.example.com")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Turn.Enabled {
+		t.Error("Enabled = false, want true")
+	}
+	if cfg.Turn.StaticAuthSecret != "from-env" {
+		t.Errorf("StaticAuthSecret = %q, want from-env", cfg.Turn.StaticAuthSecret)
+	}
+	if cfg.Turn.Host != "turn.example.com" {
+		t.Errorf("Host = %q, want turn.example.com", cfg.Turn.Host)
+	}
+	if cfg.Turn.CredentialTTL != time.Hour {
+		t.Errorf("CredentialTTL = %v, want 1h", cfg.Turn.CredentialTTL)
+	}
+}
+
+// TestLoadTurnDefaults 配置文件完全不写 turn 段时，host / realm 仍有可用默认值。
+func TestLoadTurnDefaults(t *testing.T) {
+	cfg, err := Load(writeConfig(t, minimalMinIOConfig))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Turn.Host != "localhost" {
+		t.Errorf("Host = %q, want localhost", cfg.Turn.Host)
+	}
+	if cfg.Turn.Realm != "yuanchat" {
+		t.Errorf("Realm = %q, want yuanchat", cfg.Turn.Realm)
 	}
 }
