@@ -10,7 +10,7 @@
  * @see https://mswjs.io/docs/
  */
 import { http, HttpResponse, passthrough, delay } from "msw";
-import { DEMO_FRIENDS, DEMO_MESSAGES } from "./demoData";
+import { DEMO_FRIENDS, DEMO_MEMBERS, DEMO_MESSAGES } from "./demoData";
 import type { ChatMessage, ChatMessageKind } from "../store/messageStore";
 
 // ========================================
@@ -775,6 +775,19 @@ export const handlers = [
     const page = all.slice(0, limit);
     // has_more 与后端同口径：满页即视为「可能还有更早的」（见 handler/message.go 的 Media）
     return apiOk({ items: page, has_more: page.length === limit });
+  }),
+
+  // --------------------------------------------------
+  // 会话 — 群成员列表
+  // GET /api/v1/conversations/:id/members
+  //
+  // 成员表是「群通话选人」与详情页头像墙的数据源。给 5 个人（含自己）是为了
+  // 让 mesh 上限 4 人（= 自己 + 3 名受邀人）这条前置拦截在 mock 下也能走到：
+  // 排除自己后剩 4 个候选，选满 3 个后第 4 个必须点不动。
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/conversations/:id/members", async () => {
+    await delay(150);
+    return apiOk({ members: DEMO_MEMBERS });
   }),
 
   // --------------------------------------------------
