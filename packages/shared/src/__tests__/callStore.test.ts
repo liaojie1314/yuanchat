@@ -204,3 +204,77 @@ describe("callStore", () => {
     expect(useCallStore.getState().banner).toBeNull();
   });
 });
+
+describe("同账号多设备顶替", () => {
+  beforeEach(() => useCallStore.getState().reset());
+
+  /** 让本端处于「已接通、self_conn = mine」的通话中 */
+  function activeAs(mine: string) {
+    const st = useCallStore.getState();
+    st.applyState({
+      call_id: "c1",
+      conversation_id: "v1",
+      media: "audio",
+      state: "active",
+      self_conn: mine,
+      participants: [P(mine), P("peer")],
+    });
+    expect(useCallStore.getState().phase).toBe("active");
+    expect(useCallStore.getState().selfConn).toBe(mine);
+  }
+
+  it("收到同一路通话但 self_conn 换成别的连接时自行退出", () => {
+    activeAs("mine");
+
+    // 同账号的另一台设备接了同一通电话，服务端那一格被它覆写
+    useCallStore.getState().applyState({
+      call_id: "c1",
+      conversation_id: "v1",
+      media: "audio",
+      state: "active",
+      self_conn: "other-device",
+      participants: [P("other-device"), P("peer")],
+    });
+
+    const after = useCallStore.getState();
+    // 不自退就是一个永远接不通的僵尸通话界面：本端的 offer 会被服务端 403 掉
+    expect(after.phase).toBe("idle");
+    expect(after.callId).toBeNull();
+    expect(after.endReason).toBe("superseded");
+    // 本端的连接不该被当成房间成员渲染
+    expect(after.selfConn).toBe("");
+  });
+
+  it("顶替判定不会误伤正常的成员变更（self_conn 不变）", () => {
+    activeAs("mine");
+
+    useCallStore.getState().applyState({
+      call_id: "c1",
+      conversation_id: "v1",
+      media: "audio",
+      state: "active",
+      self_conn: "mine",
+      participants: [P("mine"), P("peer"), P("peer2")],
+    });
+
+    expect(useCallStore.getState().phase).toBe("active");
+    expect(useCallStore.getState().participants).toHaveLength(3);
+  });
+
+  it("另一路通话的 state 不被误判为顶替", () => {
+    activeAs("mine");
+
+    useCallStore.getState().applyState({
+      call_id: "OTHER",
+      conversation_id: "v9",
+      media: "video",
+      state: "active",
+      self_conn: "x",
+      participants: [P("x")],
+    });
+
+    // 串号拦截优先：另一路房间的帧本就该被丢弃，不能顺手把当前通话退了
+    expect(useCallStore.getState().phase).toBe("active");
+    expect(useCallStore.getState().callId).toBe("c1");
+  });
+});

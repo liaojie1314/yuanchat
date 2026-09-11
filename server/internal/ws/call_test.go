@@ -329,3 +329,121 @@ func TestCallStateCarriesPerConnSelfConn(t *testing.T) {
 		}
 	}
 }
+
+// TestCallSameUserTwoConnsShareOneSeat 同一账号两条连接同时接听时共占一席。
+//
+// 这条用例把「多设备」的实际行为钉死，因为它决定三件用户可见的事：
+// 房间人数怎么算（上限 4 是 mesh 的硬约束）、两端会不会互相把对方当成对端
+// 去建 PeerConnection（同一个人连自己是连不通的）、通话记录记几个参与者。
+//
+// 行为：参与者表按 **user_id** 存放、格子里记的是 conn_id（`callJoin` 脚本的
+// KEYS[2] 以 userID 为 field），所以同一账号的第二条连接会**覆写**第一条那一格，
+// 房间人数按「人」算而不是按「连接」算 —— mesh 的 4 人上限因此不会被同账号
+// 多设备撑爆。代价是旧连接的 conn_id 从房间里消失，那一端必须自行退出
+// （前端 callStore 的顶替检测；注意它只能本地复位、不能补发 call.leave）。
+func TestCallSameUserTwoConnsShareOneSeat(t *testing.T) {
+	alice, bobID := uuid.New(), uuid.New()
+	f := newCallFixture(t, alice, bobID)
+
+	aliceConn := f.conn(alice)
+	bobPhone := f.conn(bobID)
+	bobDesktop := f.conn(bobID)
+
+	f.send(aliceConn, TypeCallInvite, CallInvitePayload{
+		ConversationID: uuid.New(), Media: "audio",
+		InviteeIDs: []uuid.UUID{bobID},
+	})
+
+	// 两条连接都该收到来电（服务端按 user 扇出到全部连接）
+	for _, c := range []*Client{bobPhone, bobDesktop} {
+		if firstOf(drain(c), TypeCallIncoming) == nil {
+			t.Fatal("Bob 的每条连接都应收到 call.incoming")
+		}
+	}
+	var inc CallIncomingPayload
+	if err := json.Unmarshal(firstOf(drain(aliceConn), TypeCallState).Payload, &inc); err != nil {
+		t.Fatal(err)
+	}
+
+	// 两条连接先后接听
+	f.send(bobPhone, TypeCallAnswer, CallAnswerPayload{CallID: inc.CallID, Accept: true})
+	f.send(bobDesktop, TypeCallAnswer, CallAnswerPayload{CallID: inc.CallID, Accept: true})
+
+	room, err := f.h.callSvc.Get(context.Background(), inc.CallID)
+	if err != nil {
+		t.Fatalf("取房间失败: %v", err)
+	}
+
+	joined := 0
+	bobEntries := 0
+	for _, p := range room.Participants {
+		if p.State == service.PartStateJoined {
+			joined++
+		}
+		if p.UserID == bobID {
+			bobEntries++
+		}
+	}
+	t.Logf("参与者 %d 人，其中 Bob 占 %d 席（joined=%d）", len(room.Participants), bobEntries, joined)
+
+	// 一个 2 人通话，参与者总数应当就是 2
+	if len(room.Participants) != 2 {
+		t.Errorf("参与者数 = %d, want 2（同一账号的多条连接不该各占一席）", len(room.Participants))
+	}
+	if bobEntries != 1 {
+		t.Errorf("Bob 占了 %d 席, want 1", bobEntries)
+	}
+}
+
+// TestCallLeaveFromSupersededConn 被顶替的旧连接若发 call.leave，会不会拆掉新连接的通话。
+//
+// 这是前端「旧的第二台设备自退」逻辑的安全前提：离开按 **user_id** 定位参与者格，
+// 而那一格此时归新连接所有 —— 旧连接发一帧 leave 就会把新设备踢出通话。
+// 前端因此只能本地复位、什么都不发（见 packages/shared/src/store/callStore.ts
+// 的 leaveEvicted）。本用例把服务端这一行为钉死，避免有人日后「顺手」让旧连接补发 leave。
+func TestCallLeaveFromSupersededConn(t *testing.T) {
+	alice, bobID := uuid.New(), uuid.New()
+	f := newCallFixture(t, alice, bobID)
+
+	aliceConn := f.conn(alice)
+	bobPhone := f.conn(bobID)
+	bobDesktop := f.conn(bobID)
+
+	f.send(aliceConn, TypeCallInvite, CallInvitePayload{
+		ConversationID: uuid.New(), Media: "audio",
+		InviteeIDs: []uuid.UUID{bobID},
+	})
+	var st CallStatePayload
+	if err := json.Unmarshal(firstOf(drain(aliceConn), TypeCallState).Payload, &st); err != nil {
+		t.Fatal(err)
+	}
+	drain(bobPhone)
+	drain(bobDesktop)
+
+	// 手机先接，桌面后接（桌面把手机那一格覆写掉）
+	f.send(bobPhone, TypeCallAnswer, CallAnswerPayload{CallID: st.CallID, Accept: true})
+	f.send(bobDesktop, TypeCallAnswer, CallAnswerPayload{CallID: st.CallID, Accept: true})
+	drain(aliceConn)
+
+	// 被顶替的手机发一帧 leave
+	f.send(bobPhone, TypeCallLeave, CallLeavePayload{CallID: st.CallID})
+
+	room, err := f.h.callSvc.Get(context.Background(), st.CallID)
+	if err != nil {
+		// 房间被整个终结也是「旧连接的 leave 拆掉了新通话」的一种表现
+		t.Logf("房间已被终结: %v", err)
+		return
+	}
+	joined := 0
+	for _, p := range room.Participants {
+		if p.State == service.PartStateJoined {
+			joined++
+		}
+	}
+	// 服务端按 user_id 删格，所以旧连接这一帧会连带删掉新连接的参与者格；
+	// 房间随之只剩主叫一人 → 脚本把房间置 ended 并回收全部键。
+	t.Logf("旧连接 leave 之后：参与者 %d，joined=%d，state=%s", len(room.Participants), joined, room.State)
+	if joined != 0 {
+		t.Errorf("joined = %d, want 0（同一 user_id 的格被一并删除）", joined)
+	}
+}

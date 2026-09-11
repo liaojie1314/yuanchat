@@ -153,6 +153,23 @@ export const useCallStore = create<CallState>()((set, get) => ({
       return;
     }
 
+    // 本端已被同账号的另一条连接顶替：参与者表按 user_id 存放连接，同一账号
+    // 再次接听会覆写这一格，旧连接的 conn_id 就此从房间里消失。此时这一帧的
+    // self_conn 是**新**连接，而本端仍以为自己在通话里 —— 不自退就是一个永远
+    // 接不通的僵尸通话界面（发出去的 offer 会被服务端按「非参与者」403 掉）。
+    //
+    // 只做本地复位，**绝不能补发 `call.leave`**：服务端的离开流程按 user_id 定位
+    // 参与者格（`callLeave` 脚本里 `HDEL KEYS[2] ARGV[1]` 的 ARGV[1] 就是 userID），
+    // 而那一格此时归新连接所有 —— 旧连接发一帧 leave 会把新设备一起踢出通话，
+    // 甚至直接终结整个房间。服务端这一行为由
+    // `server/internal/ws/call_test.go` 的 TestCallLeaveFromSupersededConn 钉死。
+    if (s.phase !== "idle" && s.selfConn && s.selfConn !== p.self_conn) {
+      if (s.callId === p.call_id) {
+        set({ ...IDLE, endReason: "superseded", banner: s.banner });
+        return;
+      }
+    }
+
     // 串号拦截：本端已有 call_id 且与帧不符 → 另一路房间的成员表，不能覆盖当前房间。
     // callId 为空的例外只有一个：呼出期本路的首帧（此时按 conversation_id 认亲）
     if (s.callId !== null) {
