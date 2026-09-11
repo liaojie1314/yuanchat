@@ -154,11 +154,13 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	client := &Client{
 		userID:   claims.UserID,
 		deviceID: claims.DeviceID,
-		conn:     conn,
-		send:     make(chan []byte, sendBufferSize),
-		hub:      h.hub,
-		handler:  h,
-		logger:   h.logger,
+		// 连接级唯一标识：通话信令按它点对点定址（device_id 是平台标签，多设备同值）
+		connID:  uuid.New(),
+		conn:    conn,
+		send:    make(chan []byte, sendBufferSize),
+		hub:     h.hub,
+		handler: h,
+		logger:  h.logger,
 	}
 
 	if !h.hub.Register(client) {
