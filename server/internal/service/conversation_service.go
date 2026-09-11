@@ -70,6 +70,7 @@ const (
 	previewKindVoice     = "voice"
 	previewKindVideo     = "video"
 	previewKindSticker   = "sticker"
+	previewKindCall      = "call"
 	previewKindEncrypted = "encrypted"
 	previewKindUnknown   = "unknown"
 )
@@ -93,6 +94,10 @@ type ConversationService struct {
 	// 两者均可为 nil（未接线或未配置词库时跳过审核）。
 	moderation *ModerationService
 	ugcRepo    *repository.FlaggedUGCRepository
+
+	// pushCallRecord 通话记录实时推送（router 注入；nil 时只落库不推，
+	// 收件人刷新后仍能从历史里看到）
+	pushCallRecord func(memberIDs []uuid.UUID, msg *model.Message, contentJSON string)
 }
 
 // SetUGCModeration 注入 UGC 敏感词审核依赖（router 接线用）。
@@ -209,8 +214,17 @@ func previewOf(m *repository.MessageWithSender) (string, string) {
 		return "", previewKindText
 	case model.MessageTypeSystem:
 		// 系统消息与文本同为 {"text":...}，原实现落 default 返回空串 → 建群后列表预览空白
-		var c model.MessageContentText
+		var c struct {
+			Text string          `json:"text"`
+			Call json.RawMessage `json:"call"`
+		}
 		if err := json.Unmarshal([]byte(m.Content), &c); err == nil {
+			// 通话记录不回传服务端中文：正文里的「通话时长 03:24」是给老客户端的兜底，
+			// 列表预览交客户端按 kind 渲染本地化的「[通话]」，
+			// 否则英/日/韩界面的会话列表里会冒出一行中文
+			if len(c.Call) > 0 {
+				return "", previewKindCall
+			}
 			return c.Text, previewKindSystem
 		}
 		return "", previewKindSystem

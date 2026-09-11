@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -10,6 +11,7 @@ import (
 	"github.com/yuanchat/server/internal/config"
 	"github.com/yuanchat/server/internal/handler"
 	"github.com/yuanchat/server/internal/middleware"
+	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/pkg/codesender"
 	"github.com/yuanchat/server/internal/pkg/jwt"
 	"github.com/yuanchat/server/internal/pkg/shortid"
@@ -93,6 +95,10 @@ func Setup(
 	presenceH := handler.NewPresenceHandler(contactRepo, hub, logger)
 	blocklistH := handler.NewBlocklistHandler(blocklistSvc, logger)
 	forwardH := handler.NewForwardHandler(msgSvc, hub, logger)
+
+	// 通话：房间态在 Redis，服务端只转发不透明信令、不碰媒体字节
+	callSvc := service.NewCallService(rdb, cfg.Turn, logger)
+	callH := handler.NewCallHandler(callSvc, userRepo, logger)
 
 	adminRepo := repository.NewAdminRepository(db)
 	flaggedUGCRepo := repository.NewFlaggedUGCRepository(db)
@@ -217,6 +223,55 @@ func Setup(
 		go notifyFriends(userID, online)
 	})
 
+	// --- 通话信令接线 ---
+	// 终结回调落一条通话记录系统消息（未接来电靠 seq 递增自然计入未读）
+	wsH.SetCallService(callSvc, func(
+		ctx context.Context, room *service.Room, reason service.EndReason, dur int,
+	) {
+		convSvc.AppendCallRecord(ctx, room.ConversationID, room.CallerID,
+			string(room.Media), reason.Result(), dur)
+	})
+	wsH.SetConversationMembers(convSvc.MemberIDsFor)
+	// 参与者列表要带昵称与头像；查不到时信令层会退化为空摘要而不是失败
+	wsH.SetUserBriefs(func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]ws.UserBrief, error) {
+		users, err := userRepo.FindByIDs(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		out := make(map[uuid.UUID]ws.UserBrief, len(users))
+		for i := range users {
+			out[users[i].ID] = ws.UserBrief{
+				ID:        users[i].ID,
+				Nickname:  users[i].Nickname,
+				AvatarURL: users[i].AvatarURL,
+				ShortID:   users[i].ShortID,
+			}
+		}
+		return out, nil
+	})
+	// 通话记录的实时推送：content 带结构化 call 字段，走不了只发 text 的旧路径
+	convSvc.SetCallRecordPusher(func(memberIDs []uuid.UUID, msg *model.Message, contentJSON string) {
+		var content ws.ContentPayload
+		if err := json.Unmarshal([]byte(contentJSON), &content); err != nil {
+			return
+		}
+		content.Type = "system"
+		frame, err := ws.Encode(ws.TypeMessageReceive, ws.ReceivePayload{
+			MessageID:      msg.ID,
+			ConversationID: msg.ConversationID,
+			SenderID:       msg.SenderID,
+			Content:        content,
+			Seq:            msg.Seq,
+			Timestamp:      msg.CreatedAt.UnixMilli(),
+		})
+		if err == nil {
+			hub.SendToUsers(memberIDs, frame)
+		}
+	})
+	// 连接断开即离开通话房间：关窗口、拔网线、杀进程、手机被回收都走这里。
+	// 没有它，一方掉线后另一方永远停在「通话中」，只能等 Redis 的 2 小时 TTL。
+	hub.SetDisconnectNotifier(wsH.HandleDisconnect)
+
 	// --- 路由 ---
 	api := r.Group("/api/v1")
 	api.GET("/health", healthH.Check)
@@ -298,6 +353,10 @@ func Setup(
 		chat.GET("/files/download-url", fileH.DownloadURL)
 
 		chat.GET("/presence", presenceH.Snapshot)
+
+		// 通话：信令全走 WebSocket，这里只有两个读端点
+		chat.GET("/calls/ice-servers", middleware.LimitByIP(20, 40), callH.GetICEServers)
+		chat.GET("/calls/:call_id", middleware.LimitByIP(20, 40), callH.GetCall)
 
 		chat.GET("/contacts", contactH.ListFriends)
 		chat.POST("/contacts/requests", contactH.SendRequest)
