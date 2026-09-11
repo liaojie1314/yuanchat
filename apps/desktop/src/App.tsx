@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   isPermissionGranted,
@@ -10,6 +10,7 @@ import { MainLayout, AppErrorBoundary } from "@yuanchat/ui";
 import { setNotifier, useAuthStore, useKeyboardAwareViewport } from "@yuanchat/shared";
 import { TitleBar } from "./components/TitleBar";
 import { useIsMobile } from "./hooks/useIsMobile";
+import { useCallWindow } from "./hooks/useCallWindow";
 import { EXIT_CONFIRM_MS, useAndroidBack } from "./hooks/useAndroidBack";
 import { ExitHint } from "./components/ExitHint";
 
@@ -48,6 +49,9 @@ const StickerPackEditPage = lazy(() =>
 const StickerMinePage = lazy(() =>
   import("./pages/StickerMinePage").then((m) => ({ default: m.StickerMinePage })),
 );
+const CallWindowPage = lazy(() =>
+  import("./pages/CallWindowPage").then((m) => ({ default: m.CallWindowPage })),
+);
 
 // 模块级一次性注册：权限就绪后把 Tauri 通知注入 shared 抽象
 // （receive 帧只在主窗口出现，子窗口注册无害；非 Tauri 环境 catch 静默）
@@ -71,6 +75,10 @@ function App() {
   const exitHintSeq = useAndroidBack();
   const { t } = useTranslation();
   const isMobile = useIsMobile();
+  // 通话窗口跑的是同一个 SPA：它自己就是承载方，不能再套一层开窗逻辑；
+  // 移动端没有多窗口，通话走 MainLayout 里的浮层
+  const isCallWindow = useLocation().pathname === "/call";
+  useCallWindow(!isMobile && !isCallWindow);
 
   // 移动端软键盘弹出时把内容顶起（桌面端 / 旧 WebView 自动降级为无操作）
   useKeyboardAwareViewport();
@@ -137,7 +145,16 @@ function App() {
       )}
       <Suspense fallback={null}>
         <Routes>
-          <Route element={<MainLayout titleBar={isMobile ? undefined : <TitleBar />} />}>
+          {/* 独立通话窗口：不套 MainLayout —— 它自建 WebSocket 并整屏渲染 CallView */}
+          <Route path="/call" element={<CallWindowPage />} />
+          <Route
+            element={
+              <MainLayout
+                titleBar={isMobile ? undefined : <TitleBar />}
+                callMode={isMobile ? "overlay" : "window"}
+              />
+            }
+          >
             <Route path="/chat" element={<ChatPage />} />
             <Route path="/chat/:conversationId" element={<ChatPage />} />
             <Route path="/contacts" element={<ContactsPage />} />

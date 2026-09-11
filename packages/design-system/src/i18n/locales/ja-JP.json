@@ -216,6 +216,7 @@
   "call.minimize": "最小化",
   "call.restore": "通話に戻る",
   "call.connecting": "接続中…",
+  "call.gone": "通話はすでに終了しています",
   "call.inviteTitle": "参加者を選択",
   "call.inviteHint": "あと %{n} 人まで",
   "call.joinBanner": "%{name} が通話を開始しました",

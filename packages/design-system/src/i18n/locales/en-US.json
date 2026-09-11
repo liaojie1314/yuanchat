@@ -216,6 +216,7 @@
   "call.minimize": "Minimize",
   "call.restore": "Back to call",
   "call.connecting": "Connecting…",
+  "call.gone": "This call has already ended",
   "call.inviteTitle": "Select participants",
   "call.inviteHint": "Up to %{n} more",
   "call.joinBanner": "%{name} started a call",

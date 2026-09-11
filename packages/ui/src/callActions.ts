@@ -38,6 +38,40 @@ export function stopStream(stream: MediaStream | null): void {
 let pendingLocalStream: MediaStream | null = null;
 
 /**
+ * 通话发起请求 —— 交给宿主层决定「在哪里承载这通电话」。
+ *
+ * @remarks `caller` 带 `conversationId` + `inviteeIds`（房间还不存在），
+ *   `joiner` 带 `callId`（房间已在进行，本端是后加入的）。
+ */
+export interface CallLaunchRequest {
+  role: "caller" | "joiner";
+  media: CallMedia;
+  conversationId?: string;
+  callId?: string;
+  inviteeIds?: string[];
+}
+
+/** 宿主层的通话承载器；返回 true 表示已接管，本模块不再自行发起。 */
+export type CallLauncher = (req: CallLaunchRequest) => boolean;
+
+let launcher: CallLauncher | null = null;
+
+/**
+ * 注册通话承载器（桌面端专用）。
+ *
+ * @remarks 桌面端通话在独立原生窗口里完成，而 Tauri 每个 `WebviewWindow` 是独立
+ *   JS 上下文 —— `getUserMedia` 与 `RTCPeerConnection` 必须发生在那个窗口里，
+ *   `call.invite` / `call.answer` 也必须由**它自己的** WebSocket 发出，
+ *   否则房间里登记的是主窗口那条连接，视频要往哪渲染都没有。
+ *   于是四个入口的动作在主窗口这边必须被整体拦下，只转成一次「开窗」。
+ *
+ * @param fn - 承载器；传 null 撤销（回到本模块自己发起）
+ */
+export function setCallLauncher(fn: CallLauncher | null): void {
+  launcher = fn;
+}
+
+/**
  * 取走预取的本地流。
  *
  * @returns 预取的流；没有则 null（桌面通话窗口是独立 JS 上下文，取不到主窗口
@@ -87,6 +121,8 @@ export async function startCall(
 ): Promise<void> {
   const store = useCallStore.getState();
   if (store.phase !== "idle") return; // 已在通话里，忽略重复点击
+  // 承载器优先：媒体与信令都必须发生在真正承载这通电话的上下文里
+  if (launcher !== null && launcher({ role: "caller", media, conversationId, inviteeIds })) return;
   if (!(await probeLocalMedia(media))) return;
   store.startOutgoing(conversationId, media, inviteeIds);
   chatSocket.send("call.invite", {
@@ -106,6 +142,7 @@ export async function startCall(
  */
 export async function joinCall(banner: {
   callId: string;
+  conversationId: string;
   media: CallMedia;
   joinedCount: number;
 }): Promise<void> {
@@ -114,6 +151,16 @@ export async function joinCall(banner: {
     showToast("error", i18n.t("call.full"));
     return;
   }
+  if (
+    launcher !== null &&
+    launcher({
+      role: "joiner",
+      media: banner.media,
+      callId: banner.callId,
+      conversationId: banner.conversationId,
+    })
+  )
+    return;
   if (!(await probeLocalMedia(banner.media))) return;
   chatSocket.send("call.answer", { call_id: banner.callId, accept: true });
 }
