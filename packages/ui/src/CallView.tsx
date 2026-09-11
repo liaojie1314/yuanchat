@@ -255,6 +255,23 @@ export function CallView() {
     for (let i = 0; i < tracks.length; i++) tracks[i].enabled = !cameraOff;
   }, [cameraOff]);
 
+  // 安卓通话保活：接通期间把应用钉在前台，否则切后台几十秒进程就被回收、通话静默中断。
+  // 该对象只在安卓原生 WebView 里存在（MainActivity 注入），其它平台恒为 undefined
+  useEffect(() => {
+    if (phase !== "active") return;
+    const bridge = (
+      window as unknown as {
+        __yuanchatCall__?: {
+          start(media: string, title: string, text: string): void;
+          stop(): void;
+        };
+      }
+    ).__yuanchatCall__;
+    if (!bridge) return;
+    bridge.start(media, t(isVideo ? "chat.videoCall" : "chat.voiceCall"), t("call.ongoing"));
+    return () => bridge.stop();
+  }, [phase, media, isVideo, t]);
+
   // 安卓返回键两层语义：来电态 = 拒接（最上层的打断必须能被返回键消掉），
   // 通话全屏态 = 最小化而非挂断（误触返回键就断线是最恼人的失误）
   useEffect(() => {

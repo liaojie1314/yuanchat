@@ -217,6 +217,7 @@
   "call.restore": "返回通话",
   "call.connecting": "连接中…",
   "call.gone": "通话已结束",
+  "call.ongoing": "通话进行中",
   "call.inviteTitle": "选择通话成员",
   "call.inviteHint": "最多再选 %{n} 人",
   "call.joinBanner": "%{name} 发起了通话",

@@ -22,6 +22,8 @@ class MainActivity : TauriActivity() {
 
   override fun onWebViewCreate(webView: WebView) {
     this.webView = webView
+    // 通话保活桥，见 CallBridge 的说明（其它平台上前端拿到的是 undefined）
+    webView.addJavascriptInterface(CallBridge(this), "__yuanchatCall__")
     pushSafeAreaTop()
   }
 

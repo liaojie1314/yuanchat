@@ -217,6 +217,7 @@
   "call.restore": "통화로 돌아가기",
   "call.connecting": "연결 중…",
   "call.gone": "통화가 이미 종료되었습니다",
+  "call.ongoing": "통화 중",
   "call.inviteTitle": "참여자 선택",
   "call.inviteHint": "최대 %{n}명 더",
   "call.joinBanner": "%{name} 님이 통화를 시작했습니다",

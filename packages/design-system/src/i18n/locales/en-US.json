@@ -217,6 +217,7 @@
   "call.restore": "Back to call",
   "call.connecting": "Connecting…",
   "call.gone": "This call has already ended",
+  "call.ongoing": "Call in progress",
   "call.inviteTitle": "Select participants",
   "call.inviteHint": "Up to %{n} more",
   "call.joinBanner": "%{name} started a call",
