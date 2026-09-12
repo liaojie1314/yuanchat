@@ -24,6 +24,7 @@ export type MessagePreviewKind =
   | "video"
   | "sticker"
   | "encrypted"
+  | "call"
   | "unknown";
 
 /** 非文本类消息的类型标记 → i18n key。文本/系统消息用正文，不在此表内。 */
@@ -34,6 +35,9 @@ const PREVIEW_KEYS: Record<string, string> = {
   video: "chat.message.video",
   sticker: "chat.message.sticker",
   encrypted: "chat.message.encrypted",
+  // 通话记录的 text 是服务端生成的中文「通话时长 03:24」，直接上屏会让
+  // 英/日/韩界面的会话列表冒出中文，故与其他非文本类一样走本地化占位
+  call: "chat.preview.call",
 };
 
 /**

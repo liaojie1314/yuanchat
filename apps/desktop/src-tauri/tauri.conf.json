@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: http://localhost:9002; media-src 'self' blob: http://localhost:9002; connect-src 'self' http://localhost:8085 ws://localhost:8086 http://localhost:9002 http://test-api.yuanchat.com ws://test-api.yuanchat.com https://api.yuanchat.com wss://api.yuanchat.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: http://localhost:9002 http://127.0.0.1:*; media-src 'self' blob: http://localhost:9002; connect-src 'self' http://localhost:8085 ws://localhost:8086 http://localhost:9002 http://test-api.yuanchat.com ws://test-api.yuanchat.com https://api.yuanchat.com wss://api.yuanchat.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     }
   },
   "bundle": {
@@ -37,6 +37,9 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    },
+    "macOS": {
+      "entitlements": "Entitlements.plist"
     },
     "createUpdaterArtifacts": true
   },

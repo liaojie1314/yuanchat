@@ -372,6 +372,66 @@ func TestEditHistoryEndpointReturnsVersions(t *testing.T) {
 	}
 }
 
+// TestEditedAtIsUTCEverywhere 同一次编辑的 edited_at 在 message.edited 帧与
+// REST 编辑历史里必须是同一个字面量：都为 UTC、都截到微秒。
+//
+// 曾经不是：帧走内存里的 time.Now().UTC()（纳秒 Z），历史走库回读
+// （微秒 +08:00）。两者 time.Equal 都不成立（纳秒尾数被库抹掉），
+// 前端拿字符串做「这条是不是我刚收到的那次编辑」判重会一路判错。
+func TestEditedAtIsUTCEverywhere(t *testing.T) {
+	env := newEditEnv(t)
+	if _, status := env.patch(t, env.editURL(),
+		map[string]any{"text": "对时用文本"}); status != http.StatusOK {
+		t.Fatalf("edit failed with %d", status)
+	}
+
+	var frame struct {
+		Payload struct {
+			EditedAt string `json:"edited_at"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(env.disp.frames[0], &frame); err != nil {
+		t.Fatalf("decode frame: %v", err)
+	}
+
+	resp, status := env.get(t, env.historyURL())
+	if status != http.StatusOK {
+		t.Fatalf("history status = %d", status)
+	}
+	versions, _ := resp.Data["versions"].([]any)
+	if len(versions) != 2 {
+		t.Fatalf("len(versions) = %d, want 2", len(versions))
+	}
+
+	// versions[0] 走 ListEdits（message_edits 表），versions[1] 走 FindByID
+	// （messages 表）—— 两条回读路径都要与帧对上
+	got := map[string]string{"frame": frame.Payload.EditedAt}
+	for i, label := range []string{"history[0]", "history[1].current"} {
+		v, _ := versions[i].(map[string]any)
+		s, _ := v["edited_at"].(string)
+		got[label] = s
+	}
+
+	var ref time.Time
+	for label, s := range got {
+		ts, err := time.Parse(time.RFC3339Nano, s)
+		if err != nil {
+			t.Fatalf("%s 的 edited_at %q 不是 RFC3339: %v", label, s, err)
+		}
+		if _, off := ts.Zone(); off != 0 {
+			t.Errorf("%s 的 edited_at = %q，时区偏移 %d 秒，期望 UTC", label, s, off)
+		}
+		if ts.Nanosecond()%1000 != 0 {
+			t.Errorf("%s 的 edited_at = %q 带纳秒尾数，期望截到微秒", label, s)
+		}
+		if ref.IsZero() {
+			ref = ts
+		} else if !ts.Equal(ref) {
+			t.Errorf("%s 的 edited_at = %q，与其它出口不等（ref=%s）", label, s, ref.Format(time.RFC3339Nano))
+		}
+	}
+}
+
 // TestEditHistoryEndpointRejectsNonMember 非成员查历史 → 403。
 func TestEditHistoryEndpointRejectsNonMember(t *testing.T) {
 	env := newEditEnv(t)

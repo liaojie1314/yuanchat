@@ -17,13 +17,19 @@ const sendBufferSize = 64
 type Client struct {
 	userID   uuid.UUID
 	deviceID string
-	conn     *websocket.Conn
-	send     chan []byte
+	// connID 本条连接的唯一标识。device_id 是平台标签（登录固定写 "web"），
+	// 同一用户多设备同值，无法用于点对点定址；通话信令必须精确到某一条连接。
+	connID uuid.UUID
+	conn   *websocket.Conn
+	send   chan []byte
 
 	hub     *Hub
 	handler *Handler
 	logger  *zap.Logger
 }
+
+// ConnID 返回本条连接的唯一标识（通话信令的定址依据）。
+func (c *Client) ConnID() uuid.UUID { return c.connID }
 
 // readPump 持续读取客户端帧并派发给 Handler。
 // 连接出错或客户端关闭时退出，并从 Hub 摘除自己。

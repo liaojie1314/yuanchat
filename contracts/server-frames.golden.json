@@ -38,6 +38,92 @@
           "operator_nickname": "Alice"
         }
       }
+    },
+    {
+      "name": "call.incoming 来电推送",
+      "frame": {
+        "type": "call.incoming",
+        "payload": {
+          "call_id": "6f1c9c62-7f9a-4d7e-8f2b-1b0b1f2e3a41",
+          "conversation_id": "0a4c2f10-6f3d-4a58-9f77-2b0c9d1e4f52",
+          "media": "video",
+          "caller": {
+            "id": "3c9d1a7e-4b2f-4c81-9a6d-5e0f7b8c9d10",
+            "nickname": "Alice",
+            "avatar_url": null,
+            "short_id": 100001
+          },
+          "participants": [
+            {
+              "user_id": "3c9d1a7e-4b2f-4c81-9a6d-5e0f7b8c9d10",
+              "conn_id": "b1e2c3d4-0000-4000-8000-000000000001",
+              "nickname": "Alice",
+              "avatar_url": null,
+              "state": "joined"
+            },
+            {
+              "user_id": "5d0e2b8f-1c3a-4d92-8b7e-6f1a2c3d4e50",
+              "conn_id": "",
+              "nickname": "Bob",
+              "avatar_url": null,
+              "state": "invited"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "call.state 房间成员变更",
+      "frame": {
+        "type": "call.state",
+        "payload": {
+          "call_id": "6f1c9c62-7f9a-4d7e-8f2b-1b0b1f2e3a41",
+          "conversation_id": "0a4c2f10-6f3d-4a58-9f77-2b0c9d1e4f52",
+          "media": "audio",
+          "state": "active",
+          "self_conn": "b1e2c3d4-0000-4000-8000-000000000002",
+          "participants": [
+            {
+              "user_id": "3c9d1a7e-4b2f-4c81-9a6d-5e0f7b8c9d10",
+              "conn_id": "b1e2c3d4-0000-4000-8000-000000000001",
+              "nickname": "Alice",
+              "avatar_url": null,
+              "state": "joined"
+            },
+            {
+              "user_id": "5d0e2b8f-1c3a-4d92-8b7e-6f1a2c3d4e50",
+              "conn_id": "b1e2c3d4-0000-4000-8000-000000000002",
+              "nickname": "Bob",
+              "avatar_url": null,
+              "state": "joined"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "call.signal SDP/ICE 转发",
+      "frame": {
+        "type": "call.signal",
+        "payload": {
+          "call_id": "6f1c9c62-7f9a-4d7e-8f2b-1b0b1f2e3a41",
+          "to_conn": "",
+          "from_conn": "b1e2c3d4-0000-4000-8000-000000000001",
+          "from_user": "3c9d1a7e-4b2f-4c81-9a6d-5e0f7b8c9d10",
+          "data": { "type": "offer", "sdp": "v=0\r\n" }
+        }
+      }
+    },
+    {
+      "name": "call.ended 通话终结",
+      "frame": {
+        "type": "call.ended",
+        "payload": {
+          "call_id": "6f1c9c62-7f9a-4d7e-8f2b-1b0b1f2e3a41",
+          "reason": "completed",
+          "duration": 204
+        }
+      }
     }
   ]
 }

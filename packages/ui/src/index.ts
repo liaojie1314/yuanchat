@@ -48,6 +48,21 @@ export { MentionPicker } from "./MentionPicker";
 export { ForwardModal } from "./ForwardModal";
 export { UserProfileView } from "./UserProfileView";
 
+// 通话组件
+export { CallView } from "./CallView";
+export {
+  startCall,
+  joinCall,
+  probeLocalMedia,
+  canUseWebRTC,
+  setCallLauncher,
+  setNativeVideoResolver,
+} from "./callActions";
+export type { CallLaunchRequest, CallLauncher, NativeVideoResolver } from "./callActions";
+export { CallHost } from "./CallHost";
+export { CallInviteModal, MAX_CALL_INVITEES } from "./CallInviteModal";
+export { formatCallDuration, callRecordKey } from "./callFormat";
+
 // 通讯录组件
 export { ContactsScreen } from "./ContactsScreen";
 export { ContactsPanel } from "./ContactsPanel";

@@ -37,6 +37,7 @@ import { cn } from "@yuanchat/shared/utils";
 import { useTranslation } from "react-i18next";
 import { type ReactNode, useState, useEffect } from "react";
 import { Avatar } from "./Avatar";
+import { CallHost } from "./CallHost";
 import { SearchModal } from "./SearchModal";
 import { ToastHost } from "./Toast";
 
@@ -59,7 +60,20 @@ const DESKTOP_NAV_ITEMS = [
   { to: "/stickers", icon: Sticker, labelKey: "sticker.market.title" },
 ];
 
-export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
+export function MainLayout({
+  titleBar,
+  callMode = "overlay",
+}: {
+  titleBar?: ReactNode;
+  /**
+   * 通话界面的承载方式。
+   *
+   * - `overlay`（默认）：本布局内挂 {@link CallHost} 浮层 —— Web / 移动端
+   * - `window`：桌面端开独立原生窗口承载，本布局不挂浮层（否则主窗口与
+   *   通话窗口会各建一路 `RTCPeerConnection`，同一人在房间里出现两次）
+   */
+  callMode?: "overlay" | "window";
+}) {
   const location = useLocation();
   // 新 API: mode("light"/"dark"), toggleMode()
   const { mode, toggleMode } = useThemeStore();
@@ -108,6 +122,7 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
     return (
       <div className="bg-surface app-screen flex flex-col overflow-hidden">
         <ToastHost />
+        {callMode === "overlay" ? <CallHost /> : null}
         <SearchModal show={showSearch} onClose={() => setShowSearch(false)} />
         {titleBar}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -164,6 +179,7 @@ export function MainLayout({ titleBar }: { titleBar?: ReactNode }) {
   return (
     <div className="bg-surface app-screen flex overflow-hidden">
       <ToastHost />
+      {callMode === "overlay" ? <CallHost /> : null}
       <SearchModal show={showSearch} onClose={() => setShowSearch(false)} />
       {/* 左侧品牌色导航栏 — 渐变背景 */}
       <nav className="nav-gradient shadow-elevation-2 z-20 flex w-16 shrink-0 flex-col items-center gap-1 py-3 text-white">

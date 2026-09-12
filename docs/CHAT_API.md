@@ -1111,6 +1111,10 @@ friend_requests_week, otp_today, otp_week}, "runtime": {online_connections}}`。
 | `message.send` | `{conversation_id, content: {type:"sticker", sticker_id, key, width, height}, client_msg_id, reply_to_id?}`                    | 发送贴纸（v0.4 H1）。`sticker_id` 须为合法 UUID 且**属于发送者收藏，或属于一个可用表情包**（未下架、未被打标，且为官方包或发送者已添加的包；未添加的非官方包贴纸拒绝），否则 `403`（`sticker not available to sender`）；非 UUID → `400`。服务端按 `sticker_id` 查库并用库中的 `object_key`/`width`/`height` **覆盖**客户端传值，客户端传来的 `key`/宽高一律不采信                                                                        |
 | `message.read` | `{conversation_id, seq}`                                                                                                       | 上报已读进度（已读到的最大 seq，只前进不后退）                                                                                                                                                                                                                                                                                                                                                                                            |
 | `typing`       | `{conversation_id}`                                                                                                            | 正在输入（客户端节流 ~3s/次）                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `call.invite`  | `{conversation_id, media, invitee_ids?}`                                                                                       | 发起通话。`media` ∈ `audio`/`video`，其它值 → `400`。单聊可省略 `invitee_ids`（取会话另一方）；群聊必须显式勾选，且 **≤3 人**（mesh 房间上限 4），超出 → `400`；被邀请者须全是会话成员，否则 `403`。发起者本人忙线 → `409`。全部被邀请者忙线时房间立即终结并回 `call.ended{reason:"busy"}`                                                                                                                                                |
+| `call.answer`  | `{call_id, accept}`                                                                                                            | 接听（`accept=true`）或拒绝（`false`）。**群通话的「主动加入」复用 `accept=true`** —— 会话成员即使未被邀请也可加入，但非成员 `403`、房间满员 `409`（`call is full`）、房间不存在 `404`                                                                                                                                                                                                                                                    |
+| `call.leave`   | `{call_id}`                                                                                                                    | 挂断 / 取消 / 退出，同一语义（离开房间）。剩余已接听者 <2 时房间终结                                                                                                                                                                                                                                                                                                                                                                      |
+| `call.signal`  | `{call_id, to_conn, data}`                                                                                                     | 转发 SDP / ICE。`data` 服务端不解析、原样透传。**发送方与 `to_conn` 都必须在房间内**，否则 `403`（不校验就等于把服务器变成任意连接之间的转发器）                                                                                                                                                                                                                                                                                          |
 
 > **ContentPayload（消息体传输结构）**：`{type, text?, key?, width?, height?, size?, name?, duration?, sticker_id?}`。
 > text 帧只用 `type`/`text`；image 帧用 `key`/`width`/`height`/`size`；file 帧用 `key`/`name`/`size`；
@@ -1150,10 +1154,89 @@ friend_requests_week, otp_today, otp_week}, "runtime": {online_connections}}`。
 | `friend.removed`            | `{friend_id}`                                                                                                                 | 删好友后推给**双方**所有设备（各自视角的 `friend_id` 是对方）。前端移除好友 + 隐藏关联单聊会话（历史保留）                                                                                                                                                 |
 | `conversation.role_changed` | `{conversation_id, user_id, new_role, changed_by}`                                                                            | 任命/免除/转让后推给全体在群成员（转让连发两帧）。前端递增会话 memberVersion 触发成员列表重拉；`user_id`=自己且 `changed_by`≠自己时 toast 提示                                                                                                             |
 | `error`                     | `{code, message, client_msg_id?}`                                                                                             | 当前连接。`client_msg_id` 非空表示对应那次发送失败。`code=403, message=BLOCKED`：单聊被拉黑拒发，前端翻 failed + toast                                                                                                                                     |
+| `call.incoming`             | `{call_id, conversation_id, media, caller, participants}`                                                                     | 被邀请者的**全部设备**（全设备振铃）。`caller` 为 `UserBrief`；忙线者已在建房时被跳过，不在 `participants` 里                                                                                                                                              |
+| `call.state`                | `{call_id, conversation_id, media, state, self_conn, participants}`                                                           | 房间内**每条已接听的连接各一帧**（`self_conn` 逐条不同，是收帧方自己的 conn_id），外加会话内其余成员一帧（`self_conn=""`，供渲染「通话中」横幅）。`state` ∈ `ringing`/`active`                                                                             |
+| `call.signal`               | `{call_id, to_conn, from_conn, from_user, data}`                                                                              | 目标连接（`SendToConn`）。目标不在本实例时退回按用户扇出，客户端凭 `from_conn` 与自己的 participants 自行过滤                                                                                                                                              |
+| `call.ended`                | `{call_id, reason, duration}`                                                                                                 | 终结前快照里的全部参与者。`reason` ∈ `completed`/`rejected`/`canceled`/`timeout`/`busy`/`failed`，由**服务端按房间状态推导**（客户端只说「我离开了」）；`duration` 单位秒，未接通为 0                                                                      |
 
 > **系统消息**：群管理操作（改名/邀请/踢人/退群）产生的系统消息复用 `message.receive` 帧下发，
 > `content.type = "system"`、`content.text` 为文案（如「Alice 修改群名为「X」」）。
 > 前端渲染为居中胶囊，列表预览不加发送者昵称前缀。落库 `message_type=6`。
+
+> **通话记录**：通话终结时由服务端落一条系统消息（`message_type=6`），content 形如
+> `{"text":"通话时长 03:24","call":{"media":"audio","result":"answered","duration":204}}`。
+> `result` ∈ `answered`/`missed`/`rejected`/`canceled`/`busy`。
+> **两份并存是有意的**：`text` 是给老客户端的兜底（不会白屏），新客户端读 `call`
+> 走自己的语言渲染。会话列表预览返回 `preview=""` + `preview_kind="call"`，
+> 由客户端渲染本地化的「[通话]」—— 回传服务端中文会让英/日/韩界面的列表冒出一行中文。
+> 未接来电靠 seq 递增自然计入未读，无额外未读逻辑。
+
+## 三点五、通话（WebRTC）
+
+信令全部走 WebSocket（见上表 8 帧），REST 只有两个读端点。
+房间态存 Redis（TTL 2h 为崩溃兜底，正常终结主动删除），服务端**不碰媒体字节**。
+媒体拓扑为 **mesh 全连接，房间上限 4 人**（每端 N-1 条上行；6 人起低端机发热掉帧）。
+
+### GET /api/v1/calls/ice-servers
+
+下发 STUN/TURN 配置与临时凭据。`LimitByIP(20, 40)`。
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "ice_servers": [
+      { "urls": ["stun:localhost:3478"] },
+      {
+        "urls": ["turn:localhost:3478?transport=udp", "turn:localhost:3478?transport=tcp"],
+        "username": "1788676542:<user_id>",
+        "credential": "<base64(HMAC-SHA1(secret, username))>"
+      }
+    ],
+    "ttl": 3600
+  }
+}
+```
+
+- 凭据按 coturn 的 `use-auth-secret`（REST API）口径签发：`username = <过期unix时间戳>:<用户ID>`，
+  coturn 用同一密钥复算校验。**两边都不建 TURN 用户表**，凭据自带过期时间。
+- `turn.enabled=false` 或密钥为空时**只返回 STUN 项**，不下发空凭据（空 username/credential
+  会让客户端以为有中继可用、实际连不上）。
+- 未登录 `401` —— 凭据就是中继配额。
+
+### GET /api/v1/calls/:call_id
+
+返回通话房间快照。`LimitByIP(20, 40)`。
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "call_id": "uuid",
+    "conversation_id": "uuid",
+    "media": "video",
+    "state": "ringing",
+    "caller_id": "uuid",
+    "participants": [
+      {
+        "user_id": "uuid",
+        "conn_id": "uuid",
+        "nickname": "Alice",
+        "avatar_url": null,
+        "state": "joined"
+      }
+    ]
+  }
+}
+```
+
+- 唯一调用方是**桌面端的独立通话窗口**：它在 `call.incoming` 之后才被创建，自己的
+  WebSocket 连上时那一帧早已发完，没有这个端点就没有房间信息可渲染。顺带让
+  「通话窗口刷新 / 重开」天然可恢复。
+- 非房间参与者 `403` —— 快照里含各方 `conn_id`，那是信令的定址凭据。
+- 房间不存在（含已终结）`404`；`call_id` 非 UUID `400`。
 
 ## 四、seq 与已读机制
 

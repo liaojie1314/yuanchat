@@ -38,7 +38,6 @@ import {
   fetchMembers,
   isMockEnabled,
   quoteExcerptOf,
-  showToast,
   useConversationStore,
   useMessageStore,
 } from "@yuanchat/shared";
@@ -74,6 +73,7 @@ export function Composer({
   onSend,
   compact = false,
   onOpenMedia,
+  onOpenCall,
   editingMessageId,
   onCancelEdit,
   onSaveEdit,
@@ -83,6 +83,8 @@ export function Composer({
   compact?: boolean;
   /** 打开媒体相册（移动端「更多」面板入口；缺省时该项不渲染） */
   onOpenMedia?: () => void;
+  /** 发起通话（移动端「更多」面板入口；缺省时两项不渲染，同 onOpenMedia 范式） */
+  onOpenCall?: (media: "audio" | "video") => void;
   /** 非空表示编辑态：显示提示条，发送按钮语义变「保存」 */
   editingMessageId?: string | null;
   /** 取消编辑 */
@@ -690,12 +692,18 @@ export function Composer({
               <MoreItem
                 icon={<Phone size={22} />}
                 label={t("chat.voiceCall")}
-                onClick={() => showToast("info", t("common.comingSoon"))}
+                onClick={() => {
+                  setShowMore(false);
+                  if (onOpenCall) onOpenCall("audio");
+                }}
               />
               <MoreItem
                 icon={<Video size={22} />}
                 label={t("chat.videoCall")}
-                onClick={() => showToast("info", t("common.comingSoon"))}
+                onClick={() => {
+                  setShowMore(false);
+                  if (onOpenCall) onOpenCall("video");
+                }}
               />
             </div>
           </div>

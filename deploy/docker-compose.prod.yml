@@ -219,6 +219,21 @@ services:
       - loki_data:/loki
     networks: [yuanchat-net]
 
+  # WebRTC 中继。nginx 反代不了 UDP relay，因此 coturn 自己发布端口 ——
+  # 这是除 80/443 之外唯一对外开放的一组端口。
+  coturn:
+    image: coturn/coturn:4.7.0
+    container_name: yuanchat-coturn
+    restart: unless-stopped
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "49160-49200:49160-49200/udp"
+    volumes:
+      - ./coturn/turnserver.prod.conf:/etc/coturn/turnserver.conf:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    networks: [yuanchat-net]
+
 volumes:
   pg_data:
   redis_data:

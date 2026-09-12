@@ -366,6 +366,32 @@ export function formatMediaDuration(totalSeconds: number): string {
   return String(m) + ":" + (s < 10 ? "0" : "") + String(s);
 }
 
+/**
+ * content JSON → 通话记录载荷（系统消息的 `call` 键）。
+ *
+ * @param content - 落库的 content JSON 字符串
+ * @returns 通话记录；非通话系统消息（群成员变更等）与非法 JSON 均返回 undefined，
+ *   调用方据此回退到 `text`（老服务端不带 `call` 键，不能因此白屏）
+ */
+export function parseCallContent(
+  content: string,
+): { media: "audio" | "video"; result: string; duration: number } | undefined {
+  try {
+    const parsed = JSON.parse(content) as {
+      call?: { media?: string; result?: string; duration?: number };
+    };
+    const call = parsed.call;
+    if (!call || typeof call.result !== "string") return undefined;
+    return {
+      media: call.media === "video" ? "video" : "audio",
+      result: call.result,
+      duration: typeof call.duration === "number" ? call.duration : 0,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 /** duration 为种子生成固定伪波形（12-20 根，高度 6-18px 确定性伪随机） */
 export function pseudoWave(duration: number): number[] {
   const bars = Math.min(20, Math.max(12, duration + 8));
@@ -449,6 +475,8 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     voice,
     video,
     sticker: isSticker ? parseStickerContent(dto.content) : undefined,
+    // 通话记录：系统消息里带 call 键时走 i18n 渲染，不带则回退 text
+    call: dto.message_type === 6 ? parseCallContent(dto.content) : undefined,
     reactions: dto.reactions,
     seq: dto.seq,
     time: formatMessageTime(dto.created_at),

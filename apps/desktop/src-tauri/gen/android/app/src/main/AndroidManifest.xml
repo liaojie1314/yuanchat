@@ -19,6 +19,17 @@
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
+    <!-- 通话前台服务。通话中切后台，系统会在几十秒内回收进程，WebSocket 与
+         PeerConnection 一起断掉，表现为「锁屏就掉话」。前台服务把进程钉住。
+         Android 14+ 还要求按用途细分 microphone / camera 子类型，只声明
+         FOREGROUND_SERVICE 会在 startForeground 时抛 SecurityException；
+         POST_NOTIFICATIONS 是 Android 13+ 展示常驻通知的前提，没有它
+         startForeground 不报错但通知不可见，用户无从知道自己还在通话中 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -41,6 +52,14 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- foregroundServiceType 必须同时列出 microphone 与 camera：类型在启动时
+             由 startForeground 指定，清单里没声明的类型会被系统直接拒绝；
+             语音通话与视频通话共用这一个服务，故两者都要在册 -->
+        <service
+            android:name=".CallForegroundService"
+            android:foregroundServiceType="microphone|camera"
+            android:exported="false" />
 
         <provider
           android:name="androidx.core.content.FileProvider"

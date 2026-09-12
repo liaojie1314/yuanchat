@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  硬化运行时（hardened runtime）下的设备访问豁免。
+
+  为什么与 Info.plist 分开、两个都要：Info.plist 的用途说明只负责让系统能向用户
+  发问，而硬化运行时默认切断进程对麦克风/摄像头的访问 —— 缺了下面两项，用户点
+  「允许」之后采集依然拿不到流。Tauri 的 macOS 打包默认 hardenedRuntime: true，
+  公证分发必须开，所以这是发版形态下的必需项，而非可选加固。
+
+  为什么本地 dev 感觉不到：只有 codesign 时才会带上 entitlements，未配签名身份的
+  本地构建不签名，于是这里写错/漏写在 pnpm dev 下完全无症状，直到公证包到用户
+  手上才暴露成「点了允许还是打不通」。
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<key>com.apple.security.device.camera</key>
+	<true/>
+</dict>
+</plist>

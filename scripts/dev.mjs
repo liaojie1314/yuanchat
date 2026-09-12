@@ -35,12 +35,14 @@ const GOPATH_FALLBACK = "/home/liaojie1314/env/go/GOPATH";
 const APP_PORTS = { web: 5173, desktop: 1420, android: 1420 };
 const SERVER_PORTS = [8085, 8086];
 /**
- * 真机需要反向转发的端口：REST / WS 之外还有 MinIO(9002)。
+ * 真机需要反向转发的端口：REST / WS 之外还有 MinIO(9002) 与 coturn(3478)。
  * 预签名 URL 与头像直链里写的是 localhost:9002，不转发的话手机上所有图片、
  * 语音、头像都拿不到（表现为空白占位，不报错），排查起来很费时间。
- * 注意 9002 不进 SERVER_PORTS —— dev:stop 不该去杀 docker 起的 MinIO。
+ * 3478 是 TURN 控制端口：模拟器在 10.0.2.x NAT 后，host candidate 对宿主不可达，
+ * 只能走 TURN over TCP（adb reverse 不转发 UDP），没有这条转发通话必然打不通。
+ * 注意 9002 与 3478 都不进 SERVER_PORTS —— dev:stop 不该去杀 docker 起的容器。
  */
-const REVERSE_PORTS = [...SERVER_PORTS, 9002];
+const REVERSE_PORTS = [...SERVER_PORTS, 9002, 3478];
 
 // ========================================
 // 参数解析

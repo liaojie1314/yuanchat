@@ -46,6 +46,7 @@ import {
   showToast,
   toggleReaction,
   useAuthStore,
+  useCallStore,
   useConversationStore,
   useMessageStore,
 } from "@yuanchat/shared";
@@ -53,6 +54,8 @@ import { cn } from "@yuanchat/shared/utils";
 import type { ChatMessage, MentionRef } from "@yuanchat/shared";
 import { Avatar } from "./Avatar";
 import { AnnouncementDialog } from "./AnnouncementDialog";
+import { CallInviteModal } from "./CallInviteModal";
+import { joinCall, startCall } from "./callActions";
 import { Composer } from "./Composer";
 import { ForwardModal } from "./ForwardModal";
 import { E2EEIndicator } from "./E2EEIndicator";
@@ -114,6 +117,10 @@ export function ChatWindow({
   const [editingId, setEditingId] = useState<string | null>(null);
   // 编辑历史弹层的目标消息 id（null 表示关闭）
   const [historyId, setHistoryId] = useState<string | null>(null);
+  // 群通话选人弹窗的媒体形态（null 表示关闭）
+  const [callMedia, setCallMedia] = useState<"audio" | "video" | null>(null);
+  // 会话内「通话中」横幅（本端非参与者时由 call.state 帧写入）
+  const callBanner = useCallStore((s) => s.banner);
   const selfUserId = useAuthStore((s) => s.user?.id);
 
   const items = messages ?? [];
@@ -332,6 +339,21 @@ export function ChatWindow({
     }
   };
 
+  /**
+   * 通话入口（顶栏两个按钮 + 移动端「更多」宫格两项共用）。
+   *
+   * 群会话先选人：mesh 上限 4 人，不选就默认全群会在 5 人群里必然失败一半。
+   * 单聊直接发起，服务端按会话取对端。
+   */
+  const openCall = (m: "audio" | "video") => {
+    if (!activeId) return;
+    if (conv.type === "group") {
+      setCallMedia(m);
+      return;
+    }
+    void startCall(activeId, m, []);
+  };
+
   return (
     <div className="flex h-full min-w-0 flex-col">
       {/* 顶部标题栏 */}
@@ -358,6 +380,7 @@ export function ChatWindow({
         {/* 通话 / 搜索 / 相册在手机上收进输入区的「更多」面板：60px 高的顶栏放不下
             五个图标又要留出群名，挤到标题被截断。桌面/平板保持全部常驻。 */}
         <button
+          onClick={() => openCall("audio")}
           className="md3-icon-btn text-on-surface-variant hidden sm:grid"
           title={t("chat.voiceCall")}
           aria-label={t("chat.voiceCall")}
@@ -365,6 +388,7 @@ export function ChatWindow({
           <Phone size={19} />
         </button>
         <button
+          onClick={() => openCall("video")}
           className="md3-icon-btn text-on-surface-variant hidden sm:grid"
           title={t("chat.videoCall")}
           aria-label={t("chat.videoCall")}
@@ -403,6 +427,27 @@ export function ChatWindow({
       {/* 会话内搜索面板 */}
       {showSearch && activeId && (
         <InConversationSearch conversationId={activeId} onClose={() => setShowSearch(false)} />
+      )}
+
+      {/* 通话中横幅：本端不是这一路的参与者（群里其他成员）时显示「加入」。
+          横幅由 call.state 帧驱动，通话终结时随 banner 置空自动消失 */}
+      {callBanner && callBanner.conversationId === activeId && (
+        <div className="bg-primary-container text-primary-on-container flex w-full shrink-0 items-center gap-2 px-4 py-1.5">
+          {callBanner.media === "video" ? (
+            <Video size={13} className="shrink-0" />
+          ) : (
+            <Phone size={13} className="shrink-0" />
+          )}
+          <span className="text-label-md min-w-0 flex-1 truncate">
+            {t("call.joinBanner", { name: callBanner.callerName })}
+          </span>
+          <button
+            onClick={() => void joinCall(callBanner)}
+            className="text-label-md min-h-[44px] shrink-0 px-2 font-semibold underline"
+          >
+            {t("call.join")}
+          </button>
+        </div>
       )}
 
       {/* 群公告横幅（群聊且公告非空时显示；未读时加粗 + 高亮点） */}
@@ -619,6 +664,7 @@ export function ChatWindow({
         onSend={handleSend}
         compact={compactComposer}
         onOpenMedia={() => setShowMedia(true)}
+        onOpenCall={openCall}
         editingMessageId={editingId}
         onCancelEdit={exitEditing}
         onSaveEdit={handleSaveEdit}
@@ -667,6 +713,17 @@ export function ChatWindow({
         announcement={conv.announcement ?? ""}
         onClose={() => setShowAnnouncement(false)}
       />
+
+      {/* 群通话选人（单聊直接发起，不经此弹窗） */}
+      {activeId && (
+        <CallInviteModal
+          open={callMedia !== null}
+          convId={activeId}
+          media={callMedia ?? "audio"}
+          onClose={() => setCallMedia(null)}
+          onConfirm={(m, inviteeIds) => void startCall(activeId, m, inviteeIds)}
+        />
+      )}
     </div>
   );
 }

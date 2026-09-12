@@ -265,6 +265,21 @@ export const DEMO_FRIENDS: Friend[] = [
   { id: "u_lina", nickname: "李娜", avatarUrl: null, shortId: 10022, conversationId: null },
 ];
 
+/**
+ * Mock 模式下的群成员（`GET /conversations/:id/members`）。
+ *
+ * 含「自己」（E2E 夹具与 authStore 用的 `e2e_user`）：成员表本就包含本人，
+ * 选人弹窗靠 `m.userId !== selfId` 把自己剔掉，mock 若不带自己就测不到这一步。
+ * 其余 4 人是为了让 mesh 上限（自己 + 3 名受邀人）能被真的选满。
+ */
+export const DEMO_MEMBERS = [
+  { user_id: "e2e_user", nickname: "E2E Tester", avatar_url: null, role: 2 },
+  { user_id: "u_chenxi", nickname: "陈曦", avatar_url: null, role: 1 },
+  { user_id: "u_zhangwei", nickname: "张伟", avatar_url: null, role: 0 },
+  { user_id: "u_amy", nickname: "Amy", avatar_url: null, role: 0 },
+  { user_id: "u_lina", nickname: "李娜", avatar_url: null, role: 0, alias: "娜娜" },
+];
+
 /** Mock 模式下的好友申请（1 条待处理 + 1 条我发出的） */
 export const DEMO_REQUESTS: FriendRequestItem[] = [
   {

@@ -28,6 +28,7 @@ import {
 import type { Friend, PublicProfile } from "@yuanchat/shared";
 import { getAvatarColor } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
+import { startCall } from "./callActions";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { copyText } from "./copyText";
 
@@ -56,6 +57,8 @@ export function ContactDetail({ friend, onMessage, onDeleted, onBack }: ContactD
   const deleteFriend = useContactStore((s) => s.deleteFriend);
   const block = useBlocklistStore((s) => s.block);
   const online = usePresenceStore((s) => s.onlineIds.includes(friend.id));
+  // 通话按会话定址：好友尚无单聊会话（同意申请前的历史数据）时按钮置灰
+  const convId = friend.conversationId ? friend.conversationId : "";
 
   // 拉取公开资料补全签名 / 性别；mock 模式跳过（数据已由 bootstrap 注入）
   useEffect(() => {
@@ -175,12 +178,14 @@ export function ContactDetail({ friend, onMessage, onDeleted, onBack }: ContactD
           <QuickAction
             icon={<Phone size={22} />}
             label={t("chat.voiceCall")}
-            onClick={() => showToast("info", t("common.comingSoon"))}
+            onClick={() => void startCall(convId, "audio", [])}
+            disabled={!convId}
           />
           <QuickAction
             icon={<Video size={22} />}
             label={t("chat.videoCall")}
-            onClick={() => showToast("info", t("common.comingSoon"))}
+            onClick={() => void startCall(convId, "video", [])}
+            disabled={!convId}
           />
         </div>
 
@@ -230,19 +235,23 @@ function QuickAction({
   label,
   primary,
   onClick,
+  disabled,
 }: {
   icon: React.ReactNode;
   label: string;
   primary?: boolean;
   onClick?: () => void;
+  /** 置灰：好友尚无单聊会话时通话无从发起（服务端按会话定址） */
+  disabled?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={
         primary
-          ? "bg-primary-container text-primary-on-container hover:bg-primary-container/80 flex h-16 flex-1 flex-col items-center justify-center gap-1 rounded-lg transition-all active:scale-95"
-          : "bg-surface-container text-on-surface hover:bg-surface-container-high flex h-16 flex-1 flex-col items-center justify-center gap-1 rounded-lg transition-all active:scale-95"
+          ? "bg-primary-container text-primary-on-container hover:bg-primary-container/80 flex h-16 flex-1 flex-col items-center justify-center gap-1 rounded-lg transition-all active:scale-95 disabled:opacity-50"
+          : "bg-surface-container text-on-surface hover:bg-surface-container-high flex h-16 flex-1 flex-col items-center justify-center gap-1 rounded-lg transition-all active:scale-95 disabled:opacity-50"
       }
     >
       <span className={primary ? "" : "text-primary"}>{icon}</span>

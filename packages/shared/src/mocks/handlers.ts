@@ -10,7 +10,7 @@
  * @see https://mswjs.io/docs/
  */
 import { http, HttpResponse, passthrough, delay } from "msw";
-import { DEMO_FRIENDS, DEMO_MESSAGES } from "./demoData";
+import { DEMO_FRIENDS, DEMO_MEMBERS, DEMO_MESSAGES } from "./demoData";
 import type { ChatMessage, ChatMessageKind } from "../store/messageStore";
 
 // ========================================
@@ -504,6 +504,37 @@ const MEDIA_TYPE_BY_KIND: Record<string, 2 | 3 | 4 | 5 | 8> = {
  */
 const DEMO_MEDIA_BYTES: Record<string, number> = { file: 3355443, video: 2048000 };
 
+/**
+ * 通话房间快照（`GET /calls/:call_id`）。
+ *
+ * 字段与 `server/internal/handler/call.go` 的 `callRoomDTO` 对齐：给的是
+ * `caller_id` 而非主叫完整资料。`conn_id` 在 `state=invited` 时为空串 ——
+ * 前端 mesh 只对 `state=joined` 的成员建连，这个空串是分支覆盖的关键样本。
+ */
+const MOCK_CALL_ROOM = {
+  call_id: "6f1c9c62-7f9a-4d7e-8f2b-1b0b1f2e3a41",
+  conversation_id: "0a4c2f10-6f3d-4a58-9f77-2b0c9d1e4f52",
+  media: "video",
+  state: "ringing",
+  caller_id: MOCK_USER.id,
+  participants: [
+    {
+      user_id: MOCK_USER.id,
+      conn_id: "b1e2c3d4-0000-4000-8000-000000000001",
+      nickname: MOCK_USER.nickname,
+      avatar_url: null,
+      state: "joined",
+    },
+    {
+      user_id: "5d0e2b8f-1c3a-4d92-8b7e-6f1a2c3d4e50",
+      conn_id: "",
+      nickname: "Bob",
+      avatar_url: null,
+      state: "invited",
+    },
+  ],
+};
+
 /** 相册条目 DTO（与 api/chat.ts 的 MediaItemDTO 同构，omitempty 语义靠 undefined 表达） */
 interface MockMediaItem {
   message_id: string;
@@ -747,6 +778,19 @@ export const handlers = [
   }),
 
   // --------------------------------------------------
+  // 会话 — 群成员列表
+  // GET /api/v1/conversations/:id/members
+  //
+  // 成员表是「群通话选人」与详情页头像墙的数据源。给 5 个人（含自己）是为了
+  // 让 mesh 上限 4 人（= 自己 + 3 名受邀人）这条前置拦截在 mock 下也能走到：
+  // 排除自己后剩 4 个候选，选满 3 个后第 4 个必须点不动。
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/conversations/:id/members", async () => {
+    await delay(150);
+    return apiOk({ members: DEMO_MEMBERS });
+  }),
+
+  // --------------------------------------------------
   // 会话 — 更新群公告（管理员，空串清除）
   // PATCH /api/v1/conversations/:id/announcement
   // --------------------------------------------------
@@ -830,6 +874,46 @@ export const handlers = [
       return apiError(4031, "recall window expired");
     }
     return apiOk({ message: "recalled" });
+  }),
+
+  // --------------------------------------------------
+  // 通话 — ICE 服务器凭据
+  // GET /api/v1/calls/ice-servers（?empty=1 无中继 / ?error=1 签发失败）
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/calls/ice-servers", async ({ request }) => {
+    // 150ms 延迟：通话界面「连接中…」这一态在演示里要真的出现
+    await delay(150);
+    const url = new URL(request.url);
+    if (url.searchParams.get("error") === "1") return apiError(500, "sign turn credential failed");
+    // 空态 = TURN 未部署（turn.enabled=false）：只给 STUN，同网段仍可通
+    if (url.searchParams.get("empty") === "1") {
+      return apiOk({ ice_servers: [{ urls: ["stun:localhost:3478"] }], ttl: 3600 });
+    }
+    return apiOk({
+      ice_servers: [
+        { urls: ["stun:localhost:3478"] },
+        {
+          urls: ["turn:localhost:3478?transport=udp", "turn:localhost:3478?transport=tcp"],
+          username: "1757142000:" + MOCK_USER.id,
+          credential: "bW9jay1obWFjLXNoYTEtY3JlZGVudGlhbA==",
+        },
+      ],
+      ttl: 3600,
+    });
+  }),
+
+  // --------------------------------------------------
+  // 通话 — 房间快照（桌面通话窗口启动时拉）
+  // GET /api/v1/calls/:callId（callId=missing 已终结 / ?error=1 服务端故障）
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/calls/:callId", async ({ params, request }) => {
+    await delay(150);
+    if (new URL(request.url).searchParams.get("error") === "1") {
+      return apiError(500, "load call room failed");
+    }
+    // 房间已终结：通话窗口须据此自行关闭，而不是停在空界面
+    if (params.callId === "missing") return apiError(404, "call not found");
+    return apiOk({ ...MOCK_CALL_ROOM, call_id: String(params.callId) });
   }),
 
   // --------------------------------------------------

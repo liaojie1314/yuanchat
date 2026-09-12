@@ -19,6 +19,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { useMessageStore } from "../store/messageStore";
+import { useCallStore } from "../store/callStore";
 import type { ChatMessage } from "../store/messageStore";
 import type { ServerFrames } from "../ws/chatSocket";
 
@@ -60,6 +61,14 @@ describe("server-frames golden 契约", () => {
     const types = golden.cases.map((c) => c.frame.type);
     expect(types).toContain("message.edited");
     expect(types).toContain("message.recalled");
+  });
+
+  it("契约含四个 call 帧用例", () => {
+    const types = golden.cases.map((c) => c.frame.type);
+    expect(types).toContain("call.incoming");
+    expect(types).toContain("call.state");
+    expect(types).toContain("call.signal");
+    expect(types).toContain("call.ended");
   });
 
   describe("message.edited", () => {
@@ -137,6 +146,131 @@ describe("server-frames golden 契约", () => {
       expect(m.text).toBeUndefined();
       // 本人的文本消息撤回后留底，5 分钟内可"重新编辑"
       expect(m.recalledText).toBe("撤回前");
+    });
+  });
+
+  /** 参与者元素的字段集：四个 call 帧里出现两次，抽出来避免两处各漏一个字段 */
+  const PARTICIPANT_KEYS = ["avatar_url", "conn_id", "nickname", "state", "user_id"].sort();
+
+  describe("call.incoming", () => {
+    const raw = frameOf("call.incoming");
+
+    it("字段集合与前端类型声明完全一致（多一个或少一个都红）", () => {
+      expect(Object.keys(raw).sort()).toEqual(
+        ["call_id", "conversation_id", "media", "caller", "participants"].sort(),
+      );
+      expect(Object.keys(raw.caller as Record<string, unknown>).sort()).toEqual(
+        ["id", "nickname", "avatar_url", "short_id"].sort(),
+      );
+      const parts = raw.participants as Array<Record<string, unknown>>;
+      for (const part of parts) expect(Object.keys(part).sort()).toEqual(PARTICIPANT_KEYS);
+    });
+
+    it("喂进 applyIncoming 后 phase=incoming 且记住主叫与成员表", () => {
+      // 逐字段搬进前端类型：契约或类型任一侧改名，这段就编译不过
+      const p: ServerFrames["call.incoming"] = {
+        call_id: raw.call_id as string,
+        conversation_id: raw.conversation_id as string,
+        media: raw.media as "audio" | "video",
+        caller: raw.caller as ServerFrames["call.incoming"]["caller"],
+        participants: raw.participants as ServerFrames["call.incoming"]["participants"],
+      };
+      useCallStore.getState().reset();
+      useCallStore.getState().applyIncoming(p);
+
+      const s = useCallStore.getState();
+      expect(s.phase).toBe("incoming");
+      expect(s.callId).toBe(p.call_id);
+      expect(s.media).toBe("video");
+      expect(s.caller !== null ? s.caller.nickname : null).toBe("Alice");
+      // invited 的成员 conn_id 是空串：mesh 只对 joined 建连，这个样本守住该分支
+      expect(s.participants.filter((x) => x.state === "invited")[0].conn_id).toBe("");
+    });
+  });
+
+  describe("call.state", () => {
+    const raw = frameOf("call.state");
+
+    it("字段集合与前端类型声明完全一致（多一个或少一个都红）", () => {
+      expect(Object.keys(raw).sort()).toEqual(
+        ["call_id", "conversation_id", "media", "state", "self_conn", "participants"].sort(),
+      );
+      const parts = raw.participants as Array<Record<string, unknown>>;
+      for (const part of parts) expect(Object.keys(part).sort()).toEqual(PARTICIPANT_KEYS);
+    });
+
+    it("喂进 applyState 后 phase=active、selfConn 就位且开始计时", () => {
+      const p: ServerFrames["call.state"] = {
+        call_id: raw.call_id as string,
+        conversation_id: raw.conversation_id as string,
+        media: raw.media as "audio" | "video",
+        state: raw.state as "ringing" | "active",
+        self_conn: raw.self_conn as string,
+        participants: raw.participants as ServerFrames["call.state"]["participants"],
+      };
+      useCallStore.getState().reset();
+      useCallStore.getState().startOutgoing(p.conversation_id, p.media, []);
+      useCallStore.getState().applyState(p);
+
+      const s = useCallStore.getState();
+      expect(s.phase).toBe("active");
+      expect(s.selfConn).toBe(p.self_conn);
+      expect(s.participants).toHaveLength(2);
+      expect(s.startedAt).not.toBeNull();
+    });
+  });
+
+  describe("call.signal", () => {
+    const raw = frameOf("call.signal");
+
+    it("字段集合与前端类型声明完全一致（多一个或少一个都红）", () => {
+      expect(Object.keys(raw).sort()).toEqual(
+        ["call_id", "to_conn", "from_conn", "from_user", "data"].sort(),
+      );
+    });
+
+    it("data 是不透明协商载荷：服务端不解析，前端按 type 分派", () => {
+      const p: ServerFrames["call.signal"] = {
+        call_id: raw.call_id as string,
+        to_conn: raw.to_conn as string,
+        from_conn: raw.from_conn as string,
+        from_user: raw.from_user as string,
+        data: raw.data as ServerFrames["call.signal"]["data"],
+      };
+      expect(p.data.type).toBe("offer");
+      expect(p.data.type === "offer" ? p.data.sdp : "").toContain("v=0");
+      expect(typeof p.from_conn).toBe("string");
+    });
+  });
+
+  describe("call.ended", () => {
+    const raw = frameOf("call.ended");
+
+    it("字段集合与前端类型声明完全一致（多一个或少一个都红）", () => {
+      expect(Object.keys(raw).sort()).toEqual(["call_id", "reason", "duration"].sort());
+      expect(typeof raw.reason).toBe("string");
+      expect(typeof raw.duration).toBe("number");
+    });
+
+    it("喂进 applyEnded 后复位到 idle 并留下终结原因", () => {
+      const p: ServerFrames["call.ended"] = {
+        call_id: raw.call_id as string,
+        reason: raw.reason as string,
+        duration: raw.duration as number,
+      };
+      useCallStore.getState().reset();
+      useCallStore.getState().applyIncoming({
+        call_id: p.call_id,
+        conversation_id: "v-any",
+        media: "audio",
+        caller: { id: "a", nickname: "A", avatar_url: null, short_id: 1 },
+        participants: [],
+      });
+      useCallStore.getState().applyEnded(p);
+
+      expect(useCallStore.getState().phase).toBe("idle");
+      expect(useCallStore.getState().endReason).toBe("completed");
+      expect(useCallStore.getState().callId).toBeNull();
     });
   });
 });

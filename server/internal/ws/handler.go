@@ -48,6 +48,11 @@ type Handler struct {
 	//（router 注入）。nil 时贴纸帧退化为仅字段非空校验——生产装配必然非 nil，
 	// 仅 buildContent 的纯单测会留空。
 	resolveSticker func(ctx context.Context, senderID, stickerID uuid.UUID) (objectKey string, width, height int, err error)
+	// ---- 通话信令依赖（router 注入；三者缺一即拒绝通话帧，不空指针崩读协程）----
+	callSvc      *service.CallService
+	callMembers  func(ctx context.Context, userID, convID uuid.UUID) ([]uuid.UUID, error)
+	callProfiles func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]UserBrief, error)
+	onCallEnd    func(ctx context.Context, room *service.Room, reason service.EndReason, duration int)
 }
 
 // SetStickerResolver 注入贴纸可发送性校验（router 装配时调用）。
@@ -154,11 +159,13 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	client := &Client{
 		userID:   claims.UserID,
 		deviceID: claims.DeviceID,
-		conn:     conn,
-		send:     make(chan []byte, sendBufferSize),
-		hub:      h.hub,
-		handler:  h,
-		logger:   h.logger,
+		// 连接级唯一标识：通话信令按它点对点定址（device_id 是平台标签，多设备同值）
+		connID:  uuid.New(),
+		conn:    conn,
+		send:    make(chan []byte, sendBufferSize),
+		hub:     h.hub,
+		handler: h,
+		logger:  h.logger,
 	}
 
 	if !h.hub.Register(client) {
@@ -188,6 +195,14 @@ func (h *Handler) dispatch(c *Client, env *Envelope) {
 		h.handleRead(c, env)
 	case TypeTyping:
 		h.handleTyping(c, env)
+	case TypeCallInvite:
+		h.handleCallInvite(c, env)
+	case TypeCallAnswer:
+		h.handleCallAnswer(c, env)
+	case TypeCallLeave:
+		h.handleCallLeave(c, env)
+	case TypeCallSignal:
+		h.handleCallSignal(c, env)
 	case TypePing:
 		// 应用层心跳：读侧任意帧都会顺延 read deadline（readPump 逻辑），
 		// 回 pong 让客户端确认链路活性（半开连接探测）

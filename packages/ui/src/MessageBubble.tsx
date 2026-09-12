@@ -37,6 +37,8 @@ import {
   Loader2,
   Pause,
   Pencil,
+  Phone,
+  PhoneMissed,
   Play,
   Reply,
   RotateCcw,
@@ -44,6 +46,7 @@ import {
   Sparkles,
   Star,
   Undo2,
+  Video,
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -52,6 +55,7 @@ import { canEdit, getDownloadUrl, showToast } from "@yuanchat/shared";
 import type { ChatMessage } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
+import { callRecordKey, formatCallDuration } from "./callFormat";
 import { MessageImage } from "./MessageImage";
 import { MessageVideo } from "./MessageVideo";
 import { StickerImage } from "./StickerImage";
@@ -306,9 +310,27 @@ export function MessageBubble({
 
   // 系统消息：居中胶囊，无头像无气泡
   if (msg.kind === "system") {
+    const record = msg.call;
     return (
-      <div className="bg-surface-container text-label-md text-on-surface-variant mx-auto my-2.5 w-fit rounded-full px-3 py-1">
-        {msg.text}
+      <div className="bg-surface-container text-label-md text-on-surface-variant mx-auto my-2.5 flex w-fit items-center gap-1.5 rounded-full px-3 py-1">
+        {/* 通话记录走 i18n：服务端的 text 是中文兜底，直接上屏会让英/日/韩界面
+            冒出中文。没有 call 键（群成员变更等系统消息、老服务端）则沿用 text */}
+        {record ? (
+          <>
+            {record.result === "missed" ? (
+              <PhoneMissed size={13} />
+            ) : record.media === "video" ? (
+              <Video size={13} />
+            ) : (
+              <Phone size={13} />
+            )}
+            {t(callRecordKey(record.result), {
+              duration: formatCallDuration(record.duration),
+            })}
+          </>
+        ) : (
+          msg.text
+        )}
       </div>
     );
   }
