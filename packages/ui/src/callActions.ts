@@ -72,6 +72,40 @@ export function setCallLauncher(fn: CallLauncher | null): void {
 }
 
 /**
+ * 一路画面 → 可直接放进 `<img src>` 的地址；没有就返回 null。
+ *
+ * @param key - 远端传该路的 `MediaStream.id`，本端自视传 `"self"`
+ */
+export type NativeVideoResolver = (key: string) => string | null;
+
+let nativeVideo: NativeVideoResolver | null = null;
+
+/**
+ * 注册原生视频取帧器（Linux 桌面端专用）。
+ *
+ * @remarks Linux 的 WebKitGTK 没有 WebRTC，画面在 Rust 侧的 GStreamer 里，
+ *   `MediaStream` 是空的，`<video srcObject>` 永远黑屏。那一路改由本地 MJPEG
+ *   服务推帧、前端用 `<img>` 显示，而「该拉哪个地址」只有桌面端知道 ——
+ *   故与 {@link setCallLauncher} 同样用注入，不让平台差异渗进三端共用的 `CallView`。
+ *
+ * @param fn - 取帧器；传 null 撤销（回到标准 `srcObject` 那条路）
+ */
+export function setNativeVideoResolver(fn: NativeVideoResolver | null): void {
+  nativeVideo = fn;
+}
+
+/**
+ * 查一路画面的原生地址。
+ *
+ * @returns 未注册取帧器（Web / 移动端 / Windows / macOS）时恒为 null，
+ *   调用方据此回落到标准 `srcObject`
+ */
+export function nativeVideoSrc(key: string | undefined): string | null {
+  if (!nativeVideo || !key) return null;
+  return nativeVideo(key);
+}
+
+/**
  * 取走预取的本地流。
  *
  * @returns 预取的流；没有则 null（桌面通话窗口是独立 JS 上下文，取不到主窗口

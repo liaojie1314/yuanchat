@@ -24,6 +24,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { chatSocket, fetchCall, showToast, useCallSocket, useCallStore } from "@yuanchat/shared";
 import { CallView, probeLocalMedia } from "@yuanchat/ui";
+import { isNativeRtc, NativeRTCPeerConnection } from "../nativeRtc";
 
 /** 最小化后的悬浮窗尺寸：容得下 CallView 那条悬浮条（顶距 4rem + 44px 按钮） */
 const MINI_SIZE = { width: 300, height: 160 };
@@ -65,6 +66,14 @@ export function CallWindowPage() {
     const invitees = (params.get("invitees") || "").split(",").filter(Boolean);
     const store = useCallStore.getState();
 
+    // 原生后端要在建连前知道是不是视频通话：摄像头分支必须在 SDP 协商前就位。
+    // 非 Linux 平台这两个调用是空转（命令未注册，内部已吞掉异常）
+    const native = isNativeRtc();
+    if (native) NativeRTCPeerConnection.setCallMedia(media);
+    // 走原生后端时只探麦克风：摄像头归 GStreamer 独占，WebView 再开一次会让
+    // 采集侧拿到 not-negotiated，表现为「视频通话接通了但双方都没画面」
+    const probeMedia = native ? "audio" : media;
+
     void (async () => {
       if (role === "callee") {
         try {
@@ -90,8 +99,12 @@ export function CallWindowPage() {
         return;
       }
 
-      if (!(await probeLocalMedia(media))) {
-        void closeSelf();
+      if (!(await probeLocalMedia(probeMedia))) {
+        // 取不到麦克风/摄像头就没有通话可言，但**不能一闪就关**：窗口自己消失
+        // 而 toast 挂在主窗口上，用户看到的是「点了没反应」，毫无线索。
+        // 留 2.5s 让本窗口自己的 toast 显示完再退
+        console.error("[call] 本地媒体获取失败，通话窗口即将关闭");
+        setTimeout(() => void closeSelf(), 2500);
         return;
       }
 
@@ -136,6 +149,37 @@ export function CallWindowPage() {
       }
     })();
   }, [minimized]);
+
+  // 静音与关摄像头都要多走一手：Linux 上媒体面在 GStreamer 里，而 CallView 改的是
+  // `getUserMedia` 轨道的 enabled —— 那些轨道压根没被发出去，点了静音对端照样
+  // 听得见、关了摄像头对端照样看得见。这里把两个开关转成原生后端的调用；
+  // 其余平台这两个静态方法都是空转。
+  //
+  // 放在窗口页而不是 CallView：平台差异不该渗进三端共用的 UI 组件。
+  useEffect(() => {
+    let cancelled = false;
+    const apply = (state: { muted: boolean; cameraOff: boolean }) => {
+      if (cancelled) return;
+      void NativeRTCPeerConnection.setMutedAll(state.muted);
+      void NativeRTCPeerConnection.setCameraOff(state.cameraOff);
+    };
+    apply(useCallStore.getState());
+    const unsubscribe = useCallStore.subscribe((s, prev) => {
+      if (s.muted !== prev.muted || s.cameraOff !== prev.cameraOff) apply(s);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
+  // 窗口关闭时兜底拆掉原生连接：pipeline 不显式停掉不会释放麦克风与摄像头，
+  // 下一通电话会拿不到设备
+  useEffect(() => {
+    return () => {
+      void NativeRTCPeerConnection.closeAll();
+    };
+  }, []);
 
   return <CallView />;
 }

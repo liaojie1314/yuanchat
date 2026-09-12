@@ -73,6 +73,9 @@ async function openCallWindow(p: CallWindowParams): Promise<void> {
     height: CALL_WINDOW_SIZE.height,
     center: true,
     resizable: true,
+    // 与主窗口、注册/登录窗口一致关掉系统边框：应用自绘标题栏，
+    // 留着原生边框会让通话窗口在四个窗口里显得格格不入
+    decorations: false,
   });
 }
 
@@ -86,8 +89,12 @@ export function useCallWindow(enabled: boolean): void {
     if (!enabled) return;
 
     const launch = (p: CallWindowParams) => {
-      void openCallWindow(p).catch(() => {
-        /* 非 Tauri 环境（浏览器里跑桌面 SPA）：不开窗，也不该把主窗口拖进通话 */
+      void openCallWindow(p).catch((e) => {
+        // 开窗失败与「没开窗」外观完全一致 —— 按钮点了没反应，没有任何线索。
+        // 缺 capabilities 权限就是这么失败的（实测漏了
+        // core:webview:allow-create-webview-window 时，四个入口全部静默失效）。
+        // 浏览器里跑桌面 SPA 时这里也会抛，属预期，故只记不弹
+        console.error("[call] 通话窗口打开失败:", e);
       });
       // 通话态归通话窗口所有：主窗口留着半个状态会在挂断时互相打架
       useCallStore.getState().reset();

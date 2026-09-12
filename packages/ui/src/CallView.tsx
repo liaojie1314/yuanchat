@@ -35,6 +35,7 @@ import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "./Avatar";
 import {
   constraintsOf,
+  nativeVideoSrc,
   probeLocalMedia,
   stopStream,
   takeLocalStream,
@@ -45,7 +46,13 @@ import { formatCallDuration } from "./callFormat";
 /** 触控目标 44px：本仓根字号 14px，`min-h-11`(2.75rem) 只有 38.5px，不够手指点 */
 const TOUCH = "min-h-[44px] min-w-[44px]";
 
-/** 远端流的 `<video>`：`srcObject` 只能用 ref 赋值，不能走 props */
+/**
+ * 远端画面。
+ *
+ * 两种取流方式：标准路径用 `<video srcObject>`；Linux 桌面端没有 WebRTC，
+ * 画面由本地 MJPEG 服务推来，用 `<img>` 显示（见 {@link setNativeVideoResolver}）。
+ * `srcObject` 只能用 ref 赋值，不能走 props。
+ */
 function RemoteTile({
   participant,
   stream,
@@ -62,24 +69,92 @@ function RemoteTile({
     el.srcObject = stream ? stream : null;
   }, [stream]);
 
+  const nativeSrc = audioOnly ? null : nativeVideoSrc(stream ? stream.id : undefined);
+  // 有画面可显示时才让头像让位：语音通话、以及视频通话里画面还没到的那几秒，
+  // 都该继续显示头像而不是一块黑
+  const showPlaceholder = audioOnly || (!stream && !nativeSrc);
+
   return (
-    <div className="relative flex min-h-0 items-center justify-center overflow-hidden rounded-lg bg-black/40">
-      {audioOnly || !stream ? (
+    <div className="relative flex h-full min-h-0 w-full items-center justify-center overflow-hidden rounded-lg bg-black/40">
+      {showPlaceholder ? (
         <div className="flex flex-col items-center gap-2">
           <Avatar name={participant.nickname} src={participant.avatar_url} size="xl" />
           <span className="text-label-md text-white/80">{participant.nickname}</span>
         </div>
       ) : null}
-      {/* 语音通话也保留 video 元素承载音轨：单独建 audio 元素会在切换媒体时多一条生命周期 */}
-      <video
-        ref={ref}
-        autoPlay
-        playsInline
-        className={cn("h-full w-full object-cover", audioOnly || !stream ? "hidden" : "")}
-      />
+      {nativeSrc ? (
+        <img src={nativeSrc} alt={participant.nickname} className="h-full w-full object-cover" />
+      ) : (
+        /* 语音通话也保留 video 元素承载音轨：单独建 audio 元素会在切换媒体时多一条生命周期 */
+        <video
+          ref={ref}
+          autoPlay
+          playsInline
+          className={cn("h-full w-full object-cover", showPlaceholder ? "hidden" : "")}
+        />
+      )}
       <span className="text-label-sm absolute bottom-1 left-2 truncate text-white/70">
         {participant.nickname}
       </span>
+    </div>
+  );
+}
+
+/**
+ * 本端自视画面。
+ *
+ * 两条取流路径与 {@link RemoteTile} 同理：标准路径是 `MediaStream`，Linux 桌面端
+ * 的画面来自本地 MJPEG 服务 —— 摄像头已被 GStreamer 独占，WebView 再
+ * `getUserMedia` 一次只会拿到 not-negotiated。
+ *
+ * 独立成组件是因为它要在「画中画」与「主画面」两个位置渲染（点击可对调），
+ * 两处各写一份必然漏改其中一处。
+ */
+function LocalView({
+  nativeSrc,
+  videoRef,
+  className,
+}: {
+  nativeSrc: string | null;
+  /** 回调式 ref：本端 video 会在「画中画 / 主画面 / 网格格子」之间换挂载点，
+      每次换都是一个新 DOM 元素，必须就地补 srcObject（它挂在元素实例上） */
+  videoRef: (el: HTMLVideoElement | null) => void;
+  className: string;
+}) {
+  if (nativeSrc) return <img src={nativeSrc} alt="" className={className} />;
+  return <video ref={videoRef} autoPlay playsInline muted className={className} />;
+}
+
+/**
+ * 群通话里代表自己的那一格。
+ *
+ * 1v1 不用它 —— 那里自己是画中画浮层（点击可与大画面对调）。三人及以上时浮层会压住
+ * 别人的画面，且把自己算进去 4 人正好凑满 2×2，故改为占一格。
+ */
+function SelfTile({
+  participant,
+  nativeSrc,
+  videoRef,
+  showVideo,
+}: {
+  participant: CallParticipant | undefined;
+  nativeSrc: string | null;
+  videoRef: (el: HTMLVideoElement | null) => void;
+  showVideo: boolean;
+}) {
+  const name = participant ? participant.nickname : "";
+  return (
+    <div className="relative flex h-full min-h-0 w-full items-center justify-center overflow-hidden rounded-lg bg-black/40">
+      {showVideo ? (
+        <LocalView
+          nativeSrc={nativeSrc}
+          videoRef={videoRef}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <Avatar name={name || "?"} src={participant ? participant.avatar_url : null} size="xl" />
+      )}
+      <span className="text-label-sm absolute bottom-1 left-2 truncate text-white/70">{name}</span>
     </div>
   );
 }
@@ -108,6 +183,8 @@ export function CallView() {
   const facingRef = useRef<"user" | "environment">("user");
   const [remotes, setRemotes] = useState<Record<string, MediaStream>>({});
   const [elapsed, setElapsed] = useState(0);
+  /** 画中画与主画面是否已对调（点画中画切换） */
+  const [swapped, setSwapped] = useState(false);
   const isVideo = media === "video";
 
   /** 除自己以外、已接听的对端连接（mesh 只对这些人建连） */
@@ -314,6 +391,24 @@ export function CallView() {
 
   const peers = participants.filter((p) => p.conn_id !== selfConn);
   const title = caller !== null ? caller.nickname : peers.length > 0 ? peers[0].nickname : "";
+  // 本端自视：关了摄像头就不该还显示自己的画面（原生那路送的是黑帧，
+  // 但把 img 撤掉更直接，也省一条 HTTP 长连接）
+  const localNativeSrc = isVideo && !cameraOff ? nativeVideoSrc("self") : null;
+  // 只有 1:1 视频通话能对调：群通话把自己放大等于把其他人挤出画面
+  const canSwap = isVideo && peers.length === 1;
+  // 三人及以上的视频通话把自己也放进网格（浮层会压住别人，且 4 人正好凑满 2×2）。
+  // 语音群通话不放 —— 那一格只会是自己的头像，没有任何新信息
+  const selfInGrid = isVideo && peers.length > 1;
+  const selfParticipant = participants.filter((p) => p.conn_id === selfConn)[0];
+  // 对调状态必须跟 canSwap 一起判：对方中途离开时 peers 会空掉，
+  // 只看 swapped 的话画中画会去取 peers[0] 而拿到 undefined
+  const showSwapped = swapped && canSwap;
+
+  /** 本端 video 的挂载点回调：换格子就是换 DOM 元素，srcObject 得跟着补一次 */
+  const attachLocal = useCallback((el: HTMLVideoElement | null) => {
+    localVideoRef.current = el;
+    if (el && localRef.current) el.srcObject = localRef.current;
+  }, []);
 
   // 最小化：只留一条悬浮条。本组件不卸载，故 mesh 与本地轨全程存活
   if (minimized) {
@@ -336,7 +431,9 @@ export function CallView() {
   }
 
   const ringingLabel = isVideo ? t("call.incomingVideo") : t("call.incoming");
-  const gridCols = peers.length <= 1 ? "grid-cols-1" : "grid-cols-2";
+  // 列数按**格子总数**算，不是按对端数：自己进网格时 4 人通话是 3 远端 + 1 自己
+  const tileCount = peers.length + (selfInGrid ? 1 : 0);
+  const gridCols = tileCount <= 1 ? "grid-cols-1" : "grid-cols-2";
 
   return (
     <div
@@ -350,28 +447,71 @@ export function CallView() {
       aria-modal="true"
       aria-label={phase === "incoming" ? ringingLabel : t("chat.voiceCall")}
     >
+      {/* 桌面端通话在独立窗口里，且窗口关掉了系统边框（与主窗口、登录窗口一致），
+          必须自己给一条拖拽区，否则窗口按不住也拖不动。
+          `data-tauri-drag-region` 在非 Tauri 环境（Web/安卓浮层）只是个无人认识的
+          data 属性，不会有任何影响，故无需按平台分支。
+          高度取 32px：够按住，又不会盖到下面的参与者画面与右上角按钮。 */}
+      <div data-tauri-drag-region className="absolute inset-x-0 top-0 z-10 h-8" />
       {phase === "active" ? (
         <>
           <div className={cn("grid min-h-0 flex-1 gap-2 p-2", gridCols)}>
-            {peers.map((p) => (
-              <RemoteTile
-                key={p.conn_id || p.user_id}
-                participant={p}
-                stream={remotes[p.conn_id]}
-                audioOnly={!isVideo}
+            {showSwapped ? (
+              <LocalView
+                nativeSrc={localNativeSrc}
+                videoRef={attachLocal}
+                className="h-full w-full rounded-lg bg-black/40 object-cover"
               />
-            ))}
+            ) : (
+              peers.map((p) => (
+                <RemoteTile
+                  key={p.conn_id || p.user_id}
+                  participant={p}
+                  stream={remotes[p.conn_id]}
+                  audioOnly={!isVideo}
+                />
+              ))
+            )}
+            {/* 自己那一格排在最后：新人加入时从末尾追加，已在画面上的人不会左右跳动 */}
+            {selfInGrid && (
+              <SelfTile
+                participant={selfParticipant}
+                nativeSrc={localNativeSrc}
+                videoRef={attachLocal}
+                showVideo={!cameraOff}
+              />
+            )}
           </div>
-          {/* 本地画中画：语音通话没有画面，不占位 */}
-          {isVideo && (
-            <video
-              ref={localVideoRef}
-              autoPlay
-              playsInline
-              muted
-              className="absolute right-3 h-32 w-24 rounded-lg object-cover shadow-lg"
+          {/* 本地画中画：仅 1:1 视频通话。三人及以上自己已在网格里占一格。
+              Linux 桌面端的自视同样来自 MJPEG 服务 —— 摄像头已被 GStreamer 独占，
+              WebView 再 getUserMedia 一次只会拿到 not-negotiated */}
+          {isVideo && !selfInGrid && (
+            <button
+              type="button"
+              onClick={() => canSwap && setSwapped((v) => !v)}
+              aria-label={t("call.swapView")}
+              // 不能对调时不该显示成可点（对方还没进来，没有可换的画面）
+              disabled={!canSwap}
+              className={cn(
+                "absolute right-3 h-32 w-24 overflow-hidden rounded-lg shadow-lg",
+                canSwap ? "cursor-pointer" : "cursor-default",
+              )}
               style={{ top: "calc(var(--safe-area-top, 0px) + 0.75rem)" }}
-            />
+            >
+              {showSwapped ? (
+                <RemoteTile
+                  participant={peers[0]}
+                  stream={remotes[peers[0].conn_id]}
+                  audioOnly={!isVideo}
+                />
+              ) : (
+                <LocalView
+                  nativeSrc={localNativeSrc}
+                  videoRef={attachLocal}
+                  className="h-full w-full bg-black/40 object-cover"
+                />
+              )}
+            </button>
           )}
           <p className="text-label-md pb-1 text-center text-white/70">
             {formatCallDuration(elapsed)}
@@ -379,8 +519,29 @@ export function CallView() {
         </>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
-          <Avatar name={title || "?"} src={caller !== null ? caller.avatar_url : null} size="xl" />
-          <h2 className="text-title-md font-semibold text-white">{title}</h2>
+          {/* 呼出多人时必须把被叫全列出来：只显示 peers[0] 的话，勾了 Bob + Carol
+              却只看见 Bob，用户无从判断另一个人有没有被叫到 */}
+          {phase !== "incoming" && peers.length > 1 ? (
+            <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 px-4">
+              {peers.map((p) => (
+                <div key={p.conn_id || p.user_id} className="flex flex-col items-center gap-1.5">
+                  <Avatar name={p.nickname} src={p.avatar_url} size="lg" />
+                  <span className="text-label-md max-w-24 truncate text-white/80">
+                    {p.nickname}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <>
+              <Avatar
+                name={title || "?"}
+                src={caller !== null ? caller.avatar_url : null}
+                size="xl"
+              />
+              <h2 className="text-title-md font-semibold text-white">{title}</h2>
+            </>
+          )}
           <p className="text-body-md text-white/70">
             {phase === "incoming" ? ringingLabel : t("call.calling")}
           </p>

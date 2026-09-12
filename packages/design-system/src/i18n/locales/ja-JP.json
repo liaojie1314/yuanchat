@@ -214,6 +214,7 @@
   "call.cameraOff": "カメラをオフ",
   "call.switchCamera": "カメラを切り替え",
   "call.minimize": "最小化",
+  "call.swapView": "画面を入れ替え",
   "call.restore": "通話に戻る",
   "call.connecting": "接続中…",
   "call.gone": "通話はすでに終了しています",

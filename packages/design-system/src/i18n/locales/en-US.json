@@ -214,6 +214,7 @@
   "call.cameraOff": "Turn camera off",
   "call.switchCamera": "Switch camera",
   "call.minimize": "Minimize",
+  "call.swapView": "Swap views",
   "call.restore": "Back to call",
   "call.connecting": "Connecting…",
   "call.gone": "This call has already ended",
