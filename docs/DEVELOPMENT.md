@@ -1,6 +1,6 @@
 # 元聊 YuanChat — 开发与打包指南
 
-> **最后更新**：2026-09-04（会话媒体相册 + 视频消息 + 语音倍速：GC 引用来源补 `content.thumb_key`，`.husky/pre-commit` 增前端 `tsc` 门禁）
+> **最后更新**：2026-09-12（语音/视频通话：Linux 桌面端改走原生 GStreamer 助手进程，新增 GStreamer 依赖清单与逐元件核对脚本）
 >
 > ⚠️ **文档维护规则**：任何 `package.json` scripts、Tauri 配置、环境变量、workflow 的变更，**必须同步更新本文档**。此规则对所有会话生效。
 
@@ -47,16 +47,50 @@ yuanchat/
 pnpm install                # 安装所有 workspace 依赖
 ```
 
-**Linux 桌面端（WebKitGTK）额外依赖**：
+**Linux 桌面端额外依赖（语音 / 视频通话）**：
 
 ```bash
-sudo apt install gstreamer1.0-nice   # WebRTC 的 ICE 代理（语音/视频通话必需）
+sudo apt install gstreamer1.0-nice gstreamer1.0-plugins-base \
+                 gstreamer1.0-plugins-good gstreamer1.0-plugins-bad
 ```
 
-WebKitGTK 的 WebRTC 走 GstWebRTC，ICE 代理由 `libgstnice.so` 提供。缺这个包时
-`RTCPeerConnection` 存在但收集不到任何候选，通话表现为「一直连接中」且无任何报错。
-编解码所需的 `gstreamer1.0-plugins-{good,bad}`（webrtcbin / dtls / srtp / rtpmanager）
-通常随桌面环境预装，可用 `ls /usr/lib/x86_64-linux-gnu/gstreamer-1.0/ | grep -E 'webrtc|dtls|srtp|nice'` 核对。
+Linux 上的通话**不经过 WebView**。Ubuntu 与 GNOME 官方 Flatpak runtime 的 WebKitGTK
+都没有把 GstWebRTC 后端编进去 —— `navigator.mediaDevices` 正常，`RTCPeerConnection`
+却整个类不存在（两处独立打包都如此，说明是上游默认而非发行版取舍）。媒体面因此下沉到
+一个独立的 GStreamer 助手进程 `yuanchat-call-helper`，前端由
+`apps/desktop/src/nativeRtc.ts` 垫片把标准 `RTCPeerConnection` 调用转成对它的命令。
+
+助手**必须**是独立进程：`webrtcbin` 会拽进 `libnice → libgupnp-igd → libsoup-2.4`，
+而 WebKitGTK 用的是 `libsoup-3.0`，两者同进程必 abort（该检查没有任何开关可关）。
+
+Windows（WebView2）与 macOS（WKWebView）自带完整 WebRTC，既不需要这些依赖，
+也不会编译这个助手。
+
+各元件的来源与缺失后果：
+
+| 元件                                                            | 提供方                    | 缺失后果                              |
+| --------------------------------------------------------------- | ------------------------- | ------------------------------------- |
+| `webrtcbin`                                                     | gstreamer1.0-plugins-bad  | 通话完全不可用                        |
+| `nicesink`                                                      | gstreamer1.0-nice         | 收集不到 ICE 候选，永远停在「连接中」 |
+| `opusenc` / `appsrc` / `appsink` / `videoconvert`               | gstreamer1.0-plugins-base | 语音不可用 / 视频不可用               |
+| `v4l2src` `vp8enc` `vp8dec` `rtpvp8pay` `rtpvp8depay` `jpegenc` | gstreamer1.0-plugins-good | **仅视频**不可用，语音照常            |
+| `input-selector`                                                | libgstreamer1.0-0（核心） | 关摄像头开关失效                      |
+
+一次性核对是否装齐：
+
+```bash
+for e in webrtcbin nicesink opusenc appsrc appsink videoconvert \
+         v4l2src vp8enc vp8dec rtpvp8pay rtpvp8depay jpegenc input-selector; do
+  /usr/bin/gst-inspect-1.0 "$e" >/dev/null 2>&1 && echo "  ✔ $e" || echo "  ✘ $e 缺失"
+done
+```
+
+务必用绝对路径 `/usr/bin/gst-inspect-1.0`：anaconda 等环境自带旧版 GStreamer 并会在
+PATH 里遮住系统版本，用 `gst-inspect-1.0` 会得到「元件全部缺失」的假象。
+
+视频另需一个可用的摄像头（`/dev/video0`）。摄像头不存在或被别的程序占着时通话仍能建立，
+只是本端发送纯黑画面 —— 助手会发一条 `warn` 事件说明原因。注意 V4L2 设备**只允许一个
+打开者**，所以通话期间摄像头归助手独占，此时其它程序（包括浏览器）都取不到画面。
 
 ---
 

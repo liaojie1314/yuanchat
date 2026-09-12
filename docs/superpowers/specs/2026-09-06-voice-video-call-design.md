@@ -449,7 +449,77 @@ settings.set_enable_webrtc(true);              // WebKitGTK 2.38+ 默认关闭 W
 
 **可行的出路（都需改环境，不在应用范围内）**：把 WebKitGTK 换成编进了 GstWebRTC 的构建
 （发行版较新者或自行编译），或让桌面端不走 WebView 的 WebRTC 而改用原生 GStreamer/libwebrtc。
-在未换之前，Linux 桌面端的通话入口按下面的能力探测自动关闭。
+
+**后续（2026-09-12）：已走通第二条路 —— 原生 GStreamer 后端，语音与视频均可用。**
+详见下面的 §3.11a。能力探测的逻辑保留不变，只是 Linux 上现在探测得到了。
+
+### 3.11a Linux 原生通话后端（已实现）
+
+媒体面下沉到进程外的 GStreamer，信令面**完全不动** —— 仍走既有 WebSocket 与
+`peerMesh.ts`。前端由 `apps/desktop/src/nativeRtc.ts` 垫片把标准 `RTCPeerConnection`
+调用转成对助手的命令，`PeerMesh` 因此不必加任何分支，白拿既有全部测试覆盖。
+
+```
+WebView(WebKitGTK)          主进程(Tauri)              助手进程(yuanchat-call-helper)
+  nativeRtc.ts  ──invoke──>  native_rtc.rs  ──stdio──>  call_helper.rs
+       ▲                          │  行分隔 JSON            │ webrtcbin / v4l2src / vp8enc
+       └────── <img src> ─────────┴── MJPEG(127.0.0.1) ─────┘ mjpeg.rs
+```
+
+#### 为什么助手必须是独立进程
+
+`webrtcbin` 会拽进 `libnice → libgupnp-igd → libsoup-2.4`，而 WebKitGTK 用的是
+`libsoup-3.0`。libsoup2 一旦发现进程里已有 libsoup3 符号就**无条件 abort**
+（该检查没有任何环境变量开关，实测 `LD_PRELOAD` 也绕不过）。触发点不是 `gst::init()`
+而是**创建 `webrtcbin` 元件**那一刻。拆成两个进程后各自持有自己的 libsoup，互不可见；
+附带好处是 GStreamer 崩了只掉一次通话，主界面不受影响。
+
+#### 视频为什么走 MJPEG 而不是 MediaStream
+
+远端画面在助手进程的 GStreamer 里，要显示它的元素在 WebView 里，中间隔着进程边界，
+而 WebKitGTK 又没有 `RTCPeerConnection` 可接。三条路里选了 MJPEG：
+
+| 方案                | 否决/采纳理由                                                           |
+| ------------------- | ----------------------------------------------------------------------- |
+| 复用 stdio 控制通道 | 一帧几十 KB，会把 answer/candidate 挤在后面排队，且长期霸占 stdout 的锁 |
+| WebSocket           | 要 SHA-1 握手 + 掩码解帧，得引依赖                                      |
+| **MJPEG**（采纳）   | 裸 HTTP，`multipart/x-mixed-replace` 一条响应连续推帧，前端一个 `<img>` |
+
+WebKitGTK 对 `multipart/x-mixed-replace` 的支持是**实测确认**的（同源页面里取两次像素
+不同 → 画面在持续刷新，不是只显示首帧）。服务只绑 `127.0.0.1`、端口由系统分配
+（故 CSP 按 `http://127.0.0.1:*` 放行），URL 路径带一枚随机 token —— 否则同机任何进程
+都能连上来围观用户的通话画面。
+
+音频不走这条路：直接进系统默认输出即可，回传 WebView 只会增加延迟。
+
+#### 摄像头必须共享采集
+
+V4L2 设备**只允许一个打开者**（实测第二个打开 `/dev/video0` 的直接 `not-negotiated`），
+而 mesh 拓扑下每个对端各有一条 pipeline。照搬音频的「每条连接各采一份」在第二个人加入时
+必然拿不到摄像头。故采集独立成一条 pipeline，**编码也只做一次**，再把编码后的 VP8 帧
+分发给每个对端的 `appsrc` —— 顺带省下 N-1 次编码。
+
+同一条采集的另一个分支出 JPEG 作本端自视，因此 WebView 侧**不能**再
+`getUserMedia({video})`：那会和助手抢设备。通话窗口在原生路径下只探麦克风。
+
+关摄像头用 `input-selector` 在「摄像头」与「黑帧」两路之间切，而不是断流 ——
+断流的话对端抖动缓冲会把最后一帧冻在屏幕上，看起来像卡死而不是「他关了摄像头」。
+
+#### 已知上限
+
+| 项                   | 现状                       | 影响 / 升级路径                                      |
+| -------------------- | -------------------------- | ---------------------------------------------------- |
+| 关摄像头时设备仍占用 | 只切黑帧，不停采集         | 摄像头指示灯仍亮。停了再开有 1~2s 初始化，按钮像卡住 |
+| 新对端等关键帧       | `keyframe-max-dist=30`     | 群通话中途加入最多等 2s 才出画面（15fps）            |
+| 采集固定 640×480@15  | 不随网络自适应             | 弱网下丢帧而非降质，需要码率协商才能改善             |
+| 摄像头设备写死默认   | `v4l2src` 取 `/dev/video0` | 多摄像头机器不能选；打不开时退化为黑帧并发 warn 事件 |
+
+#### 依赖
+
+见 `docs/DEVELOPMENT.md` 的「Linux 桌面端额外依赖」一节（含逐元件对应的包名、
+缺失后果与一次性核对脚本）。要点：视频所需的 `v4l2src`/`vp8enc`/`jpegenc` 等都在
+`gstreamer1.0-plugins-good`，缺它**只让视频不可用，语音照常** —— 故
+`available` 命令分开回报 `audio` 与 `video` 两个布尔值。
 
 #### 因此的处理：能力探测，不是平台判断
 
