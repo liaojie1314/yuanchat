@@ -1,6 +1,6 @@
 # 元聊 YuanChat — 开发与打包指南
 
-> **最后更新**：2026-09-12（语音/视频通话：Linux 桌面端改走原生 GStreamer 助手进程，新增 GStreamer 依赖清单与逐元件核对脚本）
+> **最后更新**：2026-09-14（补 coturn/TURN 的本地依赖与环境变量；后端环境变量表改回真实的 `YUANCHAT_` 前缀名）
 >
 > ⚠️ **文档维护规则**：任何 `package.json` scripts、Tauri 配置、环境变量、workflow 的变更，**必须同步更新本文档**。此规则对所有会话生效。
 
@@ -388,9 +388,31 @@ docker compose -f deploy/docker-compose.yml ps        # 状态
 docker compose -f deploy/docker-compose.yml down      # 停止
 ```
 
-Compose 含三个服务：**PostgreSQL**（`:5434`→5432）、**Redis**（`:6380`→6379）、**MinIO**（对象存储，图片/文件/头像）。
+Compose 含六个服务：**PostgreSQL**（`:5434`→5432）、**Redis**（`:6380`→6379）、**MinIO**（对象存储，图片/文件/头像）、**Prometheus**（`:9091`→9090）、**Grafana**（`:3001`→3000）、**coturn**（通话的 TURN/STUN，`network_mode: host`）。
 
 > 宿主机端口整体避让本机 yuanai 项目占用的 5433/6379/9000/9001。
+
+> 日志栈（Loki + Promtail）在单独的 `deploy/logging.yml`，`pnpm dev:stop` **不会**停它，
+> 需要时用 `docker compose -f deploy/logging.yml down` 自行收。
+
+### coturn（TURN/STUN，语音/视频通话用）
+
+通话的媒体是端到端直连，两端都在 NAT 后面时要靠 TURN 中继。随 compose 一并启动，
+配置在 `deploy/coturn/turnserver.dev.conf`，走 **host 网络**（TURN relay 要一整段 UDP
+端口，bridge 模式逐个发布既慢又易错）。
+
+服务端不存长期 TURN 账号，`GET /api/v1/calls/ice-servers` 现签 HMAC 临时凭据
+（`username = <过期时间戳>:<user_id>`，`credential = base64(HMAC-SHA1(secret, username))`，
+TTL 1h），密钥与 `turnserver.conf` 的 `static-auth-secret` 同值。
+
+```bash
+# 验证 coturn 起来了（应答 Binding Response 即正常）
+docker logs yuanchat-coturn --tail 20
+```
+
+`turn.enabled=false` 或密钥为空时，`ice-servers` 端点只返回 STUN 项 —— 同一局域网内
+仍能通话，跨 NAT 会连不上。安卓模拟器走 TURN over TCP 经 `adb reverse` 到宿主，
+`turn.host` 同样填 `localhost`。
 
 ### MinIO（对象存储）
 
@@ -571,19 +593,31 @@ Go 侧**刻意不进钩子**（CI 已覆盖）：把 Go 全量测试塞进 pre-c
 
 ### 后端
 
-| 变量               | 默认值               | 说明                                           |
-| ------------------ | -------------------- | ---------------------------------------------- |
-| `SERVER_ENV`       | `development`        | 运行环境                                       |
-| `DB_HOST`          | `localhost`          | PostgreSQL 主机                                |
-| `DB_PORT`          | `5434`               | PostgreSQL 端口（compose 宿主机映射）          |
-| `DB_USER`          | `yuanchat`           | 数据库用户                                     |
-| `DB_PASSWORD`      | —                    | 数据库密码                                     |
-| `DB_NAME`          | `yuanchat`           | 数据库名                                       |
-| `REDIS_ADDR`       | `localhost:6380`     | Redis 地址                                     |
-| `JWT_SECRET`       | —                    | JWT 签名密钥                                   |
-| `MINIO_ENDPOINT`   | `localhost:9002`     | MinIO S3 端点（真机联调改局域网 IP，见第五章） |
-| `MINIO_ACCESS_KEY` | `yuanchat_minio`     | MinIO 访问密钥（对应控制台用户名）             |
-| `MINIO_SECRET_KEY` | `yuanchat_minio_dev` | MinIO 私有密钥（对应控制台密码）               |
+后端配置读 `server/config/config.yaml`，环境变量以 **`YUANCHAT_`** 为前缀、用 `_` 连接
+配置层级覆盖（viper `SetEnvPrefix` + `SetEnvKeyReplacer`），即 `database.host` 对应
+`YUANCHAT_DATABASE_HOST`。**不带前缀的 `DB_HOST` 之类不会生效。**
+
+| 变量                               | 默认值                            | 说明                                                                                             |
+| ---------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `YUANCHAT_SERVER_ENV`              | `development`                     | 运行环境                                                                                         |
+| `YUANCHAT_DATABASE_HOST`           | `localhost`                       | PostgreSQL 主机                                                                                  |
+| `YUANCHAT_DATABASE_PORT`           | `5434`                            | PostgreSQL 端口（compose 宿主机映射）                                                            |
+| `YUANCHAT_DATABASE_USER`           | `yuanchat`                        | 数据库用户                                                                                       |
+| `YUANCHAT_DATABASE_PASSWORD`       | —                                 | 数据库密码                                                                                       |
+| `YUANCHAT_DATABASE_DBNAME`         | `yuanchat`                        | 数据库名                                                                                         |
+| `YUANCHAT_REDIS_HOST`              | `localhost`                       | Redis 主机                                                                                       |
+| `YUANCHAT_REDIS_PORT`              | `6380`                            | Redis 端口                                                                                       |
+| `YUANCHAT_JWT_SECRET`              | —                                 | JWT 签名密钥                                                                                     |
+| `YUANCHAT_MINIO_ENDPOINT`          | `localhost:9002`                  | MinIO S3 端点（真机联调改局域网 IP，见第五章）                                                   |
+| `YUANCHAT_MINIO_ACCESS_KEY`        | `yuanchat_minio`                  | MinIO 访问密钥（对应控制台用户名）                                                               |
+| `YUANCHAT_MINIO_SECRET_KEY`        | `yuanchat_minio_dev`              | MinIO 私有密钥（对应控制台密码）                                                                 |
+| `YUANCHAT_MINIO_PUBLIC_ENDPOINT`   | 空                                | 下发给客户端的对外地址（生产必填，内网名客户端解析不了）                                         |
+| `YUANCHAT_TURN_ENABLED`            | `true`                            | 关掉后 `ice-servers` 只返回 STUN 项                                                              |
+| `YUANCHAT_TURN_HOST`               | `localhost`                       | **客户端可达**的 TURN 主机名/IP，不是容器内网名                                                  |
+| `YUANCHAT_TURN_PORT`               | `3478`                            | TURN 端口                                                                                        |
+| `YUANCHAT_TURN_REALM`              | `yuanchat`                        | 与 `turnserver.conf` 的 `realm` 同值                                                             |
+| `YUANCHAT_TURN_STATIC_AUTH_SECRET` | dev 用 `yuanchat-dev-turn-secret` | 与 `turnserver.conf` 的 `static-auth-secret` 同值；**生产只由环境变量下发**，为空则退化为纯 STUN |
+| `YUANCHAT_TURN_CREDENTIAL_TTL`     | `1h`                              | 临时凭据有效期                                                                                   |
 
 ### 前端
 

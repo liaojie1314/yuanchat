@@ -20,7 +20,7 @@
 | 群通话（新增）   | 发起时**勾选 ≤3 名群成员**邀请；mesh 全连接，房间上限 **4 人**          |
 | 通话记录         | 复用 `MessageTypeSystem=6`，content 带结构化 `call` 字段                |
 | TURN/STUN        | coturn，dev + prod 都部署；临时凭据经 REST 端点签发                     |
-| Linux 桌面端支持 | WebKitGTK 开启 WebRTC + 放行摄像头权限（F0 spike 验证）                 |
+| Linux 桌面端支持 | WebKitGTK 无 GstWebRTC，媒体面改走原生 GStreamer 助手进程（见 §3.11a）  |
 | Android 前台服务 | 通话中切后台不被系统回收                                                |
 
 ### 1.2 明确不做（本批次范围外，登记为债）
