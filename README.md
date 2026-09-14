@@ -56,6 +56,15 @@
 - 五操作：**改名 / 邀请 / 踢人 / 退群 / 解散**，权限模型（role：0 普通 / 1 管理员 / 2 群主），全部由 `conversation.updated` / `conversation.removed` / `message.receive[system]` 帧驱动
 - **角色管理**：群主任命/撤销管理员、转让群主（新群主升 owner、原群主降管理员），`conversation.role_changed` 帧推群内全员
 
+### 语音与视频通话
+
+- **1v1 与群通话**：mesh 全连接拓扑，房间上限 4 人；呼出 / 振铃 / 接听 / 拒绝 / 挂断 / 取消 / 超时 / 忙线全分支，同账号多设备接听时后接的顶替先接的
+- **信令走 WebSocket**（8 帧），房间态存 Redis，**服务端不碰媒体字节**；TURN 用 coturn + HMAC 临时凭据（`GET /calls/ice-servers`，TTL 1h）
+- **通话中操作**：静音、开关摄像头、前后摄切换（移动端）、最小化为悬浮条；1v1 视频点画中画可与主画面对调，三人及以上自己也占一格进网格
+- **通话记录进消息流**：接通显示时长、未接显示未接，预览由客户端按当前语言渲染（服务端不回传中文）
+- **桌面端独立通话窗口**；**安卓前台服务保活**（锁屏/切后台不掉线）
+- **Linux 桌面端走原生 GStreamer 后端**：WebKitGTK 没编进 GstWebRTC，`RTCPeerConnection` 整个类不存在，故媒体面下沉到独立助手进程，画面经本地 MJPEG 服务送回 WebView（依赖清单见 [DEVELOPMENT.md](docs/DEVELOPMENT.md)）
+
 ### 实时状态与通知
 
 - **Presence 在线状态**：Hub 首连/末连回调 → 广播给在线好友；`GET /presence` 快照 + `presence` 帧增量
@@ -81,7 +90,7 @@
 ### 未做
 
 - 语音转文字
-- 音视频通话（WebRTC）、聊天机器人 / 开放 API
+- 聊天机器人 / 开放 API
 - 视频消息的应用内录制（当前仅文件选择）与服务端转码
 
 ## 技术栈
@@ -90,7 +99,8 @@
 - **桌面 + 移动**：Tauri 2（Rust 内核 + WebView，同一套 React UI 全平台复用）
 - **后端**：Go 1.25 + Gin + GORM + gorilla/websocket + MinIO SDK（单进程双端口：REST :8085 + WS :8086，另有 Prometheus :9090）
 - **存储**：PostgreSQL 16 + Redis 7 + MinIO（S3 兼容，用于图片/文件/语音/视频/头像）
-- **测试**：vitest（前端 611）+ go test（13 包，集成测试 -race）+ Playwright E2E（81）
+- **通话**：WebRTC（mesh）+ coturn（STUN/TURN，HMAC 临时凭据）；Linux 桌面端为 GStreamer `webrtcbin` 原生后端
+- **测试**：vitest（前端 727）+ go test（13 包，集成测试 -race）+ Playwright E2E（95）
 - **发版**：release-it + GitHub Actions（tag 触发 5 平台并行打包）
 
 ## 快速开始
