@@ -291,10 +291,26 @@ DESKTOP_NAV_ITEMS = [聊天, 通讯录, 朋友圈, 表情商城]   // 设置移�
 
 `badgeOf` 增 `/moments` → 未读互动数（`momentsStore.unreadCount`）。
 
-`SettingsScreen.tsx`：`NAV_GROUPS_TOP` 之后插「我的收藏」行（导航到 `/favorites`，
-带 `state: { from: "/settings" }` 供安卓返回键回设置，同现有表情商城行的做法），
-顺序为 账号 → 外观 → 表情商城 → 我的收藏 → 关于。桌面端左列同序（收藏与商城
-都是 `navigate` 而非内部 view）。
+`SettingsScreen.tsx`：加「我的收藏」行（导航到 `/favorites`，带
+`state: { from: "/settings" }` 供安卓返回键回设置，同现有表情商城行的做法），
+顺序为 账号 → 外观 → 表情商城 → 我的收藏 → 关于。
+
+**现状与改法**（读代码后修正）：该文件现有两种行是不同**种类**的 ——
+`NAV_GROUPS_TOP` / `NAV_GROUPS_BOTTOM` 里的项是 `setView` 内部视图切换，
+而表情商城行是 `navigate` 跳走，且**只在移动端分支渲染**（`SettingsScreen.tsx:252`）；
+桌面左列渲染的是扁平 `NAV_GROUPS`（账号/外观/关于三项），**今天没有商城入口**。
+
+所以不是「桌面同序」这么简单，需要：
+
+1. 把行模型统一成一个带判别的数组：`{ kind: "view", view, icon, labelKey, descKey }`
+   与 `{ kind: "route", to, icon, labelKey, descKey }`
+2. 移动端与桌面端**共用同一个数组**渲染（各自保留现有样式），
+   `kind === "route"` 的行 `navigate(to, { state: { from: "/settings" } })`，
+   `kind === "view"` 的行 `setView(view)`
+3. 顺序在数组里写死一次：账号 → 外观 → 表情商城 → 我的收藏 → 关于
+
+副产品：桌面设置页从此也有商城与收藏入口（此前商城桌面端只能从侧栏进，
+收藏在本批已从侧栏移除 —— 若不做这步，桌面端会**完全没有**收藏入口）。
 
 `/favorites` 路由保留（三端都靠它承载收藏页），只是导航入口位置变了。
 
@@ -357,36 +373,42 @@ feed：加载骨架 / 空态（「还没有动态，发一条吧」）/ 失败�
 
 ### 8.1 `ObjectACLRepository.CanRead` 增第三分支
 
+`CanRead` 只需判定「存在性」，不需要展开数组 —— `@>` 包含运算对数组元素逐个匹配，
+两次 `@>` 就够，且**整条走 GIN 索引**：
+
 ```sql
 SELECT EXISTS (
-  SELECT 1 FROM moments_posts p, jsonb_array_elements(p.media) AS m
-  WHERE (m ->> 'key' = :key OR m ->> 'thumb_key' = :key)
+  SELECT 1 FROM moments_posts p
+  WHERE (p.media @> jsonb_build_array(jsonb_build_object('key', :key))
+      OR p.media @> jsonb_build_array(jsonb_build_object('thumb_key', :key)))
     AND <visiblePostsScope(:me)>
 )
 ```
 
 不加这条：好友打开 feed 时每张图调 `/files/download-url` 全返 403，图全裂。
 
-**索引**：`jsonb_array_elements` 展开无法直接建 B-tree。加 GIN：
+**索引**：
 
 ```sql
 CREATE INDEX idx_moments_media_gin ON moments_posts USING gin (media jsonb_path_ops);
 ```
 
-查询改为先用 `media @> '[{"key": "..."}]'` 走 GIN 收窄候选，再 `jsonb_array_elements`
-精确匹配 `thumb_key`。
-
-> `jsonb_path_ops` 只支持 `@>` 等包含运算，不支持存在性 `?` 运算符；本处只用 `@>`，
-> 故选它（比 `jsonb_ops` 索引小）。
+> `jsonb_path_ops` 只支持 `@>` 一类包含运算，不支持存在性 `?` 运算符；本处只用 `@>`，
+> 故选它（索引比 `jsonb_ops` 小）。
+>
+> 只有 8.2 的 GC 反查需要 `jsonb_array_elements` —— 那里是要**取出** key 值，
+> 不是测试包含关系，无法用 `@>` 替代（该分支不走 GIN，靠 `IN` 的候选集收窄）。
 
 ### 8.2 `ReferencedKeys` 增 moments 分支
 
 ```sql
-SELECT DISTINCT m ->> 'key' FROM moments_posts p, jsonb_array_elements(p.media) m
-WHERE m ->> 'key' IN ?
+SELECT DISTINCT m.elem ->> 'key' FROM moments_posts p
+  CROSS JOIN jsonb_array_elements(p.media) AS m(elem)
+WHERE m.elem ->> 'key' IN ?
 UNION
-SELECT DISTINCT m ->> 'thumb_key' FROM moments_posts p, jsonb_array_elements(p.media) m
-WHERE m ->> 'thumb_key' IN ?
+SELECT DISTINCT m.elem ->> 'thumb_key' FROM moments_posts p
+  CROSS JOIN jsonb_array_elements(p.media) AS m(elem)
+WHERE m.elem ->> 'thumb_key' IN ?
 ```
 
 **软删语义**：与消息撤回不同 —— 撤回把 `content` 置 `{}` 所以 key 自然失去引用；
