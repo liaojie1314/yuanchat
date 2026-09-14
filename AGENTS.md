@@ -78,17 +78,19 @@
   `/api/v1/admin/*` 走 JWT + `role=admin` 双重校验，写操作留审计日志；
   敏感词命中标记 `flagged=true` 进审核队列（不阻塞发送）
 - PWA：生产构建注入自定义 Service Worker（app shell 预缓存 + Web Push 监听）
+- 语音/视频通话：信令走 WS 8 帧，房间态存 Redis，服务端不碰媒体字节；mesh 全连接、
+  房间上限 4 人；TURN 走 coturn + HMAC 临时凭据（`GET /calls/ice-servers`）。
+  **Linux 桌面端没有 `RTCPeerConnection`**（WebKitGTK 未编进 GstWebRTC），媒体面在独立
+  助手进程 `yuanchat-call-helper`（GStreamer `webrtcbin`）里，前端由 `nativeRtc.ts` 垫片
+  顶替标准 API，故 `peerMesh.ts` 不含平台分支；画面经本地 MJPEG 服务（127.0.0.1 +
+  随机 token）以 `<img>` 送回 WebView。改通话相关代码前先读
+  `docs/superpowers/specs/2026-09-06-voice-video-call-design.md` §3.11a
 - 一键启动：`pnpm dev:web` / `dev:web:mock` / `dev:desktop` / `dev:android` /
   `dev:server` / `dev:stop`（`scripts/dev.mjs`，见 `docs/DEVELOPMENT.md` 第零章）
 
-未做：语音转文字、音视频通话（WebRTC）、聊天机器人 / 开放 API、iOS 打包（需 Apple 开发者账户）。
+未做：语音转文字、聊天机器人 / 开放 API、iOS 打包（需 Apple 开发者账户）。
 
 后端单进程双端口：REST :8085 + WebSocket :8086（另有 Prometheus `:9090/metrics`）。
 消息分发是进程内 Hub（`Dispatcher` 接口，多实例需换分布式实现）；presence 可通过
 `presence.backend=redis` 走 Redis Pub/Sub 跨实例广播。对象存储为 MinIO（`:9002` S3 端点、
 `:9003` 控制台），PostgreSQL `:5434`、Redis `:6380`，随 `deploy/docker-compose.yml` 启动。
-
-## 博客
-
-开发过程中的技术文章发布到 Hexo 博客：`/home/liaojie1314/code/blog/liaojie1314'Blog/`
-博客编写规范见博客项目的 `BLOG_POST_GUIDE.md`。

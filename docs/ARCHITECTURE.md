@@ -316,6 +316,36 @@ Client                    WS Gateway
   │ ────── reconnect ────────►│
 ```
 
+### 3.4 通话信令流程（WebRTC）
+
+服务端**只转发不透明信令、永不接触媒体字节**，媒体走端到端（必要时经 coturn 中继）。
+房间是唯一模型，1v1 只是 2 人房间的特例；拓扑为 mesh 全连接，房间上限 4 人。
+
+```
+Caller              WS Gateway            Callee            coturn
+  │ call.invite ────────►│                    │                │
+  │                      │ ── call.incoming ─►│（被叫全设备振铃）
+  │ ◄─ call.state ───────│ ── call.state ────►│  state=ringing │
+  │                      │                    │                │
+  │                      │ ◄─ call.answer ────│  accept=true   │
+  │ ◄─ call.state ───────│ ── call.state ────►│  state=active  │
+  │                                                            │
+  │ ◄════ SDP / ICE（call.signal 定址到 conn，原样透传）══════►│
+  │                                                            │
+  │ ◄══════════ 媒体：SRTP 直连，打不通则经 TURN 中继 ════════►│
+  │                      │                    │                │
+  │ call.leave ─────────►│ ── call.ended ────►│ reason 由服务端推导
+```
+
+- **房间态存 Redis**（Lua 保证原子），TTL 2h 仅作崩溃兜底，正常终结主动删除
+- **定址到连接**而非用户：同一账号多端在线时，后接的顶替先接的，旧端仅本地复位
+- **通话记录**复用 `MessageTypeSystem=6` 落进会话流，不建新表（本批无迁移）
+- **TURN 凭据**由 `GET /calls/ice-servers` 现签 HMAC 临时凭据，服务端不存长期账号
+
+> 帧定义见 [CHAT_API.md 三点五](./CHAT_API.md)，客户端实现（含 Linux 桌面端的原生
+> GStreamer 后端）见
+> [通话设计文档](./superpowers/specs/2026-09-06-voice-video-call-design.md)。
+
 ---
 
 ## 四、数据流设计
