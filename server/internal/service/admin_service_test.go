@@ -244,3 +244,87 @@ func TestHandleReportTakesDownStickerPack(t *testing.T) {
 		t.Fatal("audit log missing for the takedown disposition")
 	}
 }
+
+// TestAdminDeleteMomentPost admin 删帖：内容软删 + 落审计日志。
+func TestAdminDeleteMomentPost(t *testing.T) {
+	db := adminTestDB(t)
+	svc := newAdminService(db)
+	ctx := context.Background()
+
+	admin := newAdminTestUser(t, db, "adminmoment", model.RoleAdmin)
+	author := newAdminTestUser(t, db, "momentvictim", model.RoleUser)
+	post := &model.MomentPost{UserID: author.ID, Content: "违规内容"}
+	if err := db.Create(post).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+	t.Cleanup(func() { db.Unscoped().Delete(post) })
+
+	if err := svc.DeleteMomentPost(ctx, admin.ID, post.ID); err != nil {
+		t.Fatalf("admin delete post: %v", err)
+	}
+
+	var got model.MomentPost
+	if err := db.Where("id = ?", post.ID).Take(&got).Error; err != nil {
+		t.Fatalf("回查帖子: %v", err)
+	}
+	if got.DeletedAt == nil {
+		t.Fatal("admin 删帖后 deleted_at 应非空")
+	}
+
+	var logs int64
+	db.Model(&model.AdminActionLog{}).
+		Where("action = ? AND target_id = ?", model.AdminActionDeleteMomentPost, post.ID.String()).
+		Count(&logs)
+	if logs != 1 {
+		t.Fatalf("审计日志 %d 条，want 1", logs)
+	}
+
+	// 幂等性：已删的帖子再删应回 not found，不重复写审计
+	if err := svc.DeleteMomentPost(ctx, admin.ID, post.ID); !errors.Is(err, ErrMomentPostNotFound) {
+		t.Fatalf("重复删除应回 ErrMomentPostNotFound，got %v", err)
+	}
+}
+
+// TestAdminDeleteMomentComment admin 删评论：软删 + 落审计日志。
+func TestAdminDeleteMomentComment(t *testing.T) {
+	db := adminTestDB(t)
+	svc := newAdminService(db)
+	ctx := context.Background()
+
+	admin := newAdminTestUser(t, db, "admincomment", model.RoleAdmin)
+	author := newAdminTestUser(t, db, "commentvictim", model.RoleUser)
+	post := &model.MomentPost{UserID: author.ID, Content: "正常内容"}
+	if err := db.Create(post).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+	t.Cleanup(func() { db.Unscoped().Delete(post) })
+	comment := &model.MomentComment{PostID: post.ID, UserID: author.ID, Content: "违规评论"}
+	if err := db.Create(comment).Error; err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	t.Cleanup(func() { db.Unscoped().Delete(comment) })
+
+	if err := svc.DeleteMomentComment(ctx, admin.ID, comment.ID); err != nil {
+		t.Fatalf("admin delete comment: %v", err)
+	}
+
+	var got model.MomentComment
+	if err := db.Where("id = ?", comment.ID).Take(&got).Error; err != nil {
+		t.Fatalf("回查评论: %v", err)
+	}
+	if got.DeletedAt == nil {
+		t.Fatal("admin 删评论后 deleted_at 应非空")
+	}
+
+	var logs int64
+	db.Model(&model.AdminActionLog{}).
+		Where("action = ? AND target_id = ?", model.AdminActionDeleteMomentComment, comment.ID.String()).
+		Count(&logs)
+	if logs != 1 {
+		t.Fatalf("审计日志 %d 条，want 1", logs)
+	}
+
+	if err := svc.DeleteMomentComment(ctx, admin.ID, comment.ID); !errors.Is(err, ErrMomentCommentNotFound) {
+		t.Fatalf("重复删除应回 ErrMomentCommentNotFound，got %v", err)
+	}
+}

@@ -437,6 +437,9 @@ func Setup(
 		admin.GET("/messages", adminH.ListMessages)
 		admin.DELETE("/messages/:id", adminH.DeleteMessage)
 		admin.DELETE("/messages/:id/flag", adminH.ClearMessageFlag)
+		// 静态段 comments 必须在 :id 之前注册，否则被通配吃掉
+		admin.DELETE("/moments/comments/:id", adminH.DeleteMomentComment)
+		admin.DELETE("/moments/:id", adminH.DeleteMomentPost)
 		admin.GET("/sticker-packs", adminH.ListStickerPacks)
 		admin.POST("/sticker-packs/:id/takedown", adminH.TakeDownStickerPack)
 		admin.POST("/sticker-packs/:id/untakedown", adminH.UntakeDownStickerPack)

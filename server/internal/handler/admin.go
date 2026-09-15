@@ -267,6 +267,60 @@ func (h *AdminHandler) DeleteMessage(c *gin.Context) {
 	Success(c, gin.H{"deleted": true})
 }
 
+// DeleteMomentPost 管理员删除一条朋友圈动态。
+//
+//	@Summary		管理端：删除朋友圈动态
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"动态 id"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/moments/{id} [delete]
+func (h *AdminHandler) DeleteMomentPost(c *gin.Context) {
+	actorID, _ := middleware.GetUserID(c)
+	postID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid post id")
+		return
+	}
+	if err := h.svc.DeleteMomentPost(c.Request.Context(), actorID, postID); err != nil {
+		if errors.Is(err, service.ErrMomentPostNotFound) {
+			NotFound(c, "moment post not found")
+			return
+		}
+		h.logger.Error("admin delete moment post failed", zap.Error(err))
+		InternalError(c, "delete moment post failed")
+		return
+	}
+	Success(c, gin.H{"deleted": true})
+}
+
+// DeleteMomentComment 管理员删除一条朋友圈评论。
+//
+//	@Summary		管理端：删除朋友圈评论
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"评论 id"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/moments/comments/{id} [delete]
+func (h *AdminHandler) DeleteMomentComment(c *gin.Context) {
+	actorID, _ := middleware.GetUserID(c)
+	commentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid comment id")
+		return
+	}
+	if err := h.svc.DeleteMomentComment(c.Request.Context(), actorID, commentID); err != nil {
+		if errors.Is(err, service.ErrMomentCommentNotFound) {
+			NotFound(c, "moment comment not found")
+			return
+		}
+		h.logger.Error("admin delete moment comment failed", zap.Error(err))
+		InternalError(c, "delete moment comment failed")
+		return
+	}
+	Success(c, gin.H{"deleted": true})
+}
+
 // ListAuditLogs 分页列出审计日志。
 //
 //	@Summary		管理端：审计日志列表

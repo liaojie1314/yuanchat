@@ -160,6 +160,27 @@ func (r *AdminRepository) DeleteMessage(ctx context.Context, messageID uuid.UUID
 	return hit, err
 }
 
+// SoftDeleteMomentPost 管理端软删朋友圈帖子；返回是否真的删到了行。
+//
+// 只删未删的行（deleted_at IS NULL），故重复删除返回 false，
+// 调用方据此回 not found，不会重复写审计。
+func (r *AdminRepository) SoftDeleteMomentPost(ctx context.Context, postID uuid.UUID) (bool, error) {
+	res := r.db.WithContext(ctx).
+		Model(&model.MomentPost{}).
+		Where("id = ? AND deleted_at IS NULL", postID).
+		Update("deleted_at", time.Now())
+	return res.RowsAffected > 0, res.Error
+}
+
+// SoftDeleteMomentComment 管理端软删朋友圈评论；返回是否真的删到了行。
+func (r *AdminRepository) SoftDeleteMomentComment(ctx context.Context, commentID uuid.UUID) (bool, error) {
+	res := r.db.WithContext(ctx).
+		Model(&model.MomentComment{}).
+		Where("id = ? AND deleted_at IS NULL", commentID).
+		Update("deleted_at", time.Now())
+	return res.RowsAffected > 0, res.Error
+}
+
 // ClearFlag 清除消息的 flagged 标记（审核通过保留）。返回是否命中。
 func (r *AdminRepository) ClearFlag(ctx context.Context, messageID uuid.UUID) (bool, error) {
 	res := r.db.WithContext(ctx).Model(&model.Message{}).

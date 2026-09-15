@@ -133,6 +133,41 @@ func (s *AdminService) DeleteMessage(ctx context.Context, actorID, messageID uui
 	return nil
 }
 
+// ErrMomentPostNotFound 朋友圈帖子不存在或已删。
+//
+// 与 ErrMomentNotFound 不是一回事：后者服务于普通用户路径，含「不存在**或对调用者
+// 不可见**」；管理端不受可见性约束，只判行在不在，故另立哨兵。
+var ErrMomentPostNotFound = errors.New("moment post not found")
+
+// ErrMomentCommentNotFound 朋友圈评论不存在或已删（管理端语义，同上）。
+var ErrMomentCommentNotFound = errors.New("moment comment not found")
+
+// DeleteMomentPost 管理端删除朋友圈帖子（软删 + 审计）。
+func (s *AdminService) DeleteMomentPost(ctx context.Context, actorID, postID uuid.UUID) error {
+	ok, err := s.repo.SoftDeleteMomentPost(ctx, postID)
+	if err != nil {
+		return fmt.Errorf("delete moment post: %w", err)
+	}
+	if !ok {
+		return ErrMomentPostNotFound
+	}
+	s.audit(ctx, actorID, model.AdminActionDeleteMomentPost, "moment_post", postID.String(), nil)
+	return nil
+}
+
+// DeleteMomentComment 管理端删除朋友圈评论（软删 + 审计）。
+func (s *AdminService) DeleteMomentComment(ctx context.Context, actorID, commentID uuid.UUID) error {
+	ok, err := s.repo.SoftDeleteMomentComment(ctx, commentID)
+	if err != nil {
+		return fmt.Errorf("delete moment comment: %w", err)
+	}
+	if !ok {
+		return ErrMomentCommentNotFound
+	}
+	s.audit(ctx, actorID, model.AdminActionDeleteMomentComment, "moment_comment", commentID.String(), nil)
+	return nil
+}
+
 // AuditMessageEditsView 记录「管理员查看消息编辑历史」这一取证动作。
 //
 // 历史内容本身由 MessageService.EditHistoryForAdmin 提供，本方法只负责留痕 ——
