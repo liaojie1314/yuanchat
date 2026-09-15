@@ -177,6 +177,36 @@ func Setup(
 	userSvc.SetUGCModeration(moderationSvc, flaggedUGCRepo)
 	convSvc.SetUGCModeration(moderationSvc, flaggedUGCRepo)
 
+	// 朋友圈：互动帧的编码与投递放在装配层——internal/ws 依赖 service（通话信令），
+	// service 不能反向 import ws，故 service 只声明「发生了一条互动」。
+	momentsSvc := service.NewMomentsService(
+		repository.NewMomentsRepository(db), userRepo,
+		func(act *model.MomentActivity, actor *model.User, preview string) {
+			avatar := ""
+			if actor.AvatarURL != nil {
+				avatar = *actor.AvatarURL
+			}
+			frame, err := ws.Encode(ws.TypeMomentsActivity, ws.MomentsActivityPayload{
+				ID:             act.ID,
+				Kind:           act.Kind,
+				PostID:         act.PostID,
+				ActorID:        actor.ID,
+				ActorNickname:  actor.Nickname,
+				ActorAvatarURL: avatar,
+				CommentPreview: preview,
+				CreatedAt:      act.CreatedAt,
+			})
+			if err != nil {
+				logger.Error("encode moments activity frame failed", zap.Error(err))
+				return
+			}
+			hub.SendToUsers([]uuid.UUID{act.UserID}, frame)
+		},
+		logger,
+	)
+	momentsSvc.SetModeration(moderationSvc, flaggedUGCRepo)
+	momentsH := handler.NewMomentsHandler(momentsSvc, logger)
+
 	// 好友上下线帧广播（对本实例在线好友）
 	notifyFriends := func(userID uuid.UUID, online bool) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -382,6 +412,8 @@ func Setup(
 
 		chat.POST("/reports", middleware.LimitByIP(10, 20), reportH.Create)
 
+		registerMomentsRoutes(chat, momentsH)
+
 		chat.POST("/push/subscribe", pushH.Subscribe)
 		chat.DELETE("/push/subscribe", pushH.Unsubscribe)
 
@@ -425,6 +457,28 @@ func Setup(
 	}
 
 	return r, wsH
+}
+
+// registerMomentsRoutes 注册朋友圈路由（均挂在已鉴权的分组下）。
+//
+// 与表情包同理单独成函数：静态段（feed / activities / comments / user）必须
+// 注册在参数段 :id 之前，否则 gin 会把 "activities" 当 :id 去解析 UUID，
+// 客户端拿到 400 而不是列表；集中注册让测试能用空引擎验证路由表。
+func registerMomentsRoutes(rg gin.IRouter, h *handler.MomentsHandler) {
+	moments := rg.Group("/moments")
+
+	moments.GET("/feed", middleware.LimitByIP(30, 60), h.Feed)
+	moments.GET("/activities", middleware.LimitByIP(30, 60), h.Activities)
+	moments.POST("/activities/read", middleware.LimitByIP(20, 40), h.MarkRead)
+	moments.DELETE("/comments/:id", middleware.LimitByIP(20, 40), h.DeleteComment)
+	moments.GET("/user/:id", middleware.LimitByIP(30, 60), h.UserPosts)
+
+	moments.POST("", middleware.LimitByIP(10, 20), h.Create)
+	moments.GET("/:id", middleware.LimitByIP(30, 60), h.Get)
+	moments.DELETE("/:id", middleware.LimitByIP(20, 40), h.Delete)
+	moments.POST("/:id/like", middleware.LimitByIP(30, 60), h.Like)
+	moments.DELETE("/:id/like", middleware.LimitByIP(30, 60), h.Unlike)
+	moments.POST("/:id/comments", middleware.LimitByIP(20, 40), h.AddComment)
 }
 
 // registerStickerPackRoutes 注册表情包商城 / 发布管理相关路由（均挂在已鉴权的分组下）。
