@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // MomentsRepository 朋友圈数据访问。
@@ -160,4 +161,140 @@ func (r *MomentsRepository) SoftDeletePost(ctx context.Context, postID uuid.UUID
 		Model(&model.MomentPost{}).
 		Where("id = ? AND deleted_at IS NULL", postID).
 		Update("deleted_at", now).Error
+}
+
+// Like 点赞。返回 inserted 表示本次是否真的新增了一行——
+// 重复点赞返回 false，调用方据此不重复写互动消息（否则连点能刷屏作者红点）。
+func (r *MomentsRepository) Like(ctx context.Context, postID, userID uuid.UUID) (bool, error) {
+	res := r.db.WithContext(ctx).
+		Clauses(clause.OnConflict{DoNothing: true}).
+		Create(&model.MomentLike{PostID: postID, UserID: userID})
+	if res.Error != nil {
+		return false, fmt.Errorf("like: %w", res.Error)
+	}
+	return res.RowsAffected > 0, nil
+}
+
+// Unlike 取消点赞（不存在时静默成功，幂等）。
+func (r *MomentsRepository) Unlike(ctx context.Context, postID, userID uuid.UUID) error {
+	return r.db.WithContext(ctx).
+		Where("post_id = ? AND user_id = ?", postID, userID).
+		Delete(&model.MomentLike{}).Error
+}
+
+// LikersByPost 批量取点赞者 ID（按点赞时间正序），供 feed 一次性组装 DTO，
+// 避免每帖一次查询的 N+1。
+func (r *MomentsRepository) LikersByPost(ctx context.Context, postIDs []uuid.UUID) (map[uuid.UUID][]uuid.UUID, error) {
+	out := make(map[uuid.UUID][]uuid.UUID, len(postIDs))
+	if len(postIDs) == 0 {
+		return out, nil
+	}
+	var rows []model.MomentLike
+	err := r.db.WithContext(ctx).
+		Where("post_id IN ?", postIDs).
+		Order("created_at ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("likers by post: %w", err)
+	}
+	for _, row := range rows {
+		out[row.PostID] = append(out[row.PostID], row.UserID)
+	}
+	return out, nil
+}
+
+// CreateComment 插入评论。
+func (r *MomentsRepository) CreateComment(ctx context.Context, c *model.MomentComment) error {
+	return r.db.WithContext(ctx).Create(c).Error
+}
+
+// CommentByID 取单条未删评论（删评论鉴权要先拿到它的作者）。
+func (r *MomentsRepository) CommentByID(ctx context.Context, id uuid.UUID) (*model.MomentComment, error) {
+	var c model.MomentComment
+	err := r.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", id).Take(&c).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("comment by id: %w", err)
+	}
+	return &c, nil
+}
+
+// CommentsByPost 批量取未删评论（按时间正序），同样是为了避免 feed 的 N+1。
+func (r *MomentsRepository) CommentsByPost(ctx context.Context, postIDs []uuid.UUID) (map[uuid.UUID][]model.MomentComment, error) {
+	out := make(map[uuid.UUID][]model.MomentComment, len(postIDs))
+	if len(postIDs) == 0 {
+		return out, nil
+	}
+	var rows []model.MomentComment
+	err := r.db.WithContext(ctx).
+		Where("post_id IN ? AND deleted_at IS NULL", postIDs).
+		Order("created_at ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("comments by post: %w", err)
+	}
+	for _, row := range rows {
+		out[row.PostID] = append(out[row.PostID], row)
+	}
+	return out, nil
+}
+
+// SoftDeleteComment 软删评论。
+func (r *MomentsRepository) SoftDeleteComment(ctx context.Context, id uuid.UUID) error {
+	return r.db.WithContext(ctx).
+		Model(&model.MomentComment{}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		Update("deleted_at", time.Now()).Error
+}
+
+// CreateActivity 写一条互动消息。
+func (r *MomentsRepository) CreateActivity(ctx context.Context, a *model.MomentActivity) error {
+	return r.db.WithContext(ctx).Create(a).Error
+}
+
+// activitiesBase 互动消息的公共查询：join 帖子过滤软删。
+//
+// 删帖只置 moments_posts.deleted_at，互动行仍在表里；不在读路径 join 过滤的话，
+// 删掉的帖子会继续在互动列表里留条目、继续点亮红点，且点进去是 404。
+func (r *MomentsRepository) activitiesBase(ctx context.Context, userID uuid.UUID) *gorm.DB {
+	return r.db.WithContext(ctx).
+		Table("moments_activities a").
+		Joins("JOIN moments_posts p ON p.id = a.post_id AND p.deleted_at IS NULL").
+		Where("a.user_id = ?", userID)
+}
+
+// Activities 互动消息列表（时间倒序，复合游标）。
+func (r *MomentsRepository) Activities(ctx context.Context, userID uuid.UUID, cursor *MomentCursor, limit int) ([]model.MomentActivity, error) {
+	q := r.activitiesBase(ctx, userID).Select("a.*")
+	if cursor != nil {
+		q = q.Where("(a.created_at, a.id) < (?, ?)", cursor.CreatedAt, cursor.ID)
+	}
+	var list []model.MomentActivity
+	if err := q.Order("a.created_at DESC, a.id DESC").Limit(limit).Scan(&list).Error; err != nil {
+		return nil, fmt.Errorf("activities: %w", err)
+	}
+	return list, nil
+}
+
+// UnreadActivityCount 未读互动数（红点用）。
+func (r *MomentsRepository) UnreadActivityCount(ctx context.Context, userID uuid.UUID) (int64, error) {
+	var n int64
+	err := r.activitiesBase(ctx, userID).Where("a.read_at IS NULL").Count(&n).Error
+	if err != nil {
+		return 0, fmt.Errorf("unread activity count: %w", err)
+	}
+	return n, nil
+}
+
+// MarkActivitiesRead 标记已读；ids 为空表示把该用户的未读全部标掉。
+func (r *MomentsRepository) MarkActivitiesRead(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) error {
+	q := r.db.WithContext(ctx).
+		Model(&model.MomentActivity{}).
+		Where("user_id = ? AND read_at IS NULL", userID)
+	if len(ids) > 0 {
+		q = q.Where("id IN ?", ids)
+	}
+	return q.Update("read_at", time.Now()).Error
 }

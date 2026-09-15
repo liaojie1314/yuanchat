@@ -178,3 +178,135 @@ func TestFeedCursor(t *testing.T) {
 		}
 	}
 }
+
+// TestLikeIdempotent 连点两次只留一行，且第二次 inserted=false（据此不重复推互动消息）。
+func TestLikeIdempotent(t *testing.T) {
+	db := testDB(t)
+	repo := NewMomentsRepository(db)
+	ctx := context.Background()
+
+	author := newTestUser(t, db, "likeauthor").ID
+	liker := newTestUser(t, db, "liker").ID
+	post := newPost(t, db, author, model.MomentVisibilityFriends)
+
+	first, err := repo.Like(ctx, post.ID, liker)
+	if err != nil || !first {
+		t.Fatalf("首次点赞应 inserted=true: %v %v", first, err)
+	}
+	second, err := repo.Like(ctx, post.ID, liker)
+	if err != nil {
+		t.Fatalf("重复点赞不应报错: %v", err)
+	}
+	if second {
+		t.Fatal("重复点赞应 inserted=false，否则会重复推送互动消息")
+	}
+
+	var count int64
+	db.Model(&model.MomentLike{}).Where("post_id = ?", post.ID).Count(&count)
+	if count != 1 {
+		t.Fatalf("点赞行数 = %d, want 1", count)
+	}
+
+	// 取消点赞同样幂等
+	if err := repo.Unlike(ctx, post.ID, liker); err != nil {
+		t.Fatalf("取消点赞: %v", err)
+	}
+	if err := repo.Unlike(ctx, post.ID, liker); err != nil {
+		t.Fatalf("重复取消点赞不应报错: %v", err)
+	}
+}
+
+// TestCommentsByPost 软删评论不得出现在批量读结果里。
+func TestCommentsByPost(t *testing.T) {
+	db := testDB(t)
+	repo := NewMomentsRepository(db)
+	ctx := context.Background()
+
+	author := newTestUser(t, db, "cmtauthor").ID
+	post := newPost(t, db, author, model.MomentVisibilityFriends)
+
+	alive := &model.MomentComment{PostID: post.ID, UserID: author, Content: "留着"}
+	dead := &model.MomentComment{PostID: post.ID, UserID: author, Content: "删掉"}
+	for _, c := range []*model.MomentComment{alive, dead} {
+		if err := repo.CreateComment(ctx, c); err != nil {
+			t.Fatalf("create comment: %v", err)
+		}
+		t.Cleanup(func() { db.Unscoped().Delete(c) })
+	}
+	if err := repo.SoftDeleteComment(ctx, dead.ID); err != nil {
+		t.Fatalf("soft delete comment: %v", err)
+	}
+
+	got, err := repo.CommentsByPost(ctx, []uuid.UUID{post.ID})
+	if err != nil {
+		t.Fatalf("comments by post: %v", err)
+	}
+	list := got[post.ID]
+	if len(list) != 1 || list[0].ID != alive.ID {
+		t.Fatalf("软删评论仍被读出：%+v", list)
+	}
+}
+
+// TestUnreadActivityCount 未读计数与批量标已读。
+func TestUnreadActivityCount(t *testing.T) {
+	db := testDB(t)
+	repo := NewMomentsRepository(db)
+	ctx := context.Background()
+
+	owner := newTestUser(t, db, "actowner").ID
+	actor := newTestUser(t, db, "actactor").ID
+	post := newPost(t, db, owner, model.MomentVisibilityFriends)
+
+	for i := 0; i < 3; i++ {
+		a := &model.MomentActivity{UserID: owner, ActorID: actor, PostID: post.ID, Kind: model.MomentActivityKindLike}
+		if err := repo.CreateActivity(ctx, a); err != nil {
+			t.Fatalf("create activity: %v", err)
+		}
+		t.Cleanup(func() { db.Unscoped().Delete(a) })
+	}
+
+	n, err := repo.UnreadActivityCount(ctx, owner)
+	if err != nil || n != 3 {
+		t.Fatalf("未读计数 = %d (err=%v), want 3", n, err)
+	}
+	// ids 为空表示全部标已读
+	if err := repo.MarkActivitiesRead(ctx, owner, nil); err != nil {
+		t.Fatalf("mark read: %v", err)
+	}
+	n, err = repo.UnreadActivityCount(ctx, owner)
+	if err != nil || n != 0 {
+		t.Fatalf("标已读后未读计数 = %d (err=%v), want 0", n, err)
+	}
+}
+
+// TestActivitiesExcludeDeletedPost 删帖后互动消息必须一并消失（读时 join 过滤）。
+func TestActivitiesExcludeDeletedPost(t *testing.T) {
+	db := testDB(t)
+	repo := NewMomentsRepository(db)
+	ctx := context.Background()
+
+	owner := newTestUser(t, db, "delowner").ID
+	actor := newTestUser(t, db, "delactor").ID
+	post := newPost(t, db, owner, model.MomentVisibilityFriends)
+	a := &model.MomentActivity{UserID: owner, ActorID: actor, PostID: post.ID, Kind: model.MomentActivityKindLike}
+	if err := repo.CreateActivity(ctx, a); err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+	t.Cleanup(func() { db.Unscoped().Delete(a) })
+
+	if err := repo.SoftDeletePost(ctx, post.ID); err != nil {
+		t.Fatalf("soft delete post: %v", err)
+	}
+
+	list, err := repo.Activities(ctx, owner, nil, 20)
+	if err != nil {
+		t.Fatalf("activities: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("删帖后互动消息仍可见：%+v", list)
+	}
+	n, err := repo.UnreadActivityCount(ctx, owner)
+	if err != nil || n != 0 {
+		t.Fatalf("删帖后未读计数 = %d (err=%v), want 0", n, err)
+	}
+}
