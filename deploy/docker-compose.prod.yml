@@ -103,6 +103,15 @@ services:
       YUANCHAT_PUSH_VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       YUANCHAT_PUSH_VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       YUANCHAT_PUSH_SUBJECT: mailto:${ADMIN_EMAIL}
+      # TURN：与 coturn 容器共用同一套取值，任一项不一致都会让通话在 NAT 后打不通。
+      # SECRET/REALM 两边同源（install.sh 用同样的 TURN_SECRET / DOMAIN_APP 渲染
+      # coturn/turnserver.prod.conf），HOST 必须是客户端可达的公网域名 ——
+      # 填 coturn 这个内网服务名浏览器解析不了（同 MINIO_PUBLIC_ENDPOINT 的道理）
+      YUANCHAT_TURN_ENABLED: "true"
+      YUANCHAT_TURN_HOST: ${DOMAIN_APP}
+      YUANCHAT_TURN_PORT: "3478"
+      YUANCHAT_TURN_REALM: ${DOMAIN_APP}
+      YUANCHAT_TURN_STATIC_AUTH_SECRET: ${TURN_SECRET:?TURN_SECRET required (install.sh 会自动生成；手工部署请先填 deploy/.env)}
       TZ: ${TZ:-Asia/Shanghai}
     depends_on:
       postgres:
@@ -230,6 +239,7 @@ services:
       - "3478:3478/tcp"
       - "49160-49200:49160-49200/udp"
     volumes:
+      # turnserver.prod.conf 由 install.sh 从 .template envsubst 生成（含真实密钥，不入库）
       - ./coturn/turnserver.prod.conf:/etc/coturn/turnserver.conf:ro
     command: ["-c", "/etc/coturn/turnserver.conf"]
     networks: [yuanchat-net]
