@@ -427,3 +427,119 @@ func TestReferencedKeysIncludesThumb(t *testing.T) {
 		t.Fatalf("撤回后主视频与缩略图都应变成孤儿，got %v", got)
 	}
 }
+
+// momentsACLFixture 建一条带媒体 key 的朋友圈帖子。
+func momentsACLFixture(t *testing.T, db *gorm.DB, author uuid.UUID, key, thumbKey string) *model.MomentPost {
+	t.Helper()
+	media := fmt.Sprintf(`[{"key":%q,"thumb_key":%q,"w":10,"h":10}]`, key, thumbKey)
+	p := &model.MomentPost{
+		UserID:    author,
+		Content:   "带图",
+		Media:     media,
+		MediaKind: model.MomentMediaKindVideo,
+	}
+	if err := db.Create(p).Error; err != nil {
+		t.Fatalf("create moment post: %v", err)
+	}
+	t.Cleanup(func() { db.Unscoped().Delete(p) })
+	return p
+}
+
+// TestObjectACLCanRead_ViaMoment 好友可读朋友圈媒体，非好友不可读，删帖后不可读。
+//
+// 缺这条分支时，好友打开 feed 每张图都签不出下载 URL（403），图全裂。
+func TestObjectACLCanRead_ViaMoment(t *testing.T) {
+	db := testDB(t)
+	repo := NewObjectACLRepository(db)
+	ctx := context.Background()
+
+	author := newTestUser(t, db, "aclauthor")
+	friend := newTestUser(t, db, "aclfriend")
+	stranger := newTestUser(t, db, "aclstranger")
+	for _, pair := range [][2]uuid.UUID{{friend.ID, author.ID}, {author.ID, friend.ID}} {
+		c := &model.Contact{UserID: pair[0], ContactUserID: pair[1], Status: model.ContactStatusAccepted}
+		if err := db.Create(c).Error; err != nil {
+			t.Fatalf("create contact: %v", err)
+		}
+		t.Cleanup(func() { db.Unscoped().Delete(c) })
+	}
+
+	key := "files/2026/09/" + uuid.NewString() + ".mp4"
+	thumbKey := "images/2026/09/" + uuid.NewString() + ".jpg"
+	post := momentsACLFixture(t, db, author.ID, key, thumbKey)
+
+	for _, tc := range []struct {
+		name   string
+		viewer uuid.UUID
+		target string
+		want   bool
+	}{
+		{"好友读主对象", friend.ID, key, true},
+		{"好友读封面", friend.ID, thumbKey, true},
+		{"作者读自己的", author.ID, key, true},
+		{"非好友不可读", stranger.ID, key, false},
+		{"非好友不可读封面", stranger.ID, thumbKey, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := repo.CanRead(ctx, tc.viewer, tc.target)
+			if err != nil {
+				t.Fatalf("CanRead: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("CanRead = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	// 删帖 = 撤销访问：与消息撤回同语义
+	if err := db.Model(&model.MomentPost{}).Where("id = ?", post.ID).
+		Update("deleted_at", time.Now()).Error; err != nil {
+		t.Fatalf("soft delete: %v", err)
+	}
+	if got, _ := repo.CanRead(ctx, friend.ID, key); got {
+		t.Fatal("删帖后好友仍能签出下载 URL，访问撤销失效")
+	}
+}
+
+// TestObjectACLReferencedKeys_Moment GC 必须认朋友圈媒体为在用对象。
+//
+// 与 CanRead 的刻意不对称：软删帖的媒体仍算被引用（软删可恢复，
+// GC 删了对象就恢复不了）。
+func TestObjectACLReferencedKeys_Moment(t *testing.T) {
+	db := testDB(t)
+	repo := NewObjectACLRepository(db)
+	ctx := context.Background()
+
+	author := newTestUser(t, db, "gcauthor")
+	key := "files/2026/09/" + uuid.NewString() + ".mp4"
+	thumbKey := "images/2026/09/" + uuid.NewString() + ".jpg"
+	orphan := "images/2026/09/" + uuid.NewString() + ".jpg"
+	post := momentsACLFixture(t, db, author.ID, key, thumbKey)
+
+	got, err := repo.ReferencedKeys(ctx, []string{key, thumbKey, orphan})
+	if err != nil {
+		t.Fatalf("ReferencedKeys: %v", err)
+	}
+	if _, ok := got[key]; !ok {
+		t.Fatal("朋友圈主对象未被判定为在用，会被 GC 误删")
+	}
+	if _, ok := got[thumbKey]; !ok {
+		t.Fatal("朋友圈封面未被判定为在用，会被 GC 误删")
+	}
+	if _, ok := got[orphan]; ok {
+		t.Fatal("无人引用的 key 不应算在用")
+	}
+
+	// 软删后仍算在用
+	if err := db.Model(&model.MomentPost{}).Where("id = ?", post.ID).
+		Update("deleted_at", time.Now()).Error; err != nil {
+		t.Fatalf("soft delete: %v", err)
+	}
+	got, err = repo.ReferencedKeys(ctx, []string{key})
+	if err != nil {
+		t.Fatalf("ReferencedKeys after soft delete: %v", err)
+	}
+	if _, ok := got[key]; !ok {
+		t.Fatal("软删帖的媒体被判成孤儿——软删可恢复，GC 删了对象就恢复不了")
+	}
+}

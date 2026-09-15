@@ -34,7 +34,8 @@ func NewObjectACLRepository(db *gorm.DB) *ObjectACLRepository {
 // 命中任一条件即可：
 //  1. key 出现在某条**未撤回**消息的 content.key 或 content.thumb_key 里，
 //     且 userID 是该会话成员，且该消息未被 userID 自己的清空水位过滤；
-//  2. key 属于 userID 的收藏贴纸，或属于某个表情包（官方包全员可发/可看）。
+//  2. key 属于 userID 的收藏贴纸，或属于某个表情包（官方包全员可发/可看）；
+//  3. key 出现在某条对 userID 可见的朋友圈帖子的 media 数组里（含 thumb_key）。
 //
 // thumb_key 与 key 同权：视频消息的封面是独立对象（images/ 前缀），只匹配 key
 // 会让封面永远签不出 URL；反之撤回必须同时收回两者，否则"撤回即撤销访问"
@@ -70,14 +71,37 @@ func (r *ObjectACLRepository) CanRead(ctx context.Context, userID uuid.UUID, obj
 	if err != nil {
 		return false, fmt.Errorf("acl via sticker: %w", err)
 	}
-	return viaSticker, nil
+	if viaSticker {
+		return true, nil
+	}
+
+	// 朋友圈媒体：key 出现在某条对 userID 可见的帖子的 media 数组里。
+	//
+	// 可见性直接挂 MomentsRepository 的作用域，不在此另写一遍好友/拉黑判定——
+	// 两处判定一旦漂移，漂移的那一侧就是越权洞（能签出不该看的图）。
+	// 作用域自带 deleted_at IS NULL：删帖即撤销访问，与消息撤回同语义。
+	//
+	// 媒体匹配用 @> 包含运算而非 jsonb_array_elements 展开：@> 对数组元素逐个匹配，
+	// 两次包含测试就够，且整条走 idx_moments_media_gin（jsonb_path_ops）。
+	visible := NewMomentsRepository(r.db).baseVisible(ctx, userID).
+		Select("1").
+		Where(`p.media @> jsonb_build_array(jsonb_build_object('key', ?::text))
+		    OR p.media @> jsonb_build_array(jsonb_build_object('thumb_key', ?::text))`,
+			objectKey, objectKey).
+		Limit(1)
+
+	var viaMoment bool
+	if err := r.db.WithContext(ctx).Raw("SELECT EXISTS (?)", visible).Scan(&viaMoment).Error; err != nil {
+		return false, fmt.Errorf("acl via moment: %w", err)
+	}
+	return viaMoment, nil
 }
 
 // ReferencedKeys 从给定候选集中筛出**仍被引用**的 key（GC 用，见 cmd/gc）。
 //
-// 引用来源四处：消息内容（content.key 与 content.thumb_key 都算；已撤回消息把 content
+// 引用来源五处：消息内容（content.key 与 content.thumb_key 都算；已撤回消息把 content
 // 置 '{}'，故自然不再算引用）、贴纸表、表情包封面 URL、用户/会话头像 URL
-// （后两者存的是完整 URL，故用后缀匹配）。
+// （后两者存的是完整 URL，故用后缀匹配）、朋友圈帖子的 media 数组。
 // 返回集合之外的候选即"无人引用"，GC 结合宽限期决定是否删除。
 //
 // 按批查询（调用方分批传入）而非一次性把全库 key 拉进内存：对象数随消息量线性增长，
@@ -112,6 +136,24 @@ func (r *ObjectACLRepository) ReferencedKeys(ctx context.Context, keys []string)
 	}
 	if err := collect(`SELECT DISTINCT object_key FROM stickers WHERE object_key IN ?`, keys); err != nil {
 		return nil, fmt.Errorf("referenced by stickers: %w", err)
+	}
+
+	// 朋友圈媒体。这里必须用 jsonb_array_elements 展开而非 @>：
+	// 要取出 key 值做集合比对，不是测试包含关系。
+	//
+	// 刻意不过滤 deleted_at：软删帖的媒体仍算在用。与 CanRead 的不对称是设计，
+	// 不是疏漏——软删可恢复，对象删了恢复不了。若将来要回收软删帖的媒体，
+	// 应在 GC 里按「软删超过 N 天」单独处理，而不是让本方法漏掉它们。
+	if err := collect(`
+		SELECT DISTINCT m.elem ->> 'key' FROM moments_posts p
+		  CROSS JOIN jsonb_array_elements(p.media) AS m(elem)
+		WHERE m.elem ->> 'key' IN ?
+		UNION
+		SELECT DISTINCT m.elem ->> 'thumb_key' FROM moments_posts p
+		  CROSS JOIN jsonb_array_elements(p.media) AS m(elem)
+		WHERE m.elem ->> 'thumb_key' IN ?`,
+		keys, keys); err != nil {
+		return nil, fmt.Errorf("referenced by moments: %w", err)
 	}
 
 	// 头像与表情包封面：users.avatar_url / conversations.avatar_url / sticker_packs.cover_url
