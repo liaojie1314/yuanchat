@@ -39,4 +39,7 @@ const (
 	AdminActionResetAvatar = "reset_avatar"
 	// AdminActionViewMessageEdits 管理员查看消息编辑历史（取证动作，须留痕）。
 	AdminActionViewMessageEdits = "view_message_edits"
+	// 朋友圈处置：删帖 / 删评论（内容本体软删，本表只记审计）
+	AdminActionDeleteMomentPost    = "delete_moment_post"
+	AdminActionDeleteMomentComment = "delete_moment_comment"
 )
