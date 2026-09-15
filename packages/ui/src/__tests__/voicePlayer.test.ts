@@ -15,7 +15,7 @@ import {
   stopVoice,
   subscribeVoicePlayer,
   voicePlayerState,
-} from "../voicePlayer";
+} from "../chat/voicePlayer";
 
 /** 替身音频：jsdom 未实现 HTMLMediaElement.play，且需要断言 playbackRate */
 class FakeAudio {

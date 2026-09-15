@@ -12,7 +12,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { runBackInterceptors, useCallStore, chatSocket } from "@yuanchat/shared";
 import type { CallParticipant } from "@yuanchat/shared";
-import { CallView } from "../CallView";
+import { CallView } from "../call/CallView";
 
 const sent: Array<{ type: string; payload: unknown }> = [];
 

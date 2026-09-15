@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { ChatDetail } from "../ChatDetail";
+import { ChatDetail } from "../chat/ChatDetail";
 import {
   applyConversationSetting,
   clearHistory,

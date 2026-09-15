@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { ImageLightbox } from "../ImageLightbox";
+import { ImageLightbox } from "../chat/ImageLightbox";
 
 // jsdom 默认 locale en-US，aria-label 文案断言用英文
 describe("ImageLightbox", () => {

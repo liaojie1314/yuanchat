@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
-import { StickerPackDetailView } from "../StickerPackDetailView";
+import { StickerPackDetailView } from "../stickers/StickerPackDetailView";
 import * as shared from "@yuanchat/shared";
 import type { PackDetail } from "@yuanchat/shared";
 

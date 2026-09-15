@@ -11,7 +11,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { useAuthStore } from "@yuanchat/shared";
 import { MemoryRouter } from "react-router-dom";
-import { SettingsScreen } from "../SettingsScreen";
+import { SettingsScreen } from "../settings/SettingsScreen";
 
 vi.mock("@yuanchat/shared", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@yuanchat/shared")>();
