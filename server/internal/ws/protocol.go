@@ -56,6 +56,9 @@ const (
 	TypeCallIncoming = "call.incoming"
 	TypeCallState    = "call.state"
 	TypeCallEnded    = "call.ended"
+
+	// TypeMomentsActivity 朋友圈互动推送
+	TypeMomentsActivity = "moments.activity"
 )
 
 // FriendRemovedPayload 好友关系解除推送（删好友双向下发）。
@@ -339,6 +342,22 @@ type ErrorPayload struct {
 	Code        int    `json:"code"`
 	Message     string `json:"message"`
 	ClientMsgID string `json:"client_msg_id,omitempty"`
+}
+
+// MomentsActivityPayload 朋友圈互动推送（点赞/评论），只推给帖子作者。
+//
+// 带上 actor 昵称与评论预览而非只给 id：接收端要在互动列表直接渲染一行，
+// 省掉一次回查往返（与 message.edited 直接下发正文同一惯例）。
+// 自赞自评不产生本帧（service 层已挡）。
+type MomentsActivityPayload struct {
+	ID             uuid.UUID `json:"id"`
+	Kind           int16     `json:"kind"`
+	PostID         uuid.UUID `json:"post_id"`
+	ActorID        uuid.UUID `json:"actor_id"`
+	ActorNickname  string    `json:"actor_nickname"`
+	ActorAvatarURL string    `json:"actor_avatar_url"`
+	CommentPreview string    `json:"comment_preview"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // Encode 将 type + payload 序列化为一帧完整的 JSON 数据。

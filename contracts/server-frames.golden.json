@@ -124,6 +124,22 @@
           "duration": 204
         }
       }
+    },
+    {
+      "name": "moments.activity — 好友评论了我的动态",
+      "frame": {
+        "type": "moments.activity",
+        "payload": {
+          "id": "9b7c1f2e-1a3b-4c5d-8e9f-0a1b2c3d4e5f",
+          "kind": 2,
+          "post_id": "1f2e3d4c-5b6a-4798-8a9b-0c1d2e3f4a5b",
+          "actor_id": "2e3d4c5b-6a79-4812-9b0c-1d2e3f4a5b6c",
+          "actor_nickname": "张三",
+          "actor_avatar_url": "https://cdn.example.com/avatars/2026/09/a.jpg",
+          "comment_preview": "这张拍得好",
+          "created_at": "2026-09-13T10:00:00Z"
+        }
+      }
     }
   ]
 }
