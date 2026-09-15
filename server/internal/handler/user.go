@@ -3,10 +3,12 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/middleware"
+	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/service"
 	"go.uber.org/zap"
 )
@@ -151,6 +153,23 @@ func (h *UserHandler) Logout(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// userProfileResponse 组装本人资料响应。
+//
+// 内嵌 *model.User 而非逐字段重列：字段一旦重列，model 以后加列就得两处同步，
+// 漏一处就是前端拿不到的新字段。状态三列在 model 上是 json:"-"，故在此显式补出——
+// 必须经 EffectiveStatus 取，直接读字段会把已过期的状态吐给客户端。
+type userProfileResponse struct {
+	*model.User
+	StatusEmoji string `json:"status_emoji"`
+	StatusText  string `json:"status_text"`
+}
+
+// newUserProfileResponse 按 now 时刻的有效状态组装本人资料。
+func newUserProfileResponse(u *model.User) userProfileResponse {
+	emoji, text := u.EffectiveStatus(time.Now())
+	return userProfileResponse{User: u, StatusEmoji: emoji, StatusText: text}
+}
+
 // GetProfile 返回当前用户的个人资料。
 func (h *UserHandler) GetProfile(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
@@ -170,7 +189,7 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 		return
 	}
 
-	Success(c, user)
+	Success(c, newUserProfileResponse(user))
 }
 
 // UpdateProfile 更新当前用户的资料字段。
@@ -187,7 +206,15 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		return
 	}
 
-	user, err := h.svc.UpdateProfile(c.Request.Context(), userID, req.Nickname, req.AvatarURL, req.Bio, req.Gender)
+	user, err := h.svc.UpdateProfile(c.Request.Context(), userID, service.ProfilePatch{
+		Nickname:       req.Nickname,
+		AvatarURL:      req.AvatarURL,
+		Bio:            req.Bio,
+		Gender:         req.Gender,
+		StatusEmoji:    req.StatusEmoji,
+		StatusText:     req.StatusText,
+		StatusDuration: req.StatusDuration,
+	})
 	if err != nil {
 		if errors.Is(err, service.ErrUserNotFound) {
 			NotFound(c, "user not found")
@@ -198,7 +225,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		return
 	}
 
-	Success(c, user)
+	Success(c, newUserProfileResponse(user))
 }
 
 // GetPublicProfile 查任意用户的公开资料（好友资料页用，不含手机号/邮箱）。
@@ -220,13 +247,17 @@ func (h *UserHandler) GetPublicProfile(c *gin.Context) {
 		return
 	}
 
+	// 公开资料不含 phone/email，故逐字段列出而非内嵌 model
+	emoji, text := user.EffectiveStatus(time.Now())
 	Success(c, gin.H{
-		"id":         user.ID,
-		"nickname":   user.Nickname,
-		"avatar_url": user.AvatarURL,
-		"short_id":   user.ShortID,
-		"bio":        user.Bio,
-		"gender":     user.Gender,
+		"id":           user.ID,
+		"nickname":     user.Nickname,
+		"avatar_url":   user.AvatarURL,
+		"short_id":     user.ShortID,
+		"bio":          user.Bio,
+		"gender":       user.Gender,
+		"status_emoji": emoji,
+		"status_text":  text,
 	})
 }
 
@@ -255,4 +286,8 @@ type UpdateProfileRequest struct {
 	AvatarURL *string `json:"avatar_url" binding:"omitempty,url"`
 	Bio       *string `json:"bio" binding:"omitempty,max=500"`
 	Gender    *int16  `json:"gender" binding:"omitempty,oneof=0 1 2"`
+
+	StatusEmoji    *string `json:"status_emoji" binding:"omitempty,max=16"`
+	StatusText     *string `json:"status_text" binding:"omitempty,max=64"`
+	StatusDuration *int64  `json:"status_duration" binding:"omitempty,min=0,max=2592000"`
 }
