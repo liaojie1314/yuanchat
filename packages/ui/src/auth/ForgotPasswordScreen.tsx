@@ -28,8 +28,8 @@ import {
 } from "@yuanchat/shared";
 import { validatePassword, validatePhone } from "@yuanchat/shared/utils";
 import { cn } from "@yuanchat/shared/utils";
-import { Button } from "../Button";
-import { Input } from "../Input";
+import { Button } from "../primitives/Button";
+import { Input } from "../primitives/Input";
 import { mapAuthError } from "./mapAuthError";
 
 type Step = 1 | 2 | 3;

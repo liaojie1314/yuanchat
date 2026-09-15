@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { EmojiPicker } from "../EmojiPicker";
+import { EmojiPicker } from "../chat/EmojiPicker";
 import * as shared from "@yuanchat/shared";
 
 const FAV = [{ id: "s1", object_key: "images/2026/08/a.png", width: 96, height: 96 }];

@@ -13,7 +13,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import i18n from "@yuanchat/design-system/i18n";
-import { MessageEditHistoryDialog } from "../MessageEditHistoryDialog";
+import { MessageEditHistoryDialog } from "../chat/MessageEditHistoryDialog";
 import { fetchMessageEdits } from "@yuanchat/shared";
 
 vi.mock("@yuanchat/shared", async (importOriginal) => {

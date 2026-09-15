@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { MainLayout } from "../MainLayout";
+import { MainLayout } from "../layout/MainLayout";
 import { useThemeStore, useAuthStore } from "@yuanchat/shared";
 
 beforeEach(() => {

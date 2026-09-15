@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
-import { StickerPublishView } from "../StickerPublishView";
+import { StickerPublishView } from "../stickers/StickerPublishView";
 import * as shared from "@yuanchat/shared";
 import type { PackDetail, StickerItem } from "@yuanchat/shared";
 

@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { ChatWindow } from "../ChatWindow";
+import { ChatWindow } from "../chat/ChatWindow";
 import { useAuthStore, useConversationStore, useMessageStore } from "@yuanchat/shared";
 import type { Conversation } from "@yuanchat/shared";
 

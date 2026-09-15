@@ -12,8 +12,8 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { changePassword, useAuthStore } from "@yuanchat/shared";
 import { validatePassword } from "@yuanchat/shared/utils";
-import { Button } from "../Button";
-import { Input } from "../Input";
+import { Button } from "../primitives/Button";
+import { Input } from "../primitives/Input";
 import { mapAuthError } from "./mapAuthError";
 
 export interface ChangePasswordDialogProps {

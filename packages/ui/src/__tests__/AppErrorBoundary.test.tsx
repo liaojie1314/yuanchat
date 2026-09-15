@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { AppErrorBoundary } from "../AppErrorBoundary";
+import { AppErrorBoundary } from "../primitives/AppErrorBoundary";
 
 const mockCaptureException = vi.fn();
 vi.mock("@yuanchat/shared", () => ({

@@ -4,8 +4,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import i18n from "@yuanchat/design-system/i18n";
-import { MessageBubble } from "../MessageBubble";
-import { setVoiceRate, stopVoice } from "../voicePlayer";
+import { MessageBubble } from "../chat/MessageBubble";
+import { setVoiceRate, stopVoice } from "../chat/voicePlayer";
 import type { ChatMessage } from "@yuanchat/shared";
 
 /**
