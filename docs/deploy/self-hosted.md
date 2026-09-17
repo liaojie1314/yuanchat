@@ -47,18 +47,25 @@ cd yuanchat
 # 首次运行会生成 deploy/.env 并退出，提示你填写域名
 ./deploy/install.sh
 
-# 编辑域名与邮箱（密码留空即可，脚本会自动生成随机值）
+# 编辑域名、邮箱与 PUBLIC_IP（密码留空即可，脚本会自动生成随机值）
 vim deploy/.env
 
 # 再次运行：签发证书 → 构建镜像 → 启动全部服务
 ./deploy/install.sh
 ```
 
+`deploy/.env` 里**必须手工填**的是五个域名、`ADMIN_EMAIL`，以及 `PUBLIC_IP`
+（本机**外网** IP，`curl -s https://api.ipify.org` 可查）。`PUBLIC_IP` 没法由脚本自动探测 ——
+NAT / 云主机里 `ip addr` 看到的是内网地址，填错等于没填：coturn 会把内网地址写进
+relay candidate，跨 NAT 的通话就卡在「连接中」。留空时 `install.sh` 会直接报错退出。
+
+其余凭据（含 `TURN_SECRET`）留空即可，脚本自动生成并写回 `.env`。
+
 脚本按序完成：
 
 1. 校验 docker / compose
 2. 空密码字段自动生成随机强密码并写回 `.env`
-3. `envsubst` 渲染 `nginx/nginx.conf`
+3. `envsubst` 渲染 `nginx/nginx.conf` 与 `coturn/turnserver.prod.conf`
 4. 临时自签证书让 nginx 起 443 → 走 HTTP-01 签发正式证书 → 每 12h 自动续期
 5. `docker compose up -d --build`（首次构建约 5-10 分钟）
 
@@ -66,19 +73,21 @@ vim deploy/.env
 
 ## 三、服务构成
 
-| 容器                | 作用                           | 对外端口 |
-| ------------------- | ------------------------------ | -------- |
-| `yuanchat-nginx`    | TLS 终止 + 五域名反代          | 80 / 443 |
-| `yuanchat-server`   | Go 后端（REST 8085 / WS 8086） | 仅内网   |
-| `yuanchat-web`      | Web 端静态资源                 | 仅内网   |
-| `yuanchat-admin`    | 管理后台静态资源               | 仅内网   |
-| `yuanchat-postgres` | 数据库                         | 仅内网   |
-| `yuanchat-redis`    | 缓存 / presence Pub/Sub        | 仅内网   |
-| `yuanchat-minio`    | 对象存储（图片/文件/头像）     | 经 nginx |
-| `yuanchat-certbot`  | 证书自动续期                   | —        |
+| 容器                | 作用                           | 对外端口               |
+| ------------------- | ------------------------------ | ---------------------- |
+| `yuanchat-nginx`    | TLS 终止 + 五域名反代          | 80 / 443               |
+| `yuanchat-server`   | Go 后端（REST 8085 / WS 8086） | 仅内网                 |
+| `yuanchat-web`      | Web 端静态资源                 | 仅内网                 |
+| `yuanchat-admin`    | 管理后台静态资源               | 仅内网                 |
+| `yuanchat-postgres` | 数据库                         | 仅内网                 |
+| `yuanchat-redis`    | 缓存 / presence Pub/Sub        | 仅内网                 |
+| `yuanchat-minio`    | 对象存储（图片/文件/头像）     | 经 nginx               |
+| `yuanchat-coturn`   | 通话 TURN/STUN 中继            | 3478 + 49160-49200/udp |
+| `yuanchat-certbot`  | 证书自动续期                   | —                      |
 
 数据库与 Redis **不映射宿主机端口**，只能经内网访问。
 MinIO 同样不映射端口，但客户端要下载对象，故经 nginx 的 `storage` 子域反代对外。
+coturn 是例外：UDP relay 没法走 nginx 反代，只能自己发布端口，需在安全组 / `ufw` 放行。
 
 ### 可观测（可选）
 
@@ -220,6 +229,37 @@ grep -n 'DOMAIN_STORAGE' deploy/.env           # 是否仍是 example.com 示例
 $COMPOSE logs migrate          # 先看迁移是否失败
 $COMPOSE logs yuanchat-server  # JSON 日志，含 req_id 便于串联
 ```
+
+### 通话接不通 / 一直「连接中」
+
+两端都在 NAT 后面时媒体要靠 coturn 中继，中继链路断在哪一环按序排查：
+
+```bash
+# 1. 服务端是否真下发了 TURN 项（只有 stun: 一项 = 密钥没传进容器）
+$COMPOSE exec yuanchat-server env | grep YUANCHAT_TURN
+
+# 2. coturn 拿到的密钥与 realm 必须与上一步完全一致
+grep -E '^(static-auth-secret|realm|external-ip)=' deploy/coturn/turnserver.prod.conf
+
+# 3. external-ip 必须是外网 IP，不是 172.x / 10.x 之类的内网地址
+curl -s https://api.ipify.org    # 与上面 external-ip 对比
+
+# 4. 端口是否放行
+$COMPOSE logs yuanchat-coturn | tail -20
+```
+
+对照要点：
+
+- `YUANCHAT_TURN_STATIC_AUTH_SECRET` 与 conf 的 `static-auth-secret` 不同值 → 全部通话认证失败
+- `YUANCHAT_TURN_REALM` 与 conf 的 `realm` 不同值 → 同样全挂
+- `YUANCHAT_TURN_HOST` 填成容器内网名（如 `coturn`）→ 浏览器解析不了
+- `external-ip` 是内网地址 → 客户端拿到连不上的 relay candidate，表现就是一直「连接中」
+- 3478 或 49160-49200/udp 被安全组挡住 → 同上
+
+用默认的 `docker-compose.prod.yml` 时，前三项都由 `.env` 的 `TURN_SECRET` 与 `DOMAIN_APP`
+推导（compose 与 coturn 配置读的是同一组变量），天然一致；改过其中一边才会出现不匹配。
+`deploy/coturn/turnserver.prod.conf` 是 `install.sh` 渲染的产物，不要手改 ——
+下次运行会被覆盖，要改请改 `turnserver.prod.conf.template`。
 
 ## 七、环境变量
 

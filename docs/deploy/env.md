@@ -118,13 +118,20 @@
 | `YUANCHAT_TURN_STATIC_AUTH_SECRET` | 空          | 与 coturn 的 `static-auth-secret` **同值**，**生产必填**；生成：`openssl rand -hex 32` |
 | `YUANCHAT_TURN_CREDENTIAL_TTL`     | `1h`        | 签发凭据的有效期                                                                       |
 
+生产不用手工填这几项：`docker-compose.prod.yml` 已从 `deploy/.env` 注入
+`ENABLED`/`HOST`/`PORT`/`REALM`/`STATIC_AUTH_SECRET`，其中 `HOST` 与 `REALM` 取 `DOMAIN_APP`、
+密钥取 `TURN_SECRET` —— 与渲染 `coturn/turnserver.prod.conf` 用的是同一组变量，天然两边同值。
+
 > **凭据不落库**：服务端按 coturn 的 `use-auth-secret`（REST API）口径签发
 > `username=<过期时间戳>:<用户ID>`、`credential=base64(HMAC-SHA1(密钥, username))`，
 > coturn 用同一密钥复算校验。因此密钥两边必须一致，改一边就会全部通话打不通。
+> `realm` 同理，两边不一致同样会让通话全挂。
 >
 > **开发与生产的 coturn 配置刻意不同**：`turnserver.dev.conf` 开了 `allow-loopback-peers`
 > 且不禁私网段（两个浏览器都在 127.0.0.1，不放行则中继在本机永远不可用）；
 > `turnserver.prod.conf` 反之 —— 禁全部私网 peer，否则任何登录用户都能拿 TURN 当跳板扫内网。
+> 另外 dev 那份是手写的静态文件，prod 那份由 `install.sh` 从
+> `turnserver.prod.conf.template` 渲染生成（含真实密钥，不入库）。
 
 ## 二、前端（Vite，构建期注入）
 
@@ -143,15 +150,16 @@
 
 供 `docker-compose.prod.yml` 与 `install.sh` 使用，见 [`deploy/.env.prod.example`](../../deploy/.env.prod.example)。
 
-| 变量                                                                          | 说明                                                                                                     |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `DOMAIN_APP` / `DOMAIN_API` / `DOMAIN_WS` / `DOMAIN_ADMIN` / `DOMAIN_STORAGE` | 五个子域名，须已解析到本机；`DOMAIN_STORAGE` 是对象存储对外域名（客户端下载图片/语音/视频/头像走它）     |
-| `ADMIN_EMAIL`                                                                 | Let's Encrypt 到期通知邮箱                                                                               |
-| `DB_PASSWORD` / `REDIS_PASSWORD` / `JWT_SECRET` / `MINIO_*`                   | 留空则 `install.sh` 自动生成随机值                                                                       |
-| `PRESENCE_BACKEND`                                                            | 多实例部署改 `redis`                                                                                     |
-| `DISPATCHER_BACKEND`                                                          | 多实例部署改 `redis`（默认 `inproc` 仅影响实时帧跨实例投递）                                             |
-| `TURN_SECRET` / `PUBLIC_IP`                                                   | 注入 `coturn/turnserver.prod.conf` 的占位符；`PUBLIC_IP` 是本机**外网** IP，NAT 后不填会让中继地址不可达 |
-| `APP_VERSION`                                                                 | 自建镜像 tag，**必填**（禁止 `latest`；未设置 compose 直接报错）                                         |
-| `TZ`                                                                          | 容器时区，默认 `Asia/Shanghai`                                                                           |
+| 变量                                                                          | 说明                                                                                                                                                                                                                                |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DOMAIN_APP` / `DOMAIN_API` / `DOMAIN_WS` / `DOMAIN_ADMIN` / `DOMAIN_STORAGE` | 五个子域名，须已解析到本机；`DOMAIN_STORAGE` 是对象存储对外域名（客户端下载图片/语音/视频/头像走它）                                                                                                                                |
+| `ADMIN_EMAIL`                                                                 | Let's Encrypt 到期通知邮箱                                                                                                                                                                                                          |
+| `DB_PASSWORD` / `REDIS_PASSWORD` / `JWT_SECRET` / `MINIO_*`                   | 留空则 `install.sh` 自动生成随机值                                                                                                                                                                                                  |
+| `PRESENCE_BACKEND`                                                            | 多实例部署改 `redis`                                                                                                                                                                                                                |
+| `DISPATCHER_BACKEND`                                                          | 多实例部署改 `redis`（默认 `inproc` 仅影响实时帧跨实例投递）                                                                                                                                                                        |
+| `TURN_SECRET`                                                                 | coturn 与后端共用的 TURN 密钥，留空则 `install.sh` 自动生成：拿它渲染 `coturn/turnserver.prod.conf` 的 `static-auth-secret`，compose 同时把它作为 `YUANCHAT_TURN_STATIC_AUTH_SECRET` 传给后端，故只有这一个变量（两边同值是硬要求） |
+| `PUBLIC_IP`                                                                   | **必填**，本机**外网** IP（`curl -s https://api.ipify.org`）。渲染进 coturn 的 `external-ip`；无法自动探测（NAT 内取到的是内网地址），留空 `install.sh` 直接报错                                                                    |
+| `APP_VERSION`                                                                 | 自建镜像 tag，**必填**（禁止 `latest`；未设置 compose 直接报错）                                                                                                                                                                    |
+| `TZ`                                                                          | 容器时区，默认 `Asia/Shanghai`                                                                                                                                                                                                      |
 
 > `deploy/.env` 含明文凭据，已被 `.gitignore` 排除，**切勿提交**。
