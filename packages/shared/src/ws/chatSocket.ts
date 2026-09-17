@@ -269,6 +269,22 @@ export interface ServerFrames {
   };
   /** 通话终结：投给房间内全部连接与曾振铃的设备；`reason` 由服务端推导 */
   "call.ended": { call_id: string; reason: string; duration: number };
+  /**
+   * 朋友圈互动：好友点赞/评论了我的动态，只推给帖子作者。
+   *
+   * 字段名逐字对齐 `contracts/server-frames.golden.json` 的 `moments.activity` 用例。
+   * 帧里带 actor 昵称与评论预览而非只给 id，接收端可直接渲染一行，省一次回查往返。
+   */
+  "moments.activity": {
+    id: string;
+    kind: number;
+    post_id: string;
+    actor_id: string;
+    actor_nickname: string;
+    actor_avatar_url: string;
+    comment_preview: string;
+    created_at: string;
+  };
   pong: Record<string, never>;
   error: { code: number; message: string; client_msg_id?: string };
 }

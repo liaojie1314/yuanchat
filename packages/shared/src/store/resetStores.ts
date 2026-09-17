@@ -3,6 +3,7 @@ import { useCallStore } from "./callStore";
 import { useContactStore } from "./contactStore";
 import { useConversationStore } from "./conversationStore";
 import { useMessageStore } from "./messageStore";
+import { useMomentsStore } from "./momentsStore";
 import { usePresenceStore } from "./presenceStore";
 import { resetIceServersCache } from "../webrtc/iceServers";
 import { ringtone } from "../webrtc/ringtone";
@@ -20,6 +21,15 @@ export function resetChatStores(): void {
   useContactStore.setState({ friends: [], requests: [], loading: false });
   useBlocklistStore.setState({ items: [], loading: false });
   usePresenceStore.setState({ onlineIds: [] });
+  // 朋友圈：残留的 unreadCount 会让下个账号一登录就看到上个账号的红点
+  useMomentsStore.setState({
+    posts: [],
+    nextCursor: "",
+    hasMore: true,
+    loading: false,
+    unreadCount: 0,
+    activities: [],
+  });
   // 通话：残留的 phase 会让下一次登录直接顶出一个幽灵通话界面；
   // 铃声不停会一直响到系统超时；TURN 凭据的 username 里编了旧 user_id，必须重签
   ringtone.stop();

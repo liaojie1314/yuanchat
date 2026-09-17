@@ -35,6 +35,7 @@ import {
 import { useAuthStore } from "../store/authStore";
 import { useContactStore } from "../store/contactStore";
 import { useConversationStore } from "../store/conversationStore";
+import { useMomentsStore } from "../store/momentsStore";
 import { setE2EEContext, setMessageMockMode, useMessageStore } from "../store/messageStore";
 import { decryptFrom } from "../crypto/e2eeManager";
 import { captureException } from "../observability/sentry";
@@ -392,6 +393,27 @@ function wireSocket() {
 
     "friend.removed": (p) => {
       useContactStore.getState().removeFriend(p.friend_id);
+    },
+
+    "moments.activity": (p) => {
+      // statusEmoji / postPreview / postThumbKey 帧上没有：互动页进入时会拉一次
+      // 完整列表补齐，红点与「谁做了什么」这一行本帧已够渲染
+      useMomentsStore.getState().pushActivity({
+        id: p.id,
+        kind: p.kind === 1 ? 1 : 2,
+        postId: p.post_id,
+        actor: {
+          id: p.actor_id,
+          nickname: p.actor_nickname,
+          avatarUrl: p.actor_avatar_url,
+          statusEmoji: "",
+        },
+        commentPreview: p.comment_preview,
+        postPreview: "",
+        postThumbKey: "",
+        read: false,
+        createdAt: p.created_at,
+      });
     },
 
     error: applyErrorFrame,

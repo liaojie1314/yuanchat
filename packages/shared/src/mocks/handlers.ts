@@ -637,6 +637,125 @@ function resolveSource(src: {
 }
 
 // ========================================
+// 朋友圈 Mock 数据
+// ========================================
+
+/** 帖子媒体项（与后端 `model.MomentMediaItem` 的 json 形状一致） */
+interface MockMomentMedia {
+  key: string;
+  thumb_key?: string;
+  duration?: number;
+  w: number;
+  h: number;
+}
+
+interface MockMomentUser {
+  id: string;
+  nickname: string;
+  avatar_url: string;
+  status_emoji: string;
+}
+
+const MOCK_MOMENT_SELF: MockMomentUser = {
+  id: MOCK_USER.id,
+  nickname: MOCK_USER.nickname,
+  avatar_url: "",
+  status_emoji: "🌊",
+};
+
+const MOCK_MOMENT_FRIEND: MockMomentUser = {
+  id: "user_002",
+  nickname: "李四",
+  avatar_url: "",
+  status_emoji: "",
+};
+
+/** 一条最小形态的帖子（纯文本、无互动），媒体与可见性由调用方覆盖 */
+function mockMomentPost(id: string, content: string) {
+  return {
+    id,
+    user: MOCK_MOMENT_SELF,
+    content,
+    media_kind: 0,
+    media: [] as MockMomentMedia[],
+    visibility: 0,
+    like_count: 0,
+    liked_by_me: false,
+    likes: [] as MockMomentUser[],
+    comments: [] as {
+      id: string;
+      user: MockMomentUser;
+      reply_to_user: MockMomentUser | null;
+      content: string;
+      created_at: string;
+    }[],
+    created_at: new Date().toISOString(),
+    deletable: true,
+  };
+}
+
+/** 演示信息流：纯文本 + 单图 + 九图，覆盖三种媒体网格分支 */
+const MOCK_MOMENT_POSTS = [
+  {
+    ...mockMomentPost("moment_001", "今天天气很好，适合出门走走。"),
+    like_count: 2,
+    liked_by_me: true,
+    likes: [MOCK_MOMENT_SELF, MOCK_MOMENT_FRIEND],
+    comments: [
+      {
+        id: "moment_comment_001",
+        user: MOCK_MOMENT_FRIEND,
+        reply_to_user: null,
+        content: "确实不错",
+        created_at: new Date().toISOString(),
+      },
+    ],
+  },
+  {
+    ...mockMomentPost("moment_002", "随手一拍。"),
+    user: MOCK_MOMENT_FRIEND,
+    deletable: false,
+    media_kind: 1,
+    media: [{ key: "images/2026/09/moment-single.svg", w: 1200, h: 900 }],
+  },
+  {
+    ...mockMomentPost("moment_003", "周末出游九连拍。"),
+    media_kind: 1,
+    media: Array.from({ length: 9 }, (_, i) => ({
+      key: "images/2026/09/moment-grid-" + (i + 1) + ".svg",
+      w: 800,
+      h: 800,
+    })),
+  },
+];
+
+/** 演示互动消息：一条未读评论 + 一条已读点赞 */
+const MOCK_MOMENT_ACTIVITIES = [
+  {
+    id: "moment_activity_001",
+    kind: 2,
+    post_id: "moment_001",
+    actor: MOCK_MOMENT_FRIEND,
+    comment_preview: "确实不错",
+    post_preview: "今天天气很好，适合出门走走。",
+    post_thumb_key: "",
+    read: false,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "moment_activity_002",
+    kind: 1,
+    post_id: "moment_003",
+    actor: MOCK_MOMENT_FRIEND,
+    comment_preview: "",
+    post_preview: "周末出游九连拍。",
+    post_thumb_key: "images/2026/09/moment-grid-1.svg",
+    read: true,
+    created_at: new Date().toISOString(),
+  },
+];
+
+// ========================================
 // 处理器
 // ========================================
 
@@ -1491,6 +1610,118 @@ export const handlers = [
     mockPacks = mockPacks.filter((p) => p.id !== id);
     mockAddedPackIds.delete(id);
     return apiOk({ message: "deleted" });
+  }),
+
+  // --------------------------------------------------
+  // 朋友圈 — 信息流（默认 3 帖：纯文本 / 单图 / 九图）
+  // GET /api/v1/moments/feed[?scenario=empty|error|slow]
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/moments/feed", async ({ request }) => {
+    const scenario = new URL(request.url).searchParams.get("scenario");
+    if (scenario === "empty") return apiOk({ posts: [], next_cursor: "" });
+    if (scenario === "error") return apiError(500, "mock error");
+    if (scenario === "slow") await delay(2000);
+    else await delay(200);
+    return apiOk({ posts: MOCK_MOMENT_POSTS, next_cursor: "" });
+  }),
+
+  // --------------------------------------------------
+  // 朋友圈 — 互动消息列表 / 标记已读
+  // GET /api/v1/moments/activities · POST /api/v1/moments/activities/read
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/moments/activities", async ({ request }) => {
+    const scenario = new URL(request.url).searchParams.get("scenario");
+    if (scenario === "empty") return apiOk({ activities: [], unread_count: 0, next_cursor: "" });
+    if (scenario === "error") return apiError(500, "mock error");
+    if (scenario === "slow") await delay(2000);
+    else await delay(200);
+    return apiOk({
+      activities: MOCK_MOMENT_ACTIVITIES,
+      unread_count: MOCK_MOMENT_ACTIVITIES.filter((a) => !a.read).length,
+      next_cursor: "",
+    });
+  }),
+
+  http.post("http://localhost:8085/api/v1/moments/activities/read", async () => {
+    await delay(100);
+    return apiOk({ read: true });
+  }),
+
+  // --------------------------------------------------
+  // 朋友圈 — 某人的主页动态
+  // GET /api/v1/moments/user/:id
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/moments/user/:id", async ({ params }) => {
+    await delay(200);
+    const id = String(params.id);
+    return apiOk({ posts: MOCK_MOMENT_POSTS.filter((p) => p.user.id === id), next_cursor: "" });
+  }),
+
+  // --------------------------------------------------
+  // 朋友圈 — 发布 / 单帖 / 删除
+  // POST /api/v1/moments · GET|DELETE /api/v1/moments/:id
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/moments", async ({ request }) => {
+    await delay(300);
+    const body = (await request.json()) as {
+      content?: string;
+      media?: MockMomentMedia[];
+      media_kind?: number;
+      visibility?: number;
+    };
+    const post = {
+      ...mockMomentPost("moment_new_" + Date.now(), body.content ?? ""),
+      media: body.media ?? [],
+      media_kind: body.media_kind ?? 0,
+      visibility: body.visibility ?? 0,
+    };
+    MOCK_MOMENT_POSTS.unshift(post);
+    return apiOk(post);
+  }),
+
+  http.get("http://localhost:8085/api/v1/moments/:id", async ({ params }) => {
+    await delay(150);
+    const post = MOCK_MOMENT_POSTS.find((p) => p.id === String(params.id));
+    if (!post) return apiError(40404, "moment not found");
+    return apiOk(post);
+  }),
+
+  http.delete("http://localhost:8085/api/v1/moments/:id", async ({ params }) => {
+    await delay(150);
+    const idx = MOCK_MOMENT_POSTS.findIndex((p) => p.id === String(params.id));
+    if (idx < 0) return apiError(40404, "moment not found");
+    MOCK_MOMENT_POSTS.splice(idx, 1);
+    return apiOk({ deleted: true });
+  }),
+
+  // --------------------------------------------------
+  // 朋友圈 — 点赞 / 取消点赞 / 评论
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/moments/:id/like", async () => {
+    await delay(120);
+    return apiOk({ liked: true });
+  }),
+
+  http.delete("http://localhost:8085/api/v1/moments/:id/like", async () => {
+    await delay(120);
+    return apiOk({ liked: false });
+  }),
+
+  http.post("http://localhost:8085/api/v1/moments/:id/comments", async ({ request }) => {
+    await delay(200);
+    const body = (await request.json()) as { content?: string; reply_to_user_id?: string };
+    return apiOk({
+      id: "moment_comment_" + Date.now(),
+      user: MOCK_MOMENT_SELF,
+      reply_to_user: body.reply_to_user_id ? MOCK_MOMENT_FRIEND : null,
+      content: body.content ?? "",
+      created_at: new Date().toISOString(),
+    });
+  }),
+
+  http.delete("http://localhost:8085/api/v1/moments/comments/:id", async () => {
+    await delay(120);
+    return apiOk({ deleted: true });
   }),
 
   // --------------------------------------------------
