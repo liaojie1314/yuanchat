@@ -11,6 +11,7 @@
   },
   "scripts": {
     "build": "echo 'ui: no build needed'",
+    "clean": "rm -rf coverage",
     "lint": "echo 'ui: no lint'",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
