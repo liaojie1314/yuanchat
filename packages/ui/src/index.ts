@@ -23,7 +23,7 @@
  * - `settings/` 设置页及其分区、资料编辑
  * - `favorites/` 我的收藏
  * - `auth/` 登录相关：找回密码、扫码登录、修改密码、二维码解析
- * - `moments/` 朋友圈（开发中，暂空）
+ * - `moments/` 朋友圈：信息流、动态卡片与媒体网格、发布页、互动消息页
  * - `util/` 跨域复用的小工具与 hook：复制文本、文件图标、长按手势
  */
 
@@ -95,6 +95,10 @@ export { StickerPackDetailView } from "./stickers/StickerPackDetailView";
 export { StickerPublishView } from "./stickers/StickerPublishView";
 export { StickerPackEditView } from "./stickers/StickerPackEditView";
 export { StickerMineView } from "./stickers/StickerMineView";
+
+// 朋友圈组件
+export { MomentMediaGrid } from "./moments/MomentMediaGrid";
+export { MomentPostCard } from "./moments/MomentPostCard";
 
 // 设置组件
 export { SettingsScreen } from "./settings/SettingsScreen";

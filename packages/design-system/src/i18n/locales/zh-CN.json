@@ -712,5 +712,13 @@
   "admin.stickerPacks.setOfficial": "标记官方",
   "admin.stickerPacks.setOfficialConfirm": "标记为官方包后将在商城获得官方标识。确定标记？",
   "admin.stickerPacks.unsetOfficial": "取消官方",
-  "admin.stickerPacks.unsetOfficialConfirm": "取消官方标识后该包按普通用户发布包展示。确定取消？"
+  "admin.stickerPacks.unsetOfficialConfirm": "取消官方标识后该包按普通用户发布包展示。确定取消？",
+  "moments.expand": "全文",
+  "moments.collapse": "收起",
+  "moments.like": "赞",
+  "moments.comment": "评论",
+  "moments.replyTo": "回复",
+  "moments.commentPlaceholder": "说点什么…",
+  "moments.replyPlaceholder": "回复 %{name}…",
+  "moments.send": "发送"
 }

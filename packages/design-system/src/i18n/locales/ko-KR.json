@@ -712,5 +712,13 @@
   "admin.stickerPacks.setOfficial": "공식 지정",
   "admin.stickerPacks.setOfficialConfirm": "공식 지정 후 마켓에 공식 배지가 표시됩니다. 지정하시겠습니까?",
   "admin.stickerPacks.unsetOfficial": "공식 해제",
-  "admin.stickerPacks.unsetOfficialConfirm": "해제 후 이 팩은 일반 사용자 게시 팩으로 표시됩니다. 해제하시겠습니까?"
+  "admin.stickerPacks.unsetOfficialConfirm": "해제 후 이 팩은 일반 사용자 게시 팩으로 표시됩니다. 해제하시겠습니까?",
+  "moments.expand": "더 보기",
+  "moments.collapse": "접기",
+  "moments.like": "좋아요",
+  "moments.comment": "댓글",
+  "moments.replyTo": "답장",
+  "moments.commentPlaceholder": "댓글을 입력하세요…",
+  "moments.replyPlaceholder": "%{name}님에게 답장…",
+  "moments.send": "보내기"
 }

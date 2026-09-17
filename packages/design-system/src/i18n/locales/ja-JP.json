@@ -712,5 +712,13 @@
   "admin.stickerPacks.setOfficial": "公式に指定",
   "admin.stickerPacks.setOfficialConfirm": "公式指定後、マーケットに公式バッジが表示されます。指定しますか？",
   "admin.stickerPacks.unsetOfficial": "公式を解除",
-  "admin.stickerPacks.unsetOfficialConfirm": "解除後、このパックは一般ユーザー投稿パックとして表示されます。解除しますか？"
+  "admin.stickerPacks.unsetOfficialConfirm": "解除後、このパックは一般ユーザー投稿パックとして表示されます。解除しますか？",
+  "moments.expand": "全文",
+  "moments.collapse": "折りたたむ",
+  "moments.like": "いいね",
+  "moments.comment": "コメント",
+  "moments.replyTo": "返信",
+  "moments.commentPlaceholder": "コメントを入力…",
+  "moments.replyPlaceholder": "%{name} に返信…",
+  "moments.send": "送信"
 }
