@@ -157,6 +157,48 @@ func (r *ConversationRepository) ListMembers(ctx context.Context, convID uuid.UU
 	return items, err
 }
 
+// GroupAvatarMemberLimit 拼合群头像取用的成员数上限（九宫格）。
+const GroupAvatarMemberLimit = 9
+
+// MemberAvatarsByConversation 批量取每个会话的前 GroupAvatarMemberLimit 名成员头像，
+// 顺序与 ListMembers 一致（owner 在前，其余按昵称升序），供会话列表拼合群头像。
+//
+// 不论传入多少个会话都只发一条查询：窗口函数在库内按会话分区截断，
+// 既避免了逐会话查询的 N+1，也避免把大群的全部成员捞回内存再丢掉。
+// 未设置头像的成员返回空串占位，保证返回下标与成员次序一一对应。
+func (r *ConversationRepository) MemberAvatarsByConversation(
+	ctx context.Context, convIDs []uuid.UUID,
+) (map[uuid.UUID][]string, error) {
+	out := make(map[uuid.UUID][]string, len(convIDs))
+	if len(convIDs) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		ConversationID uuid.UUID
+		AvatarURL      string
+	}
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT conversation_id, avatar_url FROM (
+			SELECT cm.conversation_id,
+			       COALESCE(u.avatar_url, '') AS avatar_url,
+			       row_number() OVER (PARTITION BY cm.conversation_id
+			                          ORDER BY cm.role DESC, u.nickname ASC) AS rn
+			FROM conversation_members cm
+			JOIN users u ON u.id = cm.user_id
+			WHERE cm.conversation_id IN ?
+		) ranked
+		WHERE rn <= ?
+		ORDER BY conversation_id, rn`, convIDs, GroupAvatarMemberLimit).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out[row.ConversationID] = append(out[row.ConversationID], row.AvatarURL)
+	}
+	return out, nil
+}
+
 // GetMember 返回成员行；非成员返回 (nil, false, nil)。
 func (r *ConversationRepository) GetMember(ctx context.Context, convID, userID uuid.UUID) (*model.ConversationMember, bool, error) {
 	var m model.ConversationMember

@@ -34,6 +34,11 @@ type ConversationDTO struct {
 	Name          string     `json:"name"`
 	AvatarURL     *string    `json:"avatar_url,omitempty"`
 	MemberCount   int64      `json:"member_count"`
+	// MemberAvatars 群成员头像，最多 9 个（九宫格上限），顺序与成员列表一致。
+	// 仅群聊有值，供客户端拼合群头像；没有设置头像的成员占一个空串，
+	// 不跳过——跳过会让格子错位，且客户端拿不到该位置去做昵称首字兜底。
+	// 群自身设了 avatar_url 时同样返回，用哪个由客户端决定。
+	MemberAvatars []string `json:"member_avatars,omitempty"`
 	UnreadCount   int64      `json:"unread_count"`
 	IsMuted       bool       `json:"is_muted"`
 	IsPinned      bool       `json:"is_pinned"`
@@ -196,7 +201,36 @@ func (s *ConversationService) List(ctx context.Context, userID uuid.UUID) ([]Con
 
 		dtos = append(dtos, dto)
 	}
+
+	s.fillMemberAvatars(ctx, dtos)
 	return dtos, nil
+}
+
+// fillMemberAvatars 给本页的群会话补成员头像（客户端据此拼合群头像）。
+//
+// 先收齐全部群会话 ID 再一次性查回，整页只加一条查询；单聊不填，
+// 它已有对端头像回落。查询失败只告警不中断：群头像是展示增强，
+// 不该让整个会话列表接口挂掉。
+func (s *ConversationService) fillMemberAvatars(ctx context.Context, dtos []ConversationDTO) {
+	groupIDs := make([]uuid.UUID, 0, len(dtos))
+	for _, dto := range dtos {
+		if dto.Type == model.ConversationTypeGroup {
+			groupIDs = append(groupIDs, dto.ID)
+		}
+	}
+	if len(groupIDs) == 0 {
+		return
+	}
+	avatars, err := s.convRepo.MemberAvatarsByConversation(ctx, groupIDs)
+	if err != nil {
+		s.logger.Warn("load group member avatars failed", zap.Error(err))
+		return
+	}
+	for i := range dtos {
+		if a, ok := avatars[dtos[i].ID]; ok {
+			dtos[i].MemberAvatars = a
+		}
+	}
 }
 
 // previewOf 将消息内容压缩为列表预览：返回 (正文, 类型标记)。
