@@ -53,6 +53,7 @@ import {
 import { cn } from "@yuanchat/shared/utils";
 import type { ChatMessage, MentionRef } from "@yuanchat/shared";
 import { Avatar } from "../primitives/Avatar";
+import { GroupAvatar } from "../primitives/GroupAvatar";
 import { AnnouncementDialog } from "./AnnouncementDialog";
 import { CallInviteModal } from "../call/CallInviteModal";
 import { joinCall, startCall } from "../call/callActions";
@@ -367,7 +368,11 @@ export function ChatWindow({
             <ArrowLeft size={22} />
           </button>
         )}
-        <Avatar name={conv.name} src={conv.avatarUrl} presence={conv.presence} />
+        {conv.type === "group" ? (
+          <GroupAvatar name={conv.name} src={conv.avatarUrl} avatars={conv.memberAvatars} />
+        ) : (
+          <Avatar name={conv.name} src={conv.avatarUrl} presence={conv.presence} />
+        )}
         <div className="min-w-0 flex-1">
           <h2 className="text-title-md text-on-surface truncate font-semibold">{conv.name}</h2>
           <p className="text-label-sm text-on-surface-variant truncate">{subtitle}</p>

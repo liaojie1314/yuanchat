@@ -10,7 +10,7 @@
  * 三端一律只从本文件这个 barrel 导入，**不要**写 `@yuanchat/ui/chat/ChatWindow`
  * 这类深路径。源码按功能域分目录，目录职责如下：
  *
- * - `primitives/` 无业务语义的原子组件：Button、Input、Avatar、Toast、
+ * - `primitives/` 无业务语义的原子组件：Button、Input、Avatar、GroupAvatar、Toast、
  *   ConfirmDialog、ResizeHandle、AppErrorBoundary
  * - `layout/` 页面框架与全局浮层：MainLayout（路由 Layout Route）、SearchModal
  * - `chat/` 会话与消息：会话列表、聊天窗口、消息气泡与各类消息体、输入区、
@@ -32,6 +32,7 @@ export { Button } from "./primitives/Button";
 export type { ButtonVariant } from "./primitives/Button";
 export { Input } from "./primitives/Input";
 export { Avatar } from "./primitives/Avatar";
+export { GroupAvatar } from "./primitives/GroupAvatar";
 export { ResizeHandle } from "./primitives/ResizeHandle";
 export { ToastHost } from "./primitives/Toast";
 export { ConfirmDialog } from "./primitives/ConfirmDialog";

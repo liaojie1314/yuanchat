@@ -72,6 +72,32 @@ describe("ConversationList", () => {
     expect(screen.getAllByText("王五").length).toBeGreaterThanOrEqual(1);
   });
 
+  it("群聊头像拼合成员头像，单聊仍是单图头像", () => {
+    act(() => {
+      useConversationStore.setState({
+        conversations: useConversationStore
+          .getState()
+          .conversations.map((c) =>
+            c.id === "2"
+              ? { ...c, memberAvatars: ["https://cdn/a.png", "", "https://cdn/c.png"] }
+              : c,
+          ),
+      });
+    });
+    const { container } = render(
+      <MemoryRouter>
+        <ConversationList />
+      </MemoryRouter>,
+    );
+
+    // 三个成员 → 上 1 下 2，两张有图一张退色块
+    expect(container.querySelector("[data-group-rows]")?.getAttribute("data-group-rows")).toBe(
+      "1,2",
+    );
+    expect(container.querySelectorAll("[data-group-tile]")).toHaveLength(3);
+    expect(container.querySelectorAll("[data-group-fallback]")).toHaveLength(1);
+  });
+
   it("shows last message preview", () => {
     render(
       <MemoryRouter>

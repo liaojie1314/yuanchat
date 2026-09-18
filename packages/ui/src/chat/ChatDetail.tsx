@@ -47,6 +47,7 @@ import {
 import type { ConversationMember } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "../primitives/Avatar";
+import { GroupAvatar } from "../primitives/GroupAvatar";
 import { startCall } from "../call/callActions";
 import { ConfirmDialog } from "../primitives/ConfirmDialog";
 import { InviteMembersModal } from "../contacts/InviteMembersModal";
@@ -195,7 +196,16 @@ export function ChatDetail({
         {/* 用块级 flex 居中而非 inline-flex：inline-flex 与下面的名称行都是行内级元素，
             面板够宽时两者会排在同一行（手机上详情页占满宽度，必然撞上） */}
         <div className="mb-2.5 flex justify-center">
-          <Avatar name={conv.name} src={conv.avatarUrl} size="xl" presence={conv.presence} />
+          {conv.type === "group" ? (
+            <GroupAvatar
+              name={conv.name}
+              src={conv.avatarUrl}
+              avatars={conv.memberAvatars}
+              size="xl"
+            />
+          ) : (
+            <Avatar name={conv.name} src={conv.avatarUrl} size="xl" presence={conv.presence} />
+          )}
         </div>
         {editingName ? (
           <div className="mx-auto flex max-w-[220px] items-center gap-1">

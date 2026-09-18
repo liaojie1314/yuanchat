@@ -28,6 +28,7 @@ import { applyConversationSetting, useConversationStore } from "@yuanchat/shared
 import type { Conversation } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "../primitives/Avatar";
+import { GroupAvatar } from "../primitives/GroupAvatar";
 import { useLongPress } from "../util/useLongPress";
 import type { UseLongPressResult } from "../util/useLongPress";
 
@@ -500,12 +501,17 @@ function ConversationItem({
         <span className="bg-primary absolute top-1/2 left-0.5 h-5 w-[3px] -translate-y-1/2 rounded-full" />
       )}
 
-      <Avatar
-        name={conv.name}
-        src={conv.avatarUrl}
-        presence={conv.presence}
-        online={conv.presence ? undefined : conv.isOnline}
-      />
+      {/* 群聊拼成员头像（群自己设了头像时 GroupAvatar 直接用它）；单聊仍带在线点 */}
+      {conv.type === "group" ? (
+        <GroupAvatar name={conv.name} src={conv.avatarUrl} avatars={conv.memberAvatars} />
+      ) : (
+        <Avatar
+          name={conv.name}
+          src={conv.avatarUrl}
+          presence={conv.presence}
+          online={conv.presence ? undefined : conv.isOnline}
+        />
+      )}
 
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">

@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 import { forwardMessage, showToast, useConversationStore } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "../primitives/Avatar";
+import { GroupAvatar } from "../primitives/GroupAvatar";
 import { Button } from "../primitives/Button";
 
 interface ForwardModalProps {
@@ -111,7 +112,16 @@ export function ForwardModal({
                 onClick={() => toggle(c.id)}
                 className="bg-primary-container/60 text-primary-on-container inline-flex items-center gap-1 rounded-full px-2 py-1"
               >
-                <Avatar name={c.name} src={c.avatarUrl} size="sm" />
+                {c.type === "group" ? (
+                  <GroupAvatar
+                    name={c.name}
+                    src={c.avatarUrl}
+                    avatars={c.memberAvatars}
+                    size="sm"
+                  />
+                ) : (
+                  <Avatar name={c.name} src={c.avatarUrl} size="sm" />
+                )}
                 <span className="text-label-md max-w-24 truncate">{c.name}</span>
                 <X size={14} />
               </button>
@@ -136,7 +146,16 @@ export function ForwardModal({
                   active ? "bg-primary-container/60" : "hover:bg-surface-container",
                 )}
               >
-                <Avatar name={c.name} src={c.avatarUrl} size="md" />
+                {c.type === "group" ? (
+                  <GroupAvatar
+                    name={c.name}
+                    src={c.avatarUrl}
+                    avatars={c.memberAvatars}
+                    size="md"
+                  />
+                ) : (
+                  <Avatar name={c.name} src={c.avatarUrl} size="md" />
+                )}
                 <span className="text-body-lg text-on-surface min-w-0 flex-1 truncate">
                   {c.name}
                 </span>
