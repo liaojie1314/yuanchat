@@ -374,6 +374,8 @@
   "chat.image.loadError": "Failed to load image, tap to retry",
   "chat.image.loadErrorShort": "Load failed",
   "chat.lightbox.close": "Close",
+  "chat.lightbox.prev": "Previous image",
+  "chat.lightbox.next": "Next image",
   "media.title": "Media",
   "media.tabAll": "All",
   "media.tabImage": "Images",

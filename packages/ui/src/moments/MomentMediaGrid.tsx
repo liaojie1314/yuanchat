@@ -24,6 +24,7 @@ import { cn } from "@yuanchat/shared/utils";
 import { ImageLightbox } from "../chat/ImageLightbox";
 import { VideoPlaybackOverlay } from "../chat/VideoPlaybackOverlay";
 import { useObjectUrl } from "../util/useObjectUrl";
+import { buildGallery } from "../util/imageGallery";
 
 /** 单图/视频封面盒的最长边；与多图网格同宽，让卡片左缘对齐 */
 const SINGLE_MAX_EDGE = 240;
@@ -54,7 +55,14 @@ export function MomentMediaGrid({
   media: MomentMediaItem[];
   mediaKind: MomentMediaKind;
 }) {
-  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
+
+  /** 点开某一格：整帖的图一起给查看器，可左右翻（本帖之外的图不在其中） */
+  const openAt = (idx: number) =>
+    void buildGallery(
+      media.map((m) => m.key),
+      idx,
+    ).then(setLightbox);
 
   if (mediaKind === 0 || media.length === 0) return null;
 
@@ -81,11 +89,17 @@ export function MomentMediaGrid({
             item={item}
             square={!single}
             box={single ? box! : null}
-            onOpen={setLightboxUrl}
+            onOpen={() => openAt(idx)}
           />
         ))}
       </div>
-      {lightboxUrl && <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
+      {lightbox && (
+        <ImageLightbox
+          urls={lightbox.urls}
+          index={lightbox.index}
+          onClose={() => setLightbox(null)}
+        />
+      )}
     </>
   );
 }
@@ -100,7 +114,7 @@ function MomentImageCell({
   item: MomentMediaItem;
   square: boolean;
   box: { width: number; height: number } | null;
-  onOpen: (url: string) => void;
+  onOpen: () => void;
 }) {
   const { t } = useTranslation();
   const url = useObjectUrl(item.key);
@@ -110,7 +124,7 @@ function MomentImageCell({
       type="button"
       data-media-cell
       disabled={!url}
-      onClick={() => url && onOpen(url)}
+      onClick={() => url && onOpen()}
       style={box ? { width: box.width, height: box.height } : undefined}
       className={cn(
         "bg-surface-container-high block overflow-hidden rounded-lg",

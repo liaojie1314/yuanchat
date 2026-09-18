@@ -374,6 +374,8 @@
   "chat.image.loadError": "图片加载失败，点击重试",
   "chat.image.loadErrorShort": "加载失败",
   "chat.lightbox.close": "关闭",
+  "chat.lightbox.prev": "上一张",
+  "chat.lightbox.next": "下一张",
   "media.title": "媒体相册",
   "media.tabAll": "全部",
   "media.tabImage": "图片",

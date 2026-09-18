@@ -671,7 +671,7 @@ export function ChatWindow({
       />
 
       {/* 图片全屏查看器（点击气泡内图片打开） */}
-      {lightboxUrl && <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
+      {lightboxUrl && <ImageLightbox urls={[lightboxUrl]} onClose={() => setLightboxUrl(null)} />}
 
       {/* 会话媒体相册（顶栏相册按钮打开，全屏覆盖当前会话） */}
       {showMedia && activeId && (

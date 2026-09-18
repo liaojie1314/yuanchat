@@ -2,7 +2,7 @@
  * MomentMediaGrid 布局测试：图数决定列数，视频走单卡
  */
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MomentMediaGrid } from "../moments/MomentMediaGrid";
 import type { MomentMediaItem } from "@yuanchat/shared";
 
@@ -49,6 +49,28 @@ describe("MomentMediaGrid", () => {
       />,
     );
     expect(screen.getByTestId("moment-video-card")).toBeInTheDocument();
+  });
+
+  it("点九宫格里的图开的是整帖图集，页码定位到点的那张", async () => {
+    const { container } = render(<MomentMediaGrid media={items(9)} mediaKind={1} />);
+    const cells = container.querySelectorAll("[data-media-cell]");
+
+    // 签名落地后格子才可点（未就绪时 disabled，避免开出空白层）
+    await waitFor(() => expect((cells[2] as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(cells[2]);
+
+    expect((await screen.findByTestId("lightbox-counter")).textContent).toBe("3/9");
+  });
+
+  it("单图点开不出翻页按钮", async () => {
+    const { container } = render(<MomentMediaGrid media={items(1)} mediaKind={1} />);
+    const cell = container.querySelector("[data-media-cell]") as HTMLButtonElement;
+
+    await waitFor(() => expect(cell.disabled).toBe(false));
+    fireEvent.click(cell);
+
+    await screen.findByRole("dialog");
+    expect(screen.queryByTestId("lightbox-counter")).toBeNull();
   });
 
   it("无媒体渲染空", () => {

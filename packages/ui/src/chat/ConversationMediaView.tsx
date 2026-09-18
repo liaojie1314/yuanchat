@@ -39,6 +39,7 @@ import { ImageLightbox } from "./ImageLightbox";
 import { StickerImage } from "../stickers/StickerImage";
 import { VideoPlaybackOverlay } from "./VideoPlaybackOverlay";
 import { fileIconOf } from "../util/fileIcon";
+import { buildGallery } from "../util/imageGallery";
 import { currentPlayingId, playVoice, subscribeVoicePlayer } from "./voicePlayer";
 
 /** 每页条数（后端上限 100，30 与消息历史同口径） */
@@ -114,7 +115,7 @@ function CellPlaceholder({ failed }: { failed?: boolean }) {
 }
 
 /** 图片方格：点开大图查看器（URL 未就绪时不响应点击，避免开出空白层） */
-function MediaImageCard({ item, onOpen }: { item: MediaItem; onOpen: (url: string) => void }) {
+function MediaImageCard({ item, onOpen }: { item: MediaItem; onOpen: (item: MediaItem) => void }) {
   const { t } = useTranslation();
   const { url, failed } = useMediaUrl(item.key);
   return (
@@ -122,7 +123,7 @@ function MediaImageCard({ item, onOpen }: { item: MediaItem; onOpen: (url: strin
       type="button"
       data-testid={"media-image-" + item.seq}
       aria-label={t("chat.image.open")}
-      onClick={() => url && onOpen(url)}
+      onClick={() => url && onOpen(item)}
       className="bg-surface-container-low grid aspect-square overflow-hidden rounded-lg"
     >
       {url ? (
@@ -290,7 +291,7 @@ export function ConversationMediaView({
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   // 语音播放态：模块级单例播放器广播当前播放的消息 ID
   const [playingId, setPlayingId] = useState<string | null>(() => currentPlayingId());
@@ -334,30 +335,45 @@ export function ConversationMediaView({
     load(tab, 0, false);
   }, [tab, load]);
 
+  /**
+   * 点开大图：把**已加载的这一批**图片整体交给查看器，可左右翻。
+   *
+   * @remarks 相册是 seq 降序游标分页的，翻到最后一张不会去触发「加载更多」——
+   *   超出已加载范围即视为到头（查看器的按钮到头即禁用）。各方格已各自签过名，
+   *   `getDownloadUrl` 的进程内缓存让这里基本是命中缓存。
+   */
+  const openLightbox = (item: MediaItem) => {
+    const imgs = items.filter((i) => i.messageType === 2);
+    void buildGallery(
+      imgs.map((i) => i.key),
+      imgs.findIndex((i) => i.messageId === item.messageId),
+    ).then(setLightbox);
+  };
+
   // Esc 关闭相册（键盘用户无需先 Tab 到关闭按钮）。
   // 大图层/播放层各自也监听 Esc，而 keydown 会同时命中所有监听器——不加这道闸门，
   // 一次 Esc 会把浮层和相册一起关掉（E2E 实测：关播放层后相册也没了）。
   useEffect(() => {
-    if (lightboxUrl !== null || videoUrl !== null) return;
+    if (lightbox !== null || videoUrl !== null) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [lightboxUrl, videoUrl, onClose]);
+  }, [lightbox, videoUrl, onClose]);
 
   // 安卓系统返回键：本层盖在会话之上，须先关自己再轮到会话
   // （视频播放层自带更上层的拦截器，故此处只需处理大图层与本层）
   useEffect(() => {
     return registerBackInterceptor(() => {
-      if (lightboxUrl !== null) {
-        setLightboxUrl(null);
+      if (lightbox !== null) {
+        setLightbox(null);
         return true;
       }
       onClose();
       return true;
     });
-  }, [lightboxUrl, onClose]);
+  }, [lightbox, onClose]);
 
   /** 滚动触底续页：游标为已加载最小 seq；加载中/错误态/无更多时不触发 */
   const handleScroll = () => {
@@ -454,7 +470,7 @@ export function ConversationMediaView({
               <div className="grid grid-cols-3 gap-2">
                 {gridItems.map((item) =>
                   item.messageType === 2 ? (
-                    <MediaImageCard key={item.messageId} item={item} onOpen={setLightboxUrl} />
+                    <MediaImageCard key={item.messageId} item={item} onOpen={openLightbox} />
                   ) : item.messageType === 5 ? (
                     <MediaVideoCard key={item.messageId} item={item} onPlay={setVideoUrl} />
                   ) : (
@@ -484,7 +500,13 @@ export function ConversationMediaView({
         )}
       </div>
 
-      {lightboxUrl && <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
+      {lightbox && (
+        <ImageLightbox
+          urls={lightbox.urls}
+          index={lightbox.index}
+          onClose={() => setLightbox(null)}
+        />
+      )}
       {videoUrl && <VideoPlaybackOverlay url={videoUrl} onClose={() => setVideoUrl(null)} />}
     </div>
   );
