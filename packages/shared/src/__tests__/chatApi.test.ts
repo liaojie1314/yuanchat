@@ -226,6 +226,19 @@ describe("mapConversation", () => {
     expect(conv.lastMessage).toBe("发布评审改到明早");
     expect(conv.peerId).toBe("u2");
   });
+
+  it("透传群成员头像，空串占位保留不压缩", () => {
+    const conv = mapConversation({
+      ...base,
+      member_avatars: ["https://cdn/a.png", "", "https://cdn/c.png"],
+    });
+    // 下标即成员次序：中间的空串不能被过滤掉，否则九宫格格子错位
+    expect(conv.memberAvatars).toEqual(["https://cdn/a.png", "", "https://cdn/c.png"]);
+  });
+
+  it("单聊无该字段时为 undefined", () => {
+    expect(mapConversation({ ...base, type: 1 }).memberAvatars).toBeUndefined();
+  });
 });
 
 describe("mapMessage", () => {

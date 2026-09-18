@@ -62,6 +62,13 @@ export interface Conversation {
   mentionedMe?: boolean;
   /** 群聊成员总数 */
   memberCount?: number;
+  /**
+   * 群聊成员头像（最多 9 个，按成员列表顺序；仅群聊有，用于拼合群头像）
+   *
+   * @remarks 未设头像的成员占一个空串，不跳过——按下标渲染才不会错位，
+   * 空串位置由调用方用该成员昵称首字兜底。群自身设了 avatarUrl 时优先用群头像。
+   */
+  memberAvatars?: string[];
   /** 群聊当前在线人数 */
   onlineCount?: number;
   /** 群公告/置顶消息（聊天窗口顶部 pin-bar 显示） */
