@@ -198,3 +198,49 @@ func mustList(t *testing.T, svc *ConversationService, userID uuid.UUID) []Conver
 	}
 	return dtos
 }
+
+// TestCreateGroupReturnsMemberAvatars 断言建群返回的 DTO 当场带上成员头像。
+// 不带的话客户端要等下一次拉会话列表才能拼出群头像，新建的群会先空着一块。
+func TestCreateGroupReturnsMemberAvatars(t *testing.T) {
+	db := testDB(t)
+	owner := newTestUser(t, db, "cg-owner")
+	m01 := newTestUser(t, db, "cg-m01")
+	m02 := newTestUser(t, db, "cg-m02")
+
+	// 建群要求成员全是好友，双向插 contacts
+	for _, pair := range [][2]uuid.UUID{
+		{owner.ID, m01.ID}, {m01.ID, owner.ID},
+		{owner.ID, m02.ID}, {m02.ID, owner.ID},
+	} {
+		ct := &model.Contact{UserID: pair[0], ContactUserID: pair[1], Status: model.ContactStatusAccepted}
+		if err := db.Create(ct).Error; err != nil {
+			t.Fatalf("create contact: %v", err)
+		}
+		t.Cleanup(func() { db.Unscoped().Delete(ct) })
+	}
+
+	// m01 故意不设头像：空位要占坑，不能被跳过，否则格子与成员顺序对不上
+	setAvatar(t, db, owner, strPtr("https://cdn.test/own.png"))
+	setAvatar(t, db, m02, strPtr("https://cdn.test/m02.png"))
+
+	dto, _, err := newConvSvc(db).CreateGroup(
+		context.Background(), owner.ID, nil, []uuid.UUID{m01.ID, m02.ID})
+	if err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Where("conversation_id = ?", dto.ID).Delete(&model.ConversationMember{})
+		db.Where("conversation_id = ?", dto.ID).Unscoped().Delete(&model.Message{})
+		db.Unscoped().Delete(&model.Conversation{}, "id = ?", dto.ID)
+	})
+
+	want := []string{"https://cdn.test/own.png", "", "https://cdn.test/m02.png"}
+	if len(dto.MemberAvatars) != len(want) {
+		t.Fatalf("want %d avatars, got %d (%v)", len(want), len(dto.MemberAvatars), dto.MemberAvatars)
+	}
+	for i := range want {
+		if dto.MemberAvatars[i] != want[i] {
+			t.Fatalf("avatar[%d]=%q, want %q (full=%v)", i, dto.MemberAvatars[i], want[i], dto.MemberAvatars)
+		}
+	}
+}

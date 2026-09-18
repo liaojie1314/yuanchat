@@ -418,6 +418,12 @@ func (s *ConversationService) CreateGroup(
 		UpdatedAt: sysMsg.CreatedAt,
 	}
 
+	// 建群当场带上成员头像：客户端据此立刻拼出群头像，不必等下一次拉会话列表。
+	// 走列表同一个填充函数而不是另写一条查询，省得两处排序规则日后走岔。
+	filled := []ConversationDTO{*dto}
+	s.fillMemberAvatars(ctx, filled)
+	dto.MemberAvatars = filled[0].MemberAvatars
+
 	s.logger.Info("group conversation created",
 		zap.String("conversation_id", conv.ID.String()),
 		zap.String("creator_id", creatorID.String()),
