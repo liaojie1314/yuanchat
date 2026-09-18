@@ -720,5 +720,22 @@
   "moments.replyTo": "回复",
   "moments.commentPlaceholder": "说点什么…",
   "moments.replyPlaceholder": "回复 %{name}…",
-  "moments.send": "发送"
+  "moments.send": "发送",
+  "moments.title": "朋友圈",
+  "moments.empty": "还没有动态",
+  "moments.postFirst": "发一条",
+  "moments.publish": "发布",
+  "moments.loadFailed": "加载失败",
+  "moments.deleteConfirm": "删除这条动态？",
+  "moments.activities": "互动消息",
+  "moments.activityLike": "赞了你的动态",
+  "moments.activityEmpty": "暂无互动",
+  "moments.publishFailed": "发布失败",
+  "moments.compose.placeholder": "这一刻的想法…",
+  "moments.compose.addImage": "添加图片",
+  "moments.compose.addVideo": "添加视频",
+  "moments.compose.removeMedia": "移除",
+  "moments.compose.uploadFailed": "上传失败",
+  "moments.visibility.friends": "好友可见",
+  "moments.visibility.private": "仅自己"
 }

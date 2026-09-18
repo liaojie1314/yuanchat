@@ -24,7 +24,7 @@
  * - `favorites/` 我的收藏
  * - `auth/` 登录相关：找回密码、扫码登录、修改密码、二维码解析
  * - `moments/` 朋友圈：信息流、动态卡片与媒体网格、发布页、互动消息页
- * - `util/` 跨域复用的小工具与 hook：复制文本、文件图标、长按手势
+ * - `util/` 跨域复用的小工具与 hook：复制文本、文件图标、长按手势、子页返回键语义
  */
 
 // 基础 UI 组件
@@ -99,6 +99,9 @@ export { StickerMineView } from "./stickers/StickerMineView";
 // 朋友圈组件
 export { MomentMediaGrid } from "./moments/MomentMediaGrid";
 export { MomentPostCard } from "./moments/MomentPostCard";
+export { MomentsScreen } from "./moments/MomentsScreen";
+export { MomentComposeView } from "./moments/MomentComposeView";
+export { MomentActivitiesView } from "./moments/MomentActivitiesView";
 
 // 设置组件
 export { SettingsScreen } from "./settings/SettingsScreen";
@@ -126,3 +129,6 @@ export type { ScanQrEntryProps, ScanFn } from "./auth/ScanQrEntry";
 
 // 错误边界
 export { AppErrorBoundary } from "./primitives/AppErrorBoundary";
+
+// 跨域复用的小工具 hook
+export { useBackTo } from "./util/useBackTo";

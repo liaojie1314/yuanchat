@@ -16,7 +16,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Loader2, PackageOpen, Sticker } from "lucide-react";
 import { captureException, listMarketPacks, showToast, useBreakpoint } from "@yuanchat/shared";
-import { useStickerBack } from "./useStickerBack";
+import { useBackTo } from "../util/useBackTo";
 import type { MarketPackItem } from "@yuanchat/shared";
 import { StickerPackCover } from "./StickerPackCover";
 import { packOwnerText } from "./stickerPackUtils";
@@ -81,7 +81,7 @@ export function StickerMarketView() {
     fromTab && ["/chat", "/contacts", "/favorites", "/settings"].includes(fromTab)
       ? fromTab
       : "/chat";
-  useStickerBack(backTarget);
+  useBackTo(backTarget);
   const [packs, setPacks] = useState<MarketPackItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [state, setState] = useState<LoadState>("loading");

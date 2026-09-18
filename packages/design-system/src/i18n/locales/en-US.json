@@ -720,5 +720,22 @@
   "moments.replyTo": "replied to",
   "moments.commentPlaceholder": "Write a comment…",
   "moments.replyPlaceholder": "Reply to %{name}…",
-  "moments.send": "Send"
+  "moments.send": "Send",
+  "moments.title": "Moments",
+  "moments.empty": "No moments yet",
+  "moments.postFirst": "Post one",
+  "moments.publish": "Post",
+  "moments.loadFailed": "Failed to load",
+  "moments.deleteConfirm": "Delete this moment?",
+  "moments.activities": "Activity",
+  "moments.activityLike": "liked your moment",
+  "moments.activityEmpty": "No activity yet",
+  "moments.publishFailed": "Failed to post",
+  "moments.compose.placeholder": "What's on your mind…",
+  "moments.compose.addImage": "Add photos",
+  "moments.compose.addVideo": "Add video",
+  "moments.compose.removeMedia": "Remove",
+  "moments.compose.uploadFailed": "Upload failed",
+  "moments.visibility.friends": "Friends",
+  "moments.visibility.private": "Only me"
 }

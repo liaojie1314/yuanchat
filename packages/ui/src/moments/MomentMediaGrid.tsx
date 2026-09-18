@@ -15,7 +15,7 @@
  * @param media - 媒体项列表（图片 0-9 张，视频恒 1 个）
  * @param mediaKind - 0 无媒体 / 1 图片 / 2 视频
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Play } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { formatMediaDuration, getDownloadUrl } from "@yuanchat/shared";
@@ -23,6 +23,7 @@ import type { MomentMediaItem, MomentMediaKind } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { ImageLightbox } from "../chat/ImageLightbox";
 import { VideoPlaybackOverlay } from "../chat/VideoPlaybackOverlay";
+import { useObjectUrl } from "../util/useObjectUrl";
 
 /** 单图/视频封面盒的最长边；与多图网格同宽，让卡片左缘对齐 */
 const SINGLE_MAX_EDGE = 240;
@@ -44,26 +45,6 @@ function displayBox(w: number, h: number): { width: number; height: number } {
   if (!w || !h) return FALLBACK_BOX;
   const scale = Math.min(1, SINGLE_MAX_EDGE / Math.max(w, h));
   return { width: Math.round(w * scale), height: Math.round(h * scale) };
-}
-
-/** 换取对象 key 的预签名 URL；失败保持 null 由调用方显示占位 */
-function useObjectUrl(key: string | undefined): string | null {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!key) return;
-    let alive = true;
-    getDownloadUrl(key)
-      .then((u) => {
-        if (alive) setUrl(u);
-      })
-      .catch(() => {
-        // 签名失败不阻断卡片渲染：骨架底色留在原位，尺寸不变
-      });
-    return () => {
-      alive = false;
-    };
-  }, [key]);
-  return url;
 }
 
 export function MomentMediaGrid({
