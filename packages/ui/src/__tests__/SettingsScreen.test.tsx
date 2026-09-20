@@ -10,13 +10,20 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { useAuthStore } from "@yuanchat/shared";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { SettingsScreen } from "../settings/SettingsScreen";
 
 vi.mock("@yuanchat/shared", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@yuanchat/shared")>();
   return { ...mod, useBreakpoint: () => "desktop" };
 });
+
+/** 探针：把当前路由与 state.from 暴露成文本，供跳转断言 */
+function LocationProbe() {
+  const loc = useLocation();
+  const from = (loc.state as { from?: string } | null)?.from ?? "";
+  return <div data-testid="loc">{`${loc.pathname}|${from}`}</div>;
+}
 
 describe("SettingsScreen", () => {
   beforeEach(() => {
@@ -54,5 +61,31 @@ describe("SettingsScreen", () => {
       </MemoryRouter>,
     );
     expect(screen.queryByText("Sign Out")).toBeNull();
+  });
+
+  it("桌面左列有表情商城与收藏，收藏排在关于之上", () => {
+    render(
+      <MemoryRouter>
+        <SettingsScreen />
+      </MemoryRouter>,
+    );
+    // favorites.title 的实际英文值是 "My Favorites"
+    const favorites = screen.getByText("My Favorites");
+    const about = screen.getByText("About");
+    expect(screen.getByText("Sticker Market")).toBeInTheDocument();
+    expect(
+      favorites.compareDocumentPosition(about) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("点收藏跳 /favorites 并带来源", () => {
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <SettingsScreen />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByText("My Favorites"));
+    expect(screen.getByTestId("loc")).toHaveTextContent("/favorites|/settings");
   });
 });

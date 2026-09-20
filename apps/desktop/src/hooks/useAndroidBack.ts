@@ -14,19 +14,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { runBackInterceptors, useAuthStore } from "@yuanchat/shared";
+import { TAB_ROOT_PATHS } from "@yuanchat/ui";
 
 /** 挂在 window 上供原生侧调用的返回处理器 */
 interface AndroidBackWindow {
   __androidBack__?: () => boolean;
 }
-
-/**
- * 底部标签栏对应的根页面
- *
- * 在这些页面按返回键应当退出应用，而不是相互跳转 —— 它们是平级的一级入口，
- * 「从设置返回到聊天」并不是用户按返回键时期待的行为。
- */
-const TAB_ROOTS = ["/chat", "/contacts", "/favorites", "/settings"];
 
 /** 两次返回键之间的确认窗口，与提示浮层的存活时间一致 */
 export const EXIT_CONFIRM_MS = 2000;
@@ -55,8 +48,11 @@ export function useAndroidBack(): number {
       if (runBackInterceptors()) return true;
 
       const path = location.pathname;
+      // TAB_ROOT_PATHS 直接取自底栏导航（@yuanchat/ui）：这些是平级的一级入口，
+      // 在它们上面按返回应当退出应用而不是相互跳转。清单曾在此另抄一份，
+      // 底栏加了朋友圈没跟着改，结果在朋友圈按返回会跳回聊天页。
       const atTabRoot = isAuthenticated
-        ? TAB_ROOTS.includes(path)
+        ? TAB_ROOT_PATHS.includes(path)
         : path === "/login" || path === "/";
 
       if (!atTabRoot) {

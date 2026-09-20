@@ -22,6 +22,7 @@ import {
   User,
   ArrowLeft,
   Sticker,
+  Star,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -37,39 +38,58 @@ import { ChangePasswordDialog } from "../auth/ChangePasswordDialog";
 /** 设置内容区视图 */
 type SettingsView = "index" | "profile" | "account" | "appearance" | "about";
 
-/** 分组导航项（不含 profile：profile 单独作 hero 卡片）。
- * 分两组：移动端列表把表情商城入口插在两组之间（About 上面）。 */
-const NAV_GROUPS_TOP: {
-  view: SettingsView;
-  icon: typeof User;
-  labelKey: string;
-  descKey: string;
-}[] = [
+/** 设置页分组项：view 为设置页内部视图切换，route 为跳走的独立页面。 */
+type SettingsNavItem =
+  | { kind: "view"; view: SettingsView; icon: typeof User; labelKey: string; descKey: string }
+  | { kind: "route"; to: string; icon: typeof User; labelKey: string; descKey: string };
+
+/**
+ * 设置页分组顺序（移动端列表与桌面左列共用同一数组，保证两端顺序一致）。
+ *
+ * 收藏与表情商城是 route 项：它们是独立路由页而非设置页内部视图，
+ * 跳转带 `state.from` 供安卓返回键回到设置页。收藏自底栏移出后，
+ * 这里是桌面端唯一的收藏入口 —— 两端共用一份数组正是为了不再漏掉一端。
+ */
+const SETTINGS_NAV: SettingsNavItem[] = [
   {
+    kind: "view",
     view: "account",
     icon: ShieldCheck,
     labelKey: "settings.account",
     descKey: "settings.accountDesc",
   },
   {
+    kind: "view",
     view: "appearance",
     icon: Palette,
     labelKey: "settings.appearance",
     descKey: "settings.appearanceDesc",
   },
-];
-
-const NAV_GROUPS_BOTTOM = [
   {
-    view: "about" as SettingsView,
+    kind: "route",
+    to: "/stickers",
+    icon: Sticker,
+    labelKey: "settings.stickerMarket",
+    descKey: "settings.stickerMarketDesc",
+  },
+  {
+    kind: "route",
+    to: "/favorites",
+    icon: Star,
+    labelKey: "favorites.title",
+    descKey: "settings.favoritesDesc",
+  },
+  {
+    kind: "view",
+    view: "about",
     icon: Info,
     labelKey: "settings.about",
     descKey: "settings.aboutDesc",
   },
 ];
 
-/** 桌面/平板左列的完整分组顺序（与移动端一致：商城插在 About 上面） */
-const NAV_GROUPS = [...NAV_GROUPS_TOP, ...NAV_GROUPS_BOTTOM];
+/** 列表 key：view 项用视图名，route 项用路由，两者不会撞 */
+const navKey = (item: SettingsNavItem) => (item.kind === "view" ? item.view : item.to);
 
 export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) {
   const { t } = useTranslation();
@@ -83,6 +103,12 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
   const [view, setView] = useState<SettingsView>("profile");
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [changePwdOpen, setChangePwdOpen] = useState(false);
+
+  /** 分组行点击：内部视图切 view，独立页面带来源跳走 */
+  const onNavClick = (item: SettingsNavItem) => {
+    if (item.kind === "route") navigate(item.to, { state: { from: "/settings" } });
+    else setView(item.view);
+  };
 
   // 安卓返回键：手机端子页是组件内部状态而非路由，不拦截的话按返回会被当成
   // 「已在 /settings 根页面」而走退出应用流程，用户预期是先退回设置列表。
@@ -237,29 +263,13 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
         </h1>
         <div className="mb-4">{heroCard}</div>
         <div className="mb-4 flex flex-col gap-1">
-          {NAV_GROUPS_TOP.map((g) => (
+          {SETTINGS_NAV.map((item) => (
             <MobileNavRow
-              key={g.view}
-              icon={g.icon}
-              label={t(g.labelKey)}
-              desc={t(g.descKey)}
-              onClick={() => setView(g.view)}
-            />
-          ))}
-          {/* 表情商城：移动端底栏保持 4 项，入口放 About 上面；带来源供返回键回设置 */}
-          <MobileNavRow
-            icon={Sticker}
-            label={t("settings.stickerMarket")}
-            desc={t("settings.stickerMarketDesc")}
-            onClick={() => navigate("/stickers", { state: { from: "/settings" } })}
-          />
-          {NAV_GROUPS_BOTTOM.map((g) => (
-            <MobileNavRow
-              key={g.view}
-              icon={g.icon}
-              label={t(g.labelKey)}
-              desc={t(g.descKey)}
-              onClick={() => setView(g.view)}
+              key={navKey(item)}
+              icon={item.icon}
+              label={t(item.labelKey)}
+              desc={t(item.descKey)}
+              onClick={() => onNavClick(item)}
             />
           ))}
         </div>
@@ -280,12 +290,13 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
       <aside className="border-outline-variant bg-surface-container-lowest flex w-72 shrink-0 flex-col gap-3 overflow-y-auto border-r p-4">
         {heroCard}
         <div className="mt-2 flex flex-col gap-1">
-          {NAV_GROUPS.map((g) => {
-            const active = view === g.view;
+          {SETTINGS_NAV.map((item) => {
+            // route 项是跳走的独立页面，永不在左列高亮
+            const active = item.kind === "view" && view === item.view;
             return (
               <button
-                key={g.view}
-                onClick={() => setView(g.view)}
+                key={navKey(item)}
+                onClick={() => onNavClick(item)}
                 className={cn(
                   "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
                   active
@@ -301,12 +312,12 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
                       : "bg-surface-container-high text-on-surface-variant group-hover:bg-surface-container-highest",
                   )}
                 >
-                  <g.icon size={18} />
+                  <item.icon size={18} />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <span className="text-body-md block font-medium">{t(g.labelKey)}</span>
+                  <span className="text-body-md block font-medium">{t(item.labelKey)}</span>
                   <span className="text-label-sm text-on-surface-variant block truncate">
-                    {t(g.descKey)}
+                    {t(item.descKey)}
                   </span>
                 </div>
               </button>

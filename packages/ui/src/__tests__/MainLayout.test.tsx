@@ -8,7 +8,21 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { MainLayout } from "../layout/MainLayout";
-import { useThemeStore, useAuthStore } from "@yuanchat/shared";
+import { TAB_ROOT_PATHS } from "../layout/navItems";
+import { useThemeStore, useAuthStore, useMomentsStore } from "@yuanchat/shared";
+
+/** jsdom 默认宽度，落在平板/桌面分支（≥768） */
+const WIDE = 1024;
+
+/**
+ * 把视口切到手机宽度。
+ *
+ * useBreakpoint 的初始 state 直接读 window.innerWidth，故渲染前改它即可，
+ * 不必派发 resize 事件。
+ */
+function setMobileViewport() {
+  window.innerWidth = 400;
+}
 
 beforeEach(() => {
   // 只对 DOM API 打 spy，不整体替换 document
@@ -16,11 +30,13 @@ beforeEach(() => {
   vi.spyOn(document.documentElement.style, "setProperty").mockImplementation(() => {});
   vi.spyOn(document.documentElement.classList, "toggle").mockImplementation(() => false);
 
+  window.innerWidth = WIDE;
   useThemeStore.setState({
     skinId: "yuan-light",
     mode: "light",
     fontScale: "normal",
   });
+  useMomentsStore.setState({ unreadCount: 0 });
 });
 
 describe("MainLayout", () => {
@@ -107,5 +123,54 @@ describe("MainLayout", () => {
     );
     // 导航栏存在
     expect(container.querySelector("nav")).toBeInTheDocument();
+  });
+
+  it("移动端底栏是 聊天/通讯录/朋友圈/设置 四项，不含收藏", () => {
+    setMobileViewport();
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <MainLayout />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("Messages")).toBeInTheDocument();
+    expect(screen.getByText("Contacts")).toBeInTheDocument();
+    expect(screen.getByText("Moments")).toBeInTheDocument();
+    expect(screen.getByText("Settings")).toBeInTheDocument();
+    // favorites.title 的实际英文值是 "My Favorites"
+    expect(screen.queryByText("My Favorites")).not.toBeInTheDocument();
+  });
+
+  it("朋友圈有未读互动时显示角标", () => {
+    setMobileViewport();
+    useMomentsStore.setState({ unreadCount: 3 });
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <MainLayout />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("3")).toBeInTheDocument();
+  });
+
+  it("桌面侧栏有朋友圈与表情商城，设置沉底在主题切换之前", () => {
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <MainLayout />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("Moments").closest("a")).toHaveAttribute("href", "/moments");
+    expect(screen.getByText("Sticker Market").closest("a")).toHaveAttribute("href", "/stickers");
+    expect(screen.queryByText("My Favorites")).not.toBeInTheDocument();
+
+    // 设置项排在表情商城之后（沉底），主题切换按钮在它之后
+    const stickers = screen.getByText("Sticker Market");
+    const settings = screen.getByText("Settings");
+    expect(
+      stickers.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("TAB_ROOT_PATHS 与底栏导航一致，含 /moments", () => {
+    // 安卓返回键靠这份清单判断「已在一级入口」；漏了 /moments 会跳回 /chat
+    expect(TAB_ROOT_PATHS).toEqual(["/chat", "/contacts", "/moments", "/settings"]);
   });
 });

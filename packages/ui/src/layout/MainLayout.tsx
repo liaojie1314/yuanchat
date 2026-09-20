@@ -24,13 +24,14 @@
  * <MainLayout />
  */
 import { Link, useLocation, Outlet } from "react-router-dom";
-import { MessageCircle, Users, Settings, Star, Sticker, Sun, Moon, LogOut } from "lucide-react";
+import { Sun, Moon, LogOut } from "lucide-react";
 import {
   useThemeStore,
   useAuthStore,
   useChatBootstrap,
   useContactStore,
   useConversationStore,
+  useMomentsStore,
   useBreakpoint,
 } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
@@ -40,25 +41,12 @@ import { Avatar } from "../primitives/Avatar";
 import { CallHost } from "../call/CallHost";
 import { SearchModal } from "./SearchModal";
 import { ToastHost } from "../primitives/Toast";
-
-/**
- * 移动端底栏导航项（4 项均分全宽）。
- *
- * @remarks 表情商城不进底栏：商城属低频入口，5 项会把每项压到 20% 宽且
- * 挤占高频导航，移动端入口改放收藏页顶部与表情面板底部（桌面侧栏无此压力）。
- */
-const MOBILE_NAV_ITEMS = [
-  { to: "/chat", icon: MessageCircle, labelKey: "chat.title" },
-  { to: "/contacts", icon: Users, labelKey: "contacts.title" },
-  { to: "/favorites", icon: Star, labelKey: "favorites.title" },
-  { to: "/settings", icon: Settings, labelKey: "settings.title" },
-];
-
-/** 桌面/平板左侧栏导航项：比底栏多一个表情商城入口（/stickers 及其子路由共用高亮） */
-const DESKTOP_NAV_ITEMS = [
-  ...MOBILE_NAV_ITEMS,
-  { to: "/stickers", icon: Sticker, labelKey: "sticker.market.title" },
-];
+import {
+  MOBILE_NAV_ITEMS,
+  DESKTOP_NAV_ITEMS,
+  DESKTOP_SETTINGS_ITEM,
+  type NavItem,
+} from "./navItems";
 
 export function MainLayout({
   titleBar,
@@ -106,10 +94,17 @@ export function MainLayout({
     (s) => s.requests.filter((r) => r.direction === "in" && r.status === 0).length,
   );
   const activeConvId = useConversationStore((s) => s.activeId);
+  const momentsUnread = useMomentsStore((s) => s.unreadCount);
 
-  /** 导航项角标数：消息未读 / 通讯录待处理申请 */
+  /** 导航项角标数：消息未读 / 通讯录待处理申请 / 朋友圈未读互动 */
   const badgeOf = (to: string) =>
-    to === "/chat" ? totalUnread : to === "/contacts" ? pendingRequests : 0;
+    to === "/chat"
+      ? totalUnread
+      : to === "/contacts"
+        ? pendingRequests
+        : to === "/moments"
+          ? momentsUnread
+          : 0;
 
   const isActive = (to: string) =>
     to === "/chat" ? location.pathname.startsWith("/chat") : location.pathname.startsWith(to);
@@ -117,6 +112,36 @@ export function MainLayout({
   // 手机端：聊天视图打开时隐藏底部导航，让消息流占满全屏
   const isMobile = bp === "mobile";
   const hideMobileNav = isMobile && location.pathname.startsWith("/chat") && !!activeConvId;
+
+  /**
+   * 桌面侧栏的一个导航项。
+   *
+   * 抽成函数是为了沉底的设置项与常规项走同一套样式 —— 两处各抄一份 JSX，
+   * 改了其中一处就会样式漂移。
+   */
+  const renderNavItem = ({ to, icon: Icon, labelKey }: NavItem) => {
+    const active = isActive(to);
+    const badge = badgeOf(to);
+    return (
+      <Link
+        key={to}
+        to={to}
+        className={cn(
+          "text-label-sm relative flex w-14 flex-col items-center gap-1 rounded-lg py-2 transition-all duration-200",
+          active
+            ? "shadow-elevation-1 bg-white/25 text-white backdrop-blur-sm"
+            : "text-white/70 hover:bg-white/15 hover:text-white",
+        )}
+        title={t(labelKey)}
+      >
+        <Icon size={24} strokeWidth={active ? 2.5 : 1.5} />
+        <span className="w-full truncate px-0.5 text-center text-[10px] leading-none">
+          {t(labelKey)}
+        </span>
+        {badge > 0 && <span className="absolute top-1.5 right-3 h-2 w-2 rounded-full bg-red-500" />}
+      </Link>
+    );
+  };
 
   if (isMobile) {
     return (
@@ -189,33 +214,12 @@ export function MainLayout({
         </div>
         <div className="mb-1 h-px w-8 bg-white/15" />
 
-        {DESKTOP_NAV_ITEMS.map(({ to, icon: Icon, labelKey }) => {
-          const active = isActive(to);
-          const badge = badgeOf(to);
-          return (
-            <Link
-              key={to}
-              to={to}
-              className={cn(
-                "text-label-sm relative flex w-14 flex-col items-center gap-1 rounded-lg py-2 transition-all duration-200",
-                active
-                  ? "shadow-elevation-1 bg-white/25 text-white backdrop-blur-sm"
-                  : "text-white/70 hover:bg-white/15 hover:text-white",
-              )}
-              title={t(labelKey)}
-            >
-              <Icon size={24} strokeWidth={active ? 2.5 : 1.5} />
-              <span className="w-full truncate px-0.5 text-center text-[10px] leading-none">
-                {t(labelKey)}
-              </span>
-              {badge > 0 && (
-                <span className="absolute top-1.5 right-3 h-2 w-2 rounded-full bg-red-500" />
-              )}
-            </Link>
-          );
-        })}
+        {DESKTOP_NAV_ITEMS.map(renderNavItem)}
 
         <div className="flex-1" />
+
+        {/* 设置沉底：与主题/登出同属「不常点但要随手够到」的一档 */}
+        {renderNavItem(DESKTOP_SETTINGS_ITEM)}
 
         {/* 主题切换 — M3 图标按钮 */}
         <button

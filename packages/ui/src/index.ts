@@ -110,6 +110,7 @@ export { ProfileEditView } from "./settings/ProfileEditView";
 
 // 布局组件
 export { MainLayout } from "./layout/MainLayout";
+export { TAB_ROOT_PATHS } from "./layout/navItems";
 export { SearchModal } from "./layout/SearchModal";
 export { E2EEIndicator } from "./e2ee/E2EEIndicator";
 export { SafetyNumberDialog } from "./e2ee/SafetyNumberDialog";
