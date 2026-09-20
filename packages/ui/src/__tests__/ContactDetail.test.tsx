@@ -11,6 +11,8 @@ const PROFILE: PublicProfile = {
   shortId: 88888,
   bio: "热爱开源",
   gender: 1,
+  statusEmoji: "",
+  statusText: "",
 };
 
 const fetchPublicProfile = vi.fn(async () => PROFILE);

@@ -45,6 +45,10 @@ interface User {
   bio?: string | null;
   /** 0=未知 1=男 2=女 */
   gender?: 0 | 1 | 2;
+  /** 个人状态 emoji（K11）；服务端读时做过期判定，已过期吐空串 */
+  statusEmoji?: string;
+  /** 个人状态文案；已过期吐空串 */
+  statusText?: string;
 }
 
 /** 后端 user JSON（snake_case） */
@@ -57,6 +61,8 @@ interface UserDTO {
   short_id?: number;
   bio?: string | null;
   gender?: number;
+  status_emoji?: string;
+  status_text?: string;
 }
 
 /** POST /api/v1/auth/login 响应 */
@@ -102,6 +108,8 @@ function mapUser(dto: UserDTO): User {
     shortId: dto.short_id,
     bio: dto.bio ?? undefined,
     gender: (dto.gender === 1 || dto.gender === 2 ? dto.gender : 0) as 0 | 1 | 2,
+    statusEmoji: dto.status_emoji ?? "",
+    statusText: dto.status_text ?? "",
   };
 }
 
@@ -256,6 +264,8 @@ export const useAuthStore = create<AuthState>()(
                 avatarUrl: updated.avatarUrl,
                 bio: updated.bio,
                 gender: updated.gender,
+                statusEmoji: updated.statusEmoji,
+                statusText: updated.statusText,
               }
             : s.user,
         }));

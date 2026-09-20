@@ -107,6 +107,7 @@ export { MomentActivitiesView } from "./moments/MomentActivitiesView";
 // 设置组件
 export { SettingsScreen } from "./settings/SettingsScreen";
 export { ProfileEditView } from "./settings/ProfileEditView";
+export { UserStatusEditor } from "./settings/UserStatusEditor";
 
 // 布局组件
 export { MainLayout } from "./layout/MainLayout";

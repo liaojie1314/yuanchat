@@ -23,6 +23,7 @@ import {
   ArrowLeft,
   Sticker,
   Star,
+  Smile,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -34,6 +35,7 @@ import { AccountSection, AppearanceSection, AboutSection } from "./SettingsSecti
 import { APP_VERSION } from "./settingsUtils";
 import { ConfirmDialog } from "../primitives/ConfirmDialog";
 import { ChangePasswordDialog } from "../auth/ChangePasswordDialog";
+import { UserStatusEditor } from "./UserStatusEditor";
 
 /** 设置内容区视图 */
 type SettingsView = "index" | "profile" | "account" | "appearance" | "about";
@@ -103,6 +105,7 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
   const [view, setView] = useState<SettingsView>("profile");
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [changePwdOpen, setChangePwdOpen] = useState(false);
+  const [statusOpen, setStatusOpen] = useState(false);
 
   /** 分组行点击：内部视图切 view，独立页面带来源跳走 */
   const onNavClick = (item: SettingsNavItem) => {
@@ -192,7 +195,13 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
           }}
         />
       )}
-      <Avatar name={user?.nickname ?? "?"} src={user?.avatarUrl} size="lg" presence="online" />
+      <Avatar
+        name={user?.nickname ?? "?"}
+        src={user?.avatarUrl}
+        size="lg"
+        presence="online"
+        statusEmoji={user?.statusEmoji}
+      />
       <div className="min-w-0 flex-1">
         <p className="text-title-md text-on-surface truncate font-semibold">
           {user?.nickname ?? t("settings.profile")}
@@ -207,6 +216,36 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
             {user.bio}
           </p>
         )}
+      </div>
+      <ChevronRight size={18} className="text-on-surface-variant shrink-0" />
+    </button>
+  );
+
+  /**
+   * 个人状态入口（hero 卡片下方独立一行）。
+   *
+   * 不并进 SETTINGS_NAV：那是「分组导航」，点进去是一屏内容；这行是就地改一个值，
+   * 而且要把当前状态直接显示出来（未设置时显示占位），语义与视觉都是另一档。
+   */
+  const statusRow = (
+    <button
+      onClick={() => setStatusOpen(true)}
+      className="bg-surface-container hover:bg-surface-container-high flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors"
+    >
+      <span className="bg-primary-container/60 text-primary-on-container flex h-9 w-9 shrink-0 items-center justify-center rounded-lg">
+        {user?.statusEmoji ? (
+          <span className="text-[17px] leading-none">{user.statusEmoji}</span>
+        ) : (
+          <Smile size={18} />
+        )}
+      </span>
+      <div className="min-w-0 flex-1">
+        <span className="text-body-md text-on-surface block font-medium">
+          {t("settings.userStatus")}
+        </span>
+        <span className="text-label-sm text-on-surface-variant block truncate">
+          {user?.statusText || user?.statusEmoji || t("settings.userStatusUnset")}
+        </span>
       </div>
       <ChevronRight size={18} className="text-on-surface-variant shrink-0" />
     </button>
@@ -261,7 +300,8 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
         <h1 className="text-title-lg text-on-surface mb-4 px-1 font-semibold">
           {t("settings.title")}
         </h1>
-        <div className="mb-4">{heroCard}</div>
+        <div className="mb-3">{heroCard}</div>
+        <div className="mb-4">{statusRow}</div>
         <div className="mb-4 flex flex-col gap-1">
           {SETTINGS_NAV.map((item) => (
             <MobileNavRow
@@ -279,6 +319,7 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
         </p>
         {logoutDialog}
         <ChangePasswordDialog open={changePwdOpen} onClose={() => setChangePwdOpen(false)} />
+        <UserStatusEditor open={statusOpen} onClose={() => setStatusOpen(false)} />
       </div>
     );
   }
@@ -289,6 +330,7 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
       {/* 左列分组导航 */}
       <aside className="border-outline-variant bg-surface-container-lowest flex w-72 shrink-0 flex-col gap-3 overflow-y-auto border-r p-4">
         {heroCard}
+        {statusRow}
         <div className="mt-2 flex flex-col gap-1">
           {SETTINGS_NAV.map((item) => {
             // route 项是跳走的独立页面，永不在左列高亮
@@ -330,6 +372,7 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-2xl px-8 py-8">{renderContent(() => setView("profile"))}</div>
       </div>
+      <UserStatusEditor open={statusOpen} onClose={() => setStatusOpen(false)} />
     </div>
   );
 }

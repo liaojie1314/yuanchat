@@ -23,3 +23,15 @@ export const APP_VERSION: string = typeof __APP_VERSION__ === "string" ? __APP_V
 export function maskPhone(phone: string): string {
   return phone.replace(/^(\d{3})\d{4}(\d{4})$/, "$1****$2");
 }
+
+/**
+ * 个人状态「今天」档的剩余秒数：按用户本地时区算到当日 23:59:59。
+ *
+ * @remarks 服务端只收秒数、不猜时区（`status_duration`），所以换算必须在客户端做。
+ *   至少返回 1 秒：恰好在午夜前一刻设置时，0 在后端语义里是「不自动清除」，
+ *   与用户选的「今天」正好相反。
+ */
+export function secondsUntilEndOfDay(now = new Date()): number {
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  return Math.max(1, Math.round((end.getTime() - now.getTime()) / 1000));
+}

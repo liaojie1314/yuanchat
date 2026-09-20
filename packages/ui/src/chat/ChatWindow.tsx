@@ -46,6 +46,7 @@ import {
   showToast,
   toggleReaction,
   useAuthStore,
+  fetchPublicProfile,
   useCallStore,
   useConversationStore,
   useMessageStore,
@@ -123,6 +124,33 @@ export function ChatWindow({
   // 会话内「通话中」横幅（本端非参与者时由 call.state 帧写入）
   const callBanner = useCallStore((s) => s.banner);
   const selfUserId = useAuthStore((s) => s.user?.id);
+
+  /**
+   * 单聊对方的个人状态（K11）：顶栏昵称旁展示。
+   *
+   * 会话对象上没有这两个字段（presence 帧只带在线态），所以进会话时按 peerId 现拉一次
+   * 公开资料。过期判定在服务端读时做，拉到的就是当下有效值；失败静默清空，
+   * 状态是装饰信息，不值得为它在顶栏弹错误。
+   */
+  const [peerStatus, setPeerStatus] = useState({ emoji: "", text: "" });
+  const peerId = conv?.type === "private" ? conv.peerId : undefined;
+  useEffect(() => {
+    if (!peerId) {
+      setPeerStatus({ emoji: "", text: "" });
+      return;
+    }
+    let alive = true;
+    void fetchPublicProfile(peerId)
+      .then((p) => {
+        if (alive) setPeerStatus({ emoji: p.statusEmoji, text: p.statusText });
+      })
+      .catch(() => {
+        if (alive) setPeerStatus({ emoji: "", text: "" });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [peerId]);
 
   const items = messages ?? [];
 
@@ -371,10 +399,24 @@ export function ChatWindow({
         {conv.type === "group" ? (
           <GroupAvatar name={conv.name} src={conv.avatarUrl} avatars={conv.memberAvatars} />
         ) : (
-          <Avatar name={conv.name} src={conv.avatarUrl} presence={conv.presence} />
+          <Avatar
+            name={conv.name}
+            src={conv.avatarUrl}
+            presence={conv.presence}
+            statusEmoji={peerStatus.emoji}
+          />
         )}
         <div className="min-w-0 flex-1">
-          <h2 className="text-title-md text-on-surface truncate font-semibold">{conv.name}</h2>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <h2 className="text-title-md text-on-surface truncate font-semibold">{conv.name}</h2>
+            {/* 对方个人状态：emoji 必有（清除时两者同时为空），文案可空 */}
+            {peerStatus.emoji && (
+              <span className="text-label-sm text-on-surface-variant min-w-0 truncate">
+                <span className="mr-0.5">{peerStatus.emoji}</span>
+                {peerStatus.text}
+              </span>
+            )}
+          </div>
           <p className="text-label-sm text-on-surface-variant truncate">{subtitle}</p>
         </div>
         <E2EEIndicator
