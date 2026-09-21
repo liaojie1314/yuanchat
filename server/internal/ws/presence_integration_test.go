@@ -5,21 +5,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+
+	"github.com/yuanchat/server/internal/testutil"
 )
 
-// testRedis 连接本地开发 Redis（deploy/docker-compose.yml 的 redis :6380）。
-// 不可达时跳过集成用例（CI 无 Redis 环境仍绿）。
-func testRedis(t *testing.T) *redis.Client {
-	t.Helper()
-	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6380", DB: 2})
-	if err := rdb.Ping(t.Context()).Err(); err != nil {
-		t.Skipf("dev redis unavailable, skip integration test: %v", err)
-	}
-	t.Cleanup(func() { _ = rdb.Close() })
-	return rdb
-}
+// 本文件的多实例用例跑在进程内 miniredis 上：presence 只用到 Pub/Sub，
+// miniredis 原生支持，不需要真实 Redis。早先这里连的是 dev 环境的 :6380，
+// 连不上就 t.Skip —— 等于这几个用例在 CI 里一次都没真正执行过。
+// 每个用例各起一个实例，互不串台。
 
 // waitUntil 轮询直到条件成立或超时。
 func waitUntil(t *testing.T, timeout time.Duration, cond func() bool) bool {
@@ -36,7 +30,7 @@ func waitUntil(t *testing.T, timeout time.Duration, cond func() bool) bool {
 
 // TestRedisPresenceCrossInstance 双实例：A 发布上线，B 的 mirror 与回调都感知。
 func TestRedisPresenceCrossInstance(t *testing.T) {
-	rdb := testRedis(t)
+	rdb, _ := testutil.NewRedis(t)
 	channel := "presence:test:" + uuid.NewString()
 
 	instA := NewRedisPresence(rdb, channel, zap.NewNop())
@@ -95,7 +89,7 @@ func TestRedisPresenceCrossInstance(t *testing.T) {
 // TestRedisPresenceMultiInstanceRefcount 同一用户在两个远端实例在线：
 // 一个下线后仍在线（引用计数），全部下线才移除。
 func TestRedisPresenceMultiInstanceRefcount(t *testing.T) {
-	rdb := testRedis(t)
+	rdb, _ := testutil.NewRedis(t)
 	channel := "presence:test:" + uuid.NewString()
 
 	observer := NewRedisPresence(rdb, channel, zap.NewNop())
@@ -136,7 +130,7 @@ func TestRedisPresenceMultiInstanceRefcount(t *testing.T) {
 
 // TestHubOnlineFilterMergesBackend Hub 全局在线判定 = 本地 OR 远端 mirror。
 func TestHubOnlineFilterMergesBackend(t *testing.T) {
-	rdb := testRedis(t)
+	rdb, _ := testutil.NewRedis(t)
 	channel := "presence:test:" + uuid.NewString()
 
 	hub := NewHub(0, zap.NewNop())
