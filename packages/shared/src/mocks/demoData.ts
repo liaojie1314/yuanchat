@@ -9,6 +9,55 @@ import type { Friend, FriendRequestItem } from "../api/contacts";
 import type { Conversation } from "../store/conversationStore";
 import type { ChatMessage } from "../store/messageStore";
 
+/**
+ * 演示用头像：内联 SVG data URI
+ *
+ * @remarks 刻意不引外网图床——mock 模式常在断网/CI 里跑，
+ * 外链头像一律加载失败就看不出九宫格的格子与顺序了。
+ * 颜色用逗号分隔的 hsl()，旧 WebView 不认空格分隔的新语法。
+ */
+function demoAvatar(label: string, hue: number): string {
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">' +
+    '<rect width="64" height="64" fill="hsl(' +
+    hue +
+    ', 58%, 55%)"/>' +
+    '<text x="32" y="43" font-size="30" text-anchor="middle" fill="#fff">' +
+    label +
+    "</text></svg>";
+  return "data:image/svg+xml," + encodeURIComponent(svg);
+}
+
+/**
+ * 生成 n 个演示成员头像（服务端最多给 9 个，此处同样不超过 9）
+ *
+ * @param n - 头像个数
+ * @param blanks - 这些下标留空串，演示「该成员没设头像」的占位格
+ */
+function demoMemberAvatars(n: number, blanks: number[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    out.push(blanks.indexOf(i) >= 0 ? "" : demoAvatar(String(i + 1), (i * 41) % 360));
+  }
+  return out;
+}
+
+/** 演示成员昵称池，循环取用；首字用于没设头像的那一格 */
+const DEMO_MEMBER_NAMES = ["陈曦", "林墨", "苏晴", "周野", "郑川", "何澜", "吴桐", "秦屿", "叶蓁"];
+
+/**
+ * 生成 n 个演示成员昵称，与 {@link demoMemberAvatars} 同序等长
+ *
+ * @param n - 成员个数（与头像数一致，服务端同样最多给 9 个）
+ */
+function demoMemberNames(n: number): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    out.push(DEMO_MEMBER_NAMES[i % DEMO_MEMBER_NAMES.length]);
+  }
+  return out;
+}
+
 export const DEMO_CONVERSATIONS: Conversation[] = [
   {
     id: "1",
@@ -22,6 +71,9 @@ export const DEMO_CONVERSATIONS: Conversation[] = [
     pinnedAt: "2026-07-31T09:00:00+08:00",
     mentionedMe: true,
     memberCount: 28,
+    // 28 人群：服务端截断到 9 个，九宫格铺满
+    memberAvatars: demoMemberAvatars(9, []),
+    memberNames: demoMemberNames(9),
     onlineCount: 5,
     pinnedMessage: "周五 15:00 发布评审，请提前更新进度看板",
     announcement: "新人入群请先自我介绍，工作日 10:00-19:00 为核心响应时间，请勿深夜 @全体成员",
@@ -61,6 +113,9 @@ export const DEMO_CONVERSATIONS: Conversation[] = [
     isMuted: false,
     draft: "图标规范我下午整理一份",
     memberCount: 9,
+    // 9 人群：恰好铺满，且第 2、6 位成员没设头像（空串占位，走昵称首字兜底）
+    memberAvatars: demoMemberAvatars(9, [1, 5]),
+    memberNames: demoMemberNames(9),
   },
   {
     id: "5",
@@ -81,6 +136,32 @@ export const DEMO_CONVERSATIONS: Conversation[] = [
     lastTime: "06-30",
     unreadCount: 0,
     isMuted: false,
+  },
+  {
+    // 3 人群：九宫格的少人分支（前端按人数改用 2x2 / 三角等布局）
+    id: "7",
+    type: "group",
+    name: "周末露营",
+    lastMessage: "帐篷我带两顶",
+    lastTime: "周一",
+    unreadCount: 0,
+    isMuted: false,
+    memberCount: 3,
+    memberAvatars: demoMemberAvatars(3, []),
+    memberNames: demoMemberNames(3),
+  },
+  {
+    // 10 人群：刚好越过九宫格上限，只给 9 个头像
+    id: "8",
+    type: "group",
+    name: "校友会",
+    lastMessage: "下个月聚一次？",
+    lastTime: "06-28",
+    unreadCount: 0,
+    isMuted: false,
+    memberCount: 10,
+    memberAvatars: demoMemberAvatars(9, [8]),
+    memberNames: demoMemberNames(9),
   },
 ];
 

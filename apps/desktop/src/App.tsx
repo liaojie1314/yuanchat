@@ -34,6 +34,18 @@ const QrLoginPage = lazy(() =>
 const FavoritesPage = lazy(() =>
   import("./pages/FavoritesPage").then((m) => ({ default: m.FavoritesPage })),
 );
+const MomentsPage = lazy(() =>
+  import("./pages/MomentsPage").then((m) => ({ default: m.MomentsPage })),
+);
+const MomentComposePage = lazy(() =>
+  import("./pages/MomentComposePage").then((m) => ({ default: m.MomentComposePage })),
+);
+const MomentActivitiesPage = lazy(() =>
+  import("./pages/MomentActivitiesPage").then((m) => ({ default: m.MomentActivitiesPage })),
+);
+const MomentUserPage = lazy(() =>
+  import("./pages/MomentUserPage").then((m) => ({ default: m.MomentUserPage })),
+);
 const StickersPage = lazy(() =>
   import("./pages/StickersPage").then((m) => ({ default: m.StickersPage })),
 );
@@ -159,6 +171,11 @@ function App() {
             <Route path="/chat/:conversationId" element={<ChatPage />} />
             <Route path="/contacts" element={<ContactsPage />} />
             <Route path="/favorites" element={<FavoritesPage />} />
+            {/* 朋友圈：静态段（compose/activities）在 user/:userId 之前声明，同商城的顺序约定 */}
+            <Route path="/moments" element={<MomentsPage />} />
+            <Route path="/moments/compose" element={<MomentComposePage />} />
+            <Route path="/moments/activities" element={<MomentActivitiesPage />} />
+            <Route path="/moments/user/:userId" element={<MomentUserPage />} />
             {/* 静态段（publish/mine）须在 :packId 之前声明：React Router 静态段优先级
                 更高，顺序书写仅为可读性——商城路由是本项目的 URL 列表→详情首例 */}
             <Route path="/stickers" element={<StickersPage />} />

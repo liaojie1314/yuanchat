@@ -98,7 +98,7 @@ func TestUpdateProfileFlagsSensitiveNicknameAndBio(t *testing.T) {
 	svc := newUGCFlaggedSvc(db)
 
 	clean := "干净的昵称"
-	if _, err := svc.UpdateProfile(ctx, user.ID, &clean, nil, nil, nil); err != nil {
+	if _, err := svc.UpdateProfile(ctx, user.ID, ProfilePatch{Nickname: &clean}); err != nil {
 		t.Fatalf("update clean nickname: %v", err)
 	}
 	if n := countFlaggedUGC(t, db, model.UGCTypeNickname); n != 0 {
@@ -106,7 +106,7 @@ func TestUpdateProfileFlagsSensitiveNicknameAndBio(t *testing.T) {
 	}
 
 	bad := "带" + testBadWord + "的昵称"
-	if _, err := svc.UpdateProfile(ctx, user.ID, &bad, nil, nil, nil); err != nil {
+	if _, err := svc.UpdateProfile(ctx, user.ID, ProfilePatch{Nickname: &bad}); err != nil {
 		t.Fatalf("update flagged nickname: %v", err)
 	}
 	// 命中仍写入成功
@@ -122,7 +122,7 @@ func TestUpdateProfileFlagsSensitiveNicknameAndBio(t *testing.T) {
 	}
 
 	bio := "签名里有" + testBadWord
-	if _, err := svc.UpdateProfile(ctx, user.ID, nil, nil, &bio, nil); err != nil {
+	if _, err := svc.UpdateProfile(ctx, user.ID, ProfilePatch{Bio: &bio}); err != nil {
 		t.Fatalf("update flagged bio: %v", err)
 	}
 	if n := countFlaggedUGC(t, db, model.UGCTypeBio); n != 1 {

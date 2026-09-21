@@ -34,6 +34,14 @@ type ConversationDTO struct {
 	Name          string     `json:"name"`
 	AvatarURL     *string    `json:"avatar_url,omitempty"`
 	MemberCount   int64      `json:"member_count"`
+	// MemberAvatars 群成员头像，最多 9 个（九宫格上限），顺序与成员列表一致。
+	// 仅群聊有值，供客户端拼合群头像；没有设置头像的成员占一个空串，
+	// 不跳过——跳过会让格子错位，且客户端拿不到该位置去做昵称首字兜底。
+	// 群自身设了 avatar_url 时同样返回，用哪个由客户端决定。
+	MemberAvatars []string `json:"member_avatars,omitempty"`
+	// MemberNames 与 MemberAvatars 同序等长的成员昵称，用于头像缺失那一格
+	// 显示昵称首字并据此取稳定配色。两个数组出自同一条查询，次序天然对齐。
+	MemberNames []string `json:"member_names,omitempty"`
 	UnreadCount   int64      `json:"unread_count"`
 	IsMuted       bool       `json:"is_muted"`
 	IsPinned      bool       `json:"is_pinned"`
@@ -196,7 +204,43 @@ func (s *ConversationService) List(ctx context.Context, userID uuid.UUID) ([]Con
 
 		dtos = append(dtos, dto)
 	}
+
+	s.fillMemberAvatars(ctx, dtos)
 	return dtos, nil
+}
+
+// fillMemberAvatars 给本页的群会话补成员头像与昵称（客户端据此拼合群头像）。
+//
+// 先收齐全部群会话 ID 再一次性查回，整页只加一条查询；单聊不填，
+// 它已有对端头像回落。查询失败只告警不中断：群头像是展示增强，
+// 不该让整个会话列表接口挂掉。
+func (s *ConversationService) fillMemberAvatars(ctx context.Context, dtos []ConversationDTO) {
+	groupIDs := make([]uuid.UUID, 0, len(dtos))
+	for _, dto := range dtos {
+		if dto.Type == model.ConversationTypeGroup {
+			groupIDs = append(groupIDs, dto.ID)
+		}
+	}
+	if len(groupIDs) == 0 {
+		return
+	}
+	briefs, err := s.convRepo.MemberBriefsByConversation(ctx, groupIDs)
+	if err != nil {
+		s.logger.Warn("load group member avatars failed", zap.Error(err))
+		return
+	}
+	for i := range dtos {
+		b, ok := briefs[dtos[i].ID]
+		if !ok {
+			continue
+		}
+		avatars := make([]string, len(b))
+		names := make([]string, len(b))
+		for j, m := range b {
+			avatars[j], names[j] = m.AvatarURL, m.Nickname
+		}
+		dtos[i].MemberAvatars, dtos[i].MemberNames = avatars, names
+	}
 }
 
 // previewOf 将消息内容压缩为列表预览：返回 (正文, 类型标记)。
@@ -383,6 +427,12 @@ func (s *ConversationService) CreateGroup(
 		},
 		UpdatedAt: sysMsg.CreatedAt,
 	}
+
+	// 建群当场带上成员头像：客户端据此立刻拼出群头像，不必等下一次拉会话列表。
+	// 走列表同一个填充函数而不是另写一条查询，省得两处排序规则日后走岔。
+	filled := []ConversationDTO{*dto}
+	s.fillMemberAvatars(ctx, filled)
+	dto.MemberAvatars, dto.MemberNames = filled[0].MemberAvatars, filled[0].MemberNames
 
 	s.logger.Info("group conversation created",
 		zap.String("conversation_id", conv.ID.String()),

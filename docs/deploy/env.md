@@ -150,16 +150,16 @@
 
 供 `docker-compose.prod.yml` 与 `install.sh` 使用，见 [`deploy/.env.prod.example`](../../deploy/.env.prod.example)。
 
-| 变量                                                                          | 说明                                                                                                     |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `DOMAIN_APP` / `DOMAIN_API` / `DOMAIN_WS` / `DOMAIN_ADMIN` / `DOMAIN_STORAGE` | 五个子域名，须已解析到本机；`DOMAIN_STORAGE` 是对象存储对外域名（客户端下载图片/语音/视频/头像走它）     |
-| `ADMIN_EMAIL`                                                                 | Let's Encrypt 到期通知邮箱                                                                               |
-| `DB_PASSWORD` / `REDIS_PASSWORD` / `JWT_SECRET` / `MINIO_*`                   | 留空则 `install.sh` 自动生成随机值                                                                       |
-| `PRESENCE_BACKEND`                                                            | 多实例部署改 `redis`                                                                                     |
-| `DISPATCHER_BACKEND`                                                          | 多实例部署改 `redis`（默认 `inproc` 仅影响实时帧跨实例投递）                                             |
+| 变量                                                                          | 说明                                                                                                                                                                                                                                |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DOMAIN_APP` / `DOMAIN_API` / `DOMAIN_WS` / `DOMAIN_ADMIN` / `DOMAIN_STORAGE` | 五个子域名，须已解析到本机；`DOMAIN_STORAGE` 是对象存储对外域名（客户端下载图片/语音/视频/头像走它）                                                                                                                                |
+| `ADMIN_EMAIL`                                                                 | Let's Encrypt 到期通知邮箱                                                                                                                                                                                                          |
+| `DB_PASSWORD` / `REDIS_PASSWORD` / `JWT_SECRET` / `MINIO_*`                   | 留空则 `install.sh` 自动生成随机值                                                                                                                                                                                                  |
+| `PRESENCE_BACKEND`                                                            | 多实例部署改 `redis`                                                                                                                                                                                                                |
+| `DISPATCHER_BACKEND`                                                          | 多实例部署改 `redis`（默认 `inproc` 仅影响实时帧跨实例投递）                                                                                                                                                                        |
 | `TURN_SECRET`                                                                 | coturn 与后端共用的 TURN 密钥，留空则 `install.sh` 自动生成：拿它渲染 `coturn/turnserver.prod.conf` 的 `static-auth-secret`，compose 同时把它作为 `YUANCHAT_TURN_STATIC_AUTH_SECRET` 传给后端，故只有这一个变量（两边同值是硬要求） |
-| `PUBLIC_IP`                                                                   | **必填**，本机**外网** IP（`curl -s https://api.ipify.org`）。渲染进 coturn 的 `external-ip`；无法自动探测（NAT 内取到的是内网地址），留空 `install.sh` 直接报错 |
-| `APP_VERSION`                                                                 | 自建镜像 tag，**必填**（禁止 `latest`；未设置 compose 直接报错）                                         |
-| `TZ`                                                                          | 容器时区，默认 `Asia/Shanghai`                                                                           |
+| `PUBLIC_IP`                                                                   | **必填**，本机**外网** IP（`curl -s https://api.ipify.org`）。渲染进 coturn 的 `external-ip`；无法自动探测（NAT 内取到的是内网地址），留空 `install.sh` 直接报错                                                                    |
+| `APP_VERSION`                                                                 | 自建镜像 tag，**必填**（禁止 `latest`；未设置 compose 直接报错）                                                                                                                                                                    |
+| `TZ`                                                                          | 容器时区，默认 `Asia/Shanghai`                                                                                                                                                                                                      |
 
 > `deploy/.env` 含明文凭据，已被 `.gitignore` 排除，**切勿提交**。

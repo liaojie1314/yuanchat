@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { StickerImage } from "../StickerImage";
+import { StickerImage } from "../stickers/StickerImage";
 import * as shared from "@yuanchat/shared";
 
 vi.mock("@yuanchat/shared", async () => {

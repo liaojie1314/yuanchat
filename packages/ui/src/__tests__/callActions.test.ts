@@ -12,7 +12,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chatSocket, useCallStore } from "@yuanchat/shared";
-import { joinCall, setCallLauncher, startCall, type CallLaunchRequest } from "../callActions";
+import { joinCall, setCallLauncher, startCall, type CallLaunchRequest } from "../call/callActions";
 
 const sent: Array<{ type: string; payload: unknown }> = [];
 const getUserMedia = vi.fn(async () => ({ getTracks: () => [] }) as unknown as MediaStream);

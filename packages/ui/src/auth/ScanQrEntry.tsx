@@ -30,7 +30,7 @@ import {
   registerBackInterceptor,
   type QrScanIdentity,
 } from "@yuanchat/shared";
-import { ConfirmDialog } from "../ConfirmDialog";
+import { ConfirmDialog } from "../primitives/ConfirmDialog";
 import { mapAuthError } from "./mapAuthError";
 import { parseLoginQr } from "./parseLoginQr";
 

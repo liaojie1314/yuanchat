@@ -63,6 +63,8 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
         "name": "产品研发群",
         "avatar_url": null,
         "member_count": 3,
+        "member_avatars": ["https://cdn/a.png", "", "https://cdn/c.png"],
+        "member_names": ["Alice", "Bob", "Carol"],
         "unread_count": 2,
         "is_muted": false,
         "is_pinned": false,
@@ -91,6 +93,12 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 - `peer` 仅单聊返回；单聊 `name`/`avatar_url` 为空时前端用 `peer` 填充。
 - `mention_unread`（v0.2）：群消息 @ 我未读标记；进入会话调用 `message.read` 时后端顺带清零（配合 `last_read_seq` 推进）。前端据此在会话列表条目显示 `[@我]` 高亮前缀。
 - `is_pinned` / `pinned_at`（v0.4 A6）：本人置顶态；列表排序置顶优先、组内按 pinned_at 倒序（前端实现）。
+- `member_avatars` / `member_names`：仅群聊返回，供客户端按微信规则拼合群头像。
+  两个数组**同序等长**，最多 9 项（九宫格上限，超出的成员不返回），顺序与成员列表一致
+  （群主在前，其余按昵称升序）。**没设头像的成员返回空串占位而不是跳过**——跳过会让格子
+  与成员次序错位，且客户端拿不到该位置去用 `member_names` 的首字兜底。群自身设了
+  `avatar_url` 时这两个字段照常返回，用群头像还是拼合由客户端决定。
+  建群接口 `POST /conversations` 的响应同样带这两个字段，新建的群不必等下一次拉列表才显示头像。
 - `announcement` / `announcement_updated_at`（v0.4 A7）：群公告正文与最近变更时间；仅群聊有意义，无公告时两字段均不出现（`omitempty`）。
 - `last_message`（v0.4 A7）：受本人「清空聊天记录」水位影响——清空后水位内的旧消息不再作为预览返回（对方列表不受影响）。
 - `last_message.preview_kind`（v0.4 H1）：消息类型标记，取值 `text` / `system` / `image` / `file` / `voice` / `video` / `sticker` / `encrypted` / `unknown`。
@@ -119,6 +127,8 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
     "name": "产品研发群",
     "avatar_url": null,
     "member_count": 3,
+    "member_avatars": ["https://cdn/a.png", "", "https://cdn/c.png"],
+    "member_names": ["Alice", "Bob", "Carol"],
     "unread_count": 0,
     "is_muted": false,
     "last_seq": 1,

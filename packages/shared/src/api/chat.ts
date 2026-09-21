@@ -37,6 +37,10 @@ export interface ConversationDTO {
   name: string;
   avatar_url?: string | null;
   member_count: number;
+  /** 群成员头像（最多 9 个，与成员列表同序；无头像的成员为空串占位），仅群聊返回 */
+  member_avatars?: string[];
+  /** 群成员昵称（与 member_avatars 同序等长），无头像的格子据此取首字兜底 */
+  member_names?: string[];
   unread_count: number;
   is_muted: boolean;
   is_pinned?: boolean;
@@ -212,6 +216,8 @@ export function mapConversation(dto: ConversationDTO): Conversation {
     pinnedAt: dto.pinned_at ?? undefined,
     mentionUnread: dto.mention_unread ?? false,
     memberCount: dto.member_count,
+    memberAvatars: dto.member_avatars,
+    memberNames: dto.member_names,
     lastSeq: dto.last_seq,
     myLastReadSeq: dto.my_last_read_seq,
     peerId: dto.peer ? dto.peer.id : undefined,

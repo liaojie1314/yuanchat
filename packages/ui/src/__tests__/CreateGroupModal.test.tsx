@@ -13,7 +13,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { useContactStore, useConversationStore } from "@yuanchat/shared";
 import type { Conversation } from "@yuanchat/shared";
-import { CreateGroupModal } from "../CreateGroupModal";
+import { CreateGroupModal } from "../contacts/CreateGroupModal";
 
 const NEW_CONV: Conversation = {
   id: "g-new",

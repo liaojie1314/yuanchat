@@ -18,7 +18,7 @@
     "build": "echo 'design-system: no build needed'",
     "lint": "echo 'design-system: no lint'",
     "typecheck": "tsc --noEmit",
-    "clean": "echo 'design-system: clean'",
+    "clean": "rm -rf dist coverage",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

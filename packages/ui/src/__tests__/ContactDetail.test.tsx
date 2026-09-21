@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { ContactDetail } from "../ContactDetail";
+import { ContactDetail } from "../contacts/ContactDetail";
 import type { Friend, PublicProfile } from "@yuanchat/shared";
 
 // fetchPublicProfile 返回固定资料，断言信息卡渲染签名 / 性别
@@ -11,6 +11,8 @@ const PROFILE: PublicProfile = {
   shortId: 88888,
   bio: "热爱开源",
   gender: 1,
+  statusEmoji: "",
+  statusText: "",
 };
 
 const fetchPublicProfile = vi.fn(async () => PROFILE);

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
-import { MessageImage } from "../MessageImage";
+import { MessageImage } from "../chat/MessageImage";
 
 // getDownloadUrl 由 files api 提供：桩掉以避免真实 fetch，断言 key→url 换取路径
 const getDownloadUrl = vi.fn(async (key: string) => "https://signed/" + key);

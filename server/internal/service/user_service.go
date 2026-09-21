@@ -313,12 +313,29 @@ func (s *UserService) Profile(ctx context.Context, userID uuid.UUID) (*model.Use
 	return user, nil
 }
 
-// UpdateProfile 更新用户资料字段（nil 表示不改），持久化后返回最新 user。
+// ProfilePatch 资料更新补丁：nil 字段表示本次不改。
+type ProfilePatch struct {
+	Nickname  *string
+	AvatarURL *string
+	Bio       *string
+	Gender    *int16
+
+	// StatusEmoji / StatusText 个人状态。传空串表示清除状态。
+	StatusEmoji *string
+	StatusText  *string
+	// StatusDuration 状态有效秒数：0 或 nil 表示不自动清除。
+	//
+	// 收秒数而非绝对过期时刻：客户端时钟可能偏移，直接收 expires_at 会让
+	// 快了几分钟的设备把状态写成「一设置就已过期」。「今天」这类语义由
+	// 客户端按本地时区换算成秒数，服务端不猜时区。
+	StatusDuration *int64
+}
+
+// UpdateProfile 更新用户资料字段（patch 中 nil 表示不改），持久化后返回最新 user。
 func (s *UserService) UpdateProfile(
 	ctx context.Context,
 	userID uuid.UUID,
-	nickname, avatarURL, bio *string,
-	gender *int16,
+	patch ProfilePatch,
 ) (*model.User, error) {
 	user, err := s.repo.FindByID(ctx, userID)
 	if err != nil {
@@ -328,17 +345,32 @@ func (s *UserService) UpdateProfile(
 		return nil, ErrUserNotFound
 	}
 
-	if nickname != nil {
-		user.Nickname = *nickname
+	if patch.Nickname != nil {
+		user.Nickname = *patch.Nickname
 	}
-	if avatarURL != nil {
-		user.AvatarURL = avatarURL
+	if patch.AvatarURL != nil {
+		user.AvatarURL = patch.AvatarURL
 	}
-	if bio != nil {
-		user.Bio = bio
+	if patch.Bio != nil {
+		user.Bio = patch.Bio
 	}
-	if gender != nil {
-		user.Gender = *gender
+	if patch.Gender != nil {
+		user.Gender = *patch.Gender
+	}
+	if patch.StatusEmoji != nil {
+		user.StatusEmoji = *patch.StatusEmoji
+	}
+	if patch.StatusText != nil {
+		user.StatusText = *patch.StatusText
+	}
+	// 只要本次提交涉及状态，就重算过期时刻
+	if patch.StatusEmoji != nil || patch.StatusText != nil {
+		if patch.StatusDuration != nil && *patch.StatusDuration > 0 {
+			exp := time.Now().Add(time.Duration(*patch.StatusDuration) * time.Second)
+			user.StatusExpiresAt = &exp
+		} else {
+			user.StatusExpiresAt = nil
+		}
 	}
 
 	if err := s.repo.Update(ctx, user); err != nil {
@@ -347,14 +379,14 @@ func (s *UserService) UpdateProfile(
 
 	// 敏感词审核（打标不阻塞）：只对本次实际提交的字段打标，命中照常写库
 	if s.moderation != nil && s.ugcRepo != nil {
-		if nickname != nil {
-			if hit := s.moderation.Check(*nickname); hit != "" {
-				s.flagUGC(ctx, model.UGCTypeNickname, *nickname, hit, userID)
+		if patch.Nickname != nil {
+			if hit := s.moderation.Check(*patch.Nickname); hit != "" {
+				s.flagUGC(ctx, model.UGCTypeNickname, *patch.Nickname, hit, userID)
 			}
 		}
-		if bio != nil {
-			if hit := s.moderation.Check(*bio); hit != "" {
-				s.flagUGC(ctx, model.UGCTypeBio, *bio, hit, userID)
+		if patch.Bio != nil {
+			if hit := s.moderation.Check(*patch.Bio); hit != "" {
+				s.flagUGC(ctx, model.UGCTypeBio, *patch.Bio, hit, userID)
 			}
 		}
 	}

@@ -2,7 +2,8 @@
  * 已登录状态下的主导航区域 E2E 测试
  *
  * @description
- * 覆盖：聊天/通讯录/我的收藏/设置四大区域在已登录状态下可正常访问。
+ * 覆盖：聊天/通讯录/朋友圈/表情商城/设置在已登录状态下可正常访问。
+ * 收藏页仍可直达（路由还在），但入口已从导航移到设置页，故不从导航点进。
  * 通过 setAuth 直接注入认证状态，跳过 UI 登录流程节省时间。
  */
 
@@ -50,9 +51,9 @@ test.describe("Authenticated Navigation", () => {
     await page.getByRole("link", { name: "通讯录" }).first().click();
     await expect(page).toHaveURL(/\/contacts/);
 
-    // 点击我的收藏
-    await page.getByRole("link", { name: "我的收藏" }).first().click();
-    await expect(page).toHaveURL(/\/favorites/);
+    // 点击朋友圈（收藏已移出导航，改从设置页进）
+    await page.getByRole("link", { name: "朋友圈" }).first().click();
+    await expect(page).toHaveURL(/\/moments/);
 
     // 点击表情商城（桌面侧栏第 5 项）
     await page.getByRole("link", { name: "表情商城" }).first().click();

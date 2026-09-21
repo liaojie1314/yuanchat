@@ -20,6 +20,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { useMessageStore } from "../store/messageStore";
 import { useCallStore } from "../store/callStore";
+import { useMomentsStore } from "../store/momentsStore";
 import type { ChatMessage } from "../store/messageStore";
 import type { ServerFrames } from "../ws/chatSocket";
 
@@ -271,6 +272,62 @@ describe("server-frames golden 契约", () => {
       expect(useCallStore.getState().phase).toBe("idle");
       expect(useCallStore.getState().endReason).toBe("completed");
       expect(useCallStore.getState().callId).toBeNull();
+    });
+  });
+
+  describe("moments.activity", () => {
+    const raw = frameOf("moments.activity");
+
+    it("字段集合与前端类型声明完全一致（多一个或少一个都红）", () => {
+      expect(Object.keys(raw).sort()).toEqual(
+        [
+          "id",
+          "kind",
+          "post_id",
+          "actor_id",
+          "actor_nickname",
+          "actor_avatar_url",
+          "comment_preview",
+          "created_at",
+        ].sort(),
+      );
+      expect(typeof raw.kind).toBe("number");
+      expect(typeof raw.comment_preview).toBe("string");
+      expect(Number.isFinite(new Date(String(raw.created_at)).getTime())).toBe(true);
+    });
+
+    it("喂进 pushActivity 后未读 +1 且新互动排在列表头部", () => {
+      const p: ServerFrames["moments.activity"] = {
+        id: raw.id as string,
+        kind: raw.kind as number,
+        post_id: raw.post_id as string,
+        actor_id: raw.actor_id as string,
+        actor_nickname: raw.actor_nickname as string,
+        actor_avatar_url: raw.actor_avatar_url as string,
+        comment_preview: raw.comment_preview as string,
+        created_at: raw.created_at as string,
+      };
+      useMomentsStore.setState({ activities: [], unreadCount: 0 });
+      useMomentsStore.getState().pushActivity({
+        id: p.id,
+        kind: p.kind === 1 ? 1 : 2,
+        postId: p.post_id,
+        actor: {
+          id: p.actor_id,
+          nickname: p.actor_nickname,
+          avatarUrl: p.actor_avatar_url,
+          statusEmoji: "",
+        },
+        commentPreview: p.comment_preview,
+        postPreview: "",
+        postThumbKey: "",
+        read: false,
+        createdAt: p.created_at,
+      });
+
+      expect(useMomentsStore.getState().unreadCount).toBe(1);
+      expect(useMomentsStore.getState().activities[0].id).toBe(p.id);
+      expect(useMomentsStore.getState().activities[0].actor.nickname).toBe(p.actor_nickname);
     });
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
-import { ResizeHandle } from "../ResizeHandle";
+import { ResizeHandle } from "../primitives/ResizeHandle";
 
 describe("ResizeHandle", () => {
   it("renders with default transparent background", () => {

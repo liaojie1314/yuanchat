@@ -10,7 +10,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { useAuthStore } from "@yuanchat/shared";
 import type { ConversationMember } from "@yuanchat/shared";
-import { CallInviteModal } from "../CallInviteModal";
+import { CallInviteModal } from "../call/CallInviteModal";
 
 const MEMBERS: ConversationMember[] = [
   { userId: "me", nickname: "Me", avatarUrl: null, role: 2 },

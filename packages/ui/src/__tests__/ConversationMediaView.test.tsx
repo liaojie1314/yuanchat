@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import i18n from "@yuanchat/design-system/i18n";
-import { ConversationMediaView } from "../ConversationMediaView";
+import { ConversationMediaView } from "../chat/ConversationMediaView";
 import * as shared from "@yuanchat/shared";
 import type { MediaItem } from "@yuanchat/shared";
 
@@ -175,7 +175,27 @@ describe("ConversationMediaView", () => {
     fireEvent.click(card);
 
     // 相册自身也是 dialog，故按 aria-label 精确定位大图查看器
-    expect(screen.getByRole("dialog", { name: label("chat.image.alt") })).toBeInTheDocument();
+    // （开层前要先把这一批图整体签成图集，故是异步的）
+    expect(
+      await screen.findByRole("dialog", { name: label("chat.image.alt") }),
+    ).toBeInTheDocument();
+  });
+
+  it("点图片开的是图集：已加载的图都能左右翻，单图不出翻页", async () => {
+    mockedFetch().mockResolvedValue({
+      items: [imageItem(3), imageItem(2), imageItem(1)],
+      hasMore: false,
+    });
+    renderAlbum();
+
+    const card = await screen.findByTestId("media-image-2");
+    await waitFor(() => expect(card.querySelector("img")).not.toBeNull());
+    fireEvent.click(card);
+
+    // 点的是第二张：页码 2/3，且左右都还有
+    expect((await screen.findByTestId("lightbox-counter")).textContent).toBe("2/3");
+    expect(screen.getByRole("button", { name: label("chat.lightbox.prev") })).toBeEnabled();
+    expect(screen.getByRole("button", { name: label("chat.lightbox.next") })).toBeEnabled();
   });
 
   it("安卓系统返回键先关大图层，再关相册", async () => {
@@ -185,7 +205,9 @@ describe("ConversationMediaView", () => {
     const card = await screen.findByTestId("media-image-1");
     await waitFor(() => expect(card.querySelector("img")).not.toBeNull());
     fireEvent.click(card);
-    expect(screen.getByRole("dialog", { name: label("chat.image.alt") })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("dialog", { name: label("chat.image.alt") }),
+    ).toBeInTheDocument();
 
     // 第一次返回：只关大图层，相册留着
     expect(shared.runBackInterceptors()).toBe(true);
