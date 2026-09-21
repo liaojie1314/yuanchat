@@ -117,6 +117,7 @@ export function ForwardModal({
                     name={c.name}
                     src={c.avatarUrl}
                     avatars={c.memberAvatars}
+                    names={c.memberNames}
                     size="sm"
                   />
                 ) : (
@@ -151,6 +152,7 @@ export function ForwardModal({
                     name={c.name}
                     src={c.avatarUrl}
                     avatars={c.memberAvatars}
+                    names={c.memberNames}
                     size="md"
                   />
                 ) : (

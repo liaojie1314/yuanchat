@@ -397,7 +397,12 @@ export function ChatWindow({
           </button>
         )}
         {conv.type === "group" ? (
-          <GroupAvatar name={conv.name} src={conv.avatarUrl} avatars={conv.memberAvatars} />
+          <GroupAvatar
+            name={conv.name}
+            src={conv.avatarUrl}
+            avatars={conv.memberAvatars}
+            names={conv.memberNames}
+          />
         ) : (
           <Avatar
             name={conv.name}

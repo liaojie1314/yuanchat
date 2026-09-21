@@ -79,4 +79,51 @@ describe("GroupAvatar", () => {
     expect(got.rows).toBe("1,2");
     expect(got.fallbacks).toBe(3);
   });
+
+  // 空头像格靠成员昵称首字兜底：两列及以内才写字（三列的格子只有外框 1/3 宽，写字必糊）
+  it("空格子取该成员昵称首字，不是群名首字", () => {
+    const { container } = render(
+      <GroupAvatar
+        name="产品研发群"
+        avatars={["", "https://cdn/1.png", ""]}
+        names={["陈曦", "林墨", "苏晴"]}
+      />,
+    );
+    const texts = Array.from(container.querySelectorAll("[data-group-fallback]")).map(
+      (el) => el.textContent,
+    );
+    expect(texts).toEqual(["陈", "苏"]);
+  });
+
+  it("同一昵称在不同群里配色一致，同群不同人配色不同", () => {
+    const colorsOf = (groupName: string) =>
+      Array.from(
+        render(
+          <GroupAvatar name={groupName} avatars={["", ""]} names={["陈曦", "林墨"]} />,
+        ).container.querySelectorAll("[data-group-fallback]"),
+      ).map((el) => (el as HTMLElement).style.backgroundColor);
+
+    const a = colorsOf("产品研发群");
+    const b = colorsOf("设计组");
+    expect(a[0]).toBe(b[0]); // 陈曦 换个群仍是同一个色
+    expect(a[0]).not.toBe(a[1]); // 同群里两个人不撞色
+  });
+
+  it("没传 names 时退回群名首字（旧调用方不炸）", () => {
+    const { container } = render(<GroupAvatar name="产品研发群" avatars={["", ""]} />);
+    const texts = Array.from(container.querySelectorAll("[data-group-fallback]")).map(
+      (el) => el.textContent,
+    );
+    expect(texts).toEqual(["产", "产"]);
+  });
+
+  it("names 比 avatars 短时，多出来的格子退回群名首字", () => {
+    const { container } = render(
+      <GroupAvatar name="产品研发群" avatars={["", "", ""]} names={["陈曦"]} />,
+    );
+    const texts = Array.from(container.querySelectorAll("[data-group-fallback]")).map(
+      (el) => el.textContent,
+    );
+    expect(texts).toEqual(["陈", "产", "产"]);
+  });
 });

@@ -201,6 +201,7 @@ export function ChatDetail({
               name={conv.name}
               src={conv.avatarUrl}
               avatars={conv.memberAvatars}
+              names={conv.memberNames}
               size="xl"
             />
           ) : (

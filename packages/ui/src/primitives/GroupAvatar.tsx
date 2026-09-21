@@ -17,10 +17,17 @@
  * @param name - 群名，用于首字母与兜底格的稳定配色
  * @param src - 群自己的头像 URL，非空时直接用它，不拼合
  * @param avatars - 成员头像 URL，按成员顺序；没设头像的成员是空串
+ * @param names - 成员昵称，与 `avatars` 同序等长；空串格子取它的首字与配色。
+ *   不传则退回群名首字（旧数据与未接线的调用方都不会炸）
  * @param size - 尺寸，与 Avatar 同一套 sm/md/lg/xl
  *
  * @example
- * <GroupAvatar name="产品研发群" src={conv.avatarUrl} avatars={conv.memberAvatars} />
+ * <GroupAvatar
+ *   name="产品研发群"
+ *   src={conv.avatarUrl}
+ *   avatars={conv.memberAvatars}
+ *   names={conv.memberNames}
+ * />
  */
 import { getAvatarColor } from "@yuanchat/shared/utils";
 import { cn } from "@yuanchat/shared/utils";
@@ -59,11 +66,14 @@ function columnsOf(count: number): number {
   return 3;
 }
 
+/** 一格的数据：头像 URL（可能为空串）与该成员昵称（可能缺） */
+type Tile = { url: string; member: string };
+
 /** 按微信规则切行：首行放余数（居中），其余行放满 */
-function splitRows(tiles: string[], cols: number): string[][] {
+function splitRows(tiles: Tile[], cols: number): Tile[][] {
   const rowCount = Math.ceil(tiles.length / cols);
   const first = tiles.length - (rowCount - 1) * cols;
-  const out: string[][] = [tiles.slice(0, first)];
+  const out: Tile[][] = [tiles.slice(0, first)];
   for (let i = 0; i < rowCount - 1; i++) {
     out.push(tiles.slice(first + i * cols, first + (i + 1) * cols));
   }
@@ -74,14 +84,18 @@ export function GroupAvatar({
   name,
   src,
   avatars,
+  names,
   size = "md",
 }: {
   name: string;
   src?: string | null;
   avatars?: string[];
+  names?: string[];
   size?: "sm" | "md" | "lg" | "xl";
 }) {
-  const tiles = (avatars ?? []).slice(0, MAX_TILES);
+  const tiles: Tile[] = (avatars ?? [])
+    .slice(0, MAX_TILES)
+    .map((url, i) => ({ url, member: names?.[i] ?? "" }));
 
   // 群头像优先；一个成员头像都没有时也退回单图头像（首字母）
   if (src || tiles.length === 0) {
@@ -105,11 +119,11 @@ export function GroupAvatar({
     >
       {rows.map((slice, r) => (
         <div key={r} className="flex w-full justify-center gap-px" style={{ height: edge }}>
-          {slice.map((url, i) => (
+          {slice.map((tile, i) => (
             <GroupTile
               key={r + "-" + i}
-              url={url}
-              name={name}
+              tile={tile}
+              groupName={name}
               seed={r + "-" + i}
               edge={edge}
               withInitial={cols <= 2}
@@ -122,29 +136,36 @@ export function GroupAvatar({
   );
 }
 
-/** 一格：有图用图，没图用该位置的稳定色块（配色复用 getAvatarColor） */
+/**
+ * 一格：有图用图，没图用首字色块。
+ *
+ * 首字与配色都优先取该成员昵称——同一个人在哪个群都是同一个色，
+ * 认人比认群更有用；昵称缺失才退回群名 + 位置种子，避免一群没头像的
+ * 成员拼出一整块同色。
+ */
 function GroupTile({
-  url,
-  name,
+  tile,
+  groupName,
   seed,
   edge,
   withInitial,
   size,
 }: {
-  url: string;
-  name: string;
+  tile: Tile;
+  groupName: string;
   seed: string;
   edge: string;
   withInitial: boolean;
   size: "sm" | "md" | "lg" | "xl";
 }) {
-  if (url) {
+  if (tile.url) {
     return (
       <span data-group-tile className="h-full overflow-hidden" style={{ width: edge }}>
-        <img src={url} alt="" className="h-full w-full object-cover" />
+        <img src={tile.url} alt="" className="h-full w-full object-cover" />
       </span>
     );
   }
+  const label = tile.member || groupName;
   return (
     <span
       data-group-tile
@@ -153,11 +174,10 @@ function GroupTile({
         "flex h-full items-center justify-center overflow-hidden font-medium text-white",
         fontSizeMap[size],
       )}
-      // 每格取不同的种子，免得一群没头像的成员拼出一整块同色
-      style={{ width: edge, backgroundColor: getAvatarColor(name + seed) }}
+      style={{ width: edge, backgroundColor: getAvatarColor(tile.member || groupName + seed) }}
     >
       {/* 三列布局的格子只有外框的三分之一宽，写字必糊，只留色块 */}
-      {withInitial ? name.slice(0, 1) : null}
+      {withInitial ? label.slice(0, 1) : null}
     </span>
   );
 }

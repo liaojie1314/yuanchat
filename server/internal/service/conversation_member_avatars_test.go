@@ -243,4 +243,52 @@ func TestCreateGroupReturnsMemberAvatars(t *testing.T) {
 			t.Fatalf("avatar[%d]=%q, want %q (full=%v)", i, dto.MemberAvatars[i], want[i], dto.MemberAvatars)
 		}
 	}
+
+	// 昵称同样当场带上：m01 没头像，那一格要靠昵称首字兜底
+	wantNames := []string{"cg-owner", "cg-m01", "cg-m02"}
+	if len(dto.MemberNames) != len(wantNames) {
+		t.Fatalf("want %d names, got %d (%v)", len(wantNames), len(dto.MemberNames), dto.MemberNames)
+	}
+	for i := range wantNames {
+		if dto.MemberNames[i] != wantNames[i] {
+			t.Fatalf("name[%d]=%q, want %q (full=%v)", i, dto.MemberNames[i], wantNames[i], dto.MemberNames)
+		}
+	}
 }
+
+// TestListMemberNamesAlignWithAvatars 成员昵称与头像同序等长：
+// 前端要靠同一下标的昵称给缺头像那一格填首字，错位就会张冠李戴。
+func TestListMemberNamesAlignWithAvatars(t *testing.T) {
+	db := testDB(t)
+	svc := newConvSvc(db)
+
+	conv, users := newAvatarGroup(t, db, "names", 4, nil)
+	for i, u := range users {
+		if i == 2 { // 第 3 名成员没设头像，正是要靠昵称兜底的那一格
+			setAvatar(t, db, u, nil)
+			continue
+		}
+		setAvatar(t, db, u, strPtr(fmt.Sprintf("https://cdn/names-%02d.png", i)))
+	}
+
+	dto := dtoByID(t, mustList(t, svc, users[0].ID), conv.ID)
+	wantNames := []string{"names-owner", "names-m01", "names-m02", "names-m03"}
+	if len(dto.MemberNames) != len(dto.MemberAvatars) {
+		t.Fatalf("names/avatars length mismatch: %d vs %d (%v / %v)",
+			len(dto.MemberNames), len(dto.MemberAvatars), dto.MemberNames, dto.MemberAvatars)
+	}
+	if len(dto.MemberNames) != len(wantNames) {
+		t.Fatalf("want %d names, got %d (%v)", len(wantNames), len(dto.MemberNames), dto.MemberNames)
+	}
+	for i := range wantNames {
+		if dto.MemberNames[i] != wantNames[i] {
+			t.Fatalf("name[%d]=%q, want %q (full=%v)", i, dto.MemberNames[i], wantNames[i], dto.MemberNames)
+		}
+	}
+	// 缺头像的那一格昵称必须在位，否则前端只能退回群名首字
+	if dto.MemberAvatars[2] != "" || dto.MemberNames[2] == "" {
+		t.Fatalf("slot 2 should be (empty avatar, non-empty name), got (%q, %q)",
+			dto.MemberAvatars[2], dto.MemberNames[2])
+	}
+}
+

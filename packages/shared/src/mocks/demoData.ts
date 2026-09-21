@@ -42,6 +42,22 @@ function demoMemberAvatars(n: number, blanks: number[]): string[] {
   return out;
 }
 
+/** 演示成员昵称池，循环取用；首字用于没设头像的那一格 */
+const DEMO_MEMBER_NAMES = ["陈曦", "林墨", "苏晴", "周野", "郑川", "何澜", "吴桐", "秦屿", "叶蓁"];
+
+/**
+ * 生成 n 个演示成员昵称，与 {@link demoMemberAvatars} 同序等长
+ *
+ * @param n - 成员个数（与头像数一致，服务端同样最多给 9 个）
+ */
+function demoMemberNames(n: number): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    out.push(DEMO_MEMBER_NAMES[i % DEMO_MEMBER_NAMES.length]);
+  }
+  return out;
+}
+
 export const DEMO_CONVERSATIONS: Conversation[] = [
   {
     id: "1",
@@ -57,6 +73,7 @@ export const DEMO_CONVERSATIONS: Conversation[] = [
     memberCount: 28,
     // 28 人群：服务端截断到 9 个，九宫格铺满
     memberAvatars: demoMemberAvatars(9, []),
+    memberNames: demoMemberNames(9),
     onlineCount: 5,
     pinnedMessage: "周五 15:00 发布评审，请提前更新进度看板",
     announcement: "新人入群请先自我介绍，工作日 10:00-19:00 为核心响应时间，请勿深夜 @全体成员",
@@ -98,6 +115,7 @@ export const DEMO_CONVERSATIONS: Conversation[] = [
     memberCount: 9,
     // 9 人群：恰好铺满，且第 2、6 位成员没设头像（空串占位，走昵称首字兜底）
     memberAvatars: demoMemberAvatars(9, [1, 5]),
+    memberNames: demoMemberNames(9),
   },
   {
     id: "5",
@@ -130,6 +148,7 @@ export const DEMO_CONVERSATIONS: Conversation[] = [
     isMuted: false,
     memberCount: 3,
     memberAvatars: demoMemberAvatars(3, []),
+    memberNames: demoMemberNames(3),
   },
   {
     // 10 人群：刚好越过九宫格上限，只给 9 个头像
@@ -142,6 +161,7 @@ export const DEMO_CONVERSATIONS: Conversation[] = [
     isMuted: false,
     memberCount: 10,
     memberAvatars: demoMemberAvatars(9, [8]),
+    memberNames: demoMemberNames(9),
   },
 ];
 

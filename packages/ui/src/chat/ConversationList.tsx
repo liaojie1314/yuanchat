@@ -503,7 +503,12 @@ function ConversationItem({
 
       {/* 群聊拼成员头像（群自己设了头像时 GroupAvatar 直接用它）；单聊仍带在线点 */}
       {conv.type === "group" ? (
-        <GroupAvatar name={conv.name} src={conv.avatarUrl} avatars={conv.memberAvatars} />
+        <GroupAvatar
+          name={conv.name}
+          src={conv.avatarUrl}
+          avatars={conv.memberAvatars}
+          names={conv.memberNames}
+        />
       ) : (
         <Avatar
           name={conv.name}
