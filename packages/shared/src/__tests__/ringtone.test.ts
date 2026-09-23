@@ -46,6 +46,7 @@ describe("ringtone", () => {
 
   afterEach(() => {
     ringtone.stop();
+    vi.unstubAllGlobals();
   });
 
   it("AudioContext 处于 suspended 时会先 resume 再响", async () => {
@@ -71,7 +72,9 @@ describe("ringtone", () => {
 
   it("stop 停掉振荡器并取消震动", () => {
     const vibrate = vi.fn();
-    (navigator as unknown as { vibrate: unknown }).vibrate = vibrate;
+    // navigator 是 Node 21 才有的全局，本仓 engines 允许 20：直接赋值会 ReferenceError，
+    // 按本仓惯例 stub 一个（ringtone 源码自身已对 navigator 缺失做了兜底）
+    vi.stubGlobal("navigator", { vibrate });
     ringtone.playIncoming();
     expect(vibrate).toHaveBeenCalled();
     vibrate.mockClear();
