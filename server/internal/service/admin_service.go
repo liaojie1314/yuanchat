@@ -401,6 +401,8 @@ func (s *AdminService) DismissFlaggedUGC(ctx context.Context, actorID, recordID 
 //   - bio → 清空
 //   - group_name → 置空（前端回退默认群名）
 //   - announcement → 清空公告
+//   - moment_post / moment_comment → 删除那一条（朋友圈没有「默认值」可退回，
+//     整条就是命中内容；软删走与管理端删动态同一条路径）
 //
 // 处置写审计（detail 里带原内容与命中词，便于追溯）。
 func (s *AdminService) ResetFlaggedUGC(ctx context.Context, actorID, recordID uuid.UUID) error {
@@ -461,6 +463,25 @@ func (s *AdminService) ResetFlaggedUGC(ctx context.Context, actorID, recordID uu
 		}
 		s.audit(ctx, actorID, model.AdminActionResetAnnouncement, "conversation", rec.ConversationID.String(),
 			map[string]any{"record_id": recordID.String(), "content": rec.Content, "hit_word": rec.HitWord})
+	case model.UGCTypeMomentPost:
+		if rec.TargetID == nil {
+			return ErrFlaggedUGCNotFound
+		}
+		if err := s.DeleteMomentPost(ctx, actorID, *rec.TargetID); err != nil {
+			// 帖子已被作者自己删掉时按已处置收尾，不把记录卡在待处理
+			if !errors.Is(err, ErrMomentPostNotFound) {
+				return err
+			}
+		}
+	case model.UGCTypeMomentComment:
+		if rec.TargetID == nil {
+			return ErrFlaggedUGCNotFound
+		}
+		if err := s.DeleteMomentComment(ctx, actorID, *rec.TargetID); err != nil {
+			if !errors.Is(err, ErrMomentCommentNotFound) {
+				return err
+			}
+		}
 	default:
 		return ErrFlaggedUGCNotFound
 	}

@@ -259,6 +259,90 @@ func TestAdminResetFlaggedUGC(t *testing.T) {
 	}
 }
 
+// TestAdminResetFlaggedMoment 朋友圈两类的处置是删掉那一条（没有默认值可退回），
+// 且在作者已自删的情况下照样把记录收尾，不留一条永远处置不掉的待办。
+func TestAdminResetFlaggedMoment(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+
+	admin := newAdminTestUser(t, db, "朋友圈重置管理员", model.RoleAdmin)
+	author := newAdminTestUser(t, db, "朋友圈违规作者", model.RoleUser)
+	ugcRepo := repository.NewFlaggedUGCRepository(db)
+	svc := newAdminService(db)
+
+	post := &model.MomentPost{UserID: author.ID, Content: "违规正文"}
+	if err := db.Create(post).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+	comment := &model.MomentComment{PostID: post.ID, UserID: author.ID, Content: "违规评论"}
+	if err := db.Create(comment).Error; err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+
+	postRec := &model.FlaggedUGC{UGCType: model.UGCTypeMomentPost, Content: post.Content,
+		HitWord: testBadWord, UserID: &author.ID, TargetID: &post.ID}
+	cmtRec := &model.FlaggedUGC{UGCType: model.UGCTypeMomentComment, Content: comment.Content,
+		HitWord: testBadWord, UserID: &author.ID, TargetID: &comment.ID}
+	for _, rec := range []*model.FlaggedUGC{postRec, cmtRec} {
+		if err := ugcRepo.Create(ctx, rec); err != nil {
+			t.Fatalf("create record (%s): %v", rec.UGCType, err)
+		}
+		if err := svc.ResetFlaggedUGC(ctx, admin.ID, rec.ID); err != nil {
+			t.Fatalf("reset moment ugc (%s): %v", rec.UGCType, err)
+		}
+	}
+
+	var gotPost model.MomentPost
+	if err := db.Where("id = ?", post.ID).Take(&gotPost).Error; err != nil {
+		t.Fatalf("回查帖子: %v", err)
+	}
+	if gotPost.DeletedAt == nil {
+		t.Fatal("处置后帖子应软删")
+	}
+	var gotCmt model.MomentComment
+	if err := db.Where("id = ?", comment.ID).Take(&gotCmt).Error; err != nil {
+		t.Fatalf("回查评论: %v", err)
+	}
+	if gotCmt.DeletedAt == nil {
+		t.Fatal("处置后评论应软删")
+	}
+
+	var pending int64
+	db.Model(&model.FlaggedUGC{}).Where("handled_at IS NULL").Count(&pending)
+	if pending != 0 {
+		t.Fatalf("pending records = %d, want 0", pending)
+	}
+	for _, action := range []string{model.AdminActionDeleteMomentPost, model.AdminActionDeleteMomentComment} {
+		var n int64
+		db.Model(&model.AdminActionLog{}).Where("actor_id = ? AND action = ?", admin.ID, action).Count(&n)
+		if n != 1 {
+			t.Fatalf("audit log %s count = %d, want 1", action, n)
+		}
+	}
+
+	// 作者先自删、管理端后处置：帖子已不在，记录仍要能关掉
+	gonePost := &model.MomentPost{UserID: author.ID, Content: "已自删的违规正文"}
+	if err := db.Create(gonePost).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+	goneRec := &model.FlaggedUGC{UGCType: model.UGCTypeMomentPost, Content: gonePost.Content,
+		HitWord: testBadWord, UserID: &author.ID, TargetID: &gonePost.ID}
+	if err := ugcRepo.Create(ctx, goneRec); err != nil {
+		t.Fatalf("create record: %v", err)
+	}
+	if _, err := svc.repo.SoftDeleteMomentPost(ctx, gonePost.ID); err != nil {
+		t.Fatalf("author self delete: %v", err)
+	}
+	if err := svc.ResetFlaggedUGC(ctx, admin.ID, goneRec.ID); err != nil {
+		t.Fatalf("帖子已自删时处置不应报错: %v", err)
+	}
+	var stillPending int64
+	db.Model(&model.FlaggedUGC{}).Where("id = ? AND handled_at IS NULL", goneRec.ID).Count(&stillPending)
+	if stillPending != 0 {
+		t.Fatal("帖子已自删时记录仍应关闭")
+	}
+}
+
 // TestAdminListAndDismissFlaggedUGC 队列检索三态过滤 + 放行处置：
 // pending 只看待处理、handled 只看已处置；放行不动业务内容，只关记录并写审计。
 func TestAdminListAndDismissFlaggedUGC(t *testing.T) {

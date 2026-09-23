@@ -236,14 +236,16 @@ async function pagedGetSingle<T>(path: string): Promise<T> {
   return json.data as T;
 }
 
-/** UGC 敏感词命中记录（昵称 / bio / 群名 / 群公告审核队列） */
+/** UGC 敏感词命中记录（昵称 / bio / 群名 / 群公告 / 朋友圈动态与评论审核队列） */
 export interface FlaggedUGC {
   id: string;
-  ugc_type: string; // nickname | bio | group_name | announcement
+  ugc_type: string; // nickname | bio | group_name | announcement | moment_post | moment_comment
   content: string;
   hit_word: string;
   user_id?: string;
   conversation_id?: string;
+  /** 命中内容所在那一行的 id；朋友圈两类靠它定位要删的帖子/评论 */
+  target_id?: string;
   handled_at?: string;
   created_at: string;
 }

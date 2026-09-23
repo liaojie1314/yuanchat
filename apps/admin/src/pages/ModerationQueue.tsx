@@ -296,7 +296,7 @@ function ReportsTab() {
   );
 }
 
-/** UGC 审核队列 tab：昵称 / bio / 群名 / 群公告的敏感词命中记录，可强制重置或放行 */
+/** UGC 审核队列 tab：昵称 / bio / 群名 / 群公告 / 朋友圈动态与评论的敏感词命中记录，可处置或放行 */
 function FlaggedUGCTab() {
   const { t } = useTranslation();
   const [handled, setHandled] = useState<"false" | "true" | "all">("false");
@@ -323,7 +323,14 @@ function FlaggedUGCTab() {
     bio: "admin.ugc.typeBio",
     group_name: "admin.ugc.typeGroupName",
     announcement: "admin.ugc.typeAnnouncement",
+    moment_post: "admin.ugc.typeMomentPost",
+    moment_comment: "admin.ugc.typeMomentComment",
   };
+
+  // 朋友圈两类没有「默认值」可退回，处置就是删掉那一条：按钮与确认文案照实说删除，
+  // 后端仍走同一个 reset 接口按类型分派
+  const isMomentType = (u: FlaggedUGC) =>
+    u.ugc_type === "moment_post" || u.ugc_type === "moment_comment";
 
   const HANDLED_TABS = [
     { value: "false", label: t("admin.moderation.statusPending") },
@@ -384,7 +391,7 @@ function FlaggedUGCTab() {
                     onClick={() => setResetTarget(u)}
                     className="text-label-lg text-error hover:underline"
                   >
-                    {t("admin.ugc.reset")}
+                    {t(isMomentType(u) ? "common.delete" : "admin.ugc.reset")}
                   </button>
                   <button
                     onClick={() => void dismissFlaggedUGC(u.id).then(refresh)}
@@ -402,8 +409,12 @@ function FlaggedUGCTab() {
 
       <ConfirmDialog
         open={resetTarget !== null}
-        title={t("admin.ugc.reset")}
-        message={t("admin.ugc.resetConfirm")}
+        title={t(resetTarget && isMomentType(resetTarget) ? "common.delete" : "admin.ugc.reset")}
+        message={t(
+          resetTarget && isMomentType(resetTarget)
+            ? "admin.ugc.deleteConfirm"
+            : "admin.ugc.resetConfirm",
+        )}
         danger
         onConfirm={() => {
           const target = resetTarget;

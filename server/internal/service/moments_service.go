@@ -25,12 +25,6 @@ var (
 	ErrMomentInvalidMedia = errors.New("moment invalid media")
 )
 
-// 朋友圈内容命中敏感词时写入审核台账的 UGC 类型。
-const (
-	ugcTypeMomentPost    = "moment_post"
-	ugcTypeMomentComment = "moment_comment"
-)
-
 // momentPostPreviewRunes 互动列表里帖子正文摘要的截断长度（按 rune）。
 const momentPostPreviewRunes = 20
 
@@ -138,13 +132,17 @@ func (s *MomentsService) SetModeration(m *ModerationService, r *repository.Flagg
 	s.ugcRepo = r
 }
 
-// flagUGC 记录一条朋友圈敏感词命中。台账写失败只告警不回滚业务写入——
+// flagUGC 记录一条朋友圈敏感词命中。targetID 是命中内容所在帖子/评论的 id，
+// 管理端据此定位并删除。台账写失败只告警不回滚业务写入——
 // 打标不阻塞发布，审核队列少一条的代价远小于用户发不出内容。
-func (s *MomentsService) flagUGC(ctx context.Context, ugcType, content, hitWord string, userID uuid.UUID) {
+func (s *MomentsService) flagUGC(ctx context.Context, ugcType, content, hitWord string, userID, targetID uuid.UUID) {
 	if s.ugcRepo == nil {
 		return
 	}
-	rec := &model.FlaggedUGC{UGCType: ugcType, Content: content, HitWord: hitWord, UserID: &userID}
+	rec := &model.FlaggedUGC{
+		UGCType: ugcType, Content: content, HitWord: hitWord,
+		UserID: &userID, TargetID: &targetID,
+	}
 	if err := s.ugcRepo.Create(ctx, rec); err != nil {
 		s.logger.Warn("record flagged moment ugc failed",
 			zap.String("ugc_type", ugcType), zap.String("user_id", userID.String()), zap.Error(err))
@@ -225,7 +223,7 @@ func (s *MomentsService) CreatePost(ctx context.Context, userID uuid.UUID, in Cr
 		return nil, fmt.Errorf("create post: %w", err)
 	}
 	if hit != "" {
-		s.flagUGC(ctx, ugcTypeMomentPost, in.Content, hit, userID)
+		s.flagUGC(ctx, model.UGCTypeMomentPost, in.Content, hit, userID, post.ID)
 	}
 
 	users, err := s.usersByIDs(ctx, []uuid.UUID{userID})
@@ -349,7 +347,7 @@ func (s *MomentsService) AddComment(ctx context.Context, userID, postID uuid.UUI
 		return nil, fmt.Errorf("create comment: %w", err)
 	}
 	if hit != "" {
-		s.flagUGC(ctx, ugcTypeMomentComment, content, hit, userID)
+		s.flagUGC(ctx, model.UGCTypeMomentComment, content, hit, userID, comment.ID)
 	}
 	if post.UserID != userID {
 		s.recordActivity(ctx, post, userID, model.MomentActivityKindComment, &comment.ID, content)
