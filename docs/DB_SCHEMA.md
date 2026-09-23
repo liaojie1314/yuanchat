@@ -2,7 +2,7 @@
 
 > **前置阅读**：[ARCHITECTURE.md](./ARCHITECTURE.md)
 >
-> 本文按 `server/internal/database/migrations/` 的实际迁移序（001 → 017）重建，
+> 本文按 `server/internal/database/migrations/` 的实际迁移序（001 → 019）重建，
 > 与代码严格同步；旧文档中的 Elasticsearch / MinIO 章节已过时，不在此保留。
 
 ---
@@ -27,7 +27,7 @@
 
 ---
 
-## 二、迁移明细（001 → 017）
+## 二、迁移明细（001 → 019）
 
 ### 001_baseline — 基准 Schema 快照
 
@@ -170,6 +170,26 @@
 - 编辑走「先 CAS 更新 `messages`（`WHERE ... AND edit_count = ?`）再 INSERT 历史行」的单事务。
   反序会先撞上面的唯一索引报 SQLSTATE 23505，把契约里的「CAS 失败 = `(false, nil)`」变成 error。
 
+### 018_g1_moments — 朋友圈与个人状态
+
+- 四张新表：`moments_posts`（正文 + `media JSONB` + `media_kind` + `visibility` + `flagged` + 软删）、
+  `moments_likes`、`moments_comments`（带 `reply_to_user_id`）、`moments_activities`（互动消息）。
+- **可见性不落表**：按 `contacts` / `blocklists` 现有数据实时推导（见
+  `repository.MomentsRepository.VisiblePostsScope`），避免好友关系变更后要回填历史帖子的
+  可见性快照。所有读写路径都收敛到这唯一一处作用域 —— 读一套、写一套就是越权。
+- `media` 用单列 JSONB + `media_kind` 判别而非图/视频两列：两列会出现「都空 / 都不空」
+  的非法组合，靠应用层约束不住。约束 `moments_posts_not_empty CHECK (content <> '' OR media_kind <> 0)`。
+- 帖子分页用 `(created_at, id)` 复合游标，不用 OFFSET。
+- `users` 加三列个人状态：`status_emoji`、`status_text`、`status_expires_at`。
+
+### 019_flagged_ugc_target — 审核台账补对象 id
+
+- `flagged_ugc` 加 `target_id UUID`：命中内容所在那一行的主键。
+- 昵称 / bio / 群名 / 公告四类改的是 `users` / `conversations` 上的一个字段，
+  靠 `user_id` / `conversation_id` 就能定位到要重置的那一行；**朋友圈动态与评论各自成行，
+  同一个人可以有很多条**，没有这列管理端查到命中后无从处置（早先 reset 会直接 404）。
+- 朋友圈两类的处置语义也因此不同：没有「默认值」可退回，整条就是命中内容，故 reset = 删除那一条。
+
 ---
 
 ## 三、最终态关键表结构
@@ -218,8 +238,10 @@ favorites              user_id, message_id, conversation_id, 快照字段, conte
 push_subscriptions  user_id, endpoint(uniq), p256dh, auth, user_agent
 reports             reporter_id, target_type(message|user), target_id, reason,
                     status(0待处理/1保留/2删除), handled_by, handled_at
-flagged_ugc         ugc_type(nickname|bio|group_name|announcement), content,
-                    hit_word, user_id?, conversation_id?, handled_at?, created_at
+flagged_ugc         ugc_type(nickname|bio|group_name|announcement|moment_post|
+                    moment_comment), content, hit_word, user_id?, conversation_id?,
+                    target_id?（命中内容所在行的主键，朋友圈两类靠它定位）,
+                    handled_at?, created_at
 admin_action_logs   actor_id, action, target_type, target_id, detail JSONB
 ```
 
@@ -241,6 +263,22 @@ stickers            pack_id? / owner_id?（CHECK 互斥）, object_key, width, h
                     content_hash   UNIQUE(owner_id, content_hash)
 user_sticker_packs  user_id, pack_id, sort   UNIQUE(user_id, pack_id)
 ```
+
+### 朋友圈与个人状态
+
+```
+moments_posts       user_id, content, media JSONB, media_kind, visibility, flagged,
+                    created_at, deleted_at
+                    CHECK(content <> '' OR media_kind <> 0)
+moments_likes       post_id, user_id   PRIMARY KEY(post_id, user_id)（点赞天然幂等）
+moments_comments    post_id, user_id, reply_to_user_id?, content, flagged, deleted_at
+moments_activities  user_id(被通知人), actor_id(操作者), post_id, comment_id?,
+                    kind, read_at?   — 自赞自评不写行，否则自己点亮自己的红点
+users(+3 列)        status_emoji, status_text, status_expires_at（过期只在读时判定）
+```
+
+可见性不落表，按 `contacts` / `blocklists` 实时推导（`VisiblePostsScope`）；
+帖子分页走 `(created_at, id)` 复合游标。
 
 ---
 
