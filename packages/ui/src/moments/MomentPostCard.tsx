@@ -75,7 +75,13 @@ export function MomentPostCard({
 
   return (
     <article className="border-outline-variant flex gap-3 border-b px-4 py-4">
-      <button type="button" onClick={() => onOpenUser && onOpenUser(post.user.id)}>
+      {/* self-start 不能省：article 是 flex 容器，默认 align-items:stretch 会把这个
+          button 拉成整卡高度，而原生 button 又会把内容垂直居中，头像就掉到图片中间去了 */}
+      <button
+        type="button"
+        onClick={() => onOpenUser && onOpenUser(post.user.id)}
+        className="self-start"
+      >
         <Avatar name={post.user.nickname} src={post.user.avatarUrl || null} size="md" />
       </button>
 
