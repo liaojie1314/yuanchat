@@ -31,26 +31,40 @@ import { registerBackInterceptor, useAuthStore, useBreakpoint } from "@yuanchat/
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "../primitives/Avatar";
 import { ProfileEditView } from "./ProfileEditView";
-import { AccountSection, AppearanceSection, AboutSection } from "./SettingsSections";
+import {
+  AccountSection,
+  AppearanceSection,
+  FavoritesSection,
+  AboutSection,
+} from "./SettingsSections";
 import { APP_VERSION } from "./settingsUtils";
 import { ConfirmDialog } from "../primitives/ConfirmDialog";
 import { ChangePasswordDialog } from "../auth/ChangePasswordDialog";
 import { UserStatusEditor } from "./UserStatusEditor";
 
 /** 设置内容区视图 */
-type SettingsView = "index" | "profile" | "account" | "appearance" | "about";
+type SettingsView = "index" | "profile" | "account" | "appearance" | "favorites" | "about";
 
 /** 设置页分组项：view 为设置页内部视图切换，route 为跳走的独立页面。 */
 type SettingsNavItem =
   | { kind: "view"; view: SettingsView; icon: typeof User; labelKey: string; descKey: string }
-  | { kind: "route"; to: string; icon: typeof User; labelKey: string; descKey: string };
+  | {
+      kind: "route";
+      to: string;
+      icon: typeof User;
+      labelKey: string;
+      descKey: string;
+      /** 仅移动端显示：桌面/平板侧栏已有同一入口，列两遍是重复 */
+      mobileOnly?: boolean;
+    };
 
 /**
  * 设置页分组顺序（移动端列表与桌面左列共用同一数组，保证两端顺序一致）。
  *
- * 收藏与表情商城是 route 项：它们是独立路由页而非设置页内部视图，
- * 跳转带 `state.from` 供安卓返回键回到设置页。收藏自底栏移出后，
- * 这里是桌面端唯一的收藏入口 —— 两端共用一份数组正是为了不再漏掉一端。
+ * 收藏是 view 项而非 route：它和账号/外观/关于长得一样，若点了就跳去另一个顶级
+ * 页面，同一份列表里两种行为会让人以为点错了。表情商城仍是 route（它是完整的商城
+ * 页，塞不进设置右栏），但只在移动端列出 —— 桌面/平板侧栏已有该入口，
+ * 手机底栏没有，删掉手机端这一项就只剩表情选择器一个入口了。
  */
 const SETTINGS_NAV: SettingsNavItem[] = [
   {
@@ -73,10 +87,11 @@ const SETTINGS_NAV: SettingsNavItem[] = [
     icon: Sticker,
     labelKey: "settings.stickerMarket",
     descKey: "settings.stickerMarketDesc",
+    mobileOnly: true,
   },
   {
-    kind: "route",
-    to: "/favorites",
+    kind: "view",
+    view: "favorites",
     icon: Star,
     labelKey: "favorites.title",
     descKey: "settings.favoritesDesc",
@@ -112,6 +127,12 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
     if (item.kind === "route") navigate(item.to, { state: { from: "/settings" } });
     else setView(item.view);
   };
+
+  // 两端渲染同一份数组，只在桌面/平板摘掉 mobileOnly 项；过滤只写一处，
+  // 免得日后加项时漏改一端（导航清单抄两份的老毛病）
+  const navItems = SETTINGS_NAV.filter(
+    (item) => isMobile || item.kind === "view" || !item.mobileOnly,
+  );
 
   // 安卓返回键：手机端子页是组件内部状态而非路由，不拦截的话按返回会被当成
   // 「已在 /settings 根页面」而走退出应用流程，用户预期是先退回设置列表。
@@ -160,6 +181,12 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
         return (
           <MobileHeader show={isMobile} title={t("settings.appearance")} onBack={onBack}>
             <AppearanceSection />
+          </MobileHeader>
+        );
+      case "favorites":
+        return (
+          <MobileHeader show={isMobile} title={t("favorites.title")} onBack={onBack}>
+            <FavoritesSection />
           </MobileHeader>
         );
       case "about":
@@ -303,7 +330,7 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
         <div className="mb-3">{heroCard}</div>
         <div className="mb-4">{statusRow}</div>
         <div className="mb-4 flex flex-col gap-1">
-          {SETTINGS_NAV.map((item) => (
+          {navItems.map((item) => (
             <MobileNavRow
               key={navKey(item)}
               icon={item.icon}
@@ -332,7 +359,7 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
         {heroCard}
         {statusRow}
         <div className="mt-2 flex flex-col gap-1">
-          {SETTINGS_NAV.map((item) => {
+          {navItems.map((item) => {
             // route 项是跳走的独立页面，永不在左列高亮
             const active = item.kind === "view" && view === item.view;
             return (
