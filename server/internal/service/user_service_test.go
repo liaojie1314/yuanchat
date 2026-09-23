@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -276,5 +277,38 @@ func TestLoginWritesLastLoginAt(t *testing.T) {
 	}
 	if stored.LastLoginAt == nil {
 		t.Fatal("登录成功后 last_login_at 应被写入，实际仍为 NULL")
+	}
+}
+
+// TestLoginByShortID 元聊号登录：登录框标的就是「元聊号」，设置页与名片页
+// 也把它当可复制的身份展示，登不进去就是名不副实（早先只认手机号与邮箱）。
+func TestLoginByShortID(t *testing.T) {
+	db := testDB(t)
+	user := newTestUser(t, db, "login-shortid")
+	svc, _ := authSvc(t, db)
+
+	const pw = "Abcdef12"
+	hash, err := password.Hash(pw)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if err := db.Model(user).Update("password_hash", hash).Error; err != nil {
+		t.Fatalf("set password hash: %v", err)
+	}
+
+	ctx := context.Background()
+	account := strconv.FormatInt(user.ShortID, 10)
+	if _, err := svc.Login(ctx, LoginRequest{Account: account, Password: pw}); err != nil {
+		t.Fatalf("按元聊号登录应成功: %v", err)
+	}
+
+	// 手机号这条老路径不能被顺序调整弄坏
+	if _, err := svc.Login(ctx, LoginRequest{Account: *user.Phone, Password: pw}); err != nil {
+		t.Fatalf("按手机号登录应仍然成功: %v", err)
+	}
+
+	// 不存在的短号照旧当凭据错误，不额外泄漏账号是否存在
+	if _, err := svc.Login(ctx, LoginRequest{Account: "999999999", Password: pw}); !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("不存在的元聊号应回 ErrUserNotFound，got %v", err)
 	}
 }
