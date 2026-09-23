@@ -15,6 +15,24 @@
 | Android         | Tauri 2                             | ✅ 可用（签名 APK）                       |
 | iOS             | Tauri 2                             | 📋 计划中（需 Apple 开发者账户）          |
 
+## 界面预览
+
+### Web 端
+
+![Web 端](docs/screenshots/web-moments.png)
+
+### 桌面端
+
+![桌面端](docs/screenshots/desktop-moments.png)
+
+### 管理后台
+
+![管理后台](docs/screenshots/admin-moderation.png)
+
+### 安卓端
+
+<img src="docs/screenshots/android-moments.png" width="300" alt="安卓端" />
+
 ## 已实现功能
 
 ### 认证与用户体系

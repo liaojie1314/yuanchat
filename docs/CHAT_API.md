@@ -1054,14 +1054,21 @@ data 为数组本体，分页字段平级在外：`{code, message, data, total, 
   消息不存在 → `404`；该类型无可预览媒体（text / system / e2ee / 坏数据）→ `404`
   （`message has no media object`）；对象存储不可用 → `503`。只读，不写审计。
 
-**UGC 审核队列（flagged_ugc：昵称 / bio / 群名 / 群公告命中敏感词，内容照常落库不阻塞）**
+**UGC 审核队列（flagged_ugc：昵称 / bio / 群名 / 群公告 / 朋友圈动态与评论命中敏感词，内容照常落库不阻塞）**
 
 - `GET /api/v1/admin/flagged-ugc?type=&handled=&page=&size=` — 分页检索命中记录。
-  `type` ∈ `nickname|bio|group_name|announcement`（缺省全部）；`handled` 三态：
-  缺省 / `false`=待处理、`true`=已处置、`all`=全部。只读。
-- `POST /api/v1/admin/flagged-ugc/:id/reset` — 强制重置命中内容并关闭记录：
-  nickname → 重置为默认昵称「用户{短号}」；bio / 群名 → 清空；公告 → 清空。
-  审计 detail 带原内容与命中词。记录不存在（或已处置）→ `404`。
+  `type` ∈ `nickname|bio|group_name|announcement|moment_post|moment_comment`（缺省全部）；
+  `handled` 三态：缺省 / `false`=待处理、`true`=已处置、`all`=全部。只读。
+  记录含 `target_id`：命中内容所在那一行的主键。前四类改的是 users / conversations
+  上的一个字段，靠 `user_id` / `conversation_id` 即可定位；朋友圈动态与评论各自成行，
+  同一个人可以有很多条，必须靠 `target_id` 才知道处置哪条。
+- `POST /api/v1/admin/flagged-ugc/:id/reset` — 按类型处置并关闭记录：
+  nickname → 重置为默认昵称「用户{短号}」；bio / 群名 → 清空；公告 → 清空；
+  moment_post / moment_comment → **删除那一条**（朋友圈没有「默认值」可退回，整条就是
+  命中内容；软删走与 `DELETE /admin/moments/:id` 同一条路径，审计 action 也同为
+  `delete_moment_post` / `delete_moment_comment`）。作者已自删时记录照常收尾，
+  不留一条永远处置不掉的待办。其余类型审计 detail 带原内容与命中词。
+  记录不存在（或已处置）→ `404`。
 - `DELETE /api/v1/admin/flagged-ugc/:id` — 放行（审核通过，内容维持原样），
   记录置 `handled_at`，幂等（并发重复处置不重复记审计）。响应 `{"dismissed": true}`；
   不存在 → `404`。审计 action=`clear_ugc_flag`。

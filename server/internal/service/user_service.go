@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -254,13 +255,21 @@ func (s *UserService) Login(ctx context.Context, req LoginRequest) (*AuthResult,
 		return nil, ErrAccountLocked
 	}
 
-	// 按手机号或邮箱查用户
+	// 按手机号、邮箱或元聊号查用户
 	var user *model.User
 
 	if strings.Contains(req.Account, "@") {
 		user, err = s.repo.FindByEmail(ctx, req.Account)
 	} else {
 		user, err = s.repo.FindByPhone(ctx, req.Account)
+		// 元聊号登录：登录框标的就是「元聊号」，设置页与名片页又把它做成可复制的身份，
+		// 用户自然会拿它来登录。先手机号后短号，反过来会让手机号登录白查一次；
+		// 两者也不会串：短号从 10000 起递增，要撞上 11 位手机号得有上百亿用户。
+		if err == nil && user == nil {
+			if shortID, convErr := strconv.ParseInt(req.Account, 10, 64); convErr == nil {
+				user, err = s.repo.FindByShortID(ctx, shortID)
+			}
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("find user: %w", err)

@@ -4,6 +4,10 @@
  * @description
  * 展示当前用户收藏的消息列表，支持按类型标签页筛选（全部/文字/图片/文件）。
  * 点击"删除"按钮取消收藏，长列表支持翻页加载。
+ *
+ * @param embedded - 嵌在设置页内部时置 true（见 SettingsSections 的 FavoritesSection）：
+ *   隐去自带页头、也不自己撑满高度和滚动，标题与卡片外框由设置页统一给，
+ *   免得在设置右栏里出现两层滚动容器
  */
 import { useCallback, useEffect, useState } from "react";
 import { FileText, Image, Loader2, MessageSquare, Mic, Smile, Star, Trash2 } from "lucide-react";
@@ -58,10 +62,10 @@ function TypeIcon({ type }: { type: number }) {
   if (type === 3) return <FileText size={16} className="shrink-0 text-orange-400" />;
   if (type === 4) return <Mic size={16} className="shrink-0 text-green-400" />;
   if (type === 8) return <Smile size={16} className="shrink-0 text-yellow-400" />;
-  return <MessageSquare size={16} className="shrink-0 text-gray-400" />;
+  return <MessageSquare size={16} className="text-on-surface-variant shrink-0" />;
 }
 
-export function FavoritesView() {
+export function FavoritesView({ embedded = false }: { embedded?: boolean } = {}) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<TabType>(0);
   const [items, setItems] = useState<FavoriteItem[]>([]);
@@ -136,13 +140,15 @@ export function FavoritesView() {
   ];
 
   return (
-    <div className="flex h-full flex-col">
-      {/* 页头 */}
-      <header className="border-outline-variant bg-surface-container-low flex h-[60px] shrink-0 items-center gap-2 border-b px-4">
-        <Star size={20} className="text-primary shrink-0" />
-        <h1 className="text-title-md text-on-surface font-semibold">{t("favorites.title")}</h1>
-        <div className="flex-1" />
-      </header>
+    <div className={cn("flex flex-col", embedded ? "min-h-0" : "h-full")}>
+      {/* 页头（嵌入设置页时不渲染：那边已有标题与返回） */}
+      {!embedded && (
+        <header className="border-outline-variant bg-surface-container-low flex h-[60px] shrink-0 items-center gap-2 border-b px-4">
+          <Star size={20} className="text-primary shrink-0" />
+          <h1 className="text-title-md text-on-surface font-semibold">{t("favorites.title")}</h1>
+          <div className="flex-1" />
+        </header>
+      )}
 
       {/* 类型标签页 */}
       <div className="border-outline-variant flex shrink-0 gap-1 border-b px-3 pt-2 pb-0">
@@ -162,8 +168,8 @@ export function FavoritesView() {
         ))}
       </div>
 
-      {/* 列表 */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* 列表：整页时自己滚，嵌入时交给设置页右栏滚，免得套两层滚动条 */}
+      <div className={cn(embedded ? "" : "min-h-0 flex-1 overflow-y-auto")}>
         {loading && items.length === 0 && (
           <div className="flex h-32 items-center justify-center">
             <Loader2 size={20} className="text-primary animate-spin" />
@@ -171,30 +177,36 @@ export function FavoritesView() {
         )}
 
         {!loading && items.length === 0 && (
-          <div className="flex h-48 flex-col items-center justify-center gap-2 text-sm text-gray-400">
-            <Star size={32} className="opacity-30" />
+          <div
+            className={cn(
+              "text-on-surface-variant flex flex-col items-center justify-center gap-2 text-sm",
+              embedded ? "h-32" : "h-48",
+            )}
+          >
+            <Star size={28} className="opacity-30" />
             <p>{t("favorites.empty")}</p>
           </div>
         )}
 
         <ul className="divide-outline-variant divide-y">
           {items.map((item) => (
-            <li key={item.id} className="flex items-start gap-3 px-4 py-3">
+            <li
+              key={item.id}
+              className="hover:bg-surface-container-high flex items-start gap-3 px-4 py-3 transition-colors"
+            >
               <TypeIcon type={item.message_type} />
               <div className="min-w-0 flex-1">
-                <div className="mb-0.5 flex items-center gap-1.5">
-                  <span className="truncate text-xs font-medium text-gray-500">
-                    {item.conv_name}
-                  </span>
-                  <span className="text-xs text-gray-400">·</span>
-                  <span className="truncate text-xs text-gray-400">{item.sender_nickname}</span>
+                <div className="text-label-sm text-on-surface-variant mb-0.5 flex items-center gap-1.5">
+                  <span className="truncate font-medium">{item.conv_name}</span>
+                  <span className="opacity-60">·</span>
+                  <span className="truncate opacity-80">{item.sender_nickname}</span>
                 </div>
                 <p className="text-on-surface line-clamp-2 text-sm">{parseExcerpt(item)}</p>
               </div>
               <button
                 onClick={() => void handleRemove(item.message_id)}
                 aria-label={t("favorites.remove")}
-                className="shrink-0 rounded-lg p-1 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20"
+                className="text-on-surface-variant hover:bg-error/10 hover:text-error shrink-0 rounded-lg p-1 transition-colors"
               >
                 <Trash2 size={16} />
               </button>

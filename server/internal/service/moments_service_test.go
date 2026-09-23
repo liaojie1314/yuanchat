@@ -49,7 +49,8 @@ func TestCreatePost_MediaValidation(t *testing.T) {
 	}
 }
 
-// TestCreatePost_Flagged 敏感词命中只打标，不阻塞发布（与消息/贴纸同口径）。
+// TestCreatePost_Flagged 敏感词命中只打标，不阻塞发布（与消息/贴纸同口径）；
+// 审核台账记下帖子 id，管理端才有东西可处置。
 func TestCreatePost_Flagged(t *testing.T) {
 	db := testDB(t)
 	repo := repository.NewMomentsRepository(db)
@@ -68,6 +69,16 @@ func TestCreatePost_Flagged(t *testing.T) {
 	}
 	if !post.Flagged {
 		t.Fatal("命中敏感词应置 flagged=true")
+	}
+	var rec model.FlaggedUGC
+	if err := db.Where("ugc_type = ?", model.UGCTypeMomentPost).Take(&rec).Error; err != nil {
+		t.Fatalf("回查审核台账: %v", err)
+	}
+	if rec.TargetID == nil || *rec.TargetID != post.ID {
+		t.Fatalf("台账 target_id = %v, want 帖子 id %s", rec.TargetID, post.ID)
+	}
+	if rec.HitWord != "违禁词" {
+		t.Fatalf("hit_word = %q", rec.HitWord)
 	}
 }
 

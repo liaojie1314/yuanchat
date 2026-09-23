@@ -5,6 +5,7 @@
  * 从 SettingsScreen 拆出的内容区组件：
  * - AccountSection：分组卡片风信息行（图标 + 标签 + 值 + 复制）
  * - AppearanceSection：主题双卡片可视化选择 + 语言分段控件（Segmented）
+ * - FavoritesSection：收藏列表套上本页统一的标题块与卡片外框
  * - AboutSection：品牌 hero + 版本 + 内部链接（相关信息列表）
  */
 import { useState, type ReactNode } from "react";
@@ -27,6 +28,7 @@ import { SUPPORTED_LOCALES } from "@yuanchat/design-system/i18n";
 import { cn } from "@yuanchat/shared/utils";
 import { copyText } from "../util/copyText";
 import { E2EESection } from "../e2ee/E2EESection";
+import { FavoritesView } from "../favorites/FavoritesView";
 import { APP_VERSION, maskPhone } from "./settingsUtils";
 
 /** 分组标题 + 副标（页面级） */
@@ -290,6 +292,24 @@ export function AppearanceSection() {
         </h3>
         <LanguageSegmented />
       </div>
+    </div>
+  );
+}
+
+/**
+ * 我的收藏：沿用本文件的「标题块 + 卡片」框架包住收藏列表。
+ *
+ * 框架留在这里而不是塞进 FavoritesView：那份组件同时还要当独立整页用，
+ * 让它自己判断该不该长成设置页的样子，等于把两处布局规则混在一个文件里。
+ */
+export function FavoritesSection() {
+  const { t } = useTranslation();
+  return (
+    <div>
+      <SectionHeader title={t("favorites.title")} desc={t("settings.favoritesDesc")} />
+      <InfoCard>
+        <FavoritesView embedded />
+      </InfoCard>
     </div>
   );
 }

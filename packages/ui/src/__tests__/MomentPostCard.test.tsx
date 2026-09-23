@@ -95,4 +95,13 @@ describe("MomentPostCard", () => {
     );
     expect(screen.getByText("🌊")).toBeInTheDocument();
   });
+
+  // 头像必须顶对齐昵称。卡片外层是 flex，默认 align-items:stretch 会把头像那个
+  // button 拉满整卡高度，原生 button 又居中内容——头像就飘到配图中间去了。
+  it("头像容器带 self-start，不被拉成整卡高度", () => {
+    const { container } = render(<MomentPostCard post={makePost({ content: "正文" })} />);
+    const avatarBtn = container.querySelector("article > button");
+    expect(avatarBtn).not.toBeNull();
+    expect(avatarBtn?.className).toContain("self-start");
+  });
 });

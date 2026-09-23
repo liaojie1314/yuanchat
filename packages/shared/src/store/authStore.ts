@@ -156,7 +156,8 @@ export const useAuthStore = create<AuthState>()(
 
       /**
        * 账号 + 密码登录
-       * account 支持手机号 / 邮箱（后端 LoginRequest.Account）
+       * account 支持手机号 / 邮箱 / 元聊号（后端 LoginRequest.Account 按是否含 @ 分派，
+       * 纯数字先查手机号再查元聊号）
        */
       loginWithPassword: async (account: string, password: string) => {
         const data = await apiPost<LoginResponse>("/api/v1/auth/login", {
