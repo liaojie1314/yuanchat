@@ -17,17 +17,6 @@ default-run = "yuanchat-desktop"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-# 通话助手默认编进来，Linux 的 dev 与打包因此不必额外传参；
-# macOS 在 CI 里用 `-- --no-default-features` 关掉它（`--` 之后才透传给 cargo）。
-# 非关不可的是 macOS：cargo 会为包里每个 bin 都产出二进制，tauri 的 bundler
-# 又会把它们统统塞进安装包，而 universal-apple-darwin 下 tauri 只把主程序 lipo
-# 进 target/universal-apple-darwin/release/，助手仍停在两个单架构目录里，
-# bundler 去通用目录取它就报 "does not exist"，整个打包失败。
-# Windows 不关：那边只是白带一个空壳二进制，没有副作用，犯不着动已经能跑的配置。
-[features]
-default = ["call-helper"]
-call-helper = []
-
 # 通话媒体助手：必须是独立进程，不能是主程序里的线程。
 # webrtcbin 拽进的 libsoup-2.4 与 WebKitGTK 的 libsoup-3.0 同进程必 abort，
 # 且该检查无开关可关（详见 src/native_rtc.rs 文件头）。
@@ -35,7 +24,7 @@ call-helper = []
 [[bin]]
 name = "yuanchat-call-helper"
 path = "src/bin/call_helper.rs"
-required-features = ["call-helper"]
+required-features = []
 
 [build-dependencies]
 tauri-build = { version = "2.6.2", features = [] }

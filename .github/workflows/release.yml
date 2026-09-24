@@ -111,13 +111,9 @@ jobs:
           - platform: windows
             os: windows-latest
             args: ""
-          # `--` 之后的参数才会透传给 cargo —— tauri build 自己没有
-          # --no-default-features 这个选项。关掉 Linux 专属的通话助手 bin，
-          # 否则 universal 包会因为助手没被 lipo 进通用目录而打包失败
-          # （理由见 src-tauri/Cargo.toml 的 [features] 注释）
           - platform: macos
             os: macos-latest
-            args: "--target universal-apple-darwin -- --no-default-features"
+            args: "--target universal-apple-darwin"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -185,6 +181,32 @@ jobs:
 
       - name: Install
         run: pnpm install --frozen-lockfile
+
+      # macOS 通用二进制的补丁。
+      # 包里有两个 bin（主程序 + 通话助手），但 tauri 打 universal 包时只把
+      # **主程序** lipo 进 target/universal-apple-darwin/release/，助手仍分别
+      # 留在 aarch64 / x86_64 两个目录里；随后 bundler 去通用目录取助手，
+      # 取不到就报 "does not exist" 并让整个打包失败。这里先自己把它 lipo 好放进去。
+      # 助手在 macOS 上只是个空 main（src/bin/call_helper.rs 按平台分流，
+      # GStreamer 那套实现只在 Linux 编译），所以这步很快。
+      # 注：不能改用 required-features 把这个 bin 在 macOS 上关掉 —— tauri 判定
+      # bin 是否启用只看 CLI 的 -f 参数，不看 cargo 的 default features；一旦判成
+      # 禁用，它会转而按 src/bin/ 的**文件名**去找 call_helper，那个名字 cargo
+      # 根本不会产出，三个平台会一起挂。
+      - name: Pre-lipo call helper (macos)
+        if: matrix.platform == 'macos'
+        working-directory: apps/desktop/src-tauri
+        run: |
+          # build.rs 会读 tauri.conf.json 的 frontendDist(../dist)，此时前端还没构建
+          mkdir -p ../dist
+          for t in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --target "$t" --bin yuanchat-call-helper
+          done
+          mkdir -p target/universal-apple-darwin/release
+          lipo -create -output target/universal-apple-darwin/release/yuanchat-call-helper \
+            target/aarch64-apple-darwin/release/yuanchat-call-helper \
+            target/x86_64-apple-darwin/release/yuanchat-call-helper
+          lipo -info target/universal-apple-darwin/release/yuanchat-call-helper
 
       # macOS/Windows 签名：只有 secret 存在时才注入环境变量，
       # 避免空值让 tauri 误以为要签名（会去 security import 一个空 pfx）
