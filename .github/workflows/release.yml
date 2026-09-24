@@ -108,12 +108,15 @@ jobs:
           - platform: linux
             os: ubuntu-22.04
             args: ""
+          # --no-default-features 关掉 Linux 专属的通话助手 bin（理由见
+          # src-tauri/Cargo.toml 的 [features] 注释），否则 macOS 的
+          # universal 包会因为助手没被 lipo 进通用目录而打包失败
           - platform: windows
             os: windows-latest
-            args: ""
+            args: "--no-default-features"
           - platform: macos
             os: macos-latest
-            args: "--target universal-apple-darwin"
+            args: "--target universal-apple-darwin --no-default-features"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -144,6 +147,12 @@ jobs:
 
       - name: Install Linux deps
         if: matrix.platform == 'linux'
+        # gstreamer 三个 -dev 包是通话助手编译期必需（gstreamer-sys 的 build.rs
+        # 走 pkg-config 找 gstreamer-1.0 / gstreamer-sdp-1.0 / gstreamer-webrtc-1.0，
+        # 找不到直接 "failed to run custom build command"）。
+        # 本机通常早就装过，所以这个缺口只会在干净的 runner 上暴露。
+        # 运行期还要 gstreamer1.0-nice 等插件包，那是装在终端用户机器上的，
+        # 打包机不需要（清单见 docs/DEVELOPMENT.md）。
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -152,6 +161,9 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libssl-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libgstreamer-plugins-bad1.0-dev \
             build-essential \
             curl \
             wget \
@@ -272,6 +284,11 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # 必须显式覆盖：该 action 的 packages 默认值是 "tools platform-tools"，
+          # 而 tools 这个旧版包 Google 已从 SDK 仓库下架，sdkmanager 找不到就
+          # 整步退出 1。build-tools / platforms 由 Gradle 自己按需拉。
+          packages: platform-tools
 
       # 缓存 NDK（~1.2 GB）：命中率接近 100%，省 3-5 min 下载/解压
       - name: Cache Android NDK
