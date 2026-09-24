@@ -1,1 +1,17 @@
 pnpm lint-staged
+
+# 前端类型检查：staged 含 ts/tsx 时跑全仓 tsc（三端 app + shared + ui）。
+#
+# 为什么是全量而非只查 staged 文件：tsc 需要整个工程的类型语义（跨文件推导、
+# 声明合并、路径别名），只喂几个文件既会漏报也会误报。turbo 缓存命中后近零耗时。
+#
+# 为什么走 turbo 而非按 app 逐个 --filter：packages/shared 与 packages/ui 已有自己的
+# tsconfig，且比 app 侧更严（target 钉 ES2019 对齐 build.target、开 noUnusedLocals），
+# 只跑 app 的 tsc 会用 app 的宽松设置覆盖这两个包的源码，两包的独立门禁就形同虚设。
+#
+# 为什么不在这里跑 go vet / go test：Go 侧由 CI 门禁覆盖，把整套 Go 测试塞进
+# pre-commit 会让每次提交多等一分钟以上，而本钩子要解的是「幽灵依赖与类型错误
+# 只在 CI 暴露」这一个具体问题（pnpm 本地提升会掩盖前者）。
+if git diff --cached --name-only --diff-filter=ACMR | grep -qE '\.(ts|tsx)$'; then
+  pnpm turbo typecheck
+fi

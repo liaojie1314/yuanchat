@@ -1,6 +1,6 @@
 # 元聊 YuanChat — 开发与打包指南
 
-> **最后更新**：2026-07-27（v0.3.0：E2EE、PWA/Web Push、桌面自动更新、生产部署编排、管理后台）
+> **最后更新**：2026-09-14（补 coturn/TURN 的本地依赖与环境变量；后端环境变量表改回真实的 `YUANCHAT_` 前缀名）
 >
 > ⚠️ **文档维护规则**：任何 `package.json` scripts、Tauri 配置、环境变量、workflow 的变更，**必须同步更新本文档**。此规则对所有会话生效。
 
@@ -21,6 +21,7 @@ yuanchat/
 │   ├── ui/               # 共享 UI 组件（Button, Input, MainLayout 等）
 │   └── design-system/    # Material 3 设计 Tokens、i18n、全局样式
 ├── server/               # Go 后端
+├── contracts/            # 前后端共用的黄金契约样本（见下方「跨端契约」）
 ├── deploy/               # Docker Compose 部署配置
 ├── docs/                 # 项目文档
 ├── pnpm-workspace.yaml   # pnpm monorepo 配置
@@ -45,6 +46,51 @@ yuanchat/
 ```bash
 pnpm install                # 安装所有 workspace 依赖
 ```
+
+**Linux 桌面端额外依赖（语音 / 视频通话）**：
+
+```bash
+sudo apt install gstreamer1.0-nice gstreamer1.0-plugins-base \
+                 gstreamer1.0-plugins-good gstreamer1.0-plugins-bad
+```
+
+Linux 上的通话**不经过 WebView**。Ubuntu 与 GNOME 官方 Flatpak runtime 的 WebKitGTK
+都没有把 GstWebRTC 后端编进去 —— `navigator.mediaDevices` 正常，`RTCPeerConnection`
+却整个类不存在（两处独立打包都如此，说明是上游默认而非发行版取舍）。媒体面因此下沉到
+一个独立的 GStreamer 助手进程 `yuanchat-call-helper`，前端由
+`apps/desktop/src/nativeRtc.ts` 垫片把标准 `RTCPeerConnection` 调用转成对它的命令。
+
+助手**必须**是独立进程：`webrtcbin` 会拽进 `libnice → libgupnp-igd → libsoup-2.4`，
+而 WebKitGTK 用的是 `libsoup-3.0`，两者同进程必 abort（该检查没有任何开关可关）。
+
+Windows（WebView2）与 macOS（WKWebView）自带完整 WebRTC，既不需要这些依赖，
+也不会编译这个助手。
+
+各元件的来源与缺失后果：
+
+| 元件                                                            | 提供方                    | 缺失后果                              |
+| --------------------------------------------------------------- | ------------------------- | ------------------------------------- |
+| `webrtcbin`                                                     | gstreamer1.0-plugins-bad  | 通话完全不可用                        |
+| `nicesink`                                                      | gstreamer1.0-nice         | 收集不到 ICE 候选，永远停在「连接中」 |
+| `opusenc` / `appsrc` / `appsink` / `videoconvert`               | gstreamer1.0-plugins-base | 语音不可用 / 视频不可用               |
+| `v4l2src` `vp8enc` `vp8dec` `rtpvp8pay` `rtpvp8depay` `jpegenc` | gstreamer1.0-plugins-good | **仅视频**不可用，语音照常            |
+| `input-selector`                                                | libgstreamer1.0-0（核心） | 关摄像头开关失效                      |
+
+一次性核对是否装齐：
+
+```bash
+for e in webrtcbin nicesink opusenc appsrc appsink videoconvert \
+         v4l2src vp8enc vp8dec rtpvp8pay rtpvp8depay jpegenc input-selector; do
+  /usr/bin/gst-inspect-1.0 "$e" >/dev/null 2>&1 && echo "  ✔ $e" || echo "  ✘ $e 缺失"
+done
+```
+
+务必用绝对路径 `/usr/bin/gst-inspect-1.0`：anaconda 等环境自带旧版 GStreamer 并会在
+PATH 里遮住系统版本，用 `gst-inspect-1.0` 会得到「元件全部缺失」的假象。
+
+视频另需一个可用的摄像头（`/dev/video0`）。摄像头不存在或被别的程序占着时通话仍能建立，
+只是本端发送纯黑画面 —— 助手会发一条 `warn` 事件说明原因。注意 V4L2 设备**只允许一个
+打开者**，所以通话期间摄像头归助手独占，此时其它程序（包括浏览器）都取不到画面。
 
 ---
 
@@ -104,8 +150,8 @@ pnpm install                # 安装所有 workspace 依赖
 
 **Mock 覆盖的接口**：
 
-- `POST /api/v1/users/login` — 账号（手机号/邮箱）+ 密码登录（密码 `wrong` 测试错误）
-- `POST /api/v1/users/register` — 手机号 + 密码 + 验证码 + 昵称注册
+- `POST /api/v1/auth/login` — 账号（手机号/邮箱）+ 密码登录（密码 `wrong` 测试错误）
+- `POST /api/v1/auth/register` — 手机号 + 密码 + 验证码 + 昵称注册
 - `POST /api/v1/auth/logout` — 登出（始终返回成功，300ms 延迟）
 - `GET /api/v1/captcha` — SVG 验证码
 
@@ -266,13 +312,14 @@ pnpm --filter @yuanchat/desktop tauri android build
 
 > Go 工具链位置：`/home/liaojie1314/env/go/go/bin`（若 `go` 不在 PATH：`export PATH=/home/liaojie1314/env/go/go/bin:$PATH`）
 
-| 命令                                                             | 说明                                               |
-| ---------------------------------------------------------------- | -------------------------------------------------- |
-| `cd server && make dev`                                          | 启动服务（REST :8085 + WebSocket :8086，同一进程） |
-| `cd server && go run ./cmd/server`                               | 等价于 make dev                                    |
-| `cd server && go run ./cmd/seed`                                 | 灌入联调测试数据（幂等，可重复执行）               |
-| `cd server && make build`                                        | 编译为 `server/bin/yuanchat-server`                |
-| `cd server && go test -v -race -coverprofile=coverage.out ./...` | 运行测试                                           |
+| 命令                                                             | 说明                                                |
+| ---------------------------------------------------------------- | --------------------------------------------------- |
+| `cd server && make dev`                                          | 启动服务（REST :8085 + WebSocket :8086，同一进程）  |
+| `cd server && go run ./cmd/server`                               | 等价于 make dev                                     |
+| `cd server && go run ./cmd/seed`                                 | 灌入联调测试数据（幂等，可重复执行）                |
+| `cd server && go run ./cmd/gc`                                   | 对象存储 GC 试运行（只报告；见下方「对象存储 GC」） |
+| `cd server && make build`                                        | 编译为 `server/bin/yuanchat-server`                 |
+| `cd server && go test -v -race -coverprofile=coverage.out ./...` | 运行测试                                            |
 
 ### 聊天功能联调（前端 + 后端全链路）
 
@@ -304,7 +351,32 @@ pnpm --filter @yuanchat/web dev:real
 
 通讯录联调：登录 Alice → 通讯录「新的朋友」有 Carol 的待处理申请（同意后自动建单聊 + 打招呼消息）；「+」添加联系人支持手机号 / 元聊号 / 邮箱精确搜索。
 
-> 聊天 REST 端点与 WebSocket 协议详见 [`docs/02_CHAT_API.md`](./02_CHAT_API.md)。
+> 聊天 REST 端点与 WebSocket 协议详见 [`docs/CHAT_API.md`](./CHAT_API.md)。
+
+### 对象存储 GC（`cmd/gc`）
+
+业务路径**从不删对象**：撤回只把 `messages.content` 置 `{}`、清空聊天记录只推进本人水位、
+删贴纸只删表行。于是三类字节会永久留在 MinIO 里——被撤回消息的媒体、被删收藏贴纸的对象、
+以及「上传成功但消息没发出去」的孤儿。回收由离线作业负责，**不在撤回时同步删**：
+同一个 `object_key` 可被多方引用（转发逐字复制 content 含 key、不同用户可各自收藏同一对象），
+同步删会打断别人的副本且需要引用计数。
+
+```bash
+cd server
+go run ./cmd/gc                       # 默认 dry-run：只报告将被回收的对象
+go run ./cmd/gc -delete               # 实际删除
+go run ./cmd/gc -grace 720h -delete   # 宽限期 30 天（默认 7 天）
+go run ./cmd/gc -prefix images/       # 只扫某前缀
+go run ./cmd/gc -batch 200            # 引用判定的分批大小（默认 500）
+```
+
+判定规则：对象 `LastModified` 早于宽限期，且 key 不被 `messages.content->>'key'` /
+`messages.content->>'thumb_key'`（视频封面）/ `stickers.object_key` / `users.avatar_url` /
+`conversations.avatar_url` / `sticker_packs.cover_url` 任何一处引用 → 可回收。
+宽限期是必需的——前端先传字节、后发 WS 帧，刚上传的对象可能"消息还在路上"。
+
+> **调度是独立的运维决策**：本仓不预置 cron/定时任务（改 `deploy/` 生产配置需单独评审）。
+> 首次在生产执行务必先跑 dry-run 核对清单。
 
 ---
 
@@ -316,9 +388,31 @@ docker compose -f deploy/docker-compose.yml ps        # 状态
 docker compose -f deploy/docker-compose.yml down      # 停止
 ```
 
-Compose 含三个服务：**PostgreSQL**（`:5434`→5432）、**Redis**（`:6380`→6379）、**MinIO**（对象存储，图片/文件/头像）。
+Compose 含六个服务：**PostgreSQL**（`:5434`→5432）、**Redis**（`:6380`→6379）、**MinIO**（对象存储，图片/文件/头像）、**Prometheus**（`:9091`→9090）、**Grafana**（`:3001`→3000）、**coturn**（通话的 TURN/STUN，`network_mode: host`）。
 
 > 宿主机端口整体避让本机 yuanai 项目占用的 5433/6379/9000/9001。
+
+> 日志栈（Loki + Promtail）在单独的 `deploy/logging.yml`，`pnpm dev:stop` **不会**停它，
+> 需要时用 `docker compose -f deploy/logging.yml down` 自行收。
+
+### coturn（TURN/STUN，语音/视频通话用）
+
+通话的媒体是端到端直连，两端都在 NAT 后面时要靠 TURN 中继。随 compose 一并启动，
+配置在 `deploy/coturn/turnserver.dev.conf`，走 **host 网络**（TURN relay 要一整段 UDP
+端口，bridge 模式逐个发布既慢又易错）。
+
+服务端不存长期 TURN 账号，`GET /api/v1/calls/ice-servers` 现签 HMAC 临时凭据
+（`username = <过期时间戳>:<user_id>`，`credential = base64(HMAC-SHA1(secret, username))`，
+TTL 1h），密钥与 `turnserver.conf` 的 `static-auth-secret` 同值。
+
+```bash
+# 验证 coturn 起来了（应答 Binding Response 即正常）
+docker logs yuanchat-coturn --tail 20
+```
+
+`turn.enabled=false` 或密钥为空时，`ice-servers` 端点只返回 STUN 项 —— 同一局域网内
+仍能通话，跨 NAT 会连不上。安卓模拟器走 TURN over TCP 经 `adb reverse` 到宿主，
+`turn.host` 同样填 `localhost`。
 
 ### MinIO（对象存储）
 
@@ -334,7 +428,7 @@ Compose 含三个服务：**PostgreSQL**（`:5434`→5432）、**Redis**（`:638
 - **健康检查**：`curl http://localhost:9002/minio/health/live` 返回 200 即就绪。
 - 后端首次连接时幂等创建 `yuanchat` 桶，并对 `avatars/` 前缀开放匿名公共读（头像用永久 public URL，
   免签名）；图片消息落 `images/` 前缀，文件/语音消息落 `files/` 前缀，均走一次性预签名 GET
-  （详见 `docs/02_CHAT_API.md` 的 files 端点）。
+  （详见 `docs/CHAT_API.md` 的 files 端点）。
 - **上传 MIME 白名单**（`server/config/config.yaml` 的 `upload.allowed_types`）：图片 4 类
   （jpeg/png/gif/webp）+ 文档（pdf/doc/docx/xlsx/pptx/txt/zip）+ 语音 `audio/webm`。
   新增可传类型时在此追加，重启后端生效；白名单外的 MIME 在 `upload-url` 阶段被 `4001` 拒绝。
@@ -456,15 +550,58 @@ npx tauri android build --aab --split-per-abi --target aarch64
 
 ## 七、Monorepo 全局命令
 
-| 命令             | 说明                                   |
-| ---------------- | -------------------------------------- |
-| `pnpm install`   | 安装所有 workspace 依赖                |
-| `pnpm dev:*`     | **一键启动**（见第零章）               |
-| `pnpm dev:stop`  | 停止一键启动拉起的全部进程与容器       |
-| `pnpm typecheck` | 所有包 TypeScript 类型检查             |
-| `pnpm lint`      | ESLint 全量检查                        |
-| `pnpm build`     | 构建所有应用（**仅前端 JS/CSS**）      |
-| `pnpm build:pkg` | **交互式打包**（桌面安装包 + APK/AAB） |
+| 命令               | 说明                                                      |
+| ------------------ | --------------------------------------------------------- |
+| `pnpm install`     | 安装所有 workspace 依赖                                   |
+| `pnpm dev:*`       | **一键启动**（见第零章）                                  |
+| `pnpm dev:stop`    | 停止一键启动拉起的全部进程与容器                          |
+| `pnpm typecheck`   | 所有包 TypeScript 类型检查                                |
+| `pnpm lint`        | ESLint 全量检查                                           |
+| `pnpm check`       | 静态门禁全跑（lint + 格式 + 样式 + i18n + 主题色类）      |
+| `pnpm check:i18n`  | i18n 翻译完整性 + 代码 key 对账                           |
+| `pnpm check:theme` | 主题色工具类是否都在色板里注册                            |
+| `pnpm build`       | 构建所有应用（**仅前端 JS/CSS**）                         |
+| `pnpm build:pkg`   | **交互式打包**（桌面安装包 + APK/AAB）                    |
+| `pnpm clean`       | 清构建产物与缓存（各包 dist/coverage + `.turbo`）         |
+| `pnpm clean:rust`  | 清 Tauri Rust 编译产物（`src-tauri/target`，**数十 GB**） |
+| `pnpm clean:all`   | 上面两条 + 删除全部 `node_modules`（需重新 install）      |
+
+### 清理命令怎么选
+
+磁盘吃紧或构建结果可疑时按需要的力度往下选，**越往下重建代价越大**：
+
+| 场景                                 | 命令              | 代价                                       |
+| ------------------------------------ | ----------------- | ------------------------------------------ |
+| 构建产物可疑、想干净重跑一次前端构建 | `pnpm clean`      | 秒级，只丢缓存与 dist                      |
+| 磁盘告急                             | `pnpm clean:rust` | 下次 `tauri build` 需全量重编 Rust（很慢） |
+| 依赖树坏了 / 换 Node 版本 / 彻底重来 | `pnpm clean:all`  | 还需 `pnpm install`，且 Rust 也要全量重编  |
+
+`src-tauri/target` 是仓库里最大的目录（本机实测 **28 GB**），但它不进 `pnpm clean`：
+误删一次就要花很久重编 Rust 依赖，所以单独放在 `clean:rust` 里，要删得明确说。
+
+### 静态门禁在查什么
+
+两个脚本都拦的是**不报错但界面出错**的一类问题，改前端时必须跑（`pnpm check` 已包含）：
+
+| 脚本                              | 三层校验                                                                                                                                                                     | 拦住的现象                                                                                   |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `scripts/check-i18n.mjs`          | ① 三个 locale 对 zh-CN 对账（key 集合 + `%{var}` 占位符集合）<br>② 源码里静态 `t("key")` 的 key 必须存在<br>③ **死键**：locale 里的 key 必须在 `packages/`、`apps/` 中出现过 | 少翻译一门语言 → 该语言回落中文；key 写错 → 界面直接显示 key 字面量；词条堆积                |
+| `scripts/check-theme-classes.mjs` | ① 三个 app 的 Tailwind 色板必须一致（共用同一 preset）<br>② 源码里所有主题色工具类（`surface`/`primary`/`on-*`/`outline`…）必须能在色板里找到 key                            | 色板里没注册的颜色类**不产出任何 CSS**，元素静默继承父级色——次要文字与正文同色、hover 无反应 |
+
+### Git 钩子（husky）
+
+`.husky/pre-commit` 两步，提交前自动跑，**不要用 `--no-verify` 绕过**：
+
+1. `pnpm lint-staged` — 对暂存的 `.ts/.tsx` 跑 `eslint --fix` + `prettier`，`.css` 跑 `stylelint --fix`，`.json/.md` 跑 `prettier`（会把格式化结果一并写回暂存区）
+2. **暂存区含 `.ts/.tsx` 时**跑 `pnpm --filter @yuanchat/web typecheck` 与 `@yuanchat/desktop typecheck`
+
+第 2 步是全量 `tsc` 而不是只查暂存文件——`tsc` 需要整个工程的类型语义（跨文件推导、路径别名），
+只喂几个文件既漏报也误报；turbo 缓存命中后耗时接近于零。查两端 app 而非 `packages/*`，
+是因为两个 app 的 tsconfig 会传递覆盖到 `packages/shared`、`packages/ui` 的源码
+（那两个包自己没有 tsconfig，属既有技术债）。
+
+Go 侧**刻意不进钩子**（CI 已覆盖）：把 Go 全量测试塞进 pre-commit 会让每次提交多等一分钟以上，
+而这个钩子要解的是「幽灵依赖与类型错误只在 CI 才暴露」这一个具体问题——pnpm 的本地依赖提升会掩盖前者。
 
 ---
 
@@ -472,19 +609,31 @@ npx tauri android build --aab --split-per-abi --target aarch64
 
 ### 后端
 
-| 变量               | 默认值               | 说明                                           |
-| ------------------ | -------------------- | ---------------------------------------------- |
-| `SERVER_ENV`       | `development`        | 运行环境                                       |
-| `DB_HOST`          | `localhost`          | PostgreSQL 主机                                |
-| `DB_PORT`          | `5434`               | PostgreSQL 端口（compose 宿主机映射）          |
-| `DB_USER`          | `yuanchat`           | 数据库用户                                     |
-| `DB_PASSWORD`      | —                    | 数据库密码                                     |
-| `DB_NAME`          | `yuanchat`           | 数据库名                                       |
-| `REDIS_ADDR`       | `localhost:6380`     | Redis 地址                                     |
-| `JWT_SECRET`       | —                    | JWT 签名密钥                                   |
-| `MINIO_ENDPOINT`   | `localhost:9002`     | MinIO S3 端点（真机联调改局域网 IP，见第五章） |
-| `MINIO_ACCESS_KEY` | `yuanchat_minio`     | MinIO 访问密钥（对应控制台用户名）             |
-| `MINIO_SECRET_KEY` | `yuanchat_minio_dev` | MinIO 私有密钥（对应控制台密码）               |
+后端配置读 `server/config/config.yaml`，环境变量以 **`YUANCHAT_`** 为前缀、用 `_` 连接
+配置层级覆盖（viper `SetEnvPrefix` + `SetEnvKeyReplacer`），即 `database.host` 对应
+`YUANCHAT_DATABASE_HOST`。**不带前缀的 `DB_HOST` 之类不会生效。**
+
+| 变量                               | 默认值                            | 说明                                                                                             |
+| ---------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `YUANCHAT_SERVER_ENV`              | `development`                     | 运行环境                                                                                         |
+| `YUANCHAT_DATABASE_HOST`           | `localhost`                       | PostgreSQL 主机                                                                                  |
+| `YUANCHAT_DATABASE_PORT`           | `5434`                            | PostgreSQL 端口（compose 宿主机映射）                                                            |
+| `YUANCHAT_DATABASE_USER`           | `yuanchat`                        | 数据库用户                                                                                       |
+| `YUANCHAT_DATABASE_PASSWORD`       | —                                 | 数据库密码                                                                                       |
+| `YUANCHAT_DATABASE_DBNAME`         | `yuanchat`                        | 数据库名                                                                                         |
+| `YUANCHAT_REDIS_HOST`              | `localhost`                       | Redis 主机                                                                                       |
+| `YUANCHAT_REDIS_PORT`              | `6380`                            | Redis 端口                                                                                       |
+| `YUANCHAT_JWT_SECRET`              | —                                 | JWT 签名密钥                                                                                     |
+| `YUANCHAT_MINIO_ENDPOINT`          | `localhost:9002`                  | MinIO S3 端点（真机联调改局域网 IP，见第五章）                                                   |
+| `YUANCHAT_MINIO_ACCESS_KEY`        | `yuanchat_minio`                  | MinIO 访问密钥（对应控制台用户名）                                                               |
+| `YUANCHAT_MINIO_SECRET_KEY`        | `yuanchat_minio_dev`              | MinIO 私有密钥（对应控制台密码）                                                                 |
+| `YUANCHAT_MINIO_PUBLIC_ENDPOINT`   | 空                                | 下发给客户端的对外地址（生产必填，内网名客户端解析不了）                                         |
+| `YUANCHAT_TURN_ENABLED`            | `true`                            | 关掉后 `ice-servers` 只返回 STUN 项                                                              |
+| `YUANCHAT_TURN_HOST`               | `localhost`                       | **客户端可达**的 TURN 主机名/IP，不是容器内网名                                                  |
+| `YUANCHAT_TURN_PORT`               | `3478`                            | TURN 端口                                                                                        |
+| `YUANCHAT_TURN_REALM`              | `yuanchat`                        | 与 `turnserver.conf` 的 `realm` 同值                                                             |
+| `YUANCHAT_TURN_STATIC_AUTH_SECRET` | dev 用 `yuanchat-dev-turn-secret` | 与 `turnserver.conf` 的 `static-auth-secret` 同值；**生产只由环境变量下发**，为空则退化为纯 STUN |
+| `YUANCHAT_TURN_CREDENTIAL_TTL`     | `1h`                              | 临时凭据有效期                                                                                   |
 
 ### 前端
 
@@ -510,11 +659,11 @@ npx tauri android build --aab --split-per-abi --target aarch64
 
 ### 前端测试
 
-| 包                       | 测试框架                 | 环境  | 覆盖内容                                                                                    |
-| ------------------------ | ------------------------ | ----- | ------------------------------------------------------------------------------------------- |
-| `packages/shared`        | Vitest                   | node  | Store（auth/theme/conversation）、Utils（cn/formatTime/truncate/validate\*/getAvatarColor） |
-| `packages/ui`            | Vitest + Testing Library | jsdom | React 组件（Avatar/Button/Input/ChatWindow 等）                                             |
-| `packages/design-system` | Vitest                   | node  | Tokens、Skins、i18n                                                                         |
+| 包                       | 测试框架                 | 环境  | 覆盖内容                                                                                                                                |
+| ------------------------ | ------------------------ | ----- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/shared`        | Vitest                   | node  | Store（auth/theme/conversation/message）、Utils（cn/formatTime/truncate/validate\*/getAvatarColor/mentionText）、语言持久化与冷启动恢复 |
+| `packages/ui`            | Vitest + Testing Library | jsdom | React 组件（Avatar/Button/Input/ChatWindow 等）、录音 hook                                                                              |
+| `packages/design-system` | Vitest                   | node  | Tokens、Skins、i18n                                                                                                                     |
 
 #### 常用命令
 
@@ -528,6 +677,13 @@ npx tauri android build --aab --split-per-abi --target aarch64
 | `pnpm --filter @yuanchat/shared test:ui`       | shared 包 Vitest UI 界面模式             |
 | `pnpm --filter @yuanchat/ui test`              | 仅运行 UI 组件测试                       |
 | `pnpm --filter @yuanchat/design-system test`   | 仅运行设计系统测试                       |
+
+> **本地自测要对齐 CI 的语言环境**：`LANG=C.UTF-8 pnpm test`。
+> Node 21 起 `globalThis.navigator` 内置，`navigator.language` 取自宿主 ICU 语言环境 ——
+> 中文机器报 `zh-CN`，GitHub Ubuntu runner 报 `en-US`。用到 `detectLocale()`、`Intl`、
+> `toLocaleString()` 的用例若不自己打桩，就会「本地全绿、远程报错」。
+> 测试里需要固定语言时，在 `vi.hoisted()` 里 `Object.defineProperty(globalThis, "navigator", …)` 钉死，
+> 别依赖跑测机器的系统语言（范例：`packages/shared/src/__tests__/themeStoreLocaleBoot.test.ts`）。
 
 #### 覆盖率报告
 
@@ -549,16 +705,34 @@ packages/shared/coverage/
 
 #### 覆盖率阈值
 
-`packages/shared` 设置了最低覆盖率阈值（`vitest.config.ts`）：
+覆盖率门禁在 CI 中强制执行（`.github/workflows/ci.yml`）。前端阈值配置在各包的
+`vitest.config.ts`（低于阈值 `pnpm test:coverage` 直接失败）：
 
-| 指标       | 阈值 |
-| ---------- | ---- |
-| statements | 60%  |
-| branches   | 50%  |
-| functions  | 60%  |
-| lines      | 60%  |
+| 包                       | statements | lines | 备注                                                                  |
+| ------------------------ | ---------- | ----- | --------------------------------------------------------------------- |
+| `packages/shared`        | 60%        | 60%   | 另有 branches 50% / functions 60%                                     |
+| `packages/ui`            | 53%        | 53%   | 目标 60%，先钉基线 -2pt，补组件测试后逐步上调                         |
+| `packages/design-system` | 46%        | 46%   | 目标 60%，先钉基线 -2pt；`skins.ts`/`legacyWebViewCompat.ts` 尚未覆盖 |
 
-低于阈值时 CI 失败。
+> 排除规则：各包 `src/__tests__/**`、`src/index.ts`（入口）、`src/mocks/**`（MSW）、
+> `src/types/**`（纯类型）、`src/i18n/**`、`src/tailwind.config.ts`（构建期配置）不计入。
+
+后端阈值为语句覆盖率 ≥ **40%**（`scripts/check-coverage.mjs` 校验，低于阈值 CI 失败）：
+
+```bash
+cd server && go test ./... -coverprofile=coverage.out -covermode=atomic
+node scripts/check-coverage.mjs 40 server/coverage.out   # 阈值以 CI 为准
+```
+
+> 后端目标 80%（见 `docs/MASTER_PLAN.md` 6.2），现状基线约 43%，先钉 40%（基线 -2pt），
+> 待补齐 `internal/handler`（约 19%）、`internal/repository`（约 18%）、`internal/middleware`
+> （约 7%）的测试后逐步上调。低分大户：handler、repository、middleware、ws（约 49%）。
+
+> **排除规则**：`cmd/`（main 入口）、`internal/testutil/`（测试辅助）、
+> `internal/database/`（DB 连接/迁移胶水层）不计入后端覆盖率统计。
+
+CI 会把覆盖率报告上传为 artifact（`backend-coverage`：`server/coverage.out`；
+`frontend-coverage`：`packages/*/coverage/` 含 lcov + HTML），不阻塞 PR 展示。
 
 ### Go 后端测试
 
@@ -574,15 +748,29 @@ packages/shared/coverage/
 
 #### 已有测试覆盖
 
-| 包                      | 测试文件               | 内容                                          |
-| ----------------------- | ---------------------- | --------------------------------------------- |
-| `internal/pkg/jwt`      | `jwt_test.go`          | Token 生成/验证/过期/无效                     |
-| `internal/pkg/password` | `password_test.go`     | bcrypt 哈希/验证/盐值                         |
-| `internal/service`      | `user_service_test.go` | 密码哈希、strPtr、错误常量                    |
-| `internal/ws`           | `hub_test.go`          | Hub 注册/注销、多设备投递、连接上限、并发安全 |
-| `internal/ws`           | `protocol_test.go`     | WS 信封编解码                                 |
+| 包                      | 测试文件                  | 内容                                          |
+| ----------------------- | ------------------------- | --------------------------------------------- |
+| `internal/pkg/jwt`      | `jwt_test.go`             | Token 生成/验证/过期/无效                     |
+| `internal/pkg/password` | `password_test.go`        | bcrypt 哈希/验证/盐值                         |
+| `internal/service`      | `user_service_test.go`    | 密码哈希、strPtr、错误常量                    |
+| `internal/ws`           | `hub_test.go`             | Hub 注册/注销、多设备投递、连接上限、并发安全 |
+| `internal/ws`           | `protocol_test.go`        | WS 信封编解码                                 |
+| `internal/ws`           | `golden_contract_test.go` | 黄金契约（见下方「跨端契约」）                |
 
 > **注意**：`UserService` 依赖具体的 `*repository.UserRepository` 而非接口，完整的 Register/Login/Profile 集成测试需要连接测试数据库或重构为接口注入。
+
+### 跨端契约（contracts/）
+
+`contracts/message-send.golden.json` 为每种 `content.type` 存一个完整的 `message.send`
+样本帧，**前后端跑同一份 JSON**：
+
+| 侧   | 测试文件                                                  | 做什么                                                                              |
+| ---- | --------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| 前端 | `packages/shared/src/__tests__/messageSendGolden.test.ts` | 驱动 `messageStore` 真的发帧，把 `chatSocket.send` 的 payload 与样本深比较          |
+| Go   | `server/internal/ws/golden_contract_test.go`              | 以 `DisallowUnknownFields` 解进 `SendPayload`，跑 `buildContent` 断言通过与落库类型 |
+
+改帧结构的**正确顺序**：先改 golden 样本 → 再让两侧变绿。任一侧擅自改字段名/类型/嵌套
+都会两端同时变红；新增 content type 忘了补样本，Go 侧的覆盖度用例会失败。
 
 ### E2E 端到端测试
 
@@ -590,6 +778,11 @@ packages/shared/coverage/
 **环境**：测试自动启动 Vite dev server（Mock 模式，`VITE_ENABLE_MOCK=true`），使用 MSW Service Worker 拦截所有 API 调用，无需真实后端。
 
 **测试文件位置**：`apps/web/e2e/`
+
+> **界面语言被钉在 zh-CN**：`playwright.config.ts` 设了 `use.locale: "zh-CN"`，
+> 因此断言与定位器里出现的中文必须与 `zh-CN.json` 词条**逐字一致**（含排版空格，
+> 用 `\s*` 兼容）。用文案定位按钮时正则要**首尾锚定**：`getByRole` 的可访问名是子串匹配，
+> `/登录/` 会同时命中「登录」和「扫码登录」，strict mode 直接报双命中。
 
 #### 命令
 
@@ -602,16 +795,20 @@ packages/shared/coverage/
 
 #### 覆盖范围
 
-| 测试文件                        | 覆盖内容                                                        |
-| ------------------------------- | --------------------------------------------------------------- |
-| `e2e/login.spec.ts`             | 登录成功/失败、表单校验错误、API 错误、Enter 快捷键             |
-| `e2e/register.spec.ts`          | 注册成功/失败、表单校验、验证码加载/刷新、Enter 快捷键          |
-| `e2e/logout.spec.ts`            | 登出跳转、localStorage 清除、登出后路由守卫                     |
-| `e2e/route-guards.spec.ts`      | 未登录重定向（/ → /login）、已登录重定向（/login → /chat）      |
-| `e2e/navigation.spec.ts`        | 登录/注册页间跳转、表单状态独立                                 |
-| `e2e/authenticated-nav.spec.ts` | 已登录状态下聊天/通讯录/收藏/设置四大区域可访问、侧边栏导航链接 |
-| `e2e/search.spec.ts`            | Ctrl/Meta+K 打开搜索弹窗、输入框自动聚焦、Escape/关闭按钮关闭   |
-| `e2e/favorites.spec.ts`         | 收藏页可访问、四个分类 Tab 按钮可见且可点击                     |
+| 测试文件                            | 覆盖内容                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------- |
+| `e2e/login.spec.ts`                 | 登录成功/失败、表单校验错误、API 错误、Enter 快捷键                             |
+| `e2e/register.spec.ts`              | 注册成功/失败、表单校验、验证码加载/刷新、Enter 快捷键                          |
+| `e2e/logout.spec.ts`                | 登出跳转、localStorage 清除、登出后路由守卫                                     |
+| `e2e/route-guards.spec.ts`          | 未登录重定向（/ → /login）、已登录重定向（/login → /chat）                      |
+| `e2e/navigation.spec.ts`            | 登录/注册页间跳转、表单状态独立                                                 |
+| `e2e/authenticated-nav.spec.ts`     | 已登录状态下聊天/通讯录/朋友圈/表情商城/设置可访问、侧边栏导航链接              |
+| `e2e/search.spec.ts`                | Ctrl/Meta+K 打开搜索弹窗、输入框自动聚焦、Escape/关闭按钮关闭                   |
+| `e2e/favorites.spec.ts`             | 收藏页可访问、四个分类 Tab 按钮可见且可点击                                     |
+| `e2e/moments.spec.ts`               | 朋友圈可达且渲染 feed、发布页与互动消息页可进入、导航含朋友圈不含收藏           |
+| `e2e/stickers.spec.ts`              | 贴纸两 tab 渲染、官方/收藏列表数量、发贴纸、图片→收藏、删除收藏、缩略图真实出图 |
+| `e2e/chat-experience.spec.ts`       | 清空聊天记录（确认后消息流清空）、群公告横幅点开全文、群内昵称编辑并保存        |
+| `e2e/conversation-settings.spec.ts` | 右键会话菜单置顶/取消置顶、免打扰开关的状态翻转                                 |
 
 #### 测试文件结构
 
@@ -698,11 +895,57 @@ macOS / Windows 代码签名（可选，用 `if` 门控——secrets 存在时�
 
 ---
 
-## 十一、文档更新规则
+## 十一、前端约定（i18n / 旧 WebView 兼容）
+
+### i18n：四语，零硬编码
+
+- **词条**：`packages/design-system/src/i18n/locales/{zh-CN,en-US,ja-JP,ko-KR}.json`，
+  扁平点号 key（`auth.loginTitle`），插值占位符是 `%{name}`（i18n 初始化里改过
+  `interpolation.prefix/suffix`，不是 i18next 默认的 `{{}}`）
+- **组件**：一律 `const { t } = useTranslation()` + `t("key")`。句子中间要给某个词单独上色时用
+  `<Trans i18nKey="auth.registerHint" components={{ id: <span className="text-primary" /> }} />`，
+  不要用字符串拼接——各语言词序不同，拼出来的句子在日/韩语下是错的
+- **纯函数拿不到 `t()`**：`packages/shared/src/utils/validation.ts` 的校验器返回的是
+  **i18n key**，由调用方 `t(result.errors[0])` 翻译。往里塞中文提示会绕过整套 i18n
+- **切换语言只走 `useThemeStore.setLocale()`**（内部已 `i18n.changeLanguage`），组件里不要再自己调
+  `i18n.changeLanguage`；冷启动的语言恢复由 themeStore 的 `onRehydrateStorage` 负责，
+  原因见 [`.claude/TROUBLESHOOTING.md`](../.claude/TROUBLESHOOTING.md) 的
+  「切换语言后重开应用又变回系统语言」
+- **新增文案必须四语同时补齐**，否则 `pnpm check:i18n` 直接失败（见第七章）
+- **`<html lang>` 自动跟随**：`packages/design-system/src/i18n/index.ts` 挂了 `languageChanged`
+  监听同步 `document.documentElement.lang`（影响断词换行、读屏发音、输入法候选），
+  各端入口不需要再自己写
+
+### 旧 WebView（Android 10 自带 Chrome 74）兼容清单
+
+`build.target=es2019` 只解决**语法**降级，下面四类是它管不到的，且**全部静默失效**——
+不报错、只是界面不对，桌面浏览器上永远复现不出来：
+
+| 层         | 约定                                                                                                                                                                                                      | 落点                                                |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| 运行时内置 | ES2020+ 的**内置方法**要手动补（已补 `Object.hasOwn`，`@noble/curves` 在模块初始化就调它）；只补真正被用到的，且必须是入口第一个 import                                                                   | `packages/shared/src/polyfills.ts`                  |
+| flex `gap` | `gap-*` 要 Chrome 84。JS 实测一次能力后在 `<html>` 挂 `no-flex-gap`，Tailwind 插件为该类名额外输出 margin 兜底（含四种 flex-direction）                                                                   | `packages/design-system/src/legacyWebViewCompat.ts` |
+| preflight  | Tailwind preflight 用了 `:where()`（Chrome 88）。CSS 规范里选择器列表**一项非法则整条规则作废**，`button` 复位与 `[hidden]` 一起失效 → 全站按钮回落系统灰底。用不带新语法的选择器在 `global.css` 里补一遍 | `packages/design-system/src/global.css`             |
+| CSS 简写   | `inset`（Chrome 87）、`place-items` / `place-content` 的单值形式在 74 上作废，一律写长写法；stylelint 的「合并回简写」规则已对这三个开例外                                                                | `stylelint.config.js`                               |
+
+还有一条与语法无关但只在移动端出现：给 `::-webkit-scrollbar` 设过任何样式后，
+Android WebView 会把「滚动时才浮现的覆盖式滚动条」换成**常驻实体滚动条**，
+因此滚动条定制包在 `@media (hover: hover) and (pointer: fine)` 里，只对桌面生效。
+
+> 验证只能靠真机/模拟器：`Medium_Phone_API_29`（Chrome 74）跑 `tauri android build` 出的
+> 生产 APK。dev 模式在 74 上跑不起来（`@vite/client` 自身用 `?.`），详见第三章。
+
+---
+
+## 十二、文档更新规则
 
 1. 任何 `package.json` scripts 的**增删改**，必须同步更新本文档的对应章节
 2. 任何 Tauri 配置（`tauri.conf.json`、`capabilities/`）的变更，必须同步更新本文档
-3. 环境变量的**新增/修改/删除**，必须同步更新本文档第七章
+3. 环境变量的**新增/修改/删除**，必须同步更新本文档第八章
 4. 故障排查 / 踩坑记录 → 追加到 `.claude/TROUBLESHOOTING.md`（按平台分类）
 5. 本文档和 `.claude/TROUBLESHOOTING.md` 必须并行更新，所有 AI 会话必须遵守此规则
 6. `.github/workflows/` 的变更须同步更新本文档"CI/CD 与发版"章节，签名策略变化须更新 `docs/RELEASE.md`
+
+### 多实例部署配置
+
+多实例部署需同时设置 `presence.backend=redis` 与 `dispatcher.backend=redis`（后者默认 `inproc`，仅影响实时帧跨实例投递），两功能共用 Redis 实例；限流在 Redis 客户端注入后自动走分布式令牌桶，无需额外配置。

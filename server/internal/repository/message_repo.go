@@ -57,19 +57,84 @@ func (r *MessageRepository) CreateWithSeq(ctx context.Context, msg *model.Messag
 	})
 }
 
-// ListBefore 取会话中 seq < beforeSeq 的最新 limit 条消息（seq 降序）。
+// utcTime 把驱动按连接时区（`Asia/Shanghai`）还原出来的时间换算回 UTC。
+//
+// 时刻本身不变，变的是序列化出来的字面量：不换算的话，同一次编辑在
+// message.edited 帧里是 `...Z`（内存值，本就是 UTC），拉历史却是 `...+08:00`，
+// 客户端拿字符串比对/去重就会判成两个不同的时间。
+func utcTime(t time.Time) time.Time { return t.UTC() }
+
+// utcTimePtr 同 utcTime，针对可空列（edited_at 未编辑过时为 NULL）。
+func utcTimePtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
+}
+
+// ListBefore 取会话中 seq < beforeSeq 且 seq > minSeq 的最新 limit 条消息（seq 降序）。
 // beforeSeq ≤ 0 表示从最新一条开始取。
-func (r *MessageRepository) ListBefore(ctx context.Context, convID uuid.UUID, beforeSeq int64, limit int) ([]MessageWithSender, error) {
+// minSeq 为调用方的 cleared_before_seq 水位（0 表示不过滤）；群会话署名用成员 alias 覆盖 nickname。
+func (r *MessageRepository) ListBefore(ctx context.Context, convID uuid.UUID, beforeSeq, minSeq int64, limit int) ([]MessageWithSender, error) {
 	q := r.db.WithContext(ctx).
 		Table("messages m").
-		Select("m.*, u.nickname AS sender_nickname, u.avatar_url AS sender_avatar_url").
+		Select(`m.*, COALESCE(NULLIF(cm.alias, ''), u.nickname) AS sender_nickname, u.avatar_url AS sender_avatar_url`).
 		Joins("JOIN users u ON u.id = m.sender_id").
+		Joins("LEFT JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = m.sender_id").
 		Where("m.conversation_id = ? AND m.deleted_at IS NULL", convID)
 	if beforeSeq > 0 {
 		q = q.Where("m.seq < ?", beforeSeq)
 	}
+	if minSeq > 0 {
+		q = q.Where("m.seq > ?", minSeq)
+	}
 
 	var rows []MessageWithSender
+	err := q.Order("m.seq DESC").Limit(limit).Scan(&rows).Error
+	for i := range rows {
+		rows[i].EditedAt = utcTimePtr(rows[i].EditedAt)
+	}
+	return rows, err
+}
+
+// MediaItemWithSender 媒体相册条目：完整消息 + 发送者昵称（群聊取群昵称，与 ListBefore 同口径）。
+type MediaItemWithSender struct {
+	model.Message
+	SenderNickname string `gorm:"column:sender_nickname" json:"sender_nickname"`
+}
+
+// ListMedia 拉取会话内指定类型的媒体消息（seq 降序，游标 beforeSeq）。
+//
+// types 为空表示"无任何媒体类型"，直接返回空且不查库（否则 `IN ()` 是语法错误）。
+// beforeSeq ≤ 0 表示从最新一条开始；minSeq 为调用方的 cleared_before_seq 水位（0 不过滤）。
+// 与 ListBefore 共用成员署名投影（COALESCE 群昵称），且只回 status=1 的未撤回消息——
+// 撤回会把 content 置 '{}'，相册若放行就会渲染出一堆空条目。
+func (r *MessageRepository) ListMedia(
+	ctx context.Context,
+	convID uuid.UUID,
+	types []int16,
+	beforeSeq, minSeq int64,
+	limit int,
+) ([]MediaItemWithSender, error) {
+	if len(types) == 0 {
+		return nil, nil
+	}
+	q := r.db.WithContext(ctx).
+		Table("messages m").
+		Select(`m.*, COALESCE(NULLIF(cm.alias, ''), u.nickname) AS sender_nickname`).
+		Joins("JOIN users u ON u.id = m.sender_id").
+		Joins("LEFT JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = m.sender_id").
+		Where("m.conversation_id = ? AND m.deleted_at IS NULL AND m.status = ? AND m.message_type IN ?",
+			convID, model.MessageStatusNormal, types)
+	if beforeSeq > 0 {
+		q = q.Where("m.seq < ?", beforeSeq)
+	}
+	if minSeq > 0 {
+		q = q.Where("m.seq > ?", minSeq)
+	}
+
+	var rows []MediaItemWithSender
 	err := q.Order("m.seq DESC").Limit(limit).Scan(&rows).Error
 	return rows, err
 }
@@ -81,6 +146,7 @@ func (r *MessageRepository) FindByID(ctx context.Context, id uuid.UUID) (*model.
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
+	msg.EditedAt = utcTimePtr(msg.EditedAt)
 	return &msg, err
 }
 
@@ -92,9 +158,85 @@ func (r *MessageRepository) Recall(ctx context.Context, id uuid.UUID) (bool, err
 	return res.RowsAffected > 0, res.Error
 }
 
+// EditWithHistory 在单事务内更新正文并写入编辑历史。
+//
+// 两步一体：先 CAS 更新 messages，再把旧 content 插入 message_edits
+// （version = expectCount+1）。CAS 条件带 edit_count —— 并发双写时只有一方成功，
+// 另一方 RowsAffected=0 返回 false 且整事务回滚，历史表不留脏版本。
+//
+// 顺序上 CAS 必须在插入之前：过期的 expectCount 算出的 version 与已有历史行撞
+// (message_id, version) 唯一索引，若先插入，过期编辑会以「唯一键冲突」报错收场，
+// 而不是走 false 这条预期分支。唯一索引因此退居第二道防线。
+// flagged 只在命中敏感词时置 true，不会把已有的 true 改回 false
+// （清标是 admin 的动作，用户不能自助洗白）。
+func (r *MessageRepository) EditWithHistory(
+	ctx context.Context,
+	id uuid.UUID,
+	oldContent, newContent string,
+	expectCount int16,
+	flagged bool,
+	editedAt time.Time,
+) (bool, error) {
+	var flipped bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updates := map[string]any{
+			"content":    newContent,
+			"edited_at":  editedAt,
+			"edit_count": expectCount + 1,
+		}
+		if flagged {
+			updates["flagged"] = true
+		}
+		res := tx.Model(&model.Message{}).
+			Where("id = ? AND status = ? AND edit_count = ?", id, model.MessageStatusNormal, expectCount).
+			Updates(updates)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			// CAS 失败：回滚整个事务，历史行不会落库
+			flipped = false
+			return gorm.ErrRecordNotFound
+		}
+
+		// EditedAt 无 gorm default tag 也不属 GORM 自动维护的时间字段，
+		// 不显式赋值会把 Go 零值写进 INSERT，库里的 DEFAULT now() 不生效。
+		hist := &model.MessageEdit{
+			MessageID:  id,
+			OldContent: oldContent,
+			Version:    expectCount + 1,
+			EditedAt:   editedAt,
+		}
+		if err := tx.Create(hist).Error; err != nil {
+			return err
+		}
+		flipped = true
+		return nil
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// CAS 失败是预期分支，不是错误
+		return false, nil
+	}
+	return flipped, err
+}
+
+// ListEdits 取一条消息的全部历史版本，按 version 升序。
+func (r *MessageRepository) ListEdits(ctx context.Context, messageID uuid.UUID) ([]model.MessageEdit, error) {
+	var edits []model.MessageEdit
+	err := r.db.WithContext(ctx).
+		Where("message_id = ?", messageID).
+		Order("version ASC").
+		Find(&edits).Error
+	for i := range edits {
+		edits[i].EditedAt = utcTime(edits[i].EditedAt)
+	}
+	return edits, err
+}
+
 // GetLastMessage 取会话最后一条消息（会话列表预览用）。
-func (r *MessageRepository) GetLastMessage(ctx context.Context, convID uuid.UUID) (*MessageWithSender, error) {
-	rows, err := r.ListBefore(ctx, convID, 0, 1)
+// minSeq 为调用方的 cleared_before_seq 水位：清空后列表预览同步失效（0 表示不过滤）。
+func (r *MessageRepository) GetLastMessage(ctx context.Context, convID uuid.UUID, minSeq int64) (*MessageWithSender, error) {
+	rows, err := r.ListBefore(ctx, convID, 0, minSeq, 1)
 	if err != nil || len(rows) == 0 {
 		return nil, err
 	}
@@ -140,5 +282,8 @@ func (r *MessageRepository) Search(
 
 	var rows []SearchResult
 	err := q.Order("m.created_at DESC").Limit(limit).Scan(&rows).Error
+	for i := range rows {
+		rows[i].EditedAt = utcTimePtr(rows[i].EditedAt)
+	}
 	return rows, err
 }

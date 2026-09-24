@@ -19,8 +19,15 @@ type User struct {
 	Bio          *string        `gorm:"type:varchar(500)" json:"bio,omitempty"`
 	Gender       int16          `gorm:"type:smallint;default:0" json:"gender"`
 	Birthday     *time.Time     `json:"birthday,omitempty"`
-	Status       int16          `gorm:"type:smallint;default:1" json:"status"`
+	// 个人状态：过期判定只在读时做（EffectiveStatus），不开定时清理任务。
+	// json tag 统一为 "-"：直接序列化会把已过期的状态原样吐出去，
+	// 所有出网路径必须经 EffectiveStatus 取值。
+	StatusEmoji     string     `gorm:"type:varchar(16);not null;default:''" json:"-"`
+	StatusText      string     `gorm:"type:varchar(64);not null;default:''" json:"-"`
+	StatusExpiresAt *time.Time `json:"-"`
+	Status          int16      `gorm:"type:smallint;default:1" json:"status"`
 	Role         int16          `gorm:"type:smallint;default:0" json:"role"`
+	TokenVersion int            `gorm:"type:int;not null;default:0" json:"-"` // 令牌吊销版本号，改密时递增使旧令牌失效
 	LastLoginAt  *time.Time     `json:"last_login_at,omitempty"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
@@ -51,3 +58,14 @@ const (
 	RoleUser  int16 = 0
 	RoleAdmin int16 = 1
 )
+
+// EffectiveStatus 返回在 now 时刻仍有效的个人状态；已过期或未设置时返回两个空串。
+//
+// StatusExpiresAt 为 nil 表示「不自动清除」。调用方传入 now 而非内部取 time.Now()，
+// 使过期边界可在测试里确定性地断言。
+func (u *User) EffectiveStatus(now time.Time) (emoji, text string) {
+	if u.StatusExpiresAt != nil && !now.Before(*u.StatusExpiresAt) {
+		return "", ""
+	}
+	return u.StatusEmoji, u.StatusText
+}

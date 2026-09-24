@@ -78,7 +78,7 @@ export function groupFriends(friends: Friend[]): FriendGroup[] {
 }
 
 // ========================================
-// Store
+// Store 定义
 // ========================================
 
 interface ContactState {

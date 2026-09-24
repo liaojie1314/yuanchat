@@ -40,16 +40,33 @@
 
 ### 对象存储（MinIO / S3）
 
-| 变量                        | 默认值           | 说明                     |
-| --------------------------- | ---------------- | ------------------------ |
-| `YUANCHAT_MINIO_ENDPOINT`   | `localhost:9002` | 服务地址（不含 scheme）  |
-| `YUANCHAT_MINIO_ACCESS_KEY` | —                | 访问密钥                 |
-| `YUANCHAT_MINIO_SECRET_KEY` | —                | 私有密钥                 |
-| `YUANCHAT_MINIO_BUCKET`     | `yuanchat`       | 桶名（首次连接自动创建） |
-| `YUANCHAT_MINIO_USE_SSL`    | `false`          | 生产走 HTTPS 时设 `true` |
+| 变量                             | 默认值           | 说明                                                    |
+| -------------------------------- | ---------------- | ------------------------------------------------------- |
+| `YUANCHAT_MINIO_ENDPOINT`        | `localhost:9002` | **服务端建连**地址（不含 scheme），生产是 `minio:9000`  |
+| `YUANCHAT_MINIO_ACCESS_KEY`      | —                | 访问密钥                                                |
+| `YUANCHAT_MINIO_SECRET_KEY`      | —                | 私有密钥                                                |
+| `YUANCHAT_MINIO_BUCKET`          | `yuanchat`       | 桶名（首次连接自动创建）                                |
+| `YUANCHAT_MINIO_USE_SSL`         | `false`          | 建连是否走 HTTPS                                        |
+| `YUANCHAT_MINIO_PUBLIC_ENDPOINT` | 空               | **下发给客户端**的对外地址（不含 scheme），**生产必填** |
+| `YUANCHAT_MINIO_PUBLIC_USE_SSL`  | `false`          | 对外地址是否走 HTTPS，生产经 nginx 终止 TLS 时设 `true` |
 
-> 预签名 URL 里的 host 来自 `endpoint`。真机/公网访问时必须填**客户端可达**的地址，
-> 填 `localhost` 会导致客户端连自己而非服务器。
+`endpoint` 与 `public_endpoint` 必须分开理解：
+
+- `endpoint` 是**服务端进程**拿去连 MinIO 的地址。生产它是 compose 内网主机名 `minio:9000`。
+- `public_endpoint` 是**拼进下发给客户端的 URL**（预签名 URL 与头像直链）的地址。
+  留空则回落到 `endpoint` —— 单机开发正是这条路径，行为与从前一致。
+
+> **生产不填 `public_endpoint` 会导致头像、图片、语音、视频、贴纸封面全部加载失败**：
+> 客户端拿到的 URL host 是 `minio:9000`，浏览器和手机都解析不了这个内网名。
+
+> **三处必须写同一个域名**，否则预签名 URL 的 SigV4 签名校验失败（直接 403，不是静默降级
+> —— 签名把 Host 头也算进去了）：
+>
+> 1. 后端 `YUANCHAT_MINIO_PUBLIC_ENDPOINT`
+> 2. MinIO 容器的 `MINIO_SERVER_URL`
+> 3. nginx 存储子域的 `server_name`（该 location 须 `proxy_set_header Host $host` 透传）
+>
+> 生产用 `docker-compose.prod.yml` 时这三处都由 `.env` 的 `DOMAIN_STORAGE` 推导，无需手动对齐。
 
 ### 日志
 
@@ -64,10 +81,12 @@
 
 ### 在线状态（Presence）
 
-| 变量                        | 默认值            | 说明                                                    |
-| --------------------------- | ----------------- | ------------------------------------------------------- |
-| `YUANCHAT_PRESENCE_BACKEND` | `local`           | `local`=单实例进程内；`redis`=多实例 Pub/Sub 跨实例同步 |
-| `YUANCHAT_PRESENCE_CHANNEL` | `presence:events` | redis 模式的事件 channel                                |
+| 变量                          | 默认值            | 说明                                                               |
+| ----------------------------- | ----------------- | ------------------------------------------------------------------ |
+| `YUANCHAT_PRESENCE_BACKEND`   | `local`           | `local`=单实例进程内；`redis`=多实例 Pub/Sub 跨实例同步            |
+| `YUANCHAT_PRESENCE_CHANNEL`   | `presence:events` | redis 模式的事件 channel                                           |
+| `YUANCHAT_DISPATCHER_BACKEND` | `inproc`          | `inproc`=单实例进程内 Hub；`redis`=多实例 Pub/Sub 跨实例投递实时帧 |
+| `YUANCHAT_DISPATCHER_CHANNEL` | `ws:dispatch`     | redis 模式的帧分发 channel                                         |
 
 > 多副本部署**必须**设为 `redis`，否则 A 实例的用户在 B 实例上被判为离线。
 
@@ -88,6 +107,32 @@
 | ------------------ | ------- | ----------------------------------------------------------------------------------- |
 | `moderation.words` | 见 yaml | 敏感词库（数组，仅支持 yaml 配置）；命中的消息标记 `flagged` 进审核队列，不阻塞发送 |
 
+### 通话中继（TURN / STUN）
+
+| 变量                               | 默认值      | 说明                                                                                   |
+| ---------------------------------- | ----------- | -------------------------------------------------------------------------------------- |
+| `YUANCHAT_TURN_ENABLED`            | `true`      | 关掉后 `/calls/ice-servers` 只返回 STUN 项，NAT 后的通话会打不通                       |
+| `YUANCHAT_TURN_HOST`               | `localhost` | **客户端可达**的 TURN 主机名/IP，**生产必填**（填容器内网名会让浏览器解析失败）        |
+| `YUANCHAT_TURN_PORT`               | `3478`      | 控制端口（UDP + TCP 同号）                                                             |
+| `YUANCHAT_TURN_REALM`              | `yuanchat`  | 与 `turnserver.conf` 的 `realm` 必须一致                                               |
+| `YUANCHAT_TURN_STATIC_AUTH_SECRET` | 空          | 与 coturn 的 `static-auth-secret` **同值**，**生产必填**；生成：`openssl rand -hex 32` |
+| `YUANCHAT_TURN_CREDENTIAL_TTL`     | `1h`        | 签发凭据的有效期                                                                       |
+
+生产不用手工填这几项：`docker-compose.prod.yml` 已从 `deploy/.env` 注入
+`ENABLED`/`HOST`/`PORT`/`REALM`/`STATIC_AUTH_SECRET`，其中 `HOST` 与 `REALM` 取 `DOMAIN_APP`、
+密钥取 `TURN_SECRET` —— 与渲染 `coturn/turnserver.prod.conf` 用的是同一组变量，天然两边同值。
+
+> **凭据不落库**：服务端按 coturn 的 `use-auth-secret`（REST API）口径签发
+> `username=<过期时间戳>:<用户ID>`、`credential=base64(HMAC-SHA1(密钥, username))`，
+> coturn 用同一密钥复算校验。因此密钥两边必须一致，改一边就会全部通话打不通。
+> `realm` 同理，两边不一致同样会让通话全挂。
+>
+> **开发与生产的 coturn 配置刻意不同**：`turnserver.dev.conf` 开了 `allow-loopback-peers`
+> 且不禁私网段（两个浏览器都在 127.0.0.1，不放行则中继在本机永远不可用）；
+> `turnserver.prod.conf` 反之 —— 禁全部私网 peer，否则任何登录用户都能拿 TURN 当跳板扫内网。
+> 另外 dev 那份是手写的静态文件，prod 那份由 `install.sh` 从
+> `turnserver.prod.conf.template` 渲染生成（含真实密钥，不入库）。
+
 ## 二、前端（Vite，构建期注入）
 
 前端变量在**构建时**编译进产物，运行期无法更改；改地址需重新构建。
@@ -105,13 +150,16 @@
 
 供 `docker-compose.prod.yml` 与 `install.sh` 使用，见 [`deploy/.env.prod.example`](../../deploy/.env.prod.example)。
 
-| 变量                                                        | 说明                               |
-| ----------------------------------------------------------- | ---------------------------------- |
-| `DOMAIN_APP` / `DOMAIN_API` / `DOMAIN_WS` / `DOMAIN_ADMIN`  | 四个子域名，须已解析到本机         |
-| `ADMIN_EMAIL`                                               | Let's Encrypt 到期通知邮箱         |
-| `DB_PASSWORD` / `REDIS_PASSWORD` / `JWT_SECRET` / `MINIO_*` | 留空则 `install.sh` 自动生成随机值 |
-| `PRESENCE_BACKEND`                                          | 多实例部署改 `redis`               |
-| `APP_VERSION`                                               | 镜像 tag，默认 `latest`            |
-| `TZ`                                                        | 容器时区，默认 `Asia/Shanghai`     |
+| 变量                                                                          | 说明                                                                                                                                                                                                                                |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DOMAIN_APP` / `DOMAIN_API` / `DOMAIN_WS` / `DOMAIN_ADMIN` / `DOMAIN_STORAGE` | 五个子域名，须已解析到本机；`DOMAIN_STORAGE` 是对象存储对外域名（客户端下载图片/语音/视频/头像走它）                                                                                                                                |
+| `ADMIN_EMAIL`                                                                 | Let's Encrypt 到期通知邮箱                                                                                                                                                                                                          |
+| `DB_PASSWORD` / `REDIS_PASSWORD` / `JWT_SECRET` / `MINIO_*`                   | 留空则 `install.sh` 自动生成随机值                                                                                                                                                                                                  |
+| `PRESENCE_BACKEND`                                                            | 多实例部署改 `redis`                                                                                                                                                                                                                |
+| `DISPATCHER_BACKEND`                                                          | 多实例部署改 `redis`（默认 `inproc` 仅影响实时帧跨实例投递）                                                                                                                                                                        |
+| `TURN_SECRET`                                                                 | coturn 与后端共用的 TURN 密钥，留空则 `install.sh` 自动生成：拿它渲染 `coturn/turnserver.prod.conf` 的 `static-auth-secret`，compose 同时把它作为 `YUANCHAT_TURN_STATIC_AUTH_SECRET` 传给后端，故只有这一个变量（两边同值是硬要求） |
+| `PUBLIC_IP`                                                                   | **必填**，本机**外网** IP（`curl -s https://api.ipify.org`）。渲染进 coturn 的 `external-ip`；无法自动探测（NAT 内取到的是内网地址），留空 `install.sh` 直接报错                                                                    |
+| `APP_VERSION`                                                                 | 自建镜像 tag，**必填**（禁止 `latest`；未设置 compose 直接报错）                                                                                                                                                                    |
+| `TZ`                                                                          | 容器时区，默认 `Asia/Shanghai`                                                                                                                                                                                                      |
 
 > `deploy/.env` 含明文凭据，已被 `.gitignore` 排除，**切勿提交**。

@@ -10,6 +10,8 @@ import { setMessageMockMode, useMessageStore } from "../store/messageStore";
 import type { ChatMessage } from "../store/messageStore";
 import { chatSocket } from "../ws/chatSocket";
 import * as filesApi from "../api/files";
+import i18n from "@yuanchat/design-system/i18n";
+import { useToastStore } from "../store/toastStore";
 
 const CONV = "conv-1";
 
@@ -517,6 +519,167 @@ describe("messageStore.sendFile (real mode)", () => {
   });
 });
 
+describe("messageStore.sendVideo (real mode)", () => {
+  let revokeSpy: ReturnType<typeof vi.fn>;
+
+  /** 一个「元数据可读」的视频：node 环境无解码器，故整体打桩 extractVideoMeta */
+  function stubMeta(duration = 15) {
+    return vi.spyOn(filesApi, "extractVideoMeta").mockResolvedValue({
+      duration,
+      width: 1280,
+      height: 720,
+      thumbnail: new Blob(["jpeg"], { type: "image/jpeg" }),
+    });
+  }
+
+  /** 两次直传票据：先视频（files/）后缩略图（images/） */
+  function stubUploads() {
+    vi.spyOn(filesApi, "getUploadUrl")
+      .mockResolvedValueOnce({ uploadUrl: "https://put", objectKey: "files/2026/09/v.mp4" })
+      .mockResolvedValueOnce({ uploadUrl: "https://put", objectKey: "images/2026/09/t.jpg" });
+    vi.spyOn(filesApi, "uploadToTicket").mockResolvedValue(undefined);
+  }
+
+  function videoFile(bytes = 1024): File {
+    return new File([new Uint8Array(bytes)], "发布演示.mp4", { type: "video/mp4" });
+  }
+
+  /**
+   * 断言最近一条 toast 用的就是指定 i18n key 的译文。
+   *
+   * @remarks showToast 在被测模块里是静态 import 绑定，vi.spyOn 改不到，故读真实 store。
+   *   额外断言译文 ≠ key 本身：i18next 对缺失 key 原样返回 key，
+   *   否则「locale 里没这条 key」会让 toBe(i18n.t(key)) 恒真（假绿）。
+   */
+  function expectToastKey(key: string) {
+    const list = useToastStore.getState().toasts;
+    const text = list.length > 0 ? list[list.length - 1].text : "";
+    expect(i18n.t(key)).not.toBe(key);
+    expect(text).toBe(i18n.t(key));
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    setMessageMockMode(false);
+    reset();
+    useToastStore.setState({ toasts: [] });
+    vi.spyOn(chatSocket, "send").mockImplementation(() => {});
+    revokeSpy = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL: () => "blob:video-1", revokeObjectURL: revokeSpy });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("乐观插入 video 气泡（localUrl + sending），回填 key/thumbKey/尺寸并发 video 帧", async () => {
+    stubMeta();
+    stubUploads();
+
+    await useMessageStore.getState().sendVideo(CONV, videoFile(2048));
+
+    const m = useMessageStore.getState().messagesByConv[CONV][0];
+    expect(m.kind).toBe("video");
+    expect(m.status).toBe("sending");
+    expect(m.video?.localUrl).toBe("blob:video-1");
+    expect(m.video?.name).toBe("发布演示.mp4");
+    // 元数据回填：乐观插入时是 0，上传完成后是真实值
+    expect(m.video?.key).toBe("files/2026/09/v.mp4");
+    expect(m.video?.thumbKey).toBe("images/2026/09/t.jpg");
+    expect(m.video?.duration).toBe(15);
+    expect(m.video?.width).toBe(1280);
+    expect(m.video?.height).toBe(720);
+
+    const call = vi.mocked(chatSocket.send).mock.calls.find(([tp]) => tp === "message.send");
+    expect(call?.[1]).toEqual({
+      conversation_id: CONV,
+      content: {
+        type: "video",
+        key: "files/2026/09/v.mp4",
+        thumb_key: "images/2026/09/t.jpg",
+        name: "发布演示.mp4",
+        size: 2048,
+        duration: 15,
+        width: 1280,
+        height: 720,
+      },
+      client_msg_id: m.clientMsgId,
+    });
+  });
+
+  it("超过 100MB：置 failed + toast，且不读元数据、不发帧", async () => {
+    const metaSpy = stubMeta();
+    stubUploads();
+
+    const file = videoFile(1024);
+    // 造一个「超大」文件：真分配 100MB 只为跑断言不值当
+    Object.defineProperty(file, "size", { value: 101 * 1024 * 1024 });
+    await useMessageStore.getState().sendVideo(CONV, file);
+
+    expect(useMessageStore.getState().messagesByConv[CONV][0].status).toBe("failed");
+    expect(metaSpy).not.toHaveBeenCalled();
+    expectToastKey("chat.video.tooLarge");
+    expect(
+      vi.mocked(chatSocket.send).mock.calls.find(([tp]) => tp === "message.send"),
+    ).toBeUndefined();
+  });
+
+  it("超过 120 秒：置 failed + toast，且不上传字节", async () => {
+    stubMeta(121);
+    const uploadSpy = vi.spyOn(filesApi, "uploadToTicket").mockResolvedValue(undefined);
+
+    await useMessageStore.getState().sendVideo(CONV, videoFile());
+
+    expect(useMessageStore.getState().messagesByConv[CONV][0].status).toBe("failed");
+    expectToastKey("chat.video.tooLong");
+    expect(uploadSpy).not.toHaveBeenCalled();
+    expect(
+      vi.mocked(chatSocket.send).mock.calls.find(([tp]) => tp === "message.send"),
+    ).toBeUndefined();
+  });
+
+  it("元数据/抽帧失败：置 failed + toast（缩略图缺失的帧服务端必拒，不能发）", async () => {
+    vi.spyOn(filesApi, "extractVideoMeta").mockRejectedValue(new Error("meta timeout"));
+
+    await useMessageStore.getState().sendVideo(CONV, videoFile());
+
+    expect(useMessageStore.getState().messagesByConv[CONV][0].status).toBe("failed");
+    expectToastKey("chat.video.readFailed");
+    expect(
+      vi.mocked(chatSocket.send).mock.calls.find(([tp]) => tp === "message.send"),
+    ).toBeUndefined();
+  });
+
+  it("上传失败：置 failed + toast，且不发帧", async () => {
+    stubMeta();
+    vi.spyOn(filesApi, "getUploadUrl").mockRejectedValue(new Error("network"));
+
+    await useMessageStore.getState().sendVideo(CONV, videoFile());
+
+    expect(useMessageStore.getState().messagesByConv[CONV][0].status).toBe("failed");
+    expectToastKey("chat.video.sendFailed");
+    expect(
+      vi.mocked(chatSocket.send).mock.calls.find(([tp]) => tp === "message.send"),
+    ).toBeUndefined();
+  });
+
+  it("applyAck 后撤销本地 blob 并保留 key（新挂载据 key 签下载播放）", async () => {
+    stubMeta();
+    stubUploads();
+
+    await useMessageStore.getState().sendVideo(CONV, videoFile());
+    const clientId = useMessageStore.getState().messagesByConv[CONV][0].clientMsgId!;
+    useMessageStore.getState().applyAck(clientId, "srv-v-1", CONV, 7, Date.now());
+
+    const after = useMessageStore.getState().messagesByConv[CONV][0];
+    expect(after.status).toBe("sent");
+    expect(after.video?.localUrl).toBeUndefined();
+    expect(after.video?.key).toBe("files/2026/09/v.mp4");
+    expect(revokeSpy).toHaveBeenCalledWith("blob:video-1");
+  });
+});
+
 describe("messageStore (mock mode)", () => {
   it("simulates sent → read receipts without network", () => {
     setMessageMockMode(true);
@@ -528,5 +691,143 @@ describe("messageStore (mock mode)", () => {
     vi.advanceTimersByTime(900);
     expect(useMessageStore.getState().messagesByConv[CONV][0].status).toBe("read");
     expect(useMessageStore.getState().messagesByConv[CONV][0].id).toBe(id);
+  });
+});
+
+describe("messageStore.clearConversation", () => {
+  const CONV_B = "conv-b";
+
+  it("empties messages and resets hasMore for the target conversation only", () => {
+    useMessageStore.setState({
+      messagesByConv: {
+        [CONV]: [
+          {
+            id: "a1",
+            conversationId: CONV,
+            kind: "text",
+            isSelf: false,
+            text: "hi",
+            time: "09:00",
+          },
+          { id: "a2", conversationId: CONV, kind: "text", isSelf: true, text: "yo", time: "09:01" },
+        ],
+        [CONV_B]: [
+          {
+            id: "b1",
+            conversationId: CONV_B,
+            kind: "text",
+            isSelf: false,
+            text: "hey",
+            time: "09:02",
+          },
+        ],
+      },
+      hasMoreByConv: { [CONV]: true, [CONV_B]: true },
+    });
+
+    useMessageStore.getState().clearConversation(CONV);
+
+    const state = useMessageStore.getState();
+    expect(state.messagesByConv[CONV]).toEqual([]);
+    expect(state.hasMoreByConv[CONV]).toBe(false);
+    expect(state.messagesByConv[CONV_B]).toHaveLength(1);
+    expect(state.hasMoreByConv[CONV_B]).toBe(true);
+  });
+
+  describe("sendSticker", () => {
+    it("optimistically inserts a sticker message with sending status", () => {
+      useMessageStore.setState({ messagesByConv: {}, hasMoreByConv: {} });
+      useMessageStore.getState().sendSticker("c1", {
+        id: "s1",
+        objectKey: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+      const msgs = useMessageStore.getState().messagesByConv["c1"];
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].kind).toBe("sticker");
+      expect(msgs[0].isSelf).toBe(true);
+      expect(msgs[0].status).toBe("sending");
+      expect(msgs[0].sticker).toEqual({
+        stickerId: "s1",
+        key: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+    });
+
+    // 帧格式必须与服务端 buildContent 的 case "sticker" 完全对齐：
+    // content 是对象（非 JSON 字符串）、带 type、四字段齐全，否则服务端回 400 且贴纸发不出去。
+    it("emits a message.send frame matching the server sticker contract", () => {
+      useMessageStore.setState({ messagesByConv: {}, hasMoreByConv: {} });
+      useMessageStore.getState().sendSticker("c1", {
+        id: "s1",
+        objectKey: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+
+      const call = vi.mocked(chatSocket.send).mock.calls.find(([tp]) => tp === "message.send");
+      expect(call).toBeTruthy();
+      const payload = call![1] as {
+        conversation_id: string;
+        content: Record<string, unknown>;
+        client_msg_id: string;
+      };
+      expect(payload.conversation_id).toBe("c1");
+      expect(payload.content).toEqual({
+        type: "sticker",
+        sticker_id: "s1",
+        key: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+      expect(payload.client_msg_id).toBeTruthy();
+    });
+
+    it("marks the sticker failed when no ack arrives before the timeout", () => {
+      useMessageStore.setState({ messagesByConv: {}, hasMoreByConv: {} });
+      useMessageStore.getState().sendSticker("c1", {
+        id: "s1",
+        objectKey: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+
+      vi.advanceTimersByTime(20_000);
+
+      expect(useMessageStore.getState().messagesByConv["c1"][0].status).toBe("failed");
+    });
+
+    // 贴纸没有本地 blob 可重传，重试就是按原 client_msg_id 重发同一帧；
+    // 若 retrySend 漏了 sticker 分支，会落到文本路径被 `if (!msg.text) return` 静默吞掉。
+    it("retrySend re-emits the same sticker frame with the original client_msg_id", () => {
+      useMessageStore.setState({ messagesByConv: {}, hasMoreByConv: {} });
+      useMessageStore.getState().sendSticker("c1", {
+        id: "s1",
+        objectKey: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+      vi.advanceTimersByTime(20_000);
+      const msg = useMessageStore.getState().messagesByConv["c1"][0];
+      expect(msg.status).toBe("failed");
+      vi.mocked(chatSocket.send).mockClear();
+
+      useMessageStore.getState().retrySend("c1", msg.id);
+
+      expect(useMessageStore.getState().messagesByConv["c1"][0].status).toBe("sending");
+      const call = vi.mocked(chatSocket.send).mock.calls.find(([tp]) => tp === "message.send");
+      expect(call).toBeTruthy();
+      const payload = call![1] as { content: Record<string, unknown>; client_msg_id: string };
+      expect(payload.content).toEqual({
+        type: "sticker",
+        sticker_id: "s1",
+        key: "images/2026/08/a.png",
+        width: 96,
+        height: 96,
+      });
+      expect(payload.client_msg_id).toBe(msg.clientMsgId);
+    });
   });
 });

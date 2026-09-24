@@ -19,6 +19,7 @@ import {
   formatListTime,
   formatMessageTime,
   mapConversation,
+  conversationUpdatePatch,
   pseudoWave,
 } from "../api/chat";
 import { setTokenProvider } from "../api/client";
@@ -34,13 +35,17 @@ import {
 import { useAuthStore } from "../store/authStore";
 import { useContactStore } from "../store/contactStore";
 import { useConversationStore } from "../store/conversationStore";
-import type { Conversation } from "../store/conversationStore";
+import { useMomentsStore } from "../store/momentsStore";
 import { setE2EEContext, setMessageMockMode, useMessageStore } from "../store/messageStore";
 import { decryptFrom } from "../crypto/e2eeManager";
+import { captureException } from "../observability/sentry";
 import { usePresenceStore } from "../store/presenceStore";
 import { resetChatStores, revokeAllLocalPreviews } from "../store/resetStores";
 import { showToast } from "../store/toastStore";
+import { previewBodyOf } from "../utils/messagePreview";
 import type { ChatMessage } from "../store/messageStore";
+import { ringtone } from "../webrtc/ringtone";
+import { callFrameHandlers } from "./useCallSocket";
 import { chatSocket } from "../ws/chatSocket";
 
 interface ImportMetaEnv {
@@ -55,6 +60,33 @@ export function isMockEnabled(): boolean {
 
 /** 帧处理器只需注册一次（模块级防重） */
 let wired = false;
+
+/**
+ * 处理服务端 `error` 帧。
+ *
+ * @remarks 服务端有 21 个 `sendError` 调用点（贴纸/图片/文件/语音字段校验、文本超长、
+ *   BLOCKED、无效 mention/quote、落库失败 500 等）。此前只认 `message === "BLOCKED"`，
+ *   其余 20 种连 `code` 都不看就丢弃——消息停在 sending 直到 5s ack 超时才无理由变
+ *   failed，用户既不知原因、重试还会以同一帧再失败。任何新增服务端校验都会重现该症状，
+ *   故这里做通用分发。服务端 `message` 是英文技术描述，只送 Sentry 不直接展示。
+ */
+export function applyErrorFrame(p: { code: number; message: string; client_msg_id?: string }) {
+  if (p.client_msg_id) {
+    useMessageStore.getState().failByClientMsgId(p.client_msg_id);
+  }
+  if (p.message === "BLOCKED") {
+    showToast("error", i18n.t("chat.message.blockedRejected"));
+  } else if (p.code === 400) {
+    showToast("error", i18n.t("chat.error.invalidFrame"));
+  } else if (p.code === 403) {
+    showToast("error", i18n.t("chat.error.rejected"));
+  } else {
+    showToast("error", i18n.t("chat.error.serverError"));
+  }
+  captureException(new Error(`ws error frame ${p.code}: ${p.message}`), {
+    clientMsgId: p.client_msg_id,
+  });
+}
 
 function wireSocket() {
   if (wired) return;
@@ -119,6 +151,8 @@ function wireSocket() {
       const isSystem = p.content.type === "system";
       const isFile = p.content.type === "file";
       const isVoice = p.content.type === "voice";
+      const isSticker = p.content.type === "sticker";
+      const isVideo = p.content.type === "video";
 
       const kind: ChatMessage["kind"] = isSystem
         ? "system"
@@ -128,13 +162,18 @@ function wireSocket() {
             ? "file"
             : isVoice
               ? "voice"
-              : "text";
+              : isVideo
+                ? "video"
+                : isSticker
+                  ? "sticker"
+                  : "text";
       const msg: ChatMessage = {
         id: p.message_id,
         conversationId: p.conversation_id,
         kind,
         isSelf,
         senderName: p.sender_nickname,
+        senderId: p.sender_id,
         text: kind === "text" || kind === "system" ? p.content.text : undefined,
         image: isImage
           ? { key: p.content.key, width: p.content.width ?? 0, height: p.content.height ?? 0 }
@@ -153,6 +192,30 @@ function wireSocket() {
               key: p.content.key,
             }
           : undefined,
+        video: isVideo
+          ? {
+              duration: p.content.duration ?? 0,
+              width: p.content.width ?? 0,
+              height: p.content.height ?? 0,
+              key: p.content.key,
+              thumbKey: p.content.thumb_key,
+              name: p.content.name,
+              size:
+                p.content.size !== undefined
+                  ? formatFileMeta(p.content.name ?? "", p.content.size).size
+                  : undefined,
+            }
+          : undefined,
+        sticker: isSticker
+          ? {
+              stickerId: p.content.sticker_id,
+              key: p.content.key,
+              width: p.content.width ?? 96,
+              height: p.content.height ?? 96,
+            }
+          : undefined,
+        // 通话记录：系统消息带 call 键时气泡走 i18n 渲染，不带则回退 text
+        call: isSystem ? p.content.call : undefined,
         seq: p.seq,
         time: formatMessageTime(iso),
         dateKey: dateKeyOf(new Date(p.timestamp)),
@@ -166,14 +229,9 @@ function wireSocket() {
 
       const convStore = useConversationStore.getState();
       const conv = convStore.conversations.find((c) => c.id === p.conversation_id);
-      // 图片/文件/语音消息列表预览走占位文案；文本/系统消息用正文
-      const body = isImage
-        ? i18n.t("chat.message.image")
-        : isFile
-          ? i18n.t("chat.message.file")
-          : isVoice
-            ? i18n.t("chat.message.voice")
-            : (p.content.text ?? "");
+      // 列表预览与 REST 路径（mapConversation）同源：非文本类走本地化占位、文本用正文。
+      // 两条路径各自写一遍占位文案是"实时英文、刷新中文"的成因，见 previewBodyOf。
+      const body = previewBodyOf(kind, p.content.text);
       // system 消息不加昵称前缀
       const preview =
         conv && conv.type === "group" && !isSelf && !isSystem
@@ -238,6 +296,25 @@ function wireSocket() {
       }
     },
 
+    "message.edited": (p) => {
+      useMessageStore.getState().applyEdited(p.conversation_id, p.message_id, p.text, p.edit_count);
+      // 编辑最后一条时会话列表预览必须同步刷新，否则实时下预览停在旧文本
+      //（刷新页面后服务端 GetLastMessage 实时查库会给出新文本，此处只补实时缺口）
+      const convStore = useConversationStore.getState();
+      const conv = convStore.conversations.find((c) => c.id === p.conversation_id);
+      if (!conv || conv.lastSeq !== p.seq) return;
+      // 群聊里他人的消息预览带"昵称: "前缀（口径同 message.receive）。edited 帧不含昵称，
+      // 改从本地这条消息上取——applyEdited 刚刚更新过它，昵称必然在位。
+      const edited = (useMessageStore.getState().messagesByConv[p.conversation_id] ?? []).find(
+        (m) => m.id === p.message_id,
+      );
+      const prefix =
+        conv.type === "group" && edited && !edited.isSelf && edited.senderName
+          ? edited.senderName + ": "
+          : "";
+      convStore.updateConversation(p.conversation_id, { lastMessage: prefix + p.text });
+    },
+
     typing: (p) => {
       useMessageStore.getState().setTyping(p.conversation_id, p.nickname);
     },
@@ -293,10 +370,9 @@ function wireSocket() {
     },
 
     "conversation.updated": (p) => {
-      const patch: Partial<Conversation> = {};
-      if (p.name) patch.name = p.name;
-      if (p.member_count) patch.memberCount = p.member_count;
-      useConversationStore.getState().updateConversation(p.conversation_id, patch);
+      useConversationStore
+        .getState()
+        .updateConversation(p.conversation_id, conversationUpdatePatch(p));
     },
 
     "conversation.removed": (p) => {
@@ -319,18 +395,36 @@ function wireSocket() {
       useContactStore.getState().removeFriend(p.friend_id);
     },
 
-    error: (p) => {
-      // BLOCKED：单聊被拉黑拒发。把对应乐观消息翻 failed + toast 提示
-      if (p.message === "BLOCKED" && p.client_msg_id) {
-        useMessageStore.getState().failByClientMsgId(p.client_msg_id);
-        showToast("error", i18n.t("chat.message.blockedRejected"));
-      }
+    "moments.activity": (p) => {
+      // statusEmoji / postPreview / postThumbKey 帧上没有：互动页进入时会拉一次
+      // 完整列表补齐，红点与「谁做了什么」这一行本帧已够渲染
+      useMomentsStore.getState().pushActivity({
+        id: p.id,
+        kind: p.kind === 1 ? 1 : 2,
+        postId: p.post_id,
+        actor: {
+          id: p.actor_id,
+          nickname: p.actor_nickname,
+          avatarUrl: p.actor_avatar_url,
+          statusEmoji: "",
+        },
+        commentPreview: p.comment_preview,
+        postPreview: "",
+        postThumbKey: "",
+        read: false,
+        createdAt: p.created_at,
+      });
     },
+
+    error: applyErrorFrame,
 
     presence: (p) => {
       useConversationStore.getState().applyPresence(p.user_id, p.online);
       usePresenceStore.getState().applyPresence(p.user_id, p.online);
     },
+
+    // 四个通话帧与桌面通话窗口共用同一份处理器（见 useCallSocket）
+    ...callFrameHandlers,
   });
 
   chatSocket.onReconnect = () => {
@@ -367,11 +461,18 @@ function injectDemoData() {
   }
   const msgState = useMessageStore.getState();
   if (Object.keys(msgState.messagesByConv).length === 0) {
-    // demo 消息无 created_at，统一按"今天"补 dateKey，保证分隔线正常渲染
+    // demo 消息无 created_at：dateKey 统一按"今天"补（分隔线要用），createdAtMs 按"刚刚"补。
+    // 后者不补的话撤回（2 分钟）与编辑（5 分钟）的窗口判定拿不到发送时间，一律判成不可用 ——
+    // mock 模式下这两个菜单项恒不出现，演示与 E2E 都测不到（见 canEdit / recallStillOpen）
     const todayKey = dateKeyOf(new Date());
+    const nowMs = Date.now();
     const withDateKey: Record<string, ChatMessage[]> = {};
     for (const [convId, list] of Object.entries(DEMO_MESSAGES)) {
-      withDateKey[convId] = list.map((m) => ({ ...m, dateKey: todayKey }));
+      withDateKey[convId] = list.map((m) => ({
+        ...m,
+        dateKey: todayKey,
+        createdAtMs: m.createdAtMs ?? nowMs,
+      }));
     }
     useMessageStore.setState({ messagesByConv: withDateKey, typingByConv: DEMO_TYPING });
   }
@@ -382,6 +483,10 @@ function injectDemoData() {
 
 export function useChatBootstrap() {
   useEffect(() => {
+    // 被叫侧响铃时没有任何用户手势，AudioContext 会停在 suspended —— 静音来电
+    // 与「没收到来电」在用户看来完全一样。这里借应用的首个 pointerdown 预热
+    ringtone.primeOnFirstGesture();
+
     if (isMockEnabled()) {
       injectDemoData();
       return;

@@ -3,13 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/yuanchat-icon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover：让 env(safe-area-inset-*) 在挖孔/刘海机型上有值，
+         作为 --safe-area-top（原生下发）的兜底 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="元聊 YuanChat — 即时通讯" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <title>元聊 YuanChat</title>
   </head>
-  <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 antialiased">
+  <body
+    class="bg-neutral-50 text-neutral-900 antialiased dark:bg-neutral-950 dark:text-neutral-100"
+  >
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

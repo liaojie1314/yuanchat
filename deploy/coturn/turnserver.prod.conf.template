@@ -1,0 +1,38 @@
+# 生产 TURN 配置（本文件是模板）。
+#
+# deploy/install.sh 用 envsubst 渲染出同目录的 turnserver.prod.conf（compose 挂载的就是它），
+# 渲染产物含真实密钥与外网 IP、不入库，只有本模板进版本库。
+#
+# 三个变量取自 deploy/.env，且与后端共用同一取值，不能各写各的：
+#   TURN_SECRET —— 同时填 static-auth-secret 与 YUANCHAT_TURN_STATIC_AUTH_SECRET，
+#                  两边不同值则所有通话的 TURN 认证都失败（install.sh 留空时自动生成）
+#   DOMAIN_APP  —— 同时填 realm 与 YUANCHAT_TURN_REALM
+#   PUBLIC_IP   —— 本机外网 IP，必填，见下方 external-ip
+
+listening-port=3478
+fingerprint
+
+use-auth-secret
+static-auth-secret=${TURN_SECRET}
+realm=${DOMAIN_APP}
+
+# NAT 后必须显式告知外网 IP：否则 coturn 把内网地址写进 relay candidate，
+# 客户端拿到一个自己根本连不上的地址，通话表现为「一直连接中」。
+external-ip=${PUBLIC_IP}
+
+min-port=49160
+max-port=49200
+
+# 禁止把中继指向内网：不禁的话任何持有凭据的人都能拿 TURN 当跳板扫内网
+# （SSRF 式滥用），而凭据是登录用户人手一份的。
+denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+
+no-multicast-peers
+total-quota=200
+no-cli
+log-file=stdout

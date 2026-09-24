@@ -21,29 +21,67 @@ var ErrNotAllFriends = errors.New("some members are not friends")
 // ErrNoValidMembers 建群成员去重、剔除发起者后为空或超上限（参数错误）。
 var ErrNoValidMembers = errors.New("no valid members")
 
+// ErrInvalidAlias 群昵称超长（>30 rune）。空串允许（= 清除昵称）。
+var ErrInvalidAlias = errors.New("alias too long")
+
+// ErrInvalidAnnouncement 群公告超长（>1000 rune）。空串允许（= 清除公告）。
+var ErrInvalidAnnouncement = errors.New("announcement too long")
+
 // ConversationDTO 会话列表条目（REST 响应结构）。
 type ConversationDTO struct {
-	ID            uuid.UUID       `json:"id"`
-	Type          int16           `json:"type"`
-	Name          string          `json:"name"`
-	AvatarURL     *string         `json:"avatar_url,omitempty"`
-	MemberCount   int64           `json:"member_count"`
-	UnreadCount   int64           `json:"unread_count"`
-	IsMuted       bool            `json:"is_muted"`
-	LastSeq       int64           `json:"last_seq"`
-	MyLastReadSeq int64           `json:"my_last_read_seq"`
-	MentionUnread bool            `json:"mention_unread"`
-	LastMessage   *LastMessageDTO `json:"last_message,omitempty"`
-	Peer          *PeerDTO        `json:"peer,omitempty"`
-	UpdatedAt     time.Time       `json:"updated_at"`
+	ID            uuid.UUID  `json:"id"`
+	Type          int16      `json:"type"`
+	Name          string     `json:"name"`
+	AvatarURL     *string    `json:"avatar_url,omitempty"`
+	MemberCount   int64      `json:"member_count"`
+	// MemberAvatars 群成员头像，最多 9 个（九宫格上限），顺序与成员列表一致。
+	// 仅群聊有值，供客户端拼合群头像；没有设置头像的成员占一个空串，
+	// 不跳过——跳过会让格子错位，且客户端拿不到该位置去做昵称首字兜底。
+	// 群自身设了 avatar_url 时同样返回，用哪个由客户端决定。
+	MemberAvatars []string `json:"member_avatars,omitempty"`
+	// MemberNames 与 MemberAvatars 同序等长的成员昵称，用于头像缺失那一格
+	// 显示昵称首字并据此取稳定配色。两个数组出自同一条查询，次序天然对齐。
+	MemberNames []string `json:"member_names,omitempty"`
+	UnreadCount   int64      `json:"unread_count"`
+	IsMuted       bool       `json:"is_muted"`
+	IsPinned      bool       `json:"is_pinned"`
+	PinnedAt      *time.Time `json:"pinned_at,omitempty"`
+	LastSeq       int64      `json:"last_seq"`
+	MyLastReadSeq int64      `json:"my_last_read_seq"`
+	MentionUnread bool       `json:"mention_unread"`
+	// Announcement 群公告正文（无公告时不出现在 JSON 中）。
+	Announcement *string `json:"announcement,omitempty"`
+	// AnnouncementUpdatedAt 公告最近变更时间（前端判断「新公告」提示）。
+	AnnouncementUpdatedAt *time.Time      `json:"announcement_updated_at,omitempty"`
+	LastMessage           *LastMessageDTO `json:"last_message,omitempty"`
+	Peer                  *PeerDTO        `json:"peer,omitempty"`
+	UpdatedAt             time.Time       `json:"updated_at"`
 }
 
 // LastMessageDTO 会话预览用的最后一条消息摘要。
+//
+// Preview 只对文本/系统消息有值；其余类型为空串，客户端按 PreviewKind 渲染
+// 本地化占位文案（见 previewOf 的说明）。
 type LastMessageDTO struct {
 	Preview        string    `json:"preview"`
+	PreviewKind    string    `json:"preview_kind"`
 	SenderNickname string    `json:"sender_nickname"`
 	CreatedAt      time.Time `json:"created_at"`
 }
+
+// previewKind* 会话列表预览的消息类型标记（客户端据此选本地化占位文案）。
+const (
+	previewKindText      = "text"
+	previewKindSystem    = "system"
+	previewKindImage     = "image"
+	previewKindFile      = "file"
+	previewKindVoice     = "voice"
+	previewKindVideo     = "video"
+	previewKindSticker   = "sticker"
+	previewKindCall      = "call"
+	previewKindEncrypted = "encrypted"
+	previewKindUnknown   = "unknown"
+)
 
 // PeerDTO 单聊对端用户信息。
 type PeerDTO struct {
@@ -59,6 +97,37 @@ type ConversationService struct {
 	contactRepo *repository.ContactRepository
 	userRepo    *repository.UserRepository
 	logger      *zap.Logger
+
+	// UGC 审核：群名 / 群公告命中敏感词时照常写入，但记入 flagged_ugc 审核队列。
+	// 两者均可为 nil（未接线或未配置词库时跳过审核）。
+	moderation *ModerationService
+	ugcRepo    *repository.FlaggedUGCRepository
+
+	// pushCallRecord 通话记录实时推送（router 注入；nil 时只落库不推，
+	// 收件人刷新后仍能从历史里看到）
+	pushCallRecord func(memberIDs []uuid.UUID, msg *model.Message, contentJSON string)
+}
+
+// SetUGCModeration 注入 UGC 敏感词审核依赖（router 接线用）。
+func (s *ConversationService) SetUGCModeration(m *ModerationService, r *repository.FlaggedUGCRepository) {
+	s.moderation = m
+	s.ugcRepo = r
+}
+
+// flagUGC 记录一条群维度的 UGC 敏感词命中（群名 / 公告）。
+// 记录失败只告警：打标不阻塞，群操作本身已提交成功。
+func (s *ConversationService) flagUGC(ctx context.Context, ugcType, content, hitWord string, operatorID, convID uuid.UUID) {
+	rec := &model.FlaggedUGC{
+		UGCType:        ugcType,
+		Content:        content,
+		HitWord:        hitWord,
+		UserID:         &operatorID,
+		ConversationID: &convID,
+	}
+	if err := s.ugcRepo.Create(ctx, rec); err != nil {
+		s.logger.Warn("record flagged ugc failed",
+			zap.String("ugc_type", ugcType), zap.String("conversation_id", convID.String()), zap.Error(err))
+	}
 }
 
 func NewConversationService(
@@ -88,16 +157,20 @@ func (s *ConversationService) List(ctx context.Context, userID uuid.UUID) ([]Con
 	dtos := make([]ConversationDTO, 0, len(items))
 	for _, item := range items {
 		dto := ConversationDTO{
-			ID:            item.ID,
-			Type:          item.Type,
-			MemberCount:   item.MemberCount,
-			IsMuted:       item.IsMuted,
-			MentionUnread: item.MentionUnread,
-			LastSeq:       item.LastSeq,
-			MyLastReadSeq: item.LastReadSeq,
-			UnreadCount:   max(item.LastSeq-item.LastReadSeq, 0),
-			AvatarURL:     item.AvatarURL,
-			UpdatedAt:     item.UpdatedAt,
+			ID:                    item.ID,
+			Type:                  item.Type,
+			MemberCount:           item.MemberCount,
+			IsMuted:               item.IsMuted,
+			IsPinned:              item.IsPinned,
+			PinnedAt:              item.PinnedAt,
+			MentionUnread:         item.MentionUnread,
+			LastSeq:               item.LastSeq,
+			MyLastReadSeq:         item.LastReadSeq,
+			UnreadCount:           max(item.LastSeq-item.LastReadSeq, 0),
+			AvatarURL:             item.AvatarURL,
+			Announcement:          item.Announcement,
+			AnnouncementUpdatedAt: item.AnnouncementUpdatedAt,
+			UpdatedAt:             item.UpdatedAt,
 		}
 		if item.Name != nil {
 			dto.Name = *item.Name
@@ -119,9 +192,11 @@ func (s *ConversationService) List(ctx context.Context, userID uuid.UUID) ([]Con
 			}
 		}
 
-		if last, err := s.msgRepo.GetLastMessage(ctx, item.ID); err == nil && last != nil {
+		if last, err := s.msgRepo.GetLastMessage(ctx, item.ID, item.ClearedBeforeSeq); err == nil && last != nil {
+			preview, kind := previewOf(last)
 			dto.LastMessage = &LastMessageDTO{
-				Preview:        previewOf(last),
+				Preview:        preview,
+				PreviewKind:    kind,
 				SenderNickname: last.SenderNickname,
 				CreatedAt:      last.CreatedAt,
 			}
@@ -129,28 +204,89 @@ func (s *ConversationService) List(ctx context.Context, userID uuid.UUID) ([]Con
 
 		dtos = append(dtos, dto)
 	}
+
+	s.fillMemberAvatars(ctx, dtos)
 	return dtos, nil
 }
 
-// previewOf 将消息内容压缩为列表预览文案。
-func previewOf(m *repository.MessageWithSender) string {
+// fillMemberAvatars 给本页的群会话补成员头像与昵称（客户端据此拼合群头像）。
+//
+// 先收齐全部群会话 ID 再一次性查回，整页只加一条查询；单聊不填，
+// 它已有对端头像回落。查询失败只告警不中断：群头像是展示增强，
+// 不该让整个会话列表接口挂掉。
+func (s *ConversationService) fillMemberAvatars(ctx context.Context, dtos []ConversationDTO) {
+	groupIDs := make([]uuid.UUID, 0, len(dtos))
+	for _, dto := range dtos {
+		if dto.Type == model.ConversationTypeGroup {
+			groupIDs = append(groupIDs, dto.ID)
+		}
+	}
+	if len(groupIDs) == 0 {
+		return
+	}
+	briefs, err := s.convRepo.MemberBriefsByConversation(ctx, groupIDs)
+	if err != nil {
+		s.logger.Warn("load group member avatars failed", zap.Error(err))
+		return
+	}
+	for i := range dtos {
+		b, ok := briefs[dtos[i].ID]
+		if !ok {
+			continue
+		}
+		avatars := make([]string, len(b))
+		names := make([]string, len(b))
+		for j, m := range b {
+			avatars[j], names[j] = m.AvatarURL, m.Nickname
+		}
+		dtos[i].MemberAvatars, dtos[i].MemberNames = avatars, names
+	}
+}
+
+// previewOf 将消息内容压缩为列表预览：返回 (正文, 类型标记)。
+//
+// 只有文本与系统消息有正文；其余类型正文为空、由客户端按 kind 渲染本地化占位
+// （"[图片]"/"[表情]"…）。文案不留在服务端：同一条消息 WS 实时路径走前端 i18n，
+// REST 列表若返回硬编码中文，英/日/韩界面就会"实时一种语言、刷新另一种语言"。
+func previewOf(m *repository.MessageWithSender) (string, string) {
 	switch m.MessageType {
 	case model.MessageTypeText:
 		var c model.MessageContentText
 		if err := json.Unmarshal([]byte(m.Content), &c); err == nil {
-			return c.Text
+			return c.Text, previewKindText
 		}
-		return ""
+		return "", previewKindText
+	case model.MessageTypeSystem:
+		// 系统消息与文本同为 {"text":...}，原实现落 default 返回空串 → 建群后列表预览空白
+		var c struct {
+			Text string          `json:"text"`
+			Call json.RawMessage `json:"call"`
+		}
+		if err := json.Unmarshal([]byte(m.Content), &c); err == nil {
+			// 通话记录不回传服务端中文：正文里的「通话时长 03:24」是给老客户端的兜底，
+			// 列表预览交客户端按 kind 渲染本地化的「[通话]」，
+			// 否则英/日/韩界面的会话列表里会冒出一行中文
+			if len(c.Call) > 0 {
+				return "", previewKindCall
+			}
+			return c.Text, previewKindSystem
+		}
+		return "", previewKindSystem
 	case model.MessageTypeImage:
-		return "[图片]"
+		return "", previewKindImage
 	case model.MessageTypeFile:
-		return "[文件]"
+		return "", previewKindFile
 	case model.MessageTypeVoice:
-		return "[语音]"
+		return "", previewKindVoice
 	case model.MessageTypeVideo:
-		return "[视频]"
+		return "", previewKindVideo
+	case model.MessageTypeSticker:
+		return "", previewKindSticker
+	case model.MessageTypeE2EE:
+		// 服务端无法解密，只能告诉客户端"这是一条加密消息"
+		return "", previewKindEncrypted
 	default:
-		return ""
+		return "", previewKindUnknown
 	}
 }
 
@@ -292,6 +428,12 @@ func (s *ConversationService) CreateGroup(
 		UpdatedAt: sysMsg.CreatedAt,
 	}
 
+	// 建群当场带上成员头像：客户端据此立刻拼出群头像，不必等下一次拉会话列表。
+	// 走列表同一个填充函数而不是另写一条查询，省得两处排序规则日后走岔。
+	filled := []ConversationDTO{*dto}
+	s.fillMemberAvatars(ctx, filled)
+	dto.MemberAvatars, dto.MemberNames = filled[0].MemberAvatars, filled[0].MemberNames
+
 	s.logger.Info("group conversation created",
 		zap.String("conversation_id", conv.ID.String()),
 		zap.String("creator_id", creatorID.String()),
@@ -317,4 +459,63 @@ func (s *ConversationService) defaultGroupName(ctx context.Context, creatorNick 
 		name = string(r[:100])
 	}
 	return name
+}
+
+// ConversationSettingsInput 会话个人设置变更（nil 字段表示不修改）。
+type ConversationSettingsInput struct {
+	IsPinned *bool
+	IsMuted  *bool
+}
+
+// ConversationSettingsResult 变更后的最新设置值（含未变更字段的当前值）。
+type ConversationSettingsResult struct {
+	IsPinned bool
+	PinnedAt *time.Time
+	IsMuted  bool
+}
+
+// UpdateSettings 更新本人在会话中的置顶/免打扰设置（member 维度）。
+//
+// 置顶语义：false→true 时落 pinned_at=now；重复置顶不刷新（置顶顺序稳定）；
+// 取消置顶清空 pinned_at。非成员返回 ErrNotMember（handler 映射 403）。
+func (s *ConversationService) UpdateSettings(
+	ctx context.Context, userID, convID uuid.UUID, in ConversationSettingsInput,
+) (*ConversationSettingsResult, error) {
+	member, found, err := s.convRepo.GetMember(ctx, convID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("load member: %w", err)
+	}
+	if !found {
+		return nil, ErrNotMember
+	}
+
+	res := &ConversationSettingsResult{
+		IsPinned: member.IsPinned, PinnedAt: member.PinnedAt, IsMuted: member.IsMuted,
+	}
+	updates := map[string]any{}
+	if in.IsPinned != nil && *in.IsPinned != member.IsPinned {
+		updates["is_pinned"] = *in.IsPinned
+		if *in.IsPinned {
+			// 截断到微秒与 Postgres timestamptz 精度对齐：
+			// 保证本次返回的 pinned_at 与后续读回的值严格相等（前端按其排序）
+			now := time.Now().Truncate(time.Microsecond)
+			updates["pinned_at"] = now
+			res.PinnedAt = &now
+		} else {
+			updates["pinned_at"] = nil
+			res.PinnedAt = nil
+		}
+		res.IsPinned = *in.IsPinned
+	}
+	if in.IsMuted != nil && *in.IsMuted != member.IsMuted {
+		updates["is_muted"] = *in.IsMuted
+		res.IsMuted = *in.IsMuted
+	}
+	if len(updates) == 0 {
+		return res, nil // 幂等：无实际变化不写库
+	}
+	if err := s.convRepo.UpdateMemberSettings(ctx, convID, userID, updates); err != nil {
+		return nil, fmt.Errorf("update settings: %w", err)
+	}
+	return res, nil
 }

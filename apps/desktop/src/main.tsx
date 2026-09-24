@@ -4,6 +4,9 @@
  * 与 Web 端的区别：
  * - 监听 auth-success 事件（来自注册窗口），自动跳转到聊天页
  */
+// 旧 WebView 补丁必须排在所有 import 之前：依赖会在模块初始化阶段就调用
+// ES2022 API（如 @noble/curves 用 Object.hasOwn），补晚了整屏空白
+import "@yuanchat/shared/polyfills";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
@@ -40,6 +43,29 @@ async function bootstrap() {
   if (import.meta.env.DEV && import.meta.env.VITE_ENABLE_MOCK === "true") {
     const { startMockWorker } = await import("@yuanchat/shared/mocks/browser");
     await startMockWorker();
+  }
+
+  // Linux 的 WebKitGTK 没有 RTCPeerConnection，媒体面走进程内 GStreamer。
+  // 必须在渲染之前装好：通话入口用 canUseWebRTC() 判的就是 window.RTCPeerConnection，
+  // 装晚了按钮已经被收起来了。其余平台自带 WebRTC，这里会直接返回 false
+  const { installNativeRtc, nativeVideoUrl } = await import("./nativeRtc");
+  const installed = await installNativeRtc();
+  if (installed) {
+    // 远端画面不在 MediaStream 里而在本地 MJPEG 服务上，CallView 需要一个
+    // 「流 → 地址」的查询入口才知道 <img> 该指向哪。装在这里而不是通话窗口页：
+    // 取帧器必须在首次渲染前就位，渲染期间它是同步调用的
+    const { setNativeVideoResolver } = await import("@yuanchat/ui");
+    setNativeVideoResolver(nativeVideoUrl);
+  }
+  // WebKitGTK 没有可外接的开发者工具；通话不通时，第一件要确认的就是垫片到底
+  // 装上没有。仅 dev 打印，发布版不输出
+  if (import.meta.env.DEV) {
+    console.log(
+      "[nativeRtc] installed=" +
+        installed +
+        " RTCPeerConnection=" +
+        typeof window.RTCPeerConnection,
+    );
   }
 
   createRoot(document.getElementById("root")!).render(

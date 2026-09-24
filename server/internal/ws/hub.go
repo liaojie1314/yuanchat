@@ -22,16 +22,26 @@ type Hub struct {
 	clients        map[uuid.UUID]map[*Client]struct{}
 	maxConnPerUser int
 	logger         *zap.Logger
+	// conns connID → 连接，供通话信令点对点定址
+	conns map[uuid.UUID]*Client
+	// disconnectNotifier 连接摘除时回调（锁外调用），通话房间据此清理掉线参与者。
+	// 与 presenceNotifier 不同，它对【每一条】连接都触发：房间成员是连接而不是用户。
+	disconnectNotifier func(userID, connID uuid.UUID)
 	// presenceNotifier 用户首连上线 / 末连下线时回调（多设备去重）；在锁外调用防死锁
 	presenceNotifier func(userID uuid.UUID, online bool)
 	// backend 全局在线视图后端：本地事件外发 + 远端实例在线镜像（多实例部署）
 	backend PresenceBackend
+	// remotePublisher 跨实例分发发布回调（Redis 模式下由装配层注入）：
+	// SendToUsers 在完成本机投递后调用，把帧发布到 Redis channel 供其他实例投递。
+	// nil 表示进程内分发（单实例默认），行为与历史版本完全一致。
+	remotePublisher func(userIDs []uuid.UUID, data []byte)
 }
 
 // NewHub 创建 Hub。maxConnPerUser ≤ 0 表示不限制。
 func NewHub(maxConnPerUser int, logger *zap.Logger) *Hub {
 	return &Hub{
 		clients:        make(map[uuid.UUID]map[*Client]struct{}),
+		conns:          make(map[uuid.UUID]*Client),
 		maxConnPerUser: maxConnPerUser,
 		logger:         logger,
 		backend:        NewLocalPresence(),
@@ -51,6 +61,36 @@ func (h *Hub) SetPresenceNotifier(fn func(userID uuid.UUID, online bool)) {
 	h.presenceNotifier = fn
 }
 
+// SetDisconnectNotifier 注册连接断开回调（装配层在启动前调用一次）。
+//
+// 与 SetPresenceNotifier 的语义差别是刻意的：presence 只关心「这个人还在不在线」，
+// 通话房间关心的是「这一条连接还在不在」，因此每条连接摘除都要回调一次。
+func (h *Hub) SetDisconnectNotifier(fn func(userID, connID uuid.UUID)) {
+	h.disconnectNotifier = fn
+}
+
+// SendToConn 向指定连接投递一帧，返回是否命中本机连接并成功入队。
+//
+// 返回 false 有两种情形：连接不在本实例（多实例部署）、或该连接发送缓冲已满。
+// 调用方（通话信令）在 false 时退回按用户扇出，由客户端凭 to_conn 自行过滤。
+func (h *Hub) SendToConn(connID uuid.UUID, data []byte) bool {
+	h.mu.RLock()
+	c := h.conns[connID]
+	h.mu.RUnlock()
+	if c == nil {
+		return false
+	}
+	select {
+	case c.send <- data:
+		metrics.WSMessagesTotal.WithLabelValues("send").Inc()
+		return true
+	default:
+		h.logger.Warn("ws send buffer full, frame dropped",
+			zap.String("conn_id", connID.String()))
+		return false
+	}
+}
+
 // Register 登记一条新连接。返回 false 表示该用户连接数已达上限，调用方应拒绝。
 func (h *Hub) Register(c *Client) bool {
 	h.mu.Lock()
@@ -66,6 +106,7 @@ func (h *Hub) Register(c *Client) bool {
 		h.clients[c.userID] = conns
 	}
 	conns[c] = struct{}{}
+	h.conns[c.connID] = c
 	h.mu.Unlock()
 
 	// Prometheus: 连接数 +1
@@ -91,6 +132,11 @@ func (h *Hub) Unregister(c *Client) {
 		return
 	}
 	delete(conns, c)
+	// 只在索引项仍指向本连接时删除：同一 connID 不会重复注册，
+	// 但零值 connID 的历史构造路径下多条连接会共用同一项，误删会摘掉在线连接
+	if h.conns[c.connID] == c {
+		delete(h.conns, c.connID)
+	}
 	last := len(conns) == 0
 	if last {
 		delete(h.clients, c.userID)
@@ -106,11 +152,36 @@ func (h *Hub) Unregister(c *Client) {
 			h.presenceNotifier(c.userID, false)
 		}
 	}
+
+	// 锁外回调：通话服务会反查 Redis，锁内调用会拖住整个 Hub
+	if h.disconnectNotifier != nil {
+		h.disconnectNotifier(c.userID, c.connID)
+	}
 }
 
-// SendToUsers 向目标用户的所有在线连接投递数据。
+// SetRemotePublisher 注入跨实例分发发布回调（装配层在启动前调用一次）。
+// 注入后 SendToUsers = 本机投递 + 发布到 Redis channel；订阅端收到其他实例
+// 的帧后调用 DeliverLocal 投递给本机连接，两条路径对本机恰好各投一次。
+func (h *Hub) SetRemotePublisher(fn func(userIDs []uuid.UUID, data []byte)) {
+	h.remotePublisher = fn
+}
+
+// SendToUsers 向目标用户的所有在线连接投递数据：先本机投递，
+// 若装配了跨实例发布回调则在锁外发布（发布走网络 IO，不能持锁）。
 // 发送通道已满时丢弃该帧（慢连接不应阻塞整个分发），仅记录日志。
 func (h *Hub) SendToUsers(userIDs []uuid.UUID, data []byte) {
+	h.DeliverLocal(userIDs, data)
+
+	// 锁外发布：DeliverLocal 已释放读锁；发布失败只记日志（发布是尽力而为，
+	// 其他实例漏收一帧属于跨实例模式可接受的降级，不回滚本机已完成的投递）
+	if h.remotePublisher != nil && len(userIDs) > 0 {
+		h.remotePublisher(userIDs, data)
+	}
+}
+
+// DeliverLocal 仅向本实例连接投递（不触发跨实例发布）。
+// 供 RedisDispatcher 的订阅协程回放其他实例发来的帧，避免「订阅→发布」自环。
+func (h *Hub) DeliverLocal(userIDs []uuid.UUID, data []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -125,6 +196,19 @@ func (h *Hub) SendToUsers(userIDs []uuid.UUID, data []byte) {
 			}
 		}
 	}
+}
+
+// TotalConnections 返回本实例当前全部 WebSocket 在线连接总数
+// （一个用户多设备在线按多条计）。管理端概览的运行时指标从这里取数，
+// 读锁保护，O(用户数) 遍历。
+func (h *Hub) TotalConnections() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	n := 0
+	for _, conns := range h.clients {
+		n += len(conns)
+	}
+	return n
 }
 
 // OnlineCount 返回某用户当前在线连接数（测试与调试用）。

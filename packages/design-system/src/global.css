@@ -41,23 +41,50 @@
     min-height: 100vh;
   }
 
-  /* 滚动条 */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+  /* 按钮底色复位 —— Tailwind preflight 里这条写成
+     `button, input:where([type=button]), …`，而 :where() 要 Chrome 88 才支持。
+     CSS 规定选择器列表中任意一项非法则整条规则作废，于是 Chrome 74 的
+     WebView 上连开头的 `button` 也一起失效：所有没写背景类的按钮
+     （通讯录“+”、会话列表行、设置项、忘记密码…）全都回落成系统默认灰底。
+     这里用不含新语法的选择器补一遍，属性值与 preflight 保持一致，
+     新引擎上重复声明同值、无副作用。 */
+  button,
+  input[type="button"],
+  input[type="reset"],
+  input[type="submit"] {
+    -webkit-appearance: button;
+    background-color: transparent;
+    background-image: none;
   }
 
-  ::-webkit-scrollbar-track {
-    background: transparent;
+  /* 同上：preflight 的 `[hidden]:where(:not([hidden=until-found]))` 在旧引擎整条作废，
+     hidden 属性会失去隐藏效果。补一条纯属性选择器兜底。 */
+  [hidden] {
+    display: none;
   }
 
-  ::-webkit-scrollbar-thumb {
-    background: rgb(var(--md-sys-color-outline-variant-rgb) / 50%);
-    border-radius: 3px;
-  }
+  /* 滚动条 —— 只在有精确指针的设备（桌面）上定制。
+     给 ::-webkit-scrollbar 设过样式后，安卓 WebView 会把「滚动时才浮现的覆盖式
+     滚动条」换成常驻实体滚动条：输入框、消息列表右侧永远挂一条灰杠，还占布局宽度。
+     触摸设备下不写这些规则，保留系统自带的自动隐藏行为。 */
+  @media (hover: hover) and (pointer: fine) {
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
 
-  ::-webkit-scrollbar-thumb:hover {
-    background: rgb(var(--md-sys-color-outline-rgb) / 70%);
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: rgb(var(--md-sys-color-outline-variant-rgb) / 50%);
+      border-radius: 3px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgb(var(--md-sys-color-outline-rgb) / 70%);
+    }
   }
 
   /* 选中文本 */
@@ -94,7 +121,7 @@
 @layer components {
   /* 消息气泡 — 发送 (品牌渐变蓝) */
   .msg-bubble {
-    @apply relative max-w-[70%] select-text rounded-2xl px-4 py-2.5;
+    @apply relative max-w-[70%] select-text rounded-lg px-4 py-2.5;
 
     word-break: break-word;
     transition: transform 0.15s var(--md-easing-standard);
@@ -183,9 +210,30 @@
     }
   }
 
+  /* 语音消息波形 — 播放中逐条起伏，停下即回到静态高度。
+     只动 transform / opacity，不碰 height，起伏不会引起重排；
+     transform 对非替换的行内元素无效，这里的 <i> 是 flex 子项已被块级化，Chrome 74 照样生效 */
+  .voice-wave-playing > i {
+    transform-origin: center;
+    animation: voice-wave 0.9s ease-in-out infinite;
+  }
+
+  @keyframes voice-wave {
+    0%,
+    100% {
+      opacity: 0.45;
+      transform: scaleY(0.5);
+    }
+
+    50% {
+      opacity: 0.95;
+      transform: scaleY(1.15);
+    }
+  }
+
   /* 输入框 */
   .input-base {
-    @apply border-outline-variant w-full rounded-xl border px-4 py-3;
+    @apply border-outline-variant w-full rounded-lg border px-4 py-3;
 
     /* 亮色：surfaceContainerLowest = #FFFFFF，比原来的 #EBF2FC 更浅更干净 */
     background: rgb(var(--md-sys-color-surface-container-lowest-rgb));
@@ -306,7 +354,12 @@
   /* 微尘网格 — 半透明圆点矩阵 */
   .dot-grid {
     position: absolute;
-    inset: 0;
+
+    /* 长写法而非 inset: 0 —— inset 简写要 Chrome 87，旧 WebView 上整条声明作废 */
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     pointer-events: none;
     background-image: radial-gradient(
       circle at 1px 1px,
@@ -319,7 +372,12 @@
   /* 流光扫描线 — 从上往下缓慢移动的光带 */
   .light-sweep {
     position: absolute;
-    inset: 0;
+
+    /* 同 .dot-grid：避开 inset 简写 */
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     pointer-events: none;
     overflow: hidden;
   }
@@ -405,5 +463,89 @@
      桌面端 / 旧 WebView 下 --app-height 恒为 100vh，等价于原 h-screen。 */
   .app-screen {
     height: var(--app-height, 100vh);
+
+    /* 顶部安全区：安卓侧（MainActivity）把状态栏实测高度下发成 --safe-area-top，
+       WebView 因此可以铺到状态栏之下，而本容器的背景（含深色模式）一直延伸上去，
+       内容再靠这条 padding 避开状态栏文字 —— 即沉浸式状态栏。
+       Web 与桌面端没有下发该变量，回退 0，行为与改造前一致。 */
+    padding-top: var(--safe-area-top, env(safe-area-inset-top, 0));
   }
+}
+
+/* inset-0 补长写法 —— Tailwind 核心插件输出的是 `inset: 0` 简写，
+   而 inset 简写要 Chrome 87，Android 10 自带的 WebView 74 上整条声明作废，
+   铺满父级的浮层（遮罩、图片预览、装饰层）会缩成 0 尺寸或跑到左上角。
+   打包时 vite 的 build.cssTarget=chrome74 会自动拆简写，但 dev server 不做这层转换，
+   而真机联调走的正是 dev server；核心插件的工具类又无法从预设里的 plugin 覆盖，
+   所以放在 @layer 之外、文件末尾：同特异性靠后者生效，新引擎上同值重复、无副作用。
+   inset-x-* / inset-y-* 本身就输出长写法，无需处理。 */
+.inset-0 {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+/* place-items-center 补长写法 —— Tailwind 输出的是 `place-items: center` 单值简写，
+   而单值形式（一个值同时管 align-items 与 justify-items）Chrome 74 不认：
+   align-items 生效、justify-items 留在 normal，网格里的内容整体贴左，
+   实测 96×96 的贴纸占位框里图标偏离中心 37px。
+   发送按钮、图片/贴纸占位、表情格子等三十多处居中全靠这个类，
+   所以直接补一遍长写法（放 @layer 之外、文件末尾，同特异性靠后者生效）。 */
+.place-items-center {
+  align-items: center;
+  justify-items: center;
+}
+
+/* 旧 WebView 再补一层「居中轨道」—— Chrome 74 的网格布局不认 svg 这类替换元素的
+   align-items / justify-items（计算值确实是 center，排版却仍按左上角放），
+   发送按钮、语音播放键、文件下载键、贴纸占位里的图标都会顶到左上角。
+   改从轨道下手：单个内容的网格里轨道宽高等于内容自身，把轨道居中即等于把图标居中，
+   走的是另一套代码路径，旧引擎照样生效。
+   多列/多行等分（1fr）的网格没有剩余空间，这两条声明是空操作，不会影响表情、贴纸列表。
+   排除 aspect-square：那边的兜底靠轨道撑满宽度再按百分比算高度，轨道一收缩正方形就没了。 */
+html.no-flex-gap .place-items-center:not(.aspect-square) {
+  align-content: center;
+  justify-content: center;
+}
+
+/* 再兜一层「auto 外边距」—— svg / img 这类替换元素在旧 WebView 的网格里连轨道居中都不认
+   （模拟器实测：28×28 的按钮里 14px 图标仍贴左 7px，改 auto 外边距当场归零）。
+   auto 外边距吸收剩余空间是 flex / grid 共用的老路径，Chrome 74 照样生效；
+   图标撑满格子时 auto 算成 0，新引擎上是空操作。表情格子里放的是文本，不受影响。 */
+html.no-flex-gap .place-items-center > svg,
+html.no-flex-gap .place-items-center > img {
+  margin: auto;
+}
+
+/* 触屏设备上关掉气泡内的原生文本选择 —— 长按在触屏上是「呼出消息菜单」的手势，
+   而气泡为了桌面端划词复制带着 select-text：两者撞在一起时 WebView 会先起自己的
+   文字选择（蓝色选区 + 两个拖拽把手 + 系统复制条），盖住我们的菜单并吞掉后续事件，
+   长按经常什么都弹不出来。触屏上复制走菜单里的「复制」项，不需要原生选区。
+   放 @layer 之外：select-text 是 utilities 层的工具类，写在 base 层会被它盖掉。 */
+@media (hover: none) {
+  .msg-bubble,
+  .select-text {
+    -webkit-user-select: none;
+    user-select: none;
+
+    /* 长按弹出的系统「复制 / 分享」浮层同样要关掉 */
+    -webkit-touch-callout: none;
+  }
+}
+
+/* aspect-square 兜底 —— aspect-ratio 要 Chrome 88，旧 WebView 上正方形格子
+   会塌成内容高度（表情/贴纸格子变扁，加载骨架直接高度 0 看不见）。
+   兜底用百分比 padding：padding-top 的百分比按包含块宽度解析，所以 100% 就是正方形。
+   伪元素与真实内容都压在同一个网格区（1/1），内容照旧居中显示。
+   类名 no-aspect-ratio 由 @yuanchat/shared/polyfills 探测后添加，新引擎上不会命中。 */
+html.no-aspect-ratio .aspect-square::before {
+  content: "";
+  display: block;
+  grid-area: 1 / 1;
+  padding-top: 100%;
+}
+
+html.no-aspect-ratio .aspect-square > * {
+  grid-area: 1 / 1;
 }

@@ -3,7 +3,9 @@ package ws
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -190,5 +192,24 @@ func TestEncodeVoiceContentOmitsImageFields(t *testing.T) {
 	}
 	if p.Content.Duration != 12 {
 		t.Fatalf("duration lost: %+v", p.Content)
+	}
+}
+
+// TestConversationUpdatedPayloadSettings 设置字段存在时序列化、缺省时省略。
+func TestConversationUpdatedPayloadSettings(t *testing.T) {
+	pinned := true
+	now := time.Now()
+	data, err := Encode(TypeConversationUpdated, ConversationUpdatedPayload{
+		ConversationID: uuid.New(), IsPinned: &pinned, PinnedAt: &now,
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `"is_pinned":true`) || !strings.Contains(s, `"pinned_at"`) {
+		t.Fatalf("want settings fields, got %s", s)
+	}
+	if strings.Contains(s, `"is_muted"`) || strings.Contains(s, `"name"`) {
+		t.Fatalf("nil/empty fields must be omitted, got %s", s)
 	}
 }

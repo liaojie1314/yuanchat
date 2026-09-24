@@ -1,0 +1,841 @@
+/**
+ * ChatWindow 组件 — 聊天消息窗口
+ *
+ * @description
+ * IM 应用最主要的交互界面，位于三栏布局的中间。组成：
+ * 1. **顶部标题栏**：头像 + 名称 + 成员/在线信息 + 通话/搜索/详情按钮，
+ *    移动端显示返回按钮
+ * 2. **置顶消息条**：会话存在 pinnedMessage 时显示
+ * 3. **消息流**：日期分隔线、全形态气泡（MessageBubble）、正在输入指示，
+ *    新消息自动滚动到底部
+ * 4. **输入区**：Composer（引用回复 / 工具条 / 自适应输入）
+ *
+ * @param onBack - 移动端返回会话列表回调，非空时显示返回按钮
+ * @param onShowDetail - 打开详情面板/抽屉回调，非空时显示详情按钮
+ * @param compactComposer - 移动端使用紧凑输入区
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import {
+  ArrowLeft,
+  Images,
+  Loader2,
+  Megaphone,
+  MessageSquare,
+  MoreHorizontal,
+  Phone,
+  Pin,
+  Search,
+  Video,
+} from "lucide-react";
+import { useTranslation } from "react-i18next";
+import {
+  addFavorite,
+  addSticker,
+  ApiError,
+  editMessage,
+  formatDateDivider,
+  getDownloadUrl,
+  hashBlob,
+  isServerConfirmed,
+  quoteExcerptOf,
+  recallMessage,
+  RE_EDIT_WINDOW_MS,
+  registerBackInterceptor,
+  reportMessage,
+  showToast,
+  toggleReaction,
+  useAuthStore,
+  fetchPublicProfile,
+  useCallStore,
+  useConversationStore,
+  useMessageStore,
+} from "@yuanchat/shared";
+import { cn } from "@yuanchat/shared/utils";
+import type { ChatMessage, MentionRef } from "@yuanchat/shared";
+import { Avatar } from "../primitives/Avatar";
+import { GroupAvatar } from "../primitives/GroupAvatar";
+import { AnnouncementDialog } from "./AnnouncementDialog";
+import { CallInviteModal } from "../call/CallInviteModal";
+import { joinCall, startCall } from "../call/callActions";
+import { Composer } from "./Composer";
+import { ForwardModal } from "./ForwardModal";
+import { E2EEIndicator } from "../e2ee/E2EEIndicator";
+import { SafetyNumberDialog } from "../e2ee/SafetyNumberDialog";
+import { ImageLightbox } from "./ImageLightbox";
+import { ConversationMediaView } from "./ConversationMediaView";
+import { InConversationSearch } from "./InConversationSearch";
+import { MessageBubble, TypingIndicator } from "./MessageBubble";
+import { MessageEditHistoryDialog } from "./MessageEditHistoryDialog";
+
+export function ChatWindow({
+  onBack,
+  onShowDetail,
+  onShowProfile,
+  compactComposer = false,
+}: {
+  onBack?: () => void;
+  onShowDetail?: () => void;
+  /** 点消息头像：交给外层在详情面板位置打开资料页（缺省则头像不可点） */
+  onShowProfile?: (target: { userId: string; name?: string; isSelf?: boolean }) => void;
+  compactComposer?: boolean;
+}) {
+  const { t } = useTranslation();
+  // 从 Zustand Store 中读取当前活跃会话与消息流
+  const activeId = useConversationStore((s) => s.activeId);
+  const conversations = useConversationStore((s) => s.conversations);
+  const conv = conversations.find((c) => c.id === activeId);
+
+  const messages = useMessageStore((s) => (activeId ? s.messagesByConv[activeId] : undefined));
+  const typingName = useMessageStore((s) => (activeId ? s.typingByConv[activeId] : undefined));
+  const hasMore = useMessageStore((s) => (activeId ? s.hasMoreByConv[activeId] : false));
+  const sendText = useMessageStore((s) => s.sendText);
+  const retrySend = useMessageStore((s) => s.retrySend);
+  const loadHistory = useMessageStore((s) => s.loadHistory);
+  const loadMore = useMessageStore((s) => s.loadMore);
+  const setReplyingTo = useMessageStore((s) => s.setReplyingTo);
+  const replyingTo = useMessageStore((s) => s.replyingTo);
+
+  const highlightMsgId = useMessageStore((s) => s.highlightMsgId);
+  const setHighlightMsgId = useMessageStore((s) => s.setHighlightMsgId);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const loadingMoreRef = useRef(false);
+  const isAtBottomRef = useRef(true);
+  const prevCountRef = useRef(0);
+  // 全屏查看的图片 URL（null 表示未打开）
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  // 转发弹窗当前源消息 ID（null 表示关闭）
+  const [forwardMsgId, setForwardMsgId] = useState<string | null>(null);
+  // 会话内搜索面板开关
+  const [showSearch, setShowSearch] = useState(false);
+  // 安全指纹校验弹窗开关（E2EE，仅单聊）
+  const [showSafetyNumber, setShowSafetyNumber] = useState(false);
+  // 群公告全文弹层开关
+  const [showAnnouncement, setShowAnnouncement] = useState(false);
+  // 会话媒体相册全屏视图开关
+  const [showMedia, setShowMedia] = useState(false);
+  // 正在编辑的消息 id（null 表示非编辑态）：底部输入区据此把发送切成保存语义
+  const [editingId, setEditingId] = useState<string | null>(null);
+  // 编辑历史弹层的目标消息 id（null 表示关闭）
+  const [historyId, setHistoryId] = useState<string | null>(null);
+  // 群通话选人弹窗的媒体形态（null 表示关闭）
+  const [callMedia, setCallMedia] = useState<"audio" | "video" | null>(null);
+  // 会话内「通话中」横幅（本端非参与者时由 call.state 帧写入）
+  const callBanner = useCallStore((s) => s.banner);
+  const selfUserId = useAuthStore((s) => s.user?.id);
+
+  /**
+   * 单聊对方的个人状态（K11）：顶栏昵称旁展示。
+   *
+   * 会话对象上没有这两个字段（presence 帧只带在线态），所以进会话时按 peerId 现拉一次
+   * 公开资料。过期判定在服务端读时做，拉到的就是当下有效值；失败静默清空，
+   * 状态是装饰信息，不值得为它在顶栏弹错误。
+   */
+  const [peerStatus, setPeerStatus] = useState({ emoji: "", text: "" });
+  const peerId = conv?.type === "private" ? conv.peerId : undefined;
+  useEffect(() => {
+    if (!peerId) {
+      setPeerStatus({ emoji: "", text: "" });
+      return;
+    }
+    let alive = true;
+    void fetchPublicProfile(peerId)
+      .then((p) => {
+        if (alive) setPeerStatus({ emoji: p.statusEmoji, text: p.statusText });
+      })
+      .catch(() => {
+        if (alive) setPeerStatus({ emoji: "", text: "" });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [peerId]);
+
+  const items = messages ?? [];
+
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const rowVirtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 80,
+    overscan: 5,
+  });
+
+  // 进入会话时按需加载历史（真实模式；mock 模式内部直接跳过）
+  useEffect(() => {
+    if (activeId) void loadHistory(activeId);
+  }, [activeId, loadHistory]);
+
+  // 新消息到达时自动滚动到底部（loadMore 预置不触发，避免跳动）
+  useEffect(() => {
+    if (items.length === 0) return;
+    if (loadingMoreRef.current) return;
+    if (isAtBottomRef.current) {
+      rowVirtualizer.scrollToIndex(items.length - 1, { align: "end", behavior: "auto" });
+    }
+    // rowVirtualizer 引用稳定，不加入 deps 防止无限循环
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length, activeId]);
+
+  // loadMore 预置旧消息后恢复视口位置
+  useEffect(() => {
+    if (!loadingMoreRef.current) {
+      prevCountRef.current = items.length;
+      return;
+    }
+    const added = items.length - prevCountRef.current;
+    if (added > 0) {
+      rowVirtualizer.scrollToIndex(added, { align: "start", behavior: "auto" });
+    }
+    prevCountRef.current = items.length;
+    loadingMoreRef.current = false;
+    // rowVirtualizer 引用稳定，不加入 deps 防止无限循环
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length]);
+
+  // 搜索跳转：highlightMsgId 变化时滚动到目标消息并 2 秒后清除高亮
+  useEffect(() => {
+    if (!highlightMsgId || items.length === 0) return;
+    const index = items.findIndex((m) => m.id === highlightMsgId);
+    if (index === -1) return;
+    rowVirtualizer.scrollToIndex(index, { align: "center", behavior: "smooth" });
+    const timer = setTimeout(() => setHighlightMsgId(null), 2000);
+    return () => clearTimeout(timer);
+    // rowVirtualizer 引用稳定，不加入 deps 防止无限循环
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightMsgId, setHighlightMsgId, items]);
+
+  /**
+   * 退出编辑态：清掉编辑目标，并把先前塞进输入框的原文一并清空。
+   *
+   * @remarks 不清空的话原文会留在输入框里，下一次回车就被当成一条新消息发出去。
+   */
+  const exitEditing = useCallback(() => {
+    setEditingId(null);
+    useMessageStore.getState().setComposerInsert("");
+  }, []);
+
+  // 安卓系统返回键：编辑态下先退出编辑。不拦的话这一按会被当成「已在标签根页面」而退出应用
+  useEffect(() => {
+    if (!editingId) return;
+    return registerBackInterceptor(() => {
+      exitEditing();
+      return true;
+    });
+  }, [editingId, exitEditing]);
+
+  // 滚动到顶部时向上翻页
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isAtBottomRef.current = distFromBottom < 100;
+    if (!activeId || !hasMore || loadingMoreRef.current || el.scrollTop > 40) return;
+    loadingMoreRef.current = true;
+    prevCountRef.current = items.length;
+    void loadMore(activeId)
+      .then(() => {
+        // 防御：loadMore 未带回新数据时解除互斥锁，防止后续加载永久失效
+        const currentCount = useMessageStore.getState().messagesByConv[activeId]?.length ?? 0;
+        if (currentCount <= prevCountRef.current) {
+          loadingMoreRef.current = false;
+        }
+      })
+      .catch(() => {
+        loadingMoreRef.current = false;
+      });
+  }, [activeId, hasMore, loadMore, items.length]);
+
+  // 防御：如果没找到会话（activeId 无效或为 null），不渲染
+  if (!conv) return null;
+
+  // 群公告未读态：localStorage 记录的已读标记时间 < 公告最近更新时间即视为未读
+  // （跨设备/清缓存后会重新判定为未读，属预期行为，非 bug）。
+  // 注意：不同来源的 RFC3339 时间戳可能带不同时区偏移后缀（+08:00 vs Z），
+  // 字典序不等于时间序，须转 epoch 数值比较（同 ConversationList 对 pinnedAt 排序的处理）；
+  // localStorage 空值 Date.parse("") 为 NaN，用 || 0 兜底成最小值（即"从未读过"）。
+  const announcementReadKey = "announcement-read:" + conv.id;
+  const isAnnouncementUnread = conv.announcementUpdatedAt
+    ? (Date.parse(localStorage.getItem(announcementReadKey) ?? "") || 0) <
+      Date.parse(conv.announcementUpdatedAt)
+    : false;
+  const openAnnouncement = () => {
+    setShowAnnouncement(true);
+    localStorage.setItem(announcementReadKey, conv.announcementUpdatedAt ?? "");
+  };
+
+  const subtitle =
+    conv.type === "group"
+      ? [
+          conv.memberCount ? t("chat.members", { count: conv.memberCount }) : null,
+          conv.onlineCount ? t("chat.onlineCount", { count: conv.onlineCount }) : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : conv.isOnline || conv.presence === "online"
+        ? t("common.online")
+        : t("common.offline");
+
+  const handleSend = (text: string, mentions: MentionRef[]) => {
+    if (!activeId) return;
+    sendText(activeId, text, {
+      mentions,
+      quote: replyingTo
+        ? {
+            messageId: replyingTo.id,
+            senderName: replyingTo.senderName ?? "我",
+            // 图片/语音/贴纸此前恒为空串，引用条只剩昵称加一行空白
+            excerpt: quoteExcerptOf(replyingTo),
+          }
+        : undefined,
+    });
+  };
+
+  const handleForward = (messageId: string) => setForwardMsgId(messageId);
+
+  // 撤回：调服务端（用服务端 id）→ 成功靠 message.recalled 帧统一 applyRecall，不乐观翻转。
+  const handleRecall = (messageId: string) => {
+    recallMessage(messageId).catch((err) => {
+      if (err instanceof ApiError && err.code === 4031) {
+        showToast("error", t("chat.message.recallExpired"));
+      } else {
+        showToast("error", t("common.opFailed"));
+      }
+    });
+  };
+
+  /**
+   * 进入编辑态：记住正在编辑哪一条，并把原文送进底部输入区。
+   *
+   * @remarks 刻意不在气泡里内嵌 textarea——消息流是虚拟滚动，行高在输入过程中突变会让
+   *   列表跳动，移动端还要跟软键盘顶起搏斗；复用底部 Composer 两个问题都不存在。
+   */
+  const handleEdit = (msg: ChatMessage) => {
+    if (!msg.text) return;
+    setEditingId(msg.id);
+    useMessageStore.getState().setComposerInsert(msg.text);
+  };
+
+  /**
+   * 保存编辑：成功与失败都退出编辑态；气泡正文不乐观翻转，
+   * 等服务端 message.edited 帧统一走 applyEdited，保证各端一致（同 handleRecall 的姿态）。
+   */
+  const handleSaveEdit = (text: string) => {
+    const id = editingId;
+    if (!id) return;
+    editMessage(id, text)
+      .then(() => exitEditing())
+      .catch((err) => {
+        const code = err instanceof ApiError ? err.code : 0;
+        // 只有窗口过期才退出编辑态：那是「再也存不上了」，留着只让人徒劳重试。
+        // 其余失败（次数超限 / 内容被拒 / 网络抖动）保留编辑态与输入框内容 ——
+        // 用户刚改的文本此刻只存在于输入框里，清掉等于让人白打一遍。
+        if (code === 4032) {
+          exitEditing();
+          showToast("error", t("chat.message.editExpired"));
+        } else if (code === 4033) showToast("error", t("chat.message.editLimitReached"));
+        else if (code === 4004) showToast("error", t("chat.message.editEmpty"));
+        else showToast("error", t("common.error"));
+      });
+  };
+
+  /**
+   * 从图片消息收藏为贴纸：取图字节算 SHA-256（后端按 (owner, hash) 去重）→ POST /stickers。
+   * 图片对象已在 MinIO 的 images/ 下，故直接复用其 object_key，不重新上传。
+   *
+   * @remarks fetch 对 4xx/5xx 不 reject，必须显式查 r.ok：否则预签名过期 / 对象已清理 /
+   *   反代 502 时会把错误页正文当图片字节算 hash 收藏成功，用户看到"已添加"，
+   *   而收藏项是永久空白格；更糟的是错误页 hash ≠ 真实图片 hash，后端 (owner, hash)
+   *   去重被打穿——网络恢复后收藏同一张图会插入第二行。
+   */
+  const handleAddSticker = async (imageKey: string, width: number, height: number) => {
+    try {
+      const url = await getDownloadUrl(imageKey);
+      const res = await fetch(url);
+      if (!res.ok) {
+        // 404/403 = 对象已不存在或签名失效，重试无意义；与网络故障分开提示
+        const expired = res.status === 403 || res.status === 404;
+        showToast("error", t(expired ? "sticker.addFailedExpired" : "sticker.addFailed"));
+        return;
+      }
+      const blob = await res.blob();
+      const hash = await hashBlob(blob);
+      await addSticker(imageKey, width, height, hash);
+      showToast("info", t("sticker.addSuccess"));
+    } catch {
+      showToast("error", t("sticker.addFailed"));
+    }
+  };
+
+  /**
+   * 通话入口（顶栏两个按钮 + 移动端「更多」宫格两项共用）。
+   *
+   * 群会话先选人：mesh 上限 4 人，不选就默认全群会在 5 人群里必然失败一半。
+   * 单聊直接发起，服务端按会话取对端。
+   */
+  const openCall = (m: "audio" | "video") => {
+    if (!activeId) return;
+    if (conv.type === "group") {
+      setCallMedia(m);
+      return;
+    }
+    void startCall(activeId, m, []);
+  };
+
+  return (
+    <div className="flex h-full min-w-0 flex-col">
+      {/* 顶部标题栏 */}
+      <header className="border-outline-variant bg-surface-container-low flex h-[60px] shrink-0 items-center gap-3 border-b pr-2 pl-3">
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="md3-icon-btn text-on-surface -ml-1"
+            aria-label={t("chat.back")}
+          >
+            <ArrowLeft size={22} />
+          </button>
+        )}
+        {conv.type === "group" ? (
+          <GroupAvatar
+            name={conv.name}
+            src={conv.avatarUrl}
+            avatars={conv.memberAvatars}
+            names={conv.memberNames}
+          />
+        ) : (
+          <Avatar
+            name={conv.name}
+            src={conv.avatarUrl}
+            presence={conv.presence}
+            statusEmoji={peerStatus.emoji}
+          />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <h2 className="text-title-md text-on-surface truncate font-semibold">{conv.name}</h2>
+            {/* 对方个人状态：emoji 必有（清除时两者同时为空），文案可空 */}
+            {peerStatus.emoji && (
+              <span className="text-label-sm text-on-surface-variant min-w-0 truncate">
+                <span className="mr-0.5">{peerStatus.emoji}</span>
+                {peerStatus.text}
+              </span>
+            )}
+          </div>
+          <p className="text-label-sm text-on-surface-variant truncate">{subtitle}</p>
+        </div>
+        <E2EEIndicator
+          selfId={selfUserId}
+          peerId={conv.type === "private" ? conv.peerId : undefined}
+          onClick={() => setShowSafetyNumber(true)}
+        />
+        {/* 通话 / 搜索 / 相册在手机上收进输入区的「更多」面板：60px 高的顶栏放不下
+            五个图标又要留出群名，挤到标题被截断。桌面/平板保持全部常驻。 */}
+        <button
+          onClick={() => openCall("audio")}
+          className="md3-icon-btn text-on-surface-variant hidden sm:grid"
+          title={t("chat.voiceCall")}
+          aria-label={t("chat.voiceCall")}
+        >
+          <Phone size={19} />
+        </button>
+        <button
+          onClick={() => openCall("video")}
+          className="md3-icon-btn text-on-surface-variant hidden sm:grid"
+          title={t("chat.videoCall")}
+          aria-label={t("chat.videoCall")}
+        >
+          <Video size={19} />
+        </button>
+        <button
+          onClick={() => setShowSearch((v) => !v)}
+          className="md3-icon-btn text-on-surface-variant hidden sm:grid"
+          title={t("chat.searchHistory")}
+          aria-label={t("chat.searchHistory")}
+        >
+          <Search size={19} />
+        </button>
+        <button
+          onClick={() => setShowMedia(true)}
+          className="md3-icon-btn text-on-surface-variant hidden sm:grid"
+          title={t("media.title")}
+          aria-label={t("media.title")}
+          data-testid="open-media"
+        >
+          <Images size={19} />
+        </button>
+        {onShowDetail && (
+          <button
+            onClick={onShowDetail}
+            className="md3-icon-btn text-on-surface-variant"
+            title={t("chat.details")}
+            aria-label={t("chat.details")}
+          >
+            <MoreHorizontal size={19} />
+          </button>
+        )}
+      </header>
+
+      {/* 会话内搜索面板 */}
+      {showSearch && activeId && (
+        <InConversationSearch conversationId={activeId} onClose={() => setShowSearch(false)} />
+      )}
+
+      {/* 通话中横幅：本端不是这一路的参与者（群里其他成员）时显示「加入」。
+          横幅由 call.state 帧驱动，通话终结时随 banner 置空自动消失 */}
+      {callBanner && callBanner.conversationId === activeId && (
+        <div className="bg-primary-container text-primary-on-container flex w-full shrink-0 items-center gap-2 px-4 py-1.5">
+          {callBanner.media === "video" ? (
+            <Video size={13} className="shrink-0" />
+          ) : (
+            <Phone size={13} className="shrink-0" />
+          )}
+          <span className="text-label-md min-w-0 flex-1 truncate">
+            {t("call.joinBanner", { name: callBanner.callerName })}
+          </span>
+          <button
+            onClick={() => void joinCall(callBanner)}
+            className="text-label-md min-h-[44px] shrink-0 px-2 font-semibold underline"
+          >
+            {t("call.join")}
+          </button>
+        </div>
+      )}
+
+      {/* 群公告横幅（群聊且公告非空时显示；未读时加粗 + 高亮点） */}
+      {conv.type === "group" && conv.announcement && (
+        <button
+          onClick={openAnnouncement}
+          className="bg-primary-container text-primary-on-container flex h-9 w-full shrink-0 items-center gap-2 px-4 text-left"
+        >
+          <Megaphone size={13} className="shrink-0" />
+          <span className={cn("text-label-md", isAnnouncementUnread && "font-bold")}>
+            {t("chat.announcementLabel")}
+          </span>
+          <span
+            className={cn(
+              "text-body-sm min-w-0 flex-1 truncate",
+              isAnnouncementUnread && "font-semibold",
+            )}
+          >
+            {conv.announcement}
+          </span>
+          {isAnnouncementUnread && (
+            <span className="bg-error h-1.5 w-1.5 shrink-0 rounded-full" aria-hidden="true" />
+          )}
+          <span className="text-label-sm shrink-0 opacity-70">
+            {t("chat.announcementViewFull")}
+          </span>
+        </button>
+      )}
+
+      {/* 置顶消息条 */}
+      {conv.pinnedMessage && (
+        <div className="bg-primary-container text-primary-on-container flex h-9 shrink-0 items-center gap-2 px-4">
+          <Pin size={13} className="shrink-0" />
+          <span className="text-label-md font-semibold">{t("chat.pinnedLabel")}</span>
+          <span className="text-body-sm min-w-0 flex-1 truncate">{conv.pinnedMessage}</span>
+        </div>
+      )}
+
+      {/* 消息流 — 虚拟滚动 */}
+      <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto">
+        {messages === undefined ? (
+          <MessageSkeleton />
+        ) : messages.length === 0 ? (
+          <EmptyMessages />
+        ) : (
+          <>
+            {/* 向上翻页加载指示 — 悬浮在虚拟列表外部，不占用绝对定位空间 */}
+            {hasMore && (
+              <div className="text-on-surface-variant flex justify-center py-1">
+                <Loader2 size={16} className="animate-spin" />
+              </div>
+            )}
+            <div
+              style={{
+                height: rowVirtualizer.getTotalSize() + (typingName ? 48 : 0),
+                position: "relative",
+              }}
+              className="py-2"
+            >
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const msg = items[virtualRow.index];
+                const prev = virtualRow.index > 0 ? items[virtualRow.index - 1] : undefined;
+                const showDivider = !!msg.dateKey && msg.dateKey !== prev?.dateKey;
+                const compact =
+                  !showDivider &&
+                  !!prev &&
+                  prev.kind !== "system" &&
+                  msg.kind !== "system" &&
+                  prev.isSelf === msg.isSelf &&
+                  prev.senderName === msg.senderName &&
+                  minutesBetween(prev.time, msg.time) < 1;
+                return (
+                  <div
+                    key={virtualRow.key}
+                    ref={rowVirtualizer.measureElement}
+                    data-index={virtualRow.index}
+                    data-msg-id={msg.id}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                    className={cn(
+                      "px-4",
+                      highlightMsgId === msg.id
+                        ? "rounded-lg ring-2 ring-blue-400 ring-offset-1"
+                        : undefined,
+                    )}
+                  >
+                    {showDivider && <DateDivider label={formatDateDivider(msg.dateKey!)} />}
+                    <MessageBubble
+                      msg={msg}
+                      compact={compact}
+                      onRetry={
+                        msg.status === "failed" && activeId
+                          ? () => retrySend(activeId, msg.id)
+                          : undefined
+                      }
+                      onReply={
+                        // 引用回复会把 reply_to_id 一起发给服务端，未 ack 的消息 id
+                        // 还是 clientMsgId → 整帧 400 且无法定位（见 isServerConfirmed）。
+                        // 此前这里是唯一没有闸门的菜单项，且双击气泡就能触发。
+                        isServerConfirmed(msg) ? () => setReplyingTo(msg) : undefined
+                      }
+                      onImageClick={setLightboxUrl}
+                      onRecall={
+                        // 仅自己且已送达（sent/read）的消息可撤回：sending/failed 只有本地
+                        // client id、无服务端 id，撤回需用服务端 id，故不提供
+                        msg.isSelf && (msg.status === "sent" || msg.status === "read")
+                          ? () => handleRecall(msg.id)
+                          : undefined
+                      }
+                      onReEdit={
+                        msg.recalled && msg.isSelf && msg.recalledText
+                          ? () => {
+                              if (Date.now() - (msg.recalledAtMs ?? 0) > RE_EDIT_WINDOW_MS) {
+                                showToast("info", t("chat.message.reEditExpired"));
+                                return;
+                              }
+                              useMessageStore.getState().setComposerInsert(msg.recalledText ?? "");
+                            }
+                          : undefined
+                      }
+                      onReact={
+                        isServerConfirmed(msg)
+                          ? (emoji) => {
+                              void toggleReaction(msg.id, emoji).catch(() =>
+                                showToast("error", t("common.opFailed")),
+                              );
+                            }
+                          : undefined
+                      }
+                      onForward={isServerConfirmed(msg) ? () => handleForward(msg.id) : undefined}
+                      onFavorite={
+                        isServerConfirmed(msg)
+                          ? () => {
+                              void addFavorite(msg.id)
+                                .then(() => showToast("info", t("favorites.added")))
+                                .catch(() => showToast("error", t("favorites.addFailed")));
+                            }
+                          : undefined
+                      }
+                      onAddSticker={
+                        // 只对已确认的图片/贴纸消息提供「添加到表情」（收藏走 REST，需服务端 id）
+                        isServerConfirmed(msg) && msg.kind === "image" && msg.image?.key
+                          ? () =>
+                              void handleAddSticker(
+                                msg.image!.key!,
+                                msg.image!.width,
+                                msg.image!.height,
+                              )
+                          : isServerConfirmed(msg) && msg.kind === "sticker" && !!msg.sticker?.key
+                            ? () =>
+                                void handleAddSticker(
+                                  msg.sticker!.key!,
+                                  msg.sticker!.width ?? 0,
+                                  msg.sticker!.height ?? 0,
+                                )
+                            : undefined
+                      }
+                      onReport={
+                        // 只能举报别人的已确认消息
+                        isServerConfirmed(msg) && !msg.isSelf
+                          ? () => {
+                              void reportMessage(msg.id)
+                                .then(() => showToast("info", t("report.submitted")))
+                                .catch(() => showToast("error", t("report.failed")));
+                            }
+                          : undefined
+                      }
+                      // 编辑资格（本人 / 已确认 / 纯文本 / 5 分钟内）由 canEdit 在气泡内现算，
+                      // 这里无条件给回调，闸门不在此处重复一遍
+                      onEdit={handleEdit}
+                      onShowEditHistory={setHistoryId}
+                      onAvatarClick={
+                        // 自己的消息点自己的头像看自己的资料（乐观发送的本地条目没有
+                        // senderId，用登录态的 userId 兜底）
+                        onShowProfile && (msg.isSelf ? selfUserId : msg.senderId)
+                          ? () =>
+                              onShowProfile({
+                                userId: (msg.isSelf ? selfUserId : msg.senderId)!,
+                                name: msg.senderName,
+                                isSelf: msg.isSelf,
+                              })
+                          : undefined
+                      }
+                    />
+                  </div>
+                );
+              })}
+              {/* 正在输入指示 — 绝对定位于虚拟列表底部 */}
+              {typingName && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: rowVirtualizer.getTotalSize(),
+                    left: 0,
+                    width: "100%",
+                  }}
+                  className="px-4"
+                >
+                  <TypingIndicator name={typingName} />
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* 输入区 */}
+      <Composer
+        onSend={handleSend}
+        compact={compactComposer}
+        onOpenMedia={() => setShowMedia(true)}
+        onOpenCall={openCall}
+        editingMessageId={editingId}
+        onCancelEdit={exitEditing}
+        onSaveEdit={handleSaveEdit}
+      />
+
+      {/* 图片全屏查看器（点击气泡内图片打开） */}
+      {lightboxUrl && <ImageLightbox urls={[lightboxUrl]} onClose={() => setLightboxUrl(null)} />}
+
+      {/* 会话媒体相册（顶栏相册按钮打开，全屏覆盖当前会话） */}
+      {showMedia && activeId && (
+        <ConversationMediaView conversationId={activeId} onClose={() => setShowMedia(false)} />
+      )}
+
+      <ForwardModal
+        open={forwardMsgId !== null}
+        sourceMessageId={forwardMsgId}
+        sourceConversationId={activeId}
+        onClose={() => setForwardMsgId(null)}
+      />
+
+      {/* 安全指纹校验（E2EE 单聊，点击头部锁图标打开） */}
+      {selfUserId && conv.type === "private" && conv.peerId && (
+        <SafetyNumberDialog
+          selfId={selfUserId}
+          peerId={conv.peerId}
+          peerName={conv.name}
+          open={showSafetyNumber}
+          onClose={() => setShowSafetyNumber(false)}
+        />
+      )}
+
+      {/* 编辑历史弹层：首版时间只能取消息本身的发送时间（历史每行的 editedAt 是
+          该版本被替换掉的时刻，首版拿它会显示成第二版的生效时间） */}
+      {historyId && (
+        <MessageEditHistoryDialog
+          messageId={historyId}
+          open
+          createdAtMs={items.find((m) => m.id === historyId)?.createdAtMs}
+          onClose={() => setHistoryId(null)}
+        />
+      )}
+
+      {/* 群公告全文弹层 */}
+      <AnnouncementDialog
+        open={showAnnouncement}
+        announcement={conv.announcement ?? ""}
+        onClose={() => setShowAnnouncement(false)}
+      />
+
+      {/* 群通话选人（单聊直接发起，不经此弹窗） */}
+      {activeId && (
+        <CallInviteModal
+          open={callMedia !== null}
+          convId={activeId}
+          media={callMedia ?? "audio"}
+          onClose={() => setCallMedia(null)}
+          onConfirm={(m, inviteeIds) => void startCall(activeId, m, inviteeIds)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** 解析两条消息 "HH:mm" 标签的分钟差；跨天由 showDivider 拦住，此处只需同日比较 */
+function minutesBetween(a: string, b: string): number {
+  const pa = a.split(":");
+  const pb = b.split(":");
+  if (pa.length !== 2 || pb.length !== 2) return Infinity;
+  const ma = Number(pa[0]) * 60 + Number(pa[1]);
+  const mb = Number(pb[0]) * 60 + Number(pb[1]);
+  if (isNaN(ma) || isNaN(mb)) return Infinity;
+  return Math.abs(mb - ma);
+}
+
+/** 日期分隔线：居中胶囊 + 两侧分隔线 */
+function DateDivider({ label }: { label: string }) {
+  return (
+    <div className="text-label-md text-on-surface-variant my-2 flex items-center gap-3">
+      <span className="bg-outline-variant h-px flex-1" />
+      {label}
+      <span className="bg-outline-variant h-px flex-1" />
+    </div>
+  );
+}
+
+/** 空消息态：图标 + 文案，居中（复用 ChatScreen EmptyState 风格） */
+function EmptyMessages() {
+  const { t } = useTranslation();
+  return (
+    <div className="flex h-full items-center justify-center px-6">
+      <div className="text-center">
+        <div className="bg-surface-container-high text-on-surface-variant mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full">
+          <MessageSquare size={40} strokeWidth={1.5} />
+        </div>
+        <p className="text-body-md text-on-surface-variant">{t("chat.emptyMessages")}</p>
+      </div>
+    </div>
+  );
+}
+
+/** 消息加载骨架：4 条左右交替的气泡占位（pulse，固定高度防 CLS） */
+function MessageSkeleton() {
+  const rows = [false, true, false, true];
+  return (
+    <div className="flex flex-col gap-4 px-4 py-4" aria-hidden>
+      {rows.map((isSelf, i) => (
+        <div
+          key={i}
+          className={cn("flex animate-pulse items-end gap-2", isSelf && "flex-row-reverse")}
+        >
+          <span className="bg-surface-container-high h-10 w-10 shrink-0 rounded-full" />
+          <span
+            className={cn(
+              "bg-surface-container-high h-10 rounded-lg",
+              i % 2 === 0 ? "w-48" : "w-32",
+            )}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}

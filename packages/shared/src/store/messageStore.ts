@@ -3,7 +3,7 @@
  *
  * @description
  * 管理每个会话内的消息流。消息按会话 ID 分桶存储（messagesByConv），
- * 支持文本 / 图片 / 文件 / 语音 / 系统消息，以及 IM 的完整状态机：
+ * 支持文本 / 图片 / 文件 / 语音 / 视频 / 系统消息，以及 IM 的完整状态机：
  *
  *   sending（发送中）→ sent（已送达）→ read（已读）
  *                    ↘ failed（失败，可点击重试）
@@ -23,14 +23,16 @@ import {
   formatMessageTime,
   pseudoWave,
 } from "../api/chat";
-import { compressImage, getUploadUrl, uploadToTicket } from "../api/files";
-import { chatSocket } from "../ws/chatSocket";
+import { compressImage, extractVideoMeta, getUploadUrl, uploadToTicket } from "../api/files";
+import type { VideoMeta } from "../api/files";
+import { asServerMessageId, chatSocket } from "../ws/chatSocket";
+import type { ClientFrames } from "../ws/chatSocket";
 import { encryptFor } from "../crypto/e2eeManager";
 import { useAuthStore } from "./authStore";
 import { showToast } from "./toastStore";
 
 /** 消息在气泡里呈现的内容类别 */
-export type ChatMessageKind = "text" | "image" | "file" | "voice" | "system";
+export type ChatMessageKind = "text" | "image" | "file" | "voice" | "system" | "sticker" | "video";
 
 /** 发送状态机（仅自己发出的消息有意义） */
 export type ChatMessageStatus = "sending" | "sent" | "read" | "failed";
@@ -84,6 +86,25 @@ export interface VoicePayload {
   localUrl?: string;
 }
 
+/** 视频消息载荷（服务端不转码：时长/宽高/缩略图全部由客户端产出并落库） */
+export interface VideoPayload {
+  /** 时长（秒） */
+  duration: number;
+  /** 像素尺寸（气泡等比占位，防 CLS；乐观插入时为 0，回填后为真实值） */
+  width: number;
+  height: number;
+  /** 视频对象存储 key，播放时据此签下载 URL */
+  key?: string;
+  /** 缩略图对象 key（气泡 poster，不随消息流下载原视频） */
+  thumbKey?: string;
+  /** 展示用大小文案，如 "3.2 MB" */
+  size?: string;
+  /** 原始文件名 */
+  name?: string;
+  /** 本地 blob URL，上传期间即可预览播放，也供失败重试取回字节 */
+  localUrl?: string;
+}
+
 /** 聊天消息（UI 层结构，与后端 Message 实体分离，由 api/chat.ts 映射） */
 export interface ChatMessage {
   id: string;
@@ -93,6 +114,8 @@ export interface ChatMessage {
   isSelf: boolean;
   /** 发送者昵称（群聊接收方气泡上方显示） */
   senderName?: string;
+  /** 发送者用户 ID（点头像查看资料用；本地乐观条目不带，自己的资料走设置页） */
+  senderId?: string;
   /** 文本内容（text / system 消息） */
   text?: string;
   /**
@@ -103,6 +126,23 @@ export interface ChatMessage {
   image?: { width: number; height: number; key?: string; localUrl?: string };
   file?: FilePayload;
   voice?: VoicePayload;
+  video?: VideoPayload;
+  /**
+   * 贴纸消息载荷：width/height 为像素尺寸（固定小尺寸渲染）。
+   * - stickerId：贴纸 ID（关联 stickers 表）
+   * - key：对象存储 key（签下载 URL 渲染）
+   */
+  sticker?: { stickerId?: string; key?: string; width: number; height: number };
+  /**
+   * 通话记录载荷（仅 `kind === "system"`）。
+   *
+   * 服务端把它放在系统消息的 `content.call` 里，同时保留兜底 `text`：
+   * 有 `call` 就按 `result` 走 i18n 渲染（图标 + 本地化文案 + mm:ss），
+   * 没有就沿用 `text` —— 老版本客户端因此不会白屏。
+   * `result ∈ {answered, missed, rejected, canceled, busy}`，非 answered 时
+   * `duration` 为 0。
+   */
+  call?: { media: "audio" | "video"; result: string; duration: number };
   quote?: QuoteRef;
   reactions?: Reaction[];
   /** @提及的用户 ID 列表（渲染时高亮相应昵称段） */
@@ -116,6 +156,8 @@ export interface ChatMessage {
   dateKey?: string;
   status?: ChatMessageStatus;
   edited?: boolean;
+  /** 累计编辑次数：>0 时「已编辑」角标可点开历史 */
+  editCount?: number;
   /** 已撤回：气泡渲染灰字系统占位，忽略 kind/text */
   recalled?: boolean;
   /** 撤回前的原文本（仅本端自己的 text 消息保留，供「重新编辑」回填） */
@@ -165,6 +207,13 @@ interface MessageState {
   sendFile: (conversationId: string, file: File) => Promise<void>;
   /** 发送一段语音：乐观插入（伪波形）→ 直传 webm → WS voice 帧 */
   sendVoice: (conversationId: string, blob: Blob, duration: number) => Promise<void>;
+  /** 发送视频：乐观插入 → 读元数据+抽帧 → 双次直传（视频/缩略图）→ WS video 帧 */
+  sendVideo: (conversationId: string, file: File) => Promise<void>;
+  /** 发送贴纸消息：乐观插入 sending 状态，通过 WS 发送 */
+  sendSticker: (
+    conversationId: string,
+    sticker: { id: string; objectKey: string; width: number; height: number },
+  ) => void;
   /** 重试发送失败的消息（复用原 client_msg_id；图片则从 localUrl 重传） */
   retrySend: (conversationId: string, messageId: string) => void;
   /** WebSocket message.receive：追加新消息（自动按 clientMsgId 去重自己的回显） */
@@ -185,6 +234,17 @@ interface MessageState {
    * @param operatorName 撤回操作者昵称（预留给调用方拼列表预览，store 内不用）
    */
   applyRecall: (convId: string, messageId: string, operatorName: string) => void;
+  /**
+   * WebSocket message.edited：就地替换一条消息的正文。
+   *
+   * @param convId - 会话 id
+   * @param messageId - 服务端消息 id
+   * @param text - 编辑后正文
+   * @param editCount - 服务端累计编辑次数，供角标判断能否点开历史
+   * @remarks 不做乐观翻转 —— 与 applyRecall 同姿态：本端保存后也等帧回来才更新，
+   *   保证多端与收件人看到的时序一致。未命中的 id 原样返回，不产生新引用。
+   */
+  applyEdited: (convId: string, messageId: string, text: string, editCount: number) => void;
   /**
    * WebSocket message.reaction：更新消息的 emoji 回应聚合。
    * @param mine 仅当操作者是自己时传 reacted（true/false）；他人操作传 undefined 保持原 mine
@@ -213,6 +273,11 @@ interface MessageState {
    * 然后设置 highlightMsgId 触发 ChatWindow 滚动定位。
    */
   seekToMessage: (convId: string, msgId: string, seq: number) => Promise<void>;
+  /**
+   * 单侧清空聊天记录（本人清空后本地即时生效，服务端已确认无需帧驱动）。
+   * 清空后该会话置为空列表，且不再有更早历史可翻页。
+   */
+  clearConversation: (convId: string) => void;
 }
 
 // ========================================
@@ -243,7 +308,12 @@ const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const ACK_TIMEOUT_MS = 5000;
 const TYPING_CLEAR_MS = 4000;
 
-/** 撤回后可重新编辑的时间窗口（5 分钟） */
+/**
+ * 撤回后可重新编辑的时间窗口（5 分钟）。
+ *
+ * @remarks 与 `utils/messageActions` 的 `EDIT_WINDOW_MS`（消息编辑窗口）同值，
+ *   两者刻意各自定义（utils 不依赖 store），相等性由 `messageEdit.test.ts` 锁住。
+ */
 export const RE_EDIT_WINDOW_MS = 5 * 60_000;
 
 const now = () =>
@@ -475,6 +545,91 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     await dispatchVoiceSend(conversationId, blob, duration, clientMsgId, get);
   },
 
+  sendVideo: async (conversationId, file) => {
+    const clientMsgId = newClientMsgId();
+    // 乐观插入：宽高/时长此刻还未读出（元数据解码在 dispatch 里），
+    // 先用 localUrl 占位——气泡据它渲染灰底 + 播放钮，点开即可播本地文件
+    const localUrl = URL.createObjectURL(file);
+    const msg: ChatMessage = {
+      id: clientMsgId,
+      conversationId,
+      kind: "video",
+      isSelf: true,
+      video: {
+        duration: 0,
+        width: 0,
+        height: 0,
+        name: file.name,
+        size: formatFileMeta(file.name, file.size).size,
+        localUrl,
+      },
+      time: now(),
+      dateKey: dateKeyOf(new Date()),
+      createdAtMs: Date.now(),
+      status: "sending",
+      clientMsgId,
+    };
+    set((s) => ({
+      messagesByConv: {
+        ...s.messagesByConv,
+        [conversationId]: [...(s.messagesByConv[conversationId] ?? []), msg],
+      },
+      replyingTo: null,
+    }));
+
+    if (mockMode) {
+      setTimeout(() => get().setStatus(conversationId, clientMsgId, "sent"), 700);
+      return;
+    }
+
+    await dispatchVideoSend(conversationId, file, clientMsgId, get);
+  },
+
+  sendSticker: (conversationId, sticker) => {
+    const clientMsgId = newClientMsgId();
+    const msg: ChatMessage = {
+      id: clientMsgId,
+      conversationId,
+      kind: "sticker",
+      isSelf: true,
+      sticker: {
+        stickerId: sticker.id,
+        key: sticker.objectKey,
+        width: sticker.width,
+        height: sticker.height,
+      },
+      time: now(),
+      dateKey: dateKeyOf(new Date()),
+      createdAtMs: Date.now(),
+      status: "sending",
+      clientMsgId,
+    };
+    set((s) => ({
+      messagesByConv: {
+        ...s.messagesByConv,
+        [conversationId]: [...(s.messagesByConv[conversationId] ?? []), msg],
+      },
+      replyingTo: null,
+    }));
+
+    if (mockMode) {
+      setTimeout(() => get().setStatus(conversationId, clientMsgId, "sent"), 500);
+      return;
+    }
+
+    dispatchStickerSend(
+      conversationId,
+      {
+        stickerId: sticker.id,
+        key: sticker.objectKey,
+        width: sticker.width,
+        height: sticker.height,
+      },
+      clientMsgId,
+      get,
+    );
+  },
+
   retrySend: (conversationId, messageId) => {
     const msg = (get().messagesByConv[conversationId] ?? []).find((m) => m.id === messageId);
     if (!msg) return;
@@ -541,6 +696,50 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       return;
     }
 
+    // 视频：从 localUrl 取回原始字节重跑（元数据与缩略图一并重算，与首发同一条路径）
+    if (msg.kind === "video") {
+      const localUrl = msg.video?.localUrl;
+      const name = msg.video?.name;
+      if (!localUrl || !name) return;
+      get().setStatus(conversationId, messageId, "sending");
+      if (mockMode) {
+        setTimeout(() => get().setStatus(conversationId, messageId, "sent"), 700);
+        return;
+      }
+      const clientMsgId = msg.clientMsgId ?? messageId;
+      void fetch(localUrl)
+        .then((r) => r.blob())
+        .then((blob) =>
+          dispatchVideoSend(
+            conversationId,
+            new File([blob], name, { type: blob.type }),
+            clientMsgId,
+            get,
+          ),
+        )
+        .catch(() => get().setStatus(conversationId, messageId, "failed"));
+      return;
+    }
+
+    // 贴纸：对象已在存储里，重试只需按原 client_msg_id 重发同一帧（无需重传字节）
+    if (msg.kind === "sticker") {
+      const st = msg.sticker;
+      if (!st?.stickerId || !st.key) return;
+      get().setStatus(conversationId, messageId, "sending");
+      if (mockMode) {
+        setTimeout(() => get().setStatus(conversationId, messageId, "sent"), 700);
+        return;
+      }
+      const clientMsgId = msg.clientMsgId ?? messageId;
+      dispatchStickerSend(
+        conversationId,
+        { stickerId: st.stickerId, key: st.key, width: st.width, height: st.height },
+        clientMsgId,
+        get,
+      );
+      return;
+    }
+
     if (!msg.text) return;
     get().setStatus(conversationId, messageId, "sending");
 
@@ -592,6 +791,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
           const image = revokeLocalPreview(m.image);
           const file = revokeFileLocalUrl(m.file);
           const voice = revokeVoiceLocalUrl(m.voice);
+          const video = revokeVideoLocalUrl(m.video);
           return {
             ...m,
             // 本地 client id 提升为服务端 message id：撤回/去重以服务端 id 为准，
@@ -605,6 +805,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
             ...(image ? { image } : {}),
             ...(file ? { file } : {}),
             ...(voice ? { voice } : {}),
+            ...(video ? { video } : {}),
           };
         }),
       },
@@ -640,6 +841,21 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
               ...(keepText ? { recalledText: keepText, recalledAtMs: Date.now() } : {}),
             };
           }),
+        },
+      };
+    }),
+
+  applyEdited: (convId, messageId, text, editCount) =>
+    set((s) => {
+      const list = s.messagesByConv[convId];
+      // 未命中直接返回原 state：Zustand 比较引用，返回新对象会让整条列表无谓重渲染
+      if (!list || !list.some((m) => m.id === messageId)) return s;
+      return {
+        messagesByConv: {
+          ...s.messagesByConv,
+          [convId]: list.map((m) =>
+            m.id === messageId ? { ...m, text, edited: true, editCount } : m,
+          ),
         },
       };
     }),
@@ -712,6 +928,12 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       return s;
     });
   },
+
+  clearConversation: (convId) =>
+    set((s) => ({
+      messagesByConv: { ...s.messagesByConv, [convId]: [] },
+      hasMoreByConv: { ...s.hasMoreByConv, [convId]: false },
+    })),
 }));
 
 /** 经 WebSocket 发出 message.send 并挂 ack 超时（超时 → failed） */
@@ -722,12 +944,16 @@ function dispatchSend(
   get: () => MessageState,
   extras?: { replyToId?: string; mentionIds?: string[] },
 ) {
-  const payload: Record<string, unknown> = {
+  // 帧结构由 ClientFrames["message.send"] 约束（原先是 Record<string, unknown>，
+  // 字段名写错/漏字段编译期无人管——reply_to_id 误填 clientMsgId 就是这么漏出去的）。
+  const payload: ClientFrames["message.send"] = {
     conversation_id: conversationId,
     content: { type: "text", text },
     client_msg_id: clientMsgId,
   };
-  if (extras?.replyToId) payload.reply_to_id = extras.replyToId;
+  // replyToId 来自被引用消息，而调用方（ChatWindow）已用 isServerConfirmed 闸门
+  // 保证它是服务端 id；此处的断言就是那份保证的落点。
+  if (extras?.replyToId) payload.reply_to_id = asServerMessageId(extras.replyToId);
   if (extras?.mentionIds && extras.mentionIds.length > 0) payload.mentions = extras.mentionIds;
 
   // E2EE：单聊且双方均已开启时改发密文。加密涉及网络（首次取 prekey
@@ -744,10 +970,16 @@ function dispatchSend(
 async function maybeEncryptAndSend(
   conversationId: string,
   text: string,
-  payload: Record<string, unknown>,
+  payload: ClientFrames["message.send"],
   clientMsgId: string,
   get: () => MessageState,
 ) {
+  // ack 超时必须在 await 之前挂：encryptFor 首次给某对端发消息会去拉 prekey
+  // bundle（走 fetch，无超时），网络挂死时若等它 settle 才计时，消息会永久停在
+  // sending——既不 failed 也不出现重试按钮。提前挂表也安全：定时器回调只对仍是
+  // sending 的消息生效，下面 catch 分支置 failed 后它就是空操作。
+  armAckTimeout(conversationId, clientMsgId, get);
+
   const selfId = getSelfId?.();
   const peerId = getPeerId?.(conversationId);
 
@@ -765,7 +997,6 @@ async function maybeEncryptAndSend(
   }
 
   chatSocket.send("message.send", payload);
-  armAckTimeout(conversationId, clientMsgId, get);
 }
 
 /**
@@ -853,6 +1084,16 @@ function revokeVoiceLocalUrl(voice: ChatMessage["voice"]): ChatMessage["voice"] 
     URL.revokeObjectURL(voice.localUrl);
   }
   const { localUrl: _dropped, ...rest } = voice;
+  return rest;
+}
+
+/** 视频消息 ack 后撤销本地 blob 并清除 localUrl */
+function revokeVideoLocalUrl(video: ChatMessage["video"]): ChatMessage["video"] {
+  if (!video || !video.localUrl) return video;
+  if (typeof URL !== "undefined" && URL.revokeObjectURL) {
+    URL.revokeObjectURL(video.localUrl);
+  }
+  const { localUrl: _dropped, ...rest } = video;
   return rest;
 }
 
@@ -948,6 +1189,135 @@ async function dispatchVoiceSend(
   chatSocket.send("message.send", {
     conversation_id: conversationId,
     content: { type: "voice", key, duration, size: blob.size },
+    client_msg_id: clientMsgId,
+  });
+  armAckTimeout(conversationId, clientMsgId, get);
+}
+
+/** 视频体积上限（字节）：与服务端 upload.max_size 默认值一致，超限本地即拦 */
+const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+
+/** 视频时长上限（秒）：服务端 video 帧只接受 1-120s，超限本地即拦 */
+const MAX_VIDEO_DURATION_SEC = 120;
+
+/**
+ * 视频发送：体积/时长闸门 → 读元数据+抽帧 → 双次直传（视频 + 缩略图）→ 发 WS video 帧。
+ *
+ * @remarks
+ * - 服务端不转码不抽帧：`duration`/`width`/`height`/`thumb_key` 全由客户端产出，
+ *   缺一即 400，故任一步失败都在本地置 failed + toast，绝不发半截帧。
+ * - 闸门放在 dispatch 而非 action 里：重试（retrySend）走同一函数，校验不会被绕过。
+ * - 视频先传、缩略图后传：帧里两个 key 的取用顺序与之一致，便于对照排查。
+ */
+async function dispatchVideoSend(
+  conversationId: string,
+  file: File,
+  clientMsgId: string,
+  get: () => MessageState,
+) {
+  /** 置该乐观条目为 failed 并提示（消息可能已被重试重置，故按 clientMsgId 现查） */
+  const fail = (messageKey: string) => {
+    const pending = (get().messagesByConv[conversationId] ?? []).find(
+      (m) => m.clientMsgId === clientMsgId,
+    );
+    if (pending) get().setStatus(conversationId, pending.id, "failed");
+    showToast("error", i18n.t(messageKey));
+  };
+
+  if (file.size > MAX_VIDEO_BYTES) {
+    fail("chat.video.tooLarge");
+    return;
+  }
+
+  // 元数据与缩略图（解码在客户端，10s 超时兜底 WebView 不回事件的情形）
+  let meta: VideoMeta;
+  try {
+    meta = await extractVideoMeta(file);
+  } catch {
+    fail("chat.video.readFailed");
+    return;
+  }
+  if (meta.duration > MAX_VIDEO_DURATION_SEC) {
+    fail("chat.video.tooLong");
+    return;
+  }
+
+  const contentType = file.type || "video/mp4";
+  let key: string;
+  let thumbKey: string;
+  try {
+    const videoTicket = await getUploadUrl(file.name, contentType, file.size);
+    await uploadToTicket(videoTicket, file, contentType);
+    key = videoTicket.objectKey;
+    const thumbTicket = await getUploadUrl("thumb.jpg", "image/jpeg", meta.thumbnail.size);
+    await uploadToTicket(thumbTicket, meta.thumbnail, "image/jpeg");
+    thumbKey = thumbTicket.objectKey;
+  } catch {
+    fail("chat.video.sendFailed");
+    return;
+  }
+
+  // 回填对象 key 与真实元数据：ack 后本地 blob 撤销，气泡据 thumbKey/key 签下载
+  useMessageStore.setState((s) => ({
+    messagesByConv: {
+      ...s.messagesByConv,
+      [conversationId]: (s.messagesByConv[conversationId] ?? []).map((m) =>
+        m.clientMsgId === clientMsgId && m.video
+          ? {
+              ...m,
+              video: {
+                ...m.video,
+                key,
+                thumbKey,
+                duration: meta.duration,
+                width: meta.width,
+                height: meta.height,
+              },
+            }
+          : m,
+      ),
+    },
+  }));
+
+  chatSocket.send("message.send", {
+    conversation_id: conversationId,
+    content: {
+      type: "video",
+      key,
+      thumb_key: thumbKey,
+      name: file.name,
+      size: file.size,
+      duration: meta.duration,
+      width: meta.width,
+      height: meta.height,
+    },
+    client_msg_id: clientMsgId,
+  });
+  armAckTimeout(conversationId, clientMsgId, get);
+}
+
+/**
+ * 贴纸发送：发 WS sticker 帧（sticker_id + key + 宽高）。
+ *
+ * @remarks 帧字段必须与服务端 `ws/handler.go` 的 `buildContent` case "sticker" 完全一致
+ *   （四项缺一或宽高 ≤ 0 服务端即回 400）。首发与重试共用本函数，避免两处各写一份漂移。
+ *   与 image/file/voice 不同，贴纸对象已在存储里，无需上传字节，故为同步函数。
+ */
+function dispatchStickerSend(
+  conversationId: string,
+  sticker: { stickerId: string; key: string; width: number; height: number },
+  clientMsgId: string,
+  get: () => MessageState,
+) {
+  chatSocket.send("message.send", {
+    conversation_id: conversationId,
+    content: {
+      type: "sticker",
+      sticker_id: sticker.stickerId,
+      key: sticker.key,
+      width: sticker.width,
+      height: sticker.height,
+    },
     client_msg_id: clientMsgId,
   });
   armAckTimeout(conversationId, clientMsgId, get);

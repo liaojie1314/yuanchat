@@ -22,7 +22,7 @@ import { persist } from "zustand/middleware";
 import type { M3ColorScheme } from "@yuanchat/design-system/tokens";
 import { lightScheme, darkScheme, type FontScale } from "@yuanchat/design-system/tokens";
 import { findSkin, getDefaultSkin } from "@yuanchat/design-system/skins";
-import type { SupportedLocale } from "@yuanchat/design-system/i18n";
+import i18n, { detectLocale, type SupportedLocale } from "@yuanchat/design-system/i18n";
 
 interface ThemeState {
   skinId: string;
@@ -56,10 +56,8 @@ export const useThemeStore = create<ThemeState>()(
         skinId: isDark ? "yuan-dark" : defaultSkin.id,
         mode: isDark ? "dark" : "light",
         fontScale: "normal",
-        locale:
-          typeof navigator !== "undefined" && navigator.language?.startsWith("zh")
-            ? "zh-CN"
-            : "en-US",
+        // 从未选过语言时才跟随系统；与 i18n 初始 lng 共用同一套判定，两边不会打架
+        locale: detectLocale(),
 
         setSkin: (skinId: string) => {
           const skin = findSkin(skinId);
@@ -84,6 +82,9 @@ export const useThemeStore = create<ThemeState>()(
 
         setLocale: (locale: SupportedLocale) => {
           set({ locale });
+          // 语言落地由 store 一手负责：调用方只管改 store，
+          // 免得某个入口忘了同步 i18n，就出现「状态是中文、界面是英文」
+          void i18n.changeLanguage(locale);
         },
 
         getCurrentScheme: (): M3ColorScheme => {
@@ -131,6 +132,7 @@ export const useThemeStore = create<ThemeState>()(
             ["error", "error"],
             ["onError", "on-error"],
             ["errorContainer", "error-container"],
+            ["onErrorContainer", "on-error-container"],
             ["background", "background"],
             ["onBackground", "on-background"],
             ["surface", "surface"],
@@ -143,6 +145,7 @@ export const useThemeStore = create<ThemeState>()(
             ["surfaceContainerLowest", "surface-container-lowest"],
             ["surfaceContainerLow", "surface-container-low"],
             ["surfaceContainerHigh", "surface-container-high"],
+            ["surfaceContainerHighest", "surface-container-highest"],
             ["outline", "outline"],
             ["outlineVariant", "outline-variant"],
           ];
@@ -164,6 +167,19 @@ export const useThemeStore = create<ThemeState>()(
         },
       };
     },
-    { name: "yuanchat-theme-v2" },
+    {
+      name: "yuanchat-theme-v2",
+      /**
+       * 恢复持久化状态后把语言推给 i18n。
+       * i18n 初始化时只看得到 navigator.language（模块加载期 store 还没建起来），
+       * 所以冷启动界面会是系统语言；漏了这一步，用户选过的语言要等设置页
+       * 挂载时才被补上，于是「重开应用又变回英文，进设置页才变回来」
+       */
+      onRehydrateStorage: () => (state) => {
+        if (state && state.locale !== i18n.language) {
+          void i18n.changeLanguage(state.locale);
+        }
+      },
+    },
   ),
 );

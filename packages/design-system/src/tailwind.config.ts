@@ -7,9 +7,14 @@
  * 这使得切换皮肤无需重新构建 CSS，只需修改 CSS 变量值。
  */
 import type { Config } from "tailwindcss";
+import { legacyWebViewCompat } from "./legacyWebViewCompat";
 
 export const yuanchatPreset: Partial<Config> = {
-  darkMode: "class",
+  // 写成自定义变体而非 "class"：Tailwind 3.4 的 "class" 会生成
+  // `.dark\:bg-x:is(.dark *)`，而 :is() 要 Chrome 88 才支持——
+  // 选择器解析失败即整条规则作废，Android 10 自带的 WebView 74 上
+  // 所有 dark: 工具类会一起消失。`.dark &` 生成的是后代选择器，旧引擎照样认。
+  darkMode: ["variant", ".dark &"],
   theme: {
     extend: {
       colors: {
@@ -26,32 +31,42 @@ export const yuanchatPreset: Partial<Config> = {
           dim: "rgb(var(--md-sys-color-surface-dim-rgb) / <alpha-value>)",
           bright: "rgb(var(--md-sys-color-surface-bright-rgb) / <alpha-value>)",
           container: "rgb(var(--md-sys-color-surface-container-rgb) / <alpha-value>)",
+          "container-lowest":
+            "rgb(var(--md-sys-color-surface-container-lowest-rgb) / <alpha-value>)",
           "container-low": "rgb(var(--md-sys-color-surface-container-low-rgb) / <alpha-value>)",
           "container-high": "rgb(var(--md-sys-color-surface-container-high-rgb) / <alpha-value>)",
+          "container-highest":
+            "rgb(var(--md-sys-color-surface-container-highest-rgb) / <alpha-value>)",
           variant: "rgb(var(--md-sys-color-surface-variant-rgb) / <alpha-value>)",
           "on-variant": "rgb(var(--md-sys-color-on-surface-variant-rgb) / <alpha-value>)",
         },
-        // On-surface text
+        // 表面之上的文字色
         "on-surface": "rgb(var(--md-sys-color-on-surface-rgb) / <alpha-value>)",
+        // M3 规范写法 on-surface-variant：与 surface.on-variant 同色，
+        // 代码里两种写法都在用，缺一个就会静默失效（类名不存在 → 文字回落成父级颜色）
+        "on-surface-variant": "rgb(var(--md-sys-color-on-surface-variant-rgb) / <alpha-value>)",
         "on-background": "rgb(var(--md-sys-color-on-background-rgb) / <alpha-value>)",
-        // M3 Secondary
+        "on-primary": "rgb(var(--md-sys-color-on-primary-rgb) / <alpha-value>)",
+        // M3 次要色
         secondary: {
           DEFAULT: "rgb(var(--md-sys-color-secondary-rgb) / <alpha-value>)",
           container: "rgb(var(--md-sys-color-secondary-container-rgb) / <alpha-value>)",
         },
-        // M3 Tertiary
+        // M3 第三色
         tertiary: "rgb(var(--md-sys-color-tertiary-rgb) / <alpha-value>)",
-        // M3 Error
+        // M3 错误色
         error: {
           DEFAULT: "rgb(var(--md-sys-color-error-rgb) / <alpha-value>)",
+          on: "rgb(var(--md-sys-color-on-error-rgb) / <alpha-value>)",
           container: "rgb(var(--md-sys-color-error-container-rgb) / <alpha-value>)",
+          "on-container": "rgb(var(--md-sys-color-on-error-container-rgb) / <alpha-value>)",
         },
-        // M3 Outline
+        // M3 描边色
         outline: {
           DEFAULT: "rgb(var(--md-sys-color-outline-rgb) / <alpha-value>)",
           variant: "rgb(var(--md-sys-color-outline-variant-rgb) / <alpha-value>)",
         },
-        // Background
+        // 背景色
         background: "rgb(var(--md-sys-color-background-rgb) / <alpha-value>)",
       },
       fontSize: {
@@ -114,5 +129,5 @@ export const yuanchatPreset: Partial<Config> = {
       },
     },
   },
-  plugins: [],
+  plugins: [legacyWebViewCompat],
 };

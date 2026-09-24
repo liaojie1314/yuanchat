@@ -29,8 +29,12 @@ import koKR from "./locales/ko-KR.json";
 /**
  * 获取浏览器首选语言
  * zh-CN、zh、zh-TW → zh-CN；ja → ja-JP；ko → ko-KR；其他 → en-US
+ *
+ * @returns 受支持的 locale 代码
+ * @remarks 仅在用户从未选过语言时作为默认值；一旦手动选过，
+ *   持久化的选择优先（见 themeStore 的 locale 与 onRehydrateStorage）
  */
-function detectLocale(): string {
+export function detectLocale(): SupportedLocale {
   if (typeof navigator === "undefined") return "zh-CN";
   const lang = navigator.language || "zh-CN";
   if (lang.startsWith("zh")) return "zh-CN";
@@ -77,6 +81,22 @@ i18n.use(initReactI18next).init({
     return key; // 返回 key 本身作为 fallback，不中断渲染
   },
 });
+
+/**
+ * 把当前语言同步到 `<html lang>`
+ *
+ * @param locale - 生效中的 locale 代码
+ * @remarks 影响浏览器断词换行、读屏发音、拼写检查与输入法候选；
+ *   非 DOM 环境（node 测试、SSR）直接跳过
+ */
+function syncDocumentLang(locale: string): void {
+  if (typeof document === "undefined") return;
+  document.documentElement.lang = locale;
+}
+
+// 语言变更的唯一落地点是 i18next，故在此挂载而非各端入口
+i18n.on("languageChanged", syncDocumentLang);
+syncDocumentLang(i18n.language);
 
 /**
  * 格式化相对时间（locale 感知）

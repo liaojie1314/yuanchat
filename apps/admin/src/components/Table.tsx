@@ -16,12 +16,12 @@ export function SearchBox({
 }) {
   return (
     <div className="flex w-80 items-center gap-2 rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2">
-      <Search size={16} className="text-on-surface-variant shrink-0" />
+      <Search size={16} className="shrink-0 text-on-surface-variant" />
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="placeholder:text-on-surface-variant w-full bg-transparent text-body-md text-on-surface outline-none"
+        className="w-full bg-transparent text-body-md text-on-surface outline-none placeholder:text-on-surface-variant"
       />
     </div>
   );
@@ -34,7 +34,7 @@ export function DataTable({ headers, children }: { headers: string[]; children: 
         <thead>
           <tr className="border-b border-outline-variant bg-surface-container-low">
             {headers.map((h) => (
-              <th key={h} className="text-on-surface-variant px-4 py-3 text-label-md font-medium">
+              <th key={h} className="px-4 py-3 text-label-md font-medium text-on-surface-variant">
                 {h}
               </th>
             ))}
@@ -60,7 +60,7 @@ export function Pager({
   const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between pt-4">
-      <span className="text-on-surface-variant text-label-md">
+      <span className="text-label-md text-on-surface-variant">
         {t("admin.common.total", { count: total })}
       </span>
       <div className="flex items-center gap-2">
@@ -71,7 +71,7 @@ export function Pager({
         >
           {t("admin.common.prev")}
         </button>
-        <span className="text-on-surface-variant text-label-md">
+        <span className="text-label-md text-on-surface-variant">
           {page} / {totalPages}
         </span>
         <button
@@ -90,7 +90,7 @@ export function EmptyRow({ colSpan }: { colSpan: number }) {
   const { t } = useTranslation();
   return (
     <tr>
-      <td colSpan={colSpan} className="text-on-surface-variant px-4 py-10 text-center text-body-md">
+      <td colSpan={colSpan} className="px-4 py-10 text-center text-body-md text-on-surface-variant">
         {t("common.noData")}
       </td>
     </tr>

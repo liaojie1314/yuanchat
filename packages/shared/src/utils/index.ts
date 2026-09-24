@@ -89,3 +89,13 @@ export type { ValidationResult } from "./validation";
 
 // 头像颜色
 export { getAvatarColor } from "./avatarColor";
+
+// @提及文本
+export {
+  mentionSpanBefore,
+  mentionSpanAfter,
+  mentionTokenBefore,
+  mentionTokenAfter,
+  repairMentionDeletion,
+} from "./mentionText";
+export type { MentionSpan } from "./mentionText";

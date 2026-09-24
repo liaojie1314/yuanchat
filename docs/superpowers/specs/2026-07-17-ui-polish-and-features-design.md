@@ -22,7 +22,7 @@
 
 ### 1.1 设置页（`/settings` 从占位变真页面）
 
-- 新建 `packages/ui/src/SettingsScreen.tsx` 三端响应式（对齐 `docs/design/04_SETTINGS_PAGE.md` 的已可支撑子集）：
+- 新建 `packages/ui/src/SettingsScreen.tsx` 三端响应式（对齐 `docs/design/SETTINGS_PAGE.md` 的已可支撑子集）：
   - desktop/tablet：双栏——导航列表 240px + 内容区
   - mobile：全屏分组列表 → 点击进子页（栈式）
 - 分组与内容：
@@ -122,7 +122,7 @@
   - object_key 规则：`{类别}/{yyyy/mm}/{uuid}.{ext}`，类别 = images / avatars / files
 - `GET /api/v1/files/download-url?key=…`：返回 24h 预签名 GET URL；前端按 key 缓存换取的 URL（内存 Map，过期重取）
 - **选预签名而非 multipart 透传的原因**：大文件不占 Go 应用带宽/内存，客户端直传 MinIO
-- **已知取舍**：预签名 GET URL 持有即可读，本轮不做按会话成员的读权限校验（记入 02_CHAT_API.md）
+- **已知取舍**：预签名 GET URL 持有即可读，本轮不做按会话成员的读权限校验（记入 CHAT_API.md）
 
 ### 3.3 图片消息
 
@@ -155,7 +155,7 @@
 2. `pnpm test`（新组件/store action 单测：EmojiPicker 插入、applyRecall、图片消息映射）
 3. web + desktop `npx tsc --noEmit`
 4. Playwright E2E 实测该批功能（双账号验证 WS 实时性：建群推送、撤回双端占位、图片双端收发）
-5. 文档同步：02_CHAT_API.md（新端点 + 3 个新 WS 帧）、DEVELOPMENT.md（MinIO 启动步骤）、AGENTS.md（MVP 状态）
+5. 文档同步：CHAT_API.md（新端点 + 3 个新 WS 帧）、DEVELOPMENT.md（MinIO 启动步骤）、AGENTS.md（MVP 状态）
 6. **环境清理**：kill dev server / go server、docker compose stop、关浏览器 tab
 
 Git：单分支 `feature/ui-and-features`，3 次完整提交（每批次一次）→ 全部完成 merge --no-ff → dev → push → 删分支。

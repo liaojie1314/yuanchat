@@ -7,7 +7,7 @@
 # 做的事：
 #   1. 校验 docker / docker compose
 #   2. 从 .env.prod.example 生成 .env（缺失的密码自动随机生成）
-#   3. envsubst 渲染 nginx.conf
+#   3. envsubst 渲染 nginx.conf 与 coturn/turnserver.prod.conf
 #   4. 首次签发 Let's Encrypt 证书（HTTP-01）
 #   5. docker compose up -d 并等待健康
 #
@@ -39,13 +39,19 @@ fi
 # shellcheck disable=SC1091
 set -a; source .env; set +a
 
-for var in DOMAIN_APP DOMAIN_API DOMAIN_WS DOMAIN_ADMIN ADMIN_EMAIL; do
+for var in DOMAIN_APP DOMAIN_API DOMAIN_WS DOMAIN_ADMIN DOMAIN_STORAGE ADMIN_EMAIL; do
   value="${!var:-}"
   [ -n "$value" ] || die ".env 缺少 $var"
   case "$value" in
     *example.com) die "$var 仍是示例值（$value），请改为你的真实域名" ;;
   esac
 done
+
+# PUBLIC_IP 无法自动探测：NAT / 云主机内取到的是内网地址，填错等于没填
+# （coturn 会把不可达地址写进 relay candidate，通话卡在「连接中」）。
+[ -n "${PUBLIC_IP:-}" ] || die ".env 缺少 PUBLIC_IP（本机外网 IP，coturn 中继必需）
+       查看方式：curl -s https://api.ipify.org  或云控制台的公网 IP
+       注意不是 ip addr 看到的内网地址"
 
 # 空密码自动生成随机值并写回 .env
 gen_secret() {
@@ -54,8 +60,14 @@ gen_secret() {
   if [ -z "$current" ]; then
     local value
     value="$(openssl rand -base64 48 | tr -d '/+=' | head -c "$len")"
-    # 仅替换空值行，保留用户已填内容
-    sed -i "s|^${key}=$|${key}=${value}|" .env
+    if grep -q "^${key}=" .env; then
+      # 仅替换空值行，保留用户已填内容
+      sed -i "s|^${key}=$|${key}=${value}|" .env
+    else
+      # 老部署的 .env 可能没有新增的键；不补进去的话下次单独跑
+      # docker compose 会取到空值（compose 只读 .env 文件，读不到本脚本的 export）
+      printf '%s=%s\n' "$key" "$value" >> .env
+    fi
     export "${key}=${value}"
     info "已生成随机 ${key}"
   fi
@@ -66,12 +78,19 @@ gen_secret JWT_SECRET 48
 gen_secret MINIO_ACCESS_KEY 20
 gen_secret MINIO_SECRET_KEY 40
 gen_secret GRAFANA_PASSWORD 24
+# coturn 与后端共用这一个密钥（compose 里 YUANCHAT_TURN_STATIC_AUTH_SECRET 取的是同一个变量）
+gen_secret TURN_SECRET 48
 
-# ---------- 3. 渲染 nginx.conf ----------
+# ---------- 3. 渲染 nginx.conf 与 coturn 配置 ----------
 info "渲染 nginx 配置"
-export DOMAIN_APP DOMAIN_API DOMAIN_WS DOMAIN_ADMIN
-envsubst '${DOMAIN_APP} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN}' \
+export DOMAIN_APP DOMAIN_API DOMAIN_WS DOMAIN_ADMIN DOMAIN_STORAGE
+envsubst '${DOMAIN_APP} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN} ${DOMAIN_STORAGE}' \
   < nginx/nginx.conf.template > nginx/nginx.conf
+
+info "渲染 coturn 配置"
+export TURN_SECRET PUBLIC_IP
+envsubst '${TURN_SECRET} ${DOMAIN_APP} ${PUBLIC_IP}' \
+  < coturn/turnserver.prod.conf.template > coturn/turnserver.prod.conf
 
 # ---------- 4. 首次签发证书 ----------
 CERT_PATH="./certbot-conf-check"
@@ -84,7 +103,7 @@ if ! docker volume inspect yuanchat_certbot_conf >/dev/null 2>&1 || \
   # 通过 80 端口完成 ACME 校验后再换成真证书
   docker run --rm -v yuanchat_certbot_conf:/etc/letsencrypt alpine sh -c "
     apk add --no-cache openssl >/dev/null 2>&1
-    for d in ${DOMAIN_APP} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN}; do
+    for d in ${DOMAIN_APP} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN} ${DOMAIN_STORAGE}; do
       mkdir -p /etc/letsencrypt/live/\$d
       openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
         -keyout /etc/letsencrypt/live/\$d/privkey.pem \
@@ -96,7 +115,7 @@ if ! docker volume inspect yuanchat_certbot_conf >/dev/null 2>&1 || \
   docker compose -f docker-compose.prod.yml up -d nginx
   sleep 5
 
-  for domain in "$DOMAIN_APP" "$DOMAIN_API" "$DOMAIN_WS" "$DOMAIN_ADMIN"; do
+  for domain in "$DOMAIN_APP" "$DOMAIN_API" "$DOMAIN_WS" "$DOMAIN_ADMIN" "$DOMAIN_STORAGE"; do
     info "签发 $domain"
     docker compose -f docker-compose.prod.yml run --rm --entrypoint certbot certbot \
       certonly --webroot -w /var/www/certbot \

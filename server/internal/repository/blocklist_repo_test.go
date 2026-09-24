@@ -8,35 +8,15 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/model"
-	"gorm.io/driver/postgres"
+	"github.com/yuanchat/server/internal/testutil"
 	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
-	"gorm.io/gorm/schema"
 )
 
-// testDB 连接本地开发库（deploy/docker-compose.yml 的 postgres :5434）。
+// testDB 返回独立测试库上的事务句柄（跑完整迁移、用例结束回滚），
 // 数据库不可达时跳过集成用例（CI 无 DB 环境仍绿）。
 func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := "host=localhost port=5434 user=yuanchat password=yuanchat_dev dbname=yuanchat sslmode=disable"
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
-		NamingStrategy: schema.NamingStrategy{
-			SingularTable: true,
-		},
-		SkipDefaultTransaction: true,
-	})
-	if err != nil {
-		t.Skipf("dev postgres unavailable, skip integration test: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil || sqlDB.Ping() != nil {
-		t.Skip("dev postgres unavailable, skip integration test")
-	}
-	if err := db.AutoMigrate(&model.Blocklist{}); err != nil {
-		t.Fatalf("migrate blocklists: %v", err)
-	}
-	return db
+	return testutil.NewDB(t)
 }
 
 // newTestUser 建一次性用户，测试结束清理拉黑记录 + 用户本身。

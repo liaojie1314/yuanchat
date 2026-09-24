@@ -2,16 +2,27 @@
  * AdminLayout — 左侧导航 + 内容区（桌面优先，管理后台不做移动端适配）
  */
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Users, MessagesSquare, ShieldAlert, Flag, ScrollText, LogOut } from "lucide-react";
+import {
+  LayoutDashboard,
+  Users,
+  MessagesSquare,
+  ShieldAlert,
+  Flag,
+  Sticker,
+  ScrollText,
+  LogOut,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 
 const NAV = [
+  { to: "/overview", icon: LayoutDashboard, labelKey: "admin.nav.overview" },
   { to: "/users", icon: Users, labelKey: "admin.nav.users" },
   { to: "/conversations", icon: MessagesSquare, labelKey: "admin.nav.conversations" },
   { to: "/messages", icon: ShieldAlert, labelKey: "admin.nav.messages" },
   { to: "/moderation", icon: Flag, labelKey: "admin.nav.moderation" },
+  { to: "/sticker-packs", icon: Sticker, labelKey: "admin.nav.stickerPacks" },
   { to: "/audit-logs", icon: ScrollText, labelKey: "admin.nav.auditLogs" },
 ];
 
@@ -25,7 +36,7 @@ export function AdminLayout() {
     <div className="flex h-screen overflow-hidden">
       <aside className="flex w-56 shrink-0 flex-col border-r border-outline-variant bg-surface-container-low">
         <div className="flex items-center gap-2 border-b border-outline-variant px-4 py-4">
-          <div className="brand-gradient grid h-8 w-8 place-items-center rounded-lg text-sm font-bold text-white">
+          <div className="brand-gradient flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold text-white">
             元
           </div>
           <span className="text-title-sm font-semibold text-on-surface">{t("admin.title")}</span>
@@ -51,14 +62,14 @@ export function AdminLayout() {
           })}
         </nav>
         <div className="flex items-center justify-between border-t border-outline-variant px-4 py-3">
-          <span className="text-on-surface-variant truncate text-label-md">{user?.nickname}</span>
+          <span className="truncate text-label-md text-on-surface-variant">{user?.nickname}</span>
           <button
             onClick={() => {
               logout();
               navigate("/login", { replace: true });
             }}
             aria-label={t("settings.logout")}
-            className="text-on-surface-variant rounded-lg p-1.5 transition-colors hover:text-error"
+            className="rounded-lg p-1.5 text-on-surface-variant transition-colors hover:text-error"
           >
             <LogOut size={16} />
           </button>

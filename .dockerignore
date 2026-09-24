@@ -1,0 +1,46 @@
+# Docker 构建上下文排除清单
+#
+# apps/web、apps/admin 两个 Dockerfile 的 context 是仓库根目录（要跨 workspace 取
+# packages/ 的源码），不排除的话整个仓库都会被打包送进 docker daemon —— 其中
+# src-tauri/target 一个目录就能到 30G，gen/android 的 Gradle 产物另有近 9G，
+# 实测光传上下文就要几分钟且随打包次数无限增长。
+#
+# 判断标准：镜像内会重新生成的、或只服务于本机开发/桌面端打包的，一律排除。
+
+# 版本库与本机配置
+.git
+.github
+.husky
+.claude
+.vscode
+.idea
+
+# 依赖：镜像内自己跑 pnpm install --frozen-lockfile
+**/node_modules
+
+# Rust / 安卓打包产物（桌面端与移动端专用，镜像用不到）
+apps/desktop/src-tauri/target
+apps/desktop/src-tauri/gen
+
+# 前端构建产物：镜像内重新 build，带进去反而可能覆盖成陈旧版本
+**/dist
+**/.turbo
+**/.vite
+
+# 测试与报告产物
+**/coverage
+**/playwright-report
+**/test-results
+**/.nyc_output
+
+# 文档与截图：不进运行时镜像
+docs
+*.md
+!README.md
+
+# 本机运行时产生的临时文件
+*.log
+.tmp-shots
+.env
+.env.local
+**/.DS_Store

@@ -8,6 +8,7 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./polyfills": "./src/polyfills.ts",
     "./store/*": "./src/store/*.ts",
     "./hooks/*": "./src/hooks/*.ts",
     "./types": "./src/types/index.ts",
@@ -23,7 +24,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
-    "clean": "echo 'shared: clean'"
+    "clean": "rm -rf dist coverage"
   },
   "dependencies": {
     "@noble/ciphers": "^2.2.0",

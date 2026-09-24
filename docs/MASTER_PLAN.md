@@ -1,0 +1,968 @@
+# 元聊 (YuanChat) — 即时通讯软件 总体计划书
+
+## 一、项目概述
+
+| 项目        | 说明                                                              |
+| ----------- | ----------------------------------------------------------------- |
+| 项目名称    | 元聊 (YuanChat)                                                   |
+| 项目类型    | 即时通讯 (IM) 软件                                                |
+| 开发模式    | GitFlow 工作流                                                    |
+| 目标平台    | Web / Windows / macOS / Linux / Android / iOS / 平板              |
+| 前端语言    | TypeScript                                                        |
+| 前端框架    | React                                                             |
+| 后端语言    | Go (Golang)                                                       |
+| 容器化      | Docker Compose（开发与生产编排都在 `deploy/`，未使用 Kubernetes） |
+| 文档位置    | `docs/` 目录（本文档所在目录）                                    |
+| AI 辅助文档 | `AGENTS.md`（根目录约束）、`.claude/TROUBLESHOOTING.md`           |
+
+---
+
+## 二、技术架构（按推荐度排序）
+
+### 2.1 前端技术方案
+
+| 方案                         | 适用范围                | 推荐度     | 说明                                                                                                             |
+| ---------------------------- | ----------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------- |
+| **React (Vite) + Tauri 2**   | Desktop + Mobile + Web  | ⭐⭐⭐⭐⭐ | Rust 内核，同一套 React UI 全平台复用（Win/Mac/Linux/Android/iOS）；体积小、性能高                               |
+| **React (Vite) + Capacitor** | Web / iOS / Android     | ⭐⭐⭐     | 曾评估但未采用：Tauri 2 已具备移动端能力，无需两套原生打包工具                                                   |
+| **React Native**             | Mobile (Android/iOS)    | ⭐⭐       | 原生体验更好，但 `<View>`/`<Text>` 与 Web `<div>`/`<span>` 是两套渲染体系，Tailwind CSS 无法复用，团队维护成本高 |
+| **Electron**                 | Desktop (Win/Mac/Linux) | ⭐⭐       | 成熟但体积大，Tauri 是更好的替代品                                                                               |
+
+**最终采用方案（当前实现）：**
+
+- **Web 端**：React 19 + TypeScript + Vite（`build.target=es2019` 兼容旧 WebView）
+- **桌面端**：Tauri 2（Rust 内核 + WebView，Win/Mac/Linux 全覆盖）
+- **移动端**：Tauri 2 Android（同一套 React UI，与桌面共享代码）
+- **iOS**：Tauri 2 iOS（需 Apple Developer 账户，规划中）
+
+> **为什么弃用 Capacitor？** Tauri 2 已原生支持移动端，同一套 React 代码 + Tailwind CSS 在
+> 桌面/移动/Web 100% 复用；Capacitor 会引入独立的移动打包链路，团队维护成本翻倍。
+
+> **macOS/iOS 构建说明**：无 macOS 本地设备时，通过 GitHub Actions 的 `macos-latest` runner
+> 自动打包（已实现，见 `.github/workflows/release.yml`）；产物为 universal `.dmg`（Intel + M 系列）。
+> iOS 需 Apple Developer 账户（$99/年）+ 证书 secrets，后续接入。
+
+### 2.2 后端技术方案
+
+**最终采用方案（当前实现）：Go 单体，单进程多监听**
+
+| 组成             | 实现                                                                        |
+| ---------------- | --------------------------------------------------------------------------- |
+| HTTP/REST        | Gin，监听 `:8085`，路由前缀 `/api/v1`（装配在 `internal/router/router.go`） |
+| WebSocket 长连接 | gorilla/websocket，独立监听 `:8086`，进程内 Hub 管理连接与帧分发            |
+| 指标暴露         | Prometheus client，独立监听 `:9090/metrics`                                 |
+| 数据访问         | GORM + goose 嵌入式 SQL 迁移（`internal/database/migrations/`）             |
+| 分层             | handler → service → repository，构造与依赖注入集中在 `router.Setup`         |
+
+同一个进程里起 REST、WebSocket、metrics 三个 `http.Server`（见 `server/cmd/server/main.go`），
+共享同一套 service / repository 实例，**没有服务间 RPC**。
+
+曾评估但**未采用**：拆分微服务 + gRPC 内部通信、独立 API 网关（Kong / 自研）。
+当前规模下拆分只会增加部署、调试与本地开发成本，收益为负。
+
+横向扩容的现状：presence 已支持 Redis Pub/Sub 跨实例广播（配置 `presence.backend=redis`），
+但消息分发的 `Dispatcher` 仍是进程内 Hub 实现，多实例部署前需先补一层分布式分发。
+
+### 2.3 通信协议
+
+```
+客户端 ──── HTTP/REST  :8085 ────┐
+                                 ├──→ yuanchat-server（单进程 Go）
+客户端 ──── WebSocket  :8086 ────┘      Gin 路由 + Hub 分发，共享 service/repository
+                                              │
+                                              ▼
+                                PostgreSQL / Redis / MinIO
+```
+
+REST 承载增删改查与文件预签名；WebSocket 承载实时帧（消息投递、已读回执、正在输入、
+presence、会话创建/变更/移除、reaction、角色变更等）。帧类型与载荷定义见
+[`CHAT_API.md`](./CHAT_API.md)，服务端在 `server/internal/ws/protocol.go`。
+
+---
+
+## 三、系统架构图
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                          客户端层                             │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐     │
+│  │  Web 端  │  │  桌面端  │  │ Android  │  │ 管理后台 │     │
+│  │React+Vite│  │ Tauri 2  │  │ Tauri 2  │  │React+Vite│     │
+│  │   PWA    │  │Win/Mac/Lx│  │  签名APK │  │apps/admin│     │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘     │
+└───────┼─────────────┼─────────────┼─────────────┼───────────┘
+        └─────────────┴──────┬──────┴─────────────┘
+                             │ HTTPS / WSS
+                   ┌─────────▼──────────┐
+                   │   Nginx（生产）    │ ← TLS 终止 + 反向代理 + 静态资源
+                   │   certbot 续期     │
+                   └─────────┬──────────┘
+                             │
+        ┌────────────────────▼─────────────────────┐
+        │      yuanchat-server（单进程 Go 单体）    │
+        │  :8085 REST (Gin)  :8086 WebSocket Hub   │
+        │  :9090 /metrics                          │
+        │  handler → service → repository          │
+        └───┬───────────────┬───────────────┬──────┘
+            │               │               │
+   ┌────────▼─────┐  ┌──────▼──────┐  ┌─────▼──────┐
+   │  PostgreSQL  │  │    Redis    │  │   MinIO    │
+   │ 业务数据 +   │  │ 验证码/限流 │  │ 图片/文件/ │
+   │ pg_trgm 检索 │  │ presence    │  │ 语音/头像  │
+   └──────────────┘  └─────────────┘  └────────────┘
+
+可观测性：Prometheus 抓 `:9090` → Grafana 看板；loki + promtail 收 zap 结构化日志；
+前端异常走 Sentry。
+```
+
+> 单进程内 REST 与 WebSocket 共享 service/repository 实例，消息经进程内 Hub 直接投递给
+> 目标连接，不经消息队列。多实例部署需先把 `Dispatcher` 换成分布式实现（presence 已可切
+> Redis Pub/Sub）。
+
+---
+
+## 四、项目目录结构
+
+```
+yuanchat/
+├── docs/                          # 📖 项目文档
+│   ├── MASTER_PLAN.md            # 总体计划书（本文件）
+│   ├── ARCHITECTURE.md           # 详细架构设计
+│   ├── CHAT_API.md               # 聊天 REST 端点 + WebSocket 协议
+│   ├── DB_SCHEMA.md              # 数据库设计 + 迁移
+│   ├── DEVELOPMENT.md            # 开发与打包指南（启动/构建/调试/测试）
+│   ├── ROADMAP.md                # 迭代路线图
+│   ├── RELEASE.md                # 发版指南
+│   ├── design/                   # UI/UX 设计规范（7 份专题 + README）
+│   ├── deploy/                   # 部署文档（self-hosted.md / env.md / server-and-domain.md）
+│   ├── observability/            # 可观测性（logging.md）
+│   └── superpowers/              # SDD 产物：specs/ 设计文档 + plans/ TDD 实施计划
+│
+├── AGENTS.md                     # AI Agent 指南（根目录，核心约束清单）
+├── CHANGELOG.md                  # 变更日志（release-it + conventional-changelog 生成）
+├── contracts/                    # 前后端黄金契约（message-send.golden.json）
+├── .claude/                      # 🤖 Claude Code 项目配置
+│   ├── TROUBLESHOOTING.md        # 按平台分类的踩坑记录
+│   └── settings.local.json       # 本地权限设置
+│
+├── server/                       # 🔧 后端 Go 服务（单进程双端口：REST :8085 + WS :8086）
+│   ├── go.mod
+│   ├── Makefile                  # 后端本地任务（构建 / 测试 / vet）
+│   ├── Dockerfile
+│   ├── cmd/
+│   │   ├── server/               # 主服务入口（REST + WS 网关 + Hub 分发 + metrics）
+│   │   ├── migrate/              # goose 迁移单独执行（生产部署用）
+│   │   ├── seed/                 # 开发种子数据（Alice/Bob/Carol 测试账号）
+│   │   ├── gc/                   # 离线对象 GC（清理未被引用的 MinIO 对象）
+│   │   └── genvapid/             # 生成 Web Push VAPID 密钥对
+│   ├── internal/
+│   │   ├── config/               # Viper 配置加载
+│   │   ├── database/             # goose 迁移执行器 + migrations/（001…013，embed 进二进制）
+│   │   ├── handler/              # HTTP handlers（user/conversation/message/contact/file/presence/
+│   │   │                         #   favorite/sticker/report/admin/e2ee/push/captcha）
+│   │   ├── middleware/           # 认证 / 限流 / CORS / 日志
+│   │   ├── model/                # GORM 模型
+│   │   ├── pkg/                  # jwt / password / shortid
+│   │   ├── redis/                # Redis 客户端（图形验证码 / 限流 / 分布式 presence）
+│   │   ├── repository/           # 数据访问层
+│   │   ├── router/               # 路由装配
+│   │   ├── service/              # 业务服务
+│   │   ├── storage/              # MinIO 对象存储封装（预签名 URL / 桶策略）
+│   │   └── ws/                   # WebSocket Hub + protocol 帧定义
+│   └── config/config.yaml
+│
+├── apps/                         # 🎨 前端应用（pnpm workspace）
+│   ├── web/                      # 🌐 Web (Vite + React 19)
+│   │   ├── src/                  # 页面路由 + 应用壳
+│   │   └── e2e/                  # Playwright E2E（含 pages/ POM + fixtures/）
+│   ├── desktop/                  # 🖥️📱 Desktop + Mobile (Tauri 2)
+│   │   ├── src/                  # React UI（复用 packages/ui）
+│   │   └── src-tauri/            # Rust 内核 + 平台配置
+│   │       ├── Cargo.toml
+│   │       ├── tauri.conf.json
+│   │       ├── capabilities/     # Tauri 2 权限声明（按平台分文件，桌面专属进 desktop.json）
+│   │       └── gen/android/      # Tauri Android 生成的 Gradle 工程
+│   └── admin/                    # 🛡️ 管理后台 (React + Vite)：用户封禁 / 审核队列 / 审计日志
+│
+├── packages/                     # 📦 前端共享包（workspace）
+│   ├── shared/                   # 跨端共享：api/store/hooks/ws/utils
+│   ├── ui/                       # React UI 组件库（跨端复用）
+│   └── design-system/            # 设计令牌 + i18n 资源 + Tailwind preset
+│
+├── deploy/                       # 🚀 部署配置
+│   ├── docker-compose.yml        # 开发环境（PostgreSQL/Redis/MinIO，镜像均钉版本号）
+│   ├── docker-compose.prod.yml   # 生产编排（+ nginx / prometheus / grafana）
+│   ├── logging.yml               # 日志栈（loki + promtail）
+│   ├── install.sh / backup.sh    # 一键部署 / 备份脚本
+│   ├── nginx/ grafana/ prometheus*.yml
+│   └── init-scripts/             # DB 初始化 SQL
+│
+├── scripts/                      # 📜 脚本工具
+│   ├── dev.mjs                   # 一键启动（web/desktop/android/server + 停止）
+│   ├── build.mjs                 # 打包脚本
+│   ├── check-env.mjs             # 环境检查（preinstall 钩子）
+│   ├── check-i18n.mjs            # i18n 门禁（四语齐全 + 查代码实际使用的 key + 死键）
+│   ├── check-theme-classes.mjs   # 主题门禁（颜色工具类必须在色板内）
+│   └── sync-version.mjs          # release-it 用：同步版本到子包与 tauri.conf.json
+│
+├── .github/workflows/            # ⚙️ CI/CD
+│   ├── ci.yml                    # push 到 dev / 目标 dev 的 PR：i18n 门禁 + 前端 test + 双端 tsc + Playwright E2E + 后端 vet/test/-race
+│   └── release.yml               # tag v* 触发：Web + Desktop 三平台 + Android 打包
+│
+├── turbo.json                    # Turborepo 任务编排
+├── pnpm-workspace.yaml           # workspace 定义（apps/* + packages/*）
+├── .release-it.json              # release-it 配置（requireBranch: main）
+├── LICENSE
+└── README.md                     # 项目说明
+```
+
+---
+
+## 五、核心功能清单
+
+### 阶段一：基础能力（MVP）✅ 全部完成
+
+- [x] 用户注册/登录（手机号/邮箱 + 密码 + SVG 验证码，JWT 双 Token 静默刷新）
+- [x] 单聊消息（文本 + 图片 + 文件 + 语音 + 表情回应）
+- [x] 联系人管理（精确搜索 手机号/元聊号/邮箱、申请/接受/拒绝、字母分组好友列表）
+- [x] 在线状态（Hub 首连/末连回调 → 广播好友 + REST 快照，`presence` 帧增量）
+- [x] Web 端基础 UI（登录/注册/三端响应式聊天主界面）
+- [x] 消息持久化存储（PostgreSQL，seq 会话内原子分配）
+
+### 阶段二：核心体验 ✅ 全部完成
+
+- [x] 群组聊天（建群 + 群管理五操作：改名/邀请/踢人/退群/解散，权限模型 role 0/1/2）
+- [x] 图片/文件消息（MinIO 预签名直传，气泡 lucide 图标 + 预签名下载）
+- [x] 语音消息（MediaRecorder + audio/webm，60s 自动截断，模块级单例播放器）
+- [x] 消息已读/未读（last_read_seq 回执机制 + 未读角标）
+- [x] 离线消息推送（Web Push：VAPID + Service Worker，仅推离线收件人并过滤免打扰；
+      FCM / APNs 原生推送未接）
+- [x] 桌面端基础版本（Tauri 2 Windows/macOS/Linux + Android，同一套 React UI）
+- [x] 消息全文搜索（PostgreSQL `pg_trgm` GIN 索引，全局 + 会话内；未引入 Elasticsearch）
+- [x] 桌面系统通知（Tauri notification plugin，失焦 + 非免打扰时弹）
+
+### 阶段三：进阶功能
+
+- [x] 语音/视频通话（WebRTC，1v1 + 群通话 mesh；Linux 桌面端走原生 GStreamer 后端，见设计文档 §3.11a）
+- [x] 端到端加密 E2EE（X3DH + Double Ratchet，仅单聊，用户自行开启，对方未启用降级明文）
+- [x] 多设备消息同步（WS 协议已支持多设备推送 + 已读多端同步）
+- [x] 移动端基础版本（Tauri 2 Android，签名 APK 已可通过 CI 打包）
+- [ ] 聊天机器人/自动化
+- [x] 消息引用/回复（UI + 后端 reply_to_id 联通）
+- [x] 消息撤回/编辑（2 分钟撤回窗口 + 5 分钟内可「重新编辑」回填输入框）
+- [x] 表情回应 Reactions（快捷 6 emoji 条 + 气泡 toggle + 历史聚合回填）
+- [x] 消息转发（一次最多 9 个会话）/ `@` 提及 / 消息收藏
+- [x] 贴纸与收藏表情（blob 内容寻址去重，独立 content type，前后端共用 golden 契约）
+- [x] 消息编辑（已发送文本就地编辑 + 「已编辑」角标 + 全量编辑历史；5 分钟窗口 / 20 次上限 / 编辑重跑敏感词审核；区别于撤回后「重新编辑」回填）
+- [ ] 定时发送 / 稍后提醒（消息排程到指定时间）
+- [ ] 消息翻译（气泡内一键译文，接自托管机翻，不出私钥）
+- [x] 视频消息（≤120s 短视频气泡，文件选择 + 客户端抽帧封面；未做录制，见 K6 备注）
+- [x] 会话媒体相册（图片/文件/语音/视频/贴纸聚合网格页 + 类型筛选）
+- [x] 语音消息倍速播放（1x / 1.5x / 2x）
+- [ ] 贴纸 DIY（裁剪 + 加字生成贴纸，直通商城发布，候选 H1d）
+- [ ] 群投票 / 接龙（消息形态的轻投票，结果内联展示）
+- [x] 个人状态（emoji + 一句话 + 时长，presence 扩展，会话列表角标展示）
+- [x] 朋友圈（图文动态、好友可见范围、点赞与评论、互动消息、他人主页）
+- [ ] 阅后即焚（单聊一次性会话，读后双方销毁，与 E2EE 联动）
+- [ ] 草稿云同步（输入框草稿按会话漫游）
+- [ ] 桌面托盘 + 系统未读角标（Tauri tray / badge，点击直达未读）
+- [ ] 命令面板（Ctrl+K 全局跳转 / 搜人 / 搜消息 / 快捷动作，SearchModal 升维）
+
+### 阶段四：企业级特性
+
+- [ ] 组织架构/企业通讯录
+- [ ] 企业审批应用（群公告已实现，企业级审批流未做）
+- [ ] 开放 API / Webhook
+- [ ] 数据统计面板（管理后台目前只有列表与工单，无聚合看板）
+- [x] 管理员后台（`apps/admin`：用户封禁解封 / 会话解散 / 消息审核删除 / 举报处理，
+      `/api/v1/admin/*` 走 JWT + `role=admin` 双重校验）
+- [x] 审计日志（管理端写操作落 `admin_action_logs`，`GET /admin/audit-logs` 分页查询）
+- [x] 内容安全（用户举报工单 + 敏感词 `flagged` 审核队列，命中不阻塞发送）
+- [ ] 压测（消息列表虚拟滚动、检索索引、限流等前后端优化已做，系统性压测未做）
+- [ ] 设备管理页（活跃会话列表 + 远程登出；与 A8 多设备会话债协同设计）
+- [ ] 新设备登录通知（异地 / 新设备登录即时推送，低成本高安全感）
+- [ ] 聊天记录导出 / 备份（按会话导出 JSON/HTML，数据自主权）
+- [ ] 多账号切换（工作号 / 生活号快速切换，依赖多设备会话基建）
+
+### 未做清单总览（单一真源）
+
+> **本小节是「还有什么没做」的唯一真源。**`docs/ROADMAP.md` 只排批次顺序，
+> `docs/superpowers/plans/*.md` 只在某功能即将实现时才写、写完即用于执行，**都不是真源**。
+> 新发现的待实现项、主动留下的技术债，**当次登记到这里**——别的会话不知道你发现了什么，
+> 漏登记等于永久丢失（已发生过：A6/A7 的 plan 被删后范围只剩会话记忆）。
+
+**图例**：🔴 数据丢失/安全风险，必须优先 · 🟡 影响体验或可维护性 · ⚪ 增强项
+
+#### 1. A8 — auth 补全与安全加固（**已完成，已合回 dev**）
+
+设计：[`specs/2026-08-23-auth-completion-design.md`](superpowers/specs/2026-08-23-auth-completion-design.md)
+执行：[`plans/2026-08-23-auth-completion.md`](superpowers/plans/2026-08-23-auth-completion.md)（18 Task）
+分支：`feature/auth-completion`（自 dev @ `03baf6a` 切出，31 个 commit，`--no-ff` 合回 dev）
+过程记录：`.superpowers/sdd/2026-08-23-auth-completion/`（ledger `progress.md`、裁决 `rulings.md`、批次报告 `batch-1-report.md` / `batch-2-report.md`、批 1 评审 `batch-1-review.md`）
+
+> ⚠️ **plan 的代码块不可照抄**：pre-flight 证实它引用了不存在的包与符号（`response` 包、`internal/dto`、`jwt.Manager`、`model.UserStatusBanned`）、用了 slog（本仓 zap-only）、含编译不过的笔误，多处确切数值与 spec 相反。已正式降级为「意图草图」。
+> **权威顺序：spec > `rulings.md` > 仓库真实代码 > plan（最低）。**
+
+**已完成（Task 1-8，纯后端）**：`go build` + `go vet` + `go test -race ./...` 全绿，12 包通过、0 SKIP。
+
+| 状态 | 条目                                                                                                                                                 |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ✅   | 会话吊销：`users.token_version`（迁移 **014**）+ JWT `tv` 声明，`Refresh` 与 WS 建连校验（fail-closed）                                              |
+| ✅   | 后端密码复杂度：`ValidatePasswordStrength`（8-64 **字节** / 大小写 / 数字 / 不含空白），注册路径已接                                                 |
+| ✅   | `POST /auth/logout` 补齐，返 204 空体，**不递增 `token_version`**（无 device 表时会误踢该用户全部设备）                                              |
+| ✅   | `Refresh` 补封禁 + 令牌版本校验，封禁返 403/40301；登录写 `last_login_at`；说谎注释已改                                                              |
+| ✅   | `CodeSender` 抽象 + `LogSender`，未知 provider **启动即 FATAL**（已实测）；Sender 经 `router.Setup` 末位参数注入                                     |
+| ✅   | 忘记密码**后端**三段式链路（`AuthService` + `AuthHandler`）：发码 → 校码换一次性 `reset_ticket`（`GetDel` 单次消费）→ 改密并原子自增 `token_version` |
+
+**Task 9-18 全部完成**（含真机实测）：
+
+| 状态 | 条目                                                                                                                                                                                                                                             |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ✅   | **Task 9** 账号级登录失败锁定（`auth:login:fail:{标识}`，5 次锁 15 分钟）。未注册号同样计数 —— 否则「已注册 429 / 未注册 401」就是一个用户枚举探针                                                                                               |
+| ✅   | **Task 10** 扫码登录状态机 `pending → scanned → confirmed`，令牌在 confirm 签发、poll 用 Lua 原子取走即销毁                                                                                                                                      |
+| ✅   | **加固（超出 plan）** 轮询绑定发起方：`poll_secret` 只随建会话响应下发、不进二维码，轮询须带 `X-Qr-Poll-Secret` 并做常量时间比较。否则拍到屏幕的人可抢先取走令牌                                                                                 |
+| ✅   | **Task 11** 8 条新路由的真断言冒烟（按 D3 未引 swaggo）                                                                                                                                                                                          |
+| ✅   | **Task 12** `doFetch` 在 `res.json()` 前短路 204；顺带修好 `deleteFriend` / `unblockUser` 两个既有 bug（打 204 端点却总抛 `SyntaxError`）                                                                                                        |
+| ✅   | **Task 13** 忘记密码页接真接口并下沉共享组件：`ForgotPasswordPage` web 273 → 6 行、desktop 279 → 44 行                                                                                                                                           |
+| ✅   | **Task 14** 前端密码规则统一到 spec 五条，长度按字节（`TextEncoder`）；删 `validation.passwordSpecial`                                                                                                                                           |
+| ✅   | **Task 15** 扫码页接真接口并下沉：`QrLoginPage` 172/175 → 6/38 行，删掉写死的 60 秒过期，倒计时用服务端 `expires_in` 校准                                                                                                                        |
+| ✅   | **Task 16** Android 原生扫码（`tauri-plugin-barcode-scanner` 2.4.5，权限名取自 crate 自带 `permissions/autogenerated/reference.md`，写进新建的 `capabilities/mobile.json`）。`parseLoginQr` 只接受 `yuanchat://login?t=`，其余判为非本应用二维码 |
+| ✅   | **Task 17** MSW 补齐 8 个端点 + 忘记密码/扫码两个 E2E spec                                                                                                                                                                                       |
+| ✅   | **Task 18** 桌面 CSP 由 `null` 改为白名单（`script-src 'self'`，另加 `object-src 'none'` / `base-uri 'self'` / `frame-ancestors 'none'`）；nginx HSTS 启用 `max-age=31536000; includeSubDomains`（按 brief 不加 `preload`）                      |
+| ✅   | **超出 plan 的补齐**：登录态改密 `POST /auth/password/change`（凭当前密码，先验旧密码再验新密码强度）+ 设置页改密弹窗；CORS 放行 `X-Qr-Poll-Secret`；安卓返回键与沉浸式状态栏（见下）                                                            |
+
+**真机与真后端实测结论**（不只是单测）：
+
+| 项                  | 结论                                                                                                                    |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| curl 打真后端 27 项 | 登录/登出/改密三段式/登录锁定/扫码状态机全部符合契约；验证码日志已打码（`code=7****0`），要从 Redis 读真码才能续跑      |
+| Playwright 打真后端 | dev 与生产构建各 14/15（唯一「失败」是测试脚本自己 `localStorage.clear()` 造成的 WS 400，正常登录与登出路径零 4xx/5xx） |
+| 生产构建产物        | 21 个 JS 文件**零** `?.` / `??`，es2019 底线守住                                                                        |
+| Android 真机        | 扫码登录全链路走通（用户确认）；相机权限弹框正常；返回键与沉浸式状态栏见下                                              |
+| 桌面端 Tauri        | 新 CSP 下正常启动，真实会话数据加载，CSP 拦截日志 0 行                                                                  |
+
+**过程中发现并修掉的既有缺陷**（非 A8 引入）：
+
+| 缺陷                                          | 说明                                                                                                                                                                                                               |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| CORS 缺 `X-Qr-Poll-Secret`                    | 浏览器预检直接拦死扫码轮询。Go 单测走 httptest 不做预检、MSW 在网络层之前拦截，两者都发现不了 —— 只有真浏览器打真后端才暴露。已补 `middleware` 首个测试文件钉住四个自定义头                                        |
+| WebView 抢吃返回键                            | `android.webkit.WebView` 自己处理 KEYCODE_BACK（有历史就 `goBack()` 并吞掉），因此系统返回键在应用内一路失效、只在无历史时漏给 Activity 表现为「直接退出」。已在 `dispatchKeyEvent` 层截断并委托前端拦截栈         |
+| 状态栏不沉浸                                  | 原本把状态栏高度作为 padding 加在内容视图上，留下一条与应用背景断开的空白。改为 WebView 铺到状态栏之下 + 原生下发 `--safe-area-top`；下发必须重试到真实文档就位（inset 回调早于页面加载，写在 about:blank 上会丢） |
+| 测试夹具连接池只开不关                        | 全量跑撞 `53300 too many clients`，11 个用例静默变 SKIP。已限量 4/2 + `t.Cleanup` 关闭                                                                                                                             |
+| `APP_VERSION` 手抄常量                        | 停在 `0.1.0` 与实际发版脱节，改读构建期注入的 `__APP_VERSION__`                                                                                                                                                    |
+| `apps/web` 依赖缺失                           | `@sentry/vite-plugin`、`vite-plugin-pwa` 声明了但没装，dev server 起不来（`pnpm install --frozen-lockfile` 恢复，lockfile 零改动）                                                                                 |
+| `packages/shared` / `packages/ui` 无 tsconfig | 两个包的 `typecheck` 脚本一直跑不了，即从未被单独类型检查（两端 app 的 tsc 会传递覆盖）。**已于消息编辑批次修掉，见下方留债表**                                                                                    |
+
+**A8 期间沉淀的注意事项（后续批次仍适用）**：
+
+| 事项                                                                                                                                                                                                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **本地跑 E2E 前先确认没有残留 dev server**：Playwright 的 `reuseExistingServer` 会接管已在 5173 的进程，若那个进程是用 `VITE_ENABLE_MOCK=false` 起的，63 条用例会齐刷刷 30s 超时，看起来像代码全坏                                                                     |
+| **`--safe-area-top` 由原生下发**：`.app-screen` 用它留出状态栏高度，`ToastHost` 的顶部偏移也叠了它。新增全屏浮层若贴顶，必须一并叠加，否则会压在系统时间/信号图标上                                                                                                    |
+| **安卓返回键走前端拦截栈**：`registerBackInterceptor` 注册的拦截器倒序执行（后注册在更上层）。新增手机端「组件内部栈」（子页、抽屉、全屏弹层）必须注册拦截器，否则按返回会被当成「已在标签根页面」而触发退出应用                                                       |
+| **不要照抄 `handler/captcha.go`**：它有先删再比、`rand.IntN`、key 无命名空间三个缺陷。`internal/service/auth_service.go` 是正确范式（比对成功才删、`crypto/rand`、key 带 `auth:` 命名空间、发送失败回滚已发的码）                                                      |
+| **测试禁止依赖宿主语言环境**：Node 21 起 `navigator.language` 取自宿主 ICU locale（中文机器 `zh-CN`、GitHub runner `en-US`），依赖它的用例会「本地全绿、远程报错」。要固定语言就在 `vi.hoisted()` 里打 `navigator` 桩；本地自测用 `LANG=C.UTF-8 pnpm test` 对齐 runner |
+| **新增自定义请求头必须同步 CORS**：`middleware/cors.go` 的 `Allow-Headers` 要逐个列出，浏览器预检不接受通配。`internal/middleware/cors_test.go` 已钉住现有四个头                                                                                                       |
+| **i18n 占位符是 `%{var}`**（Rails 风格，见 `i18n/index.ts` 的 `interpolation.prefix`），写成 i18next 默认的 `{{var}}` 不会插值、直接把字面量上屏                                                                                                                       |
+
+**已定裁决（沿用，不要重开讨论）**：
+
+| 编号 | 裁决                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| C1   | 前后端密码规则**统一到 spec 的 5 条**：前端 `validatePassword` **删掉「特殊字符」**（连同 `validation.ts:47` 与 `__tests__/validation.test.ts:41`），**加**「≤64 字节」+「不含空白」；长度按**字节**算（`new TextEncoder().encode(pw).length`，Chrome 38+ 可用），**不能用 `.length`**；四份 locale **删** `validation.passwordSpecial`（不删会被 check:i18n 判死键）、**加** `passwordMaxLength` + `passwordNoWhitespace`。理由：后端从来没强制过特殊字符，非 web 客户端一直能注册 `Abcdef12`，那条前端规则是装饰性的、不是安全控制 |
+| D1   | cursor-glow 用 `pointer: fine` 统一启用（`AuthShell` 内部 `matchMedia`，**不接 `isDesktop` prop**——`packages/ui` 组件断点一律内部 `useBreakpoint()` 推导）                                                                                                                                                                                                                                                                                                                                                                           |
+| D3   | Task 11 降为「真断言冒烟」，不引 swaggo、不建 `server/docs/`。注：`@Summary` / `@Router` 注解注释是本仓既有约定（16 个 handler 共 50 处），**允许写注解，禁止引依赖**                                                                                                                                                                                                                                                                                                                                                                |
+| —    | `token_version` **只在** `UserService.Refresh` 与 WS `ServeWS` 校验，**`AuthRequired` 中间件里绝不加**（spec 明确用「每请求不查库」换 ≤15 分钟残留窗口）                                                                                                                                                                                                                                                                                                                                                                             |
+
+**A8 主动留债**（本批次明确不做，做完后仍留在本清单）：
+
+| 级别 | 条目                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ✅   | `/auth/*` 与 `/users/login`、`/users/register` 前缀不统一——已于 auth 路由收敛批次解决：注册/登录统一为 `/auth/register`、`/auth/login`（破坏性变更，前后端同版发布，旧路径不做兼容）                                                                                                                                                                                                                                                                    |
+| 🟡   | `AuthRequired` 中间件不校验 `token_version`（它当前零 IO；加校验需先给版本号做 Redis 缓存），改密后 access token 仍有最长 15 分钟残余有效期                                                                                                                                                                                                                                                                                                             |
+| ⚪   | 多设备会话管理与「单设备登出」：无 device/session 表，`logout` 只能全量踢或不踢，本批次选不踢                                                                                                                                                                                                                                                                                                                                                           |
+| ⚪   | 真实短信/邮件 provider：本批次只有 `LogSender`，`codesender.provider` 留了扩展位                                                                                                                                                                                                                                                                                                                                                                        |
+| ⚪   | `verification_codes` 表只写审计不读，无审计查询入口                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ⚪   | Swagger 文档：Task 11 按 D3 不引 swaggo，**记债给 B7** 统一补                                                                                                                                                                                                                                                                                                                                                                                           |
+| 🔴   | **生产环境对象存储不可达**：`YUANCHAT_MINIO_ENDPOINT` 在 `docker-compose.prod.yml` 里是内网主机名 `minio:9000`，而预签名 URL 与头像直链直接用该值，浏览器/客户端无法解析 → 生产图片、语音、头像全拿不到。修法：加 `DOMAIN_STORAGE` 子域 + nginx server 块 + 一个「对外端点」配置项（与 `Endpoint` 分开），并同步把该域名加进桌面端 CSP 的 `img-src` / `media-src` / `connect-src`。**A8 的 CSP 刻意只列真实可达主机，没有用 `https:` 通配去掩盖这个洞** |
+| 🟡   | `/auth/password/otp` 未校验图形码（spec `:203` 的请求体含 `captcha_id` / `captcha_answer`）。单号轰炸已被 60s 冷却按死、枚举已被「未注册号响应完全相同」按死，图形码真正防的是跨 IP 喷洒造成的**短信成本**，而当前 provider 是 `LogSender`、喷洒零成本 —— 因此与「真实短信 provider」同批实现。注意补它会**改请求体**（多两个必填字段），属破坏性变更，前后端须同版发布                                                                                 |
+| ✅   | 扫码会话缺 `canceled` 终态（spec §7 提及）——已于消息编辑批次收口：`POST /auth/qr/:token/cancel`（需 Bearer，仅扫码者本人、仅 `scanned` 可取消），会话进入 `canceled` 终态但**不销毁**（否则被扫端只能看到与过期一致的 404）；扫码端确认页的「取消」与安卓返回键都回报服务端，被扫端轮询到即停轮询并提示「已在手机上取消」                                                                                                                               |
+| ⚪   | `scan` / `confirm` 两端点未加 `LimitByIP`（spec 未给额度，未自造数值）。两者都要 Bearer 令牌，滥用面已受限，待有真实流量数据再定                                                                                                                                                                                                                                                                                                                        |
+| ✅   | `packages/shared` 与 `packages/ui` 没有 `tsconfig.json` —— 已于消息编辑批次补上：两包 `target` 钉 `ES2019`（对齐 vite 的 `build.target`，app 侧是 ES2021）、开 `noUnusedLocals` / `noUnusedParameters`（app 侧刻意关掉），`.husky/pre-commit` 也随之改跑 `pnpm turbo typecheck`（原先只跑 web + desktop 两端，会用 app 的宽松设置盖掉两包的门禁）                                                                                                       |
+| ⚪   | 改密后当前设备也会被登出（`token_version` 全量递增）。若要保留当前会话，需在改密响应里下发新令牌对                                                                                                                                                                                                                                                                                                                                                      |
+
+#### 2. H1b — 贴纸商城与投稿发布（✅ 已完成，2026-08-30）
+
+按 [`plans/2026-08-09-h1b-sticker-market.md`](superpowers/plans/2026-08-09-h1b-sticker-market.md) 执行完毕（迁移号 **015**），`feature/sticker-market` 分支。已交付：
+
+- **商城**：`GET /sticker-packs/market`（`created_at DESC` 游标分页）、包详情、幂等添加/移除（`user_sticker_packs` 关系表非快照，发布者编辑实时生效）；`GET /sticker-packs` 语义扩展为「官方包 + 已添加的包」，EmojiPicker 零改动接入
+- **投稿发布**：发布（collection 复制 / upload 直传两来源，包+贴纸同事务）、改名/换封面、增删贴纸、删包（级联）、我发布的；每用户发布上限 20（超限 400 + 业务码 4003）
+- **治理**：包名敏感词打标 `flagged`（不阻塞发布）；`POST /reports` 支持 `target_type=sticker_pack`；admin 三端点（flagged 包检索 / 直接下架 / 清标记）+ admin 审核队列第三个 tab；下架 = `taken_down` 软下架（已添加者保留），举报处置「删除」对包执行下架
+- **存储**：上传类别 `sticker-covers/` 公共读（独立桶策略 Statement）；发布封面自动以首张贴纸复制上传；商城/详情投影带 `first_sticker_key`，无封面包回退展示首图
+- **前置缺陷修复**：`ReferencedKeys` 补 `sticker_packs.cover_url`（GC 误删封面）
+- **三端实测中追加修复**：贴纸消息（kind=sticker）右键菜单缺「添加到表情」入口；发布封面因路由漏注入 PublicURL 转换静默丢库；封面缓存命中 onLoad 丢失占位不消失；认证四页磨砂卡片暗色适配；安卓返回键在商城子页落入「回聊天页」兜底（useStickerBack 拦截器 + 入口带 from）；设置页商城入口移到 About 上面；移除收藏页头商城按钮（入口收敛为设置页 + 表情选择器）
+- 实测覆盖：Web（Playwright 暗亮双主题 + 移动视口 + admin 审核闭环）、Android（模拟器，底栏 4 项、返回键语义）、桌面（渲染走查）
+
+| 级别 | 条目                                                                                                                                                                                                                                                                         |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🟡   | `GET /sticker-packs`（官方 + 已添加）仍无分页——集合小（官方包 + 用户添加数）尚可接受，包数量级上来再分页                                                                                                                                                                     |
+| 🟡   | handler 集成测试直连 dev Postgres 且部分用例不清理（H1b 实测时 17 个测试包以 `is_public=true` 泄进商城列表）——测试需独立库/事务回滚                                                                                                                                          |
+| 🟡   | WS 发送校验 `FindInAnyPack` 对**任何**表情包贴纸放行（未添加也可凭 sticker_id 发送，下架包贴纸同理）——与商城「公开内容」姿态一致暂不收紧，收紧需统一口径到「is_public 未下架 + 已添加」                                                                                      |
+| ⚪   | 发布上限 20 / 单包贴纸上限 500 的校验是「先 COUNT 后 INSERT」两步，同一用户并发连发可少量越过上限（TOCTOU）。上限是防滥用软护栏、越界量以并发度为界、且全是用户自伤面，收紧需事务内 advisory lock（`pg_advisory_xact_lock(owner_id)`）或 serializable 重试，待有真实滥用再上 |
+| ⚪   | 商城分类 / 搜索 / 热度排序未做（H1b-i 有意不做，需要时再加）                                                                                                                                                                                                                 |
+| ⚪   | H1c 付费贴纸为候选，未立项（数据模型未预留 price 字段）                                                                                                                                                                                                                      |
+| ⚪   | H1d 贴纸 DIY（裁剪 + 加字直通商城）为候选，见 K 泳道 K9；商城入口已收敛为设置页 + 表情选择器两处                                                                                                                                                                             |
+
+#### 2.5 管理端治理（admin-hardening，2026-09-02）
+
+分支 `feature/admin-hardening`，范围 = admin-gap-audit 全部缺口（P0/P1/P2 全清，「明确不做」除外）：
+
+| 批次   | 内容                                                                                                                                                  | 状态 |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| A      | 审核补漏：非文本消息媒体预览（admin 专用授权签发通道）、昵称/群名/公告/bio 敏感词打标进 `flagged_ugc`（016 迁移）+ 强制重置、user 举报一键封禁 + 深链 | ✅   |
+| B      | 运营仪表盘：`GET /admin/stats` 聚合指标 + 概览页（设为默认首页）、好友申请/OTP 量（verification_codes 台账）、Web Push 订阅视图、WS 在线连接数        | ✅   |
+| C      | 贴纸包治理：admin 全量管理页、untakedown + is_official 端点（写审计）、flagged 包商城暂隐（发布者/已添加者保留，清标记恢复）                          | ✅   |
+| D      | 补漏小项：admin 重置头像（P0-3）、存储统计视图（P1-3，DB 聚合口径）、admin 删消息级联清收藏（P2-1）                                                   | ✅   |
+| 搭车   | captcha 两缺陷修复、DB_SCHEMA 按 001-015 重建（compose 镜像核实已钉版本）                                                                             | ✅   |
+| 债收口 | `/auth/*` 前缀统一（/users/register、/users/login 迁移，破坏性变更前后端同版处理）、WS 贴纸发送口径收紧、`GET /sticker-packs` 游标分页、B7 覆盖率门禁 | ✅   |
+| 债收口 | 限流改 Redis 原子令牌桶 + Dispatcher Redis Pub/Sub 跨实例分发（默认 inproc，单实例行为不变；env.md/DEVELOPMENT.md 已补多实例配置说明）                | ✅   |
+
+#### 2.6 K7/K6/K8 — 会话媒体相册 + 视频消息 + 语音倍速（✅ 已完成，2026-09-04）
+
+设计：[`specs/2026-09-02-media-album-video-design.md`](superpowers/specs/2026-09-02-media-album-video-design.md)
+执行：[`plans/2026-09-02-media-album-video.md`](superpowers/plans/2026-09-02-media-album-video.md)（10 Task，Stage A-E）
+分支：`feature/media-album-and-video`（自 dev @ `69f0558` 切出，`--no-ff` 合回 dev）
+**迁移号：无**（不新表不改表——相册是纯读查询，视频复用既有 `message_type=5` 与 jsonb content）
+
+已交付：
+
+- **K7 媒体相册**：`GET /conversations/:id/media?type=all|image|file|voice|video|sticker&before_seq=&limit=`，
+  `all` 展开 `[2,3,4,5,8]`（不含文本/系统/E2EE）；可见性口径与 `GetHistory` **完全一致**（成员校验 +
+  `status=1` + `seq > cleared_before_seq`），故相册里可见的对象必然签得出下载 URL；
+  前端 `ConversationMediaView`（三端共用，ChatWindow 头部入口）六 Tab + 三列方格/行列表 + seq 游标续页 +
+  骨架/空/错误/正常四态，图片复用 `ImageLightbox`、视频走 `VideoPlaybackOverlay`、语音复用 `voicePlayer` 单例
+- **K6 视频消息**：`message.send` 新增 video 分支（`key`/`thumb_key`/`name`/`size`/`duration(1-120s)`/`width`/`height`
+  全必填，golden 契约双端覆盖）；采集**仅文件选择**（裁决 M1：Android WebView 的 MediaRecorder 编码兼容不可控）；
+  封面由**客户端** canvas 抽帧生成 JPEG 落 `images/` 前缀，服务端不转码不抽帧
+- **K8 语音倍速**：全局速率 1x/1.5x/2x（显式循环表非取模），跨播放保持、`stopVoice` 不重置，按钮仅当前播放行显示
+- **对象授权与 GC 适配（必做，否则两处真实缺陷）**：`CanRead` 与 `ReferencedKeys` 双双纳入 `content->>'thumb_key'`——
+  前者不改则视频封面永远签不出 URL，后者不改则封面在 GC 宽限期后被当孤儿删掉（与 H1b「封面被 GC 误删」同一缺陷族）
+- **husky tsc 门禁**（见下方债表收口）
+
+真机实测结论（不只是单测）：
+
+| 项                       | 结论                                                                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 本地 CI 全量             | i18n(669×3) / format / lint / stylelint / theme / 两端 tsc / 单测 611 / `go vet` / `go test ./...` / `go test -race ./internal/ws/` / E2E 81 全绿 |
+| Web 真后端（playwright） | 相册六 Tab + 真实分页、视频发送落库 `message_type=5`、封面与视频双 presign 200、倍速 1x→1.5x→2x→1x、移动视口与暗色主题走查通过                    |
+| 视频封面纯黑（本批引入） | 真机发现并修复：抽帧把 `seeked` 与 `loadeddata` 放进竞速，后者在 `readyState=1` 先到 → 画出全黑帧（实测 avg=0 vs 修后 127.2、var=6932）           |
+
+本批新登记的债：
+
+| 级别 | 条目                                                                                                                                                              |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ⚪   | 视频消息**不支持录制**（裁决 M1 仅文件选择）；也不做服务端转码/多码率，等真实出现「大视频发不动」再上                                                             |
+| ⚪   | 相册无搜索 / 时间范围过滤 / 按大小排序（seq 游标够用；spec §7 明确不做）                                                                                          |
+| ⚪   | 相册 `has_more = len(items)==limit`，当页若有脏 content 被跳过会偏保守报 `false`，可能提前截断分页。脏 content 属病态数据，且「单条坏数据不使整页失败」是有意取舍 |
+| ⚪   | 转发视频消息不重建实时帧（`contentPayloadFromMessage` 对 video 返回 false，沿用既有语义）：目标会话要刷新后经 REST 历史才看到                                     |
+| 🟡   | mock 模式点播 demo 语音会 toast「播放失败」——demo 语音/文件为进相册补了对象 key，而 mock `download-url` 只回 SVG data URL。仅影响 mock 演示，真实后端已验证可播   |
+| ⚪   | 相册组件测试用 `vi.mock("@yuanchat/shared")` 而非 MSW（`packages/ui` 未引 msw 依赖）；MSW 四态由 shared 包单测与 E2E 覆盖                                         |
+| ⚪   | 视频消息不进全文检索、不进内容审核（与 image/file/voice/sticker 现状一致，审核仅对文本生效）                                                                      |
+| ⚪   | `content->>'thumb_key'` 无表达式索引：`CanRead` 的 `key OR thumb_key` 与 GC 的 `IN` 都走不到 `idx_messages_content_key`。两处均为低频路径，等实测慢查询再补索引   |
+
+#### 2.7 K1 — 消息编辑与编辑历史（✅ 已完成，2026-09-05）
+
+设计：[`specs/2026-09-05-message-edit-design.md`](superpowers/specs/2026-09-05-message-edit-design.md)
+执行：[`plans/2026-09-05-message-edit.md`](superpowers/plans/2026-09-05-message-edit.md)（17 Task）
+分支：`feature/message-edit`（自 dev 切出，`--no-ff` 合回 dev）
+**迁移号：017**（`messages` 加 `edited_at` / `edit_count`，新表 `message_edits`）
+
+已交付：
+
+- **编辑闸门**（服务层，顺序即失败优先级）：文本非空且 ≤4000 字 → 消息存在 → 本人发送 →
+  `message_type=text` → `status=normal` → 发送起 5 分钟内（`EditWindow`）→ 累计 ≤20 次
+  （`MaxEditCount`）→ 与原文有差异。**编辑窗口 5 分钟刻意宽于撤回的 2 分钟**：编辑不改变
+  「对方已看到过什么」的事实，危害面小于撤回
+- **仅纯文本可编辑**：媒体 content 无 caption 可改且 `content->>'key'` 是对象授权与 GC 的凭据，
+  E2EE 服务端无明文，system 非用户产出
+- **单事务 CAS**：`WHERE ... AND edit_count = ?` 乐观并发，先 CAS 更新正文再写历史行
+  （反序会先撞 `(message_id, version)` 唯一索引报 23505，把契约里的 `(false, nil)` 变成 error）
+- **编辑重跑敏感词审核**：抽出 `textHitsModeration` 供发送与编辑共用。不重跑的话
+  「先发干净文本 → 编辑成敏感词」可完全绕过内容审核，且 admin 检索实时读 `content->>'text'`，
+  编辑掉敏感词即从审核队列消失。**反向不清标** —— 清 `flagged` 是 admin 的动作，
+  用户不能靠再编辑自助洗白
+- **REST**：`PATCH /messages/:id`（业务码 4032 窗口过期 / 4033 次数超限 / 4004 不可编辑）、
+  `GET /messages/:id/edits`（可见性口径与 `GetHistory` 完全一致：成员校验 + `cleared_before_seq` 水位）、
+  admin 取证入口 `GET /admin/messages/:id/edits`（跳过成员与水位校验）
+- **WS**：新增 `message.edited` 帧（`message_id`/`conversation_id`/`seq`/`text`/`edited_at`/`edit_count`），
+  全会话成员扇出；气泡正文**不做乐观翻转**，等服务端帧统一走 `applyEdited`，保证各端一致（同 `handleRecall` 姿态）
+- **前端**：长按/右键菜单「编辑」项（`canEdit` 闸门与服务端同口径）、底部 Composer 复用为编辑器
+  （刻意不在气泡内嵌 textarea——虚拟滚动行高突变会让列表跳动，移动端还要与软键盘搏斗）、
+  「已编辑」角标点开编辑历史弹窗、安卓返回键两层拦截（编辑态 → 退出编辑；弹窗 → 关弹窗）
+- **编辑历史时间口径**：`message_edits.edited_at` 语义是「该版本**被替换掉**的时刻」，
+  故首版显示消息的**发送时间**（调用方从 store 传 `createdAtMs`），其余版本显示该行 `edited_at`。
+  逐行照搬会让首版显示成第二版的生效时间
+- **双向 golden 契约**：新建 `contracts/server-frames.golden.json`（服务端→客户端方向，
+  既有 `message-send.golden.json` 是反方向且绑定 `SendPayload`）。除 `DisallowUnknownFields`
+  拦「契约多字段」外，另加反射比对字段集**完全相等**的测试——只靠解码挡不住「struct 加了字段
+  而契约漏登记」（JSON 缺字段只留零值，解码照样成功），而契约是双端唯一真源
+
+搭车完成的债收口（详见上文各债表已改 ✅）：生产对象存储对外端点（🔴）、扫码会话 `canceled` 终态、
+`packages/shared` + `packages/ui` 补 `tsconfig.json`、`.husky/pre-commit` 改跑 `pnpm turbo typecheck`。
+
+真机与真后端实测结论（不只是单测）：
+
+| 项                     | 结论                                                                                                                                                                             |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 本地 CI 全量           | i18n(683×4) / format / lint / stylelint / theme / `turbo typecheck` 8 包 / 单测 659 / 前后端覆盖率门禁 / `go vet` / `go test ./...` 14 包 / `-race ./internal/ws/` / E2E 91 全绿 |
+| Web 真后端（双上下文） | Alice 编辑 → Bob 侧气泡**原地**更新、出现角标、可查两版历史、会话列表预览同步；抓到 Bob socket 上的真实 `message.edited` 帧，六个字段与 golden 契约逐一对上                      |
+| 审核绕过闭环           | 干净文本落库 `flagged=f` → 编辑成含「赌博」→ 库里 `flagged=t`、`edit_count=1`、历史行存原文，服务端日志 `word=赌博`                                                              |
+| 服务端闸门（curl）     | 超窗 4032 / 非本人 403 / 空文本 4004 / 超长 400 / 语音消息 4004，逐条实测                                                                                                        |
+| UI 闸门                | 超窗后长按菜单里「编辑」与「撤回」同时消失（两个窗口各自到期）                                                                                                                   |
+| 首版时间语义           | 故意让发送与编辑跨分钟：第 1 版显示 19:49（发送时刻）、第 2 版 19:50（编辑时刻）；桌面端 20:09/20:11、安卓 20:41/20:43 三端一致                                                  |
+| 暗色主题               | 编辑提示条对比度 9.75:1（AA 通过），取色全走主题 token，圆角 `rounded-lg`                                                                                                        |
+| 375×667 窄屏           | 菜单/编辑条/弹窗均在视口内，无横向溢出；历史列表 `max-h-[50vh] overflow-y-auto`                                                                                                  |
+| 桌面端 Tauri           | 真窗口内长按菜单 → 编辑 → 保存 → 角标 → 弹窗 → Esc 关闭全链路走通，CSP 违规 0 行、console 错误 0 行                                                                              |
+| Android 模拟器         | 长按菜单出「Edit」、软键盘顶起后编辑条与输入框都不被遮挡、返回键两层语义正确（收键盘 → 退编辑态；弹窗打开时先关弹窗且不退应用）                                                  |
+| 生产构建产物           | 41 个 JS 文件，应用 bundle **零** `?.` / `??` / `\|\|=` / `replaceAll` / `.at()`，`globalThis` 两处均有 `typeof` 守卫（且 Chrome 71+ 即有），es2019 底线守住                     |
+
+真机实测发现并修掉的缺陷（本批引入 + 既有）：
+
+| 缺陷                               | 说明                                                                                                                                                                                                                            |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 编辑态光标停在 0（既有路径）       | 程序化 `setValue` + `focus` 后光标在 0，接着打字变成往原文**前面**插（安卓实测：输入 `-EDITED` 得到 `-EDITEDandroid-edit-orig`）。显式 `setSelectionRange` 到末尾；撤回后「重新编辑」复用同一条 `composerInsert` 路径，一并受益 |
+| 「已编辑」角标触控目标 21px        | 低于 WCAG 2.5.8 的 24px 下限。修法必须写死 `min-h-[24px]`：`global.css` 把 html 根字号设成 **14px**，rem 刻度整体缩水 14/16，`min-h-6`(1.5rem) 只有 21px                                                                        |
+| mock 模式下编辑/撤回菜单项永不出现 | `DEMO_MESSAGES` 全部条目没有 `createdAtMs`，而 `canEdit`/`canRecall` 都有 `if (!created) return false`。撤回项其实一直是坏的，只是没人发现                                                                                      |
+| REST 历史丢引用（既有）            | 刷新后引用回复的被引内容消失（WS 路径有、REST 路径无）。补 `backfillQuotes` 页内回填，跳过已撤回的源消息                                                                                                                        |
+| viper 静默丢环境变量（既有）       | `AutomaticEnv` 不把未知 key 注册进 `AllKeys()`，而 `Unmarshal` 只遍历 `AllKeys()` → `minio.public_endpoint`（从不在 config.yaml 里）被直接丢掉，`rewriteHost` 成永久空操作、整个生产存储修复等于没做。必须配 `SetDefault`       |
+
+本批新登记的债：
+
+| 级别 | 条目                                                                                                                                                                                                                                                          |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🟡   | **CAS 并发路径无真并发测试**：两层（repo/service）都只按 READ COMMITTED 语义推理，没有并发压测证明「两个编辑同时到达时恰好一个成功、另一个得 `ErrEditNoChange`」。补法是起 N 个 goroutine 同时 `Edit` 同一条并断言成功数恰为 1                                |
+| 🟡   | **`edited_at` 两条出口序列化不一致**：WS 帧走 `time.Now().UTC()` → `2026-09-05T11:47:28.914103355Z`（UTC，纳秒），REST 走 DB 回读 → `2026-09-05T19:47:28.914103+08:00`（+08:00，微秒）。同一绝对时刻、`new Date()` 解析结果相同，属口径与精度不齐，非功能缺陷 |
+| 🟡   | **两端 app 的 tsconfig `target` 仍是 ES2021**，与 vite `build.target=es2019` 不一致；两个 package 已钉 ES2019。app 侧要么跟着降到 ES2019，要么明确写清「靠 vite 转译兜底」                                                                                    |
+| 🟡   | **`packages/design-system` 无 tsconfig / typecheck 脚本**（同 shared/ui 修掉前的状态），`turbo typecheck` 覆盖 8 包里没有它                                                                                                                                   |
+| ⚪   | **超长文本无专用提示**：编辑走 REST 被 `binding:"max=4000"` 拦成通用 `400 invalid text`（服务层的 `ErrEditTextTooLong` 因此在 REST 路径上不可达，仅作纵深防御），前端落到通用错误 toast；发送路径同样只有通用提示。Composer 也没有 `maxLength` 前置约束       |
+| ⚪   | **WS 断连噪声进 Sentry**：页面卸载时在建的 WS 握手被浏览器中止，`chatSocket` 的 `onerror` 把它当异常 `captureException` 上报（每次页面跳转一条）。属既有行为，收紧需区分「卸载中止」与「真实故障」                                                            |
+| ⚪   | **同一对象 key 的 `download-url` 不去重**：单页实测同一 key 连发 8 次请求。属既有行为，加一层 key→URL 的短期缓存即可                                                                                                                                          |
+| ⚪   | **`mockServiceWorker.js` 进了生产 dist**：它是 `public/` 静态资源原样复制，未经 vite 转译（内含 `?.`），但 MSW 启动被 `import.meta.env.DEV` 静态门禁掉、生产从不注册它，故只是 ~8KB 死重量，不构成 es2019 违规                                                |
+| ⚪   | **编辑不改 `seq`、不重排消息位置**（有意：编辑不是新消息），故编辑一条旧消息不会把它顶到会话底部；会话列表预览仅当被编辑的是最后一条时才变                                                                                                                    |
+| ⚪   | **编辑历史无分页**：`MaxEditCount=20` 已是天然上限，一次全量返回                                                                                                                                                                                              |
+| ⚪   | **E2EE 消息不可编辑**（服务端无明文，无法重跑审核也无法比对差异），与撤回一致                                                                                                                                                                                 |
+
+#### 2.8 语音/视频通话（✅ 已完成，2026-09-12）
+
+设计：[`specs/2026-09-06-voice-video-call-design.md`](superpowers/specs/2026-09-06-voice-video-call-design.md)（Linux 原生后端见 §3.11a）
+执行：[`plans/2026-09-06-voice-video-call.md`](superpowers/plans/2026-09-06-voice-video-call.md)
+分支：`feature/voice-video-call`（自 dev 切出，`--no-ff` 合回 dev）
+
+已交付：1v1 与群通话（mesh，房间上限 4）、语音与视频、TURN 临时凭据、安卓前台服务保活、
+桌面独立通话窗口、**Linux 桌面端原生 GStreamer 后端**（WebKitGTK 无 `RTCPeerConnection`）。
+
+Linux 原生后端要点（详见设计文档 §3.11a）：媒体面下沉到独立助手进程
+`yuanchat-call-helper`（与主进程同进程会因 libsoup2/libsoup3 冲突而 abort），
+前端用 `nativeRtc.ts` 垫片顶替 `RTCPeerConnection` 故 `PeerMesh` 无需分支；
+远端与本端画面经本地 MJPEG 服务（仅 127.0.0.1 + 随机 token）以 `<img>` 送进 WebView；
+摄像头因 V4L2 独占限制改为**单路共享采集 + 编码一次分发多端**。
+依赖清单见 `docs/DEVELOPMENT.md`。
+
+实测：桌面端 ↔ 网页端语音与视频双向通（视频包稳定增长、WebView 6s 内从 MJPEG 服务
+收 1.35MB 帧）、安卓真机（vivo V2312A / Android 13）↔ 网页端视频通话双向通。
+
+本批新登记的债：
+
+| 级别 | 条目                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ✅   | **生产 TURN 完全没接线**：已修：`install.sh` 新增 coturn 配置渲染（`turnserver.prod.conf.template` → `turnserver.prod.conf`，产物不入库），三个占位符改 envsubst 变量并真实注入；`server_env` 锚点补齐 `YUANCHAT_TURN_ENABLED/HOST/PORT/REALM/STATIC_AUTH_SECRET`。密钥与 realm 两边同源 —— 密钥统一取 `.env` 的 `TURN_SECRET`（留空自动生成），realm 与 `YUANCHAT_TURN_HOST` 统一取 `DOMAIN_APP`，杜绝两边不一致；`PUBLIC_IP` 列为 `.env` 必填项并由 `install.sh` 校验（NAT 后无法自动探测）。dev 链路不受影响（`turnserver.dev.conf` 未动） |
+| 🟡   | **Linux 关摄像头只切黑帧、不停采集**：摄像头指示灯仍亮，用户可能误以为仍在拍摄。停采再开有 1~2s 设备初始化，按钮会像卡住，故选了当前折中。收紧需要「延迟停采 + 预热」策略                                                                                                                                                                                                                                                                                                                                                                     |
+| 🟡   | **Linux 视频参数写死 640×480@15、码率不自适应**：弱网下表现为丢帧而非降质。需要 `webrtcbin` 侧的码率协商/`transport-cc` 反馈接入才能改善                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 🟡   | **Linux 摄像头设备写死 `/dev/video0`**（`v4l2src` 默认）：多摄像头机器不能选择，也没有设置项。打不开时已退化为纯黑帧并发 `warn` 事件，不会让通话失败                                                                                                                                                                                                                                                                                                                                                                                          |
+| ⚪   | **群通话中途加入最多等 2s 才出画面**：靠 `keyframe-max-dist=30`（15fps）周期性关键帧，未在新对端加入时主动 force-keyframe。加入 `GstForceKeyUnit` 上行事件即可缩短                                                                                                                                                                                                                                                                                                                                                                            |
+| ⚪   | **MJPEG 帧走 JPEG 而非零拷贝**：每帧在助手进程编码 JPEG、再由 WebView 解码，1v1 640×480 实测约 225KB/s 本机环回。够用，但比共享内存/`gtksink` 方案多一轮编解码                                                                                                                                                                                                                                                                                                                                                                                |
+| ⚪   | **助手进程崩溃不自动重启**：`ensure_helper` 只在下次命令时重建，当前通话不会自愈（表现为这一通电话没有声音/画面，挂断重拨即恢复）                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ⚪   | **`native_rtc_available` 每次都真的 make 一次元件**：四个元件各实例化一遍，仅在装载与探测时调用，未做缓存                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+
+#### 2.9 G1/G2 — 朋友圈与个人状态（✅ 已完成，2026-09-21）
+
+设计：[`specs/2026-09-13-moments-design.md`](superpowers/specs/2026-09-13-moments-design.md)
+执行：[`plans/2026-09-13-moments.md`](superpowers/plans/2026-09-13-moments.md)（16 个 task）
+分支：`feature/moments`（自 dev 切出，`--no-ff` 合回 dev）
+
+已交付：
+
+- **数据与可见性**：四表迁移（`moments_posts` / `_likes` / `_comments` / `_activities`）+ 用户个人状态三列；
+  **全部读写路径收敛到唯一的 `VisiblePostsScope`**（好友关系 + 黑名单 + 可见范围），
+  读一套、写一套会直接变成越权，故不允许第二处独立判断；帖子分页用 `(created_at, id)` 复合游标
+- **互动**：点赞幂等、评论与回复、互动消息聚合；WS `moment.activity` 帧（前后端共用 golden 契约）
+- **媒体授权**：`CanRead` 的 moments 分支复用 `baseVisible`（与列表同一份作用域，杜绝漂移）；
+  GC 的 `ReferencedKeys` 纳入朋友圈媒体。删帖 = 访问撤销，对象随之不可读
+- **治理**：admin 删动态 / 删评论并写审计
+- **前端**：信息流、发布页、互动消息页、他人主页；媒体网格与动态卡片；
+  导航改版（底栏与侧栏加入朋友圈，收藏入口移到设置页）；个人状态编辑与头像状态角标；
+  四语言文案补齐（750 keys × 4）
+- **搭车修复**：群头像改按微信规则拼合成员头像（`GroupAvatar`，3-9 人分行 + 超 9 取前 9），
+  会话 DTO 新增 `member_avatars` / `member_names`（一条窗口函数查询批量取回，不引入 N+1；
+  建群响应同样带上）；`ImageLightbox` 支持图集左右翻页；
+  presence 跨实例集成用例从「连不上 dev Redis 就 skip」改为进程内 miniredis，**三例首次真正执行**
+
+实测：Web E2E 99 条全绿（新增 `e2e/moments.spec.ts` 4 条，走 MSW 不依赖真实后端）；
+本地 CI 全量绿（`pnpm check` / `pnpm test` 793 条 / `turbo typecheck` 9 包 /
+`go vet ./...` / `go test ./...` / `go test -race ./internal/ws/`）。
+
+本批新登记的债：
+
+| 级别 | 条目                                                                                                                                                                                                                   |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🟡   | **三端真机实测部分完成**：Web 端已实测（跨账号看图、点赞落库、WS 实时推送、admin 处置链路）。**桌面（Tauri）与安卓模拟器仍未走查** —— plan Task 16 Step 3 列的底栏四项布局、九宫格不溢出、发布页软键盘、返回键语义待补 |
+| 🟡   | 个人状态文本不过审核 —— 见 §3 同名条目（需新增 `UGCTypeStatus` 并接管理端，故未随本批做）                                                                                                                              |
+| ⚪   | `GroupAvatar` 三列布局（5 人及以上）的空头像格只出色块不写字：格子仅外框 1/3 宽，写字必糊。两列及以内才取昵称首字                                                                                                      |
+| 🟡   | **README 四端截图只完成两端**：Web 与管理后台已截（`docs/screenshots/`，统一 1920×1080）。桌面与安卓待补，补齐后再一次性写进 README —— 桌面首次构建要从零编译 Rust，单独排时间                                         |
+
+#### 2.10 朋友圈实测收口批（✅ 已完成，2026-09-22）
+
+走查 Web 端真实链路时发现并修掉的缺陷，均非新功能：
+
+- **朋友圈命中敏感词后管理端无法处置**：`moments_service` 写的 `ugc_type` 是
+  `moment_post` / `moment_comment`，而管理端标签映射与 `AdminService.ResetFlaggedUGC`
+  的 switch 都只认早先四类 —— 类型列渲染成原始 key，「强制重置」直接 404。
+  根因是台账没记命中内容所在那一行：前四类改的是 users / conversations 上的一个字段，
+  靠 `user_id` / `conversation_id` 就能定位，朋友圈两类各自成行则定位不到。
+  修法：迁移 019 给 `flagged_ugc` 补 `target_id`；朋友圈两类的处置语义是**删除那一条**
+  （没有默认值可退回），复用已有的 `SoftDeleteMomentPost/Comment` 与其审计动作；
+  管理端按类型切换按钮与确认文案（「强制重置」→「删除」）。作者已自删时记录照常收尾，
+  不留永远处置不掉的待办
+- **元聊号登不进去**：登录框标的就是「元聊号」，设置页与名片页也把它做成可复制的身份，
+  但 `UserService.Login` 只按 `@` 分邮箱、否则查手机号，短号这条路从来没接上
+  （`FindByShortID` 早就存在，只是登录路径没调）。改为手机号查不到再按短号查一次
+- **收藏嵌进设置页后样式不搭**：摘掉自带页头后标题与卡片外框一起没了。外框改由
+  `SettingsSections.FavoritesSection` 统一给（与账号/外观同一套 `SectionHeader` + 卡片），
+  `FavoritesView` 只在 `embedded` 时让出高度与滚动，避免设置右栏套两层滚动条
+- **动态卡片头像垂直居中**：`article` 是 flex 容器，默认 `align-items:stretch` 把头像那个
+  `button` 拉成整卡高度，原生 button 又居中内容，头像就飘到配图中间。补 `self-start`，
+  加回归用例
+- **搭车修复**：`ringtone` 单测直接写 `navigator`，而该包 vitest 环境是 node、本仓
+  engines 允许 Node 20（`navigator` 是 21 才有的全局）—— 跑起来 ReferenceError。
+  改用本仓惯例 `vi.stubGlobal`。此前该用例一直是红的
+- **文档补账**：`DB_SCHEMA.md` 此前停在 017，朋友圈四表（018）从未落文档，
+  本批连同 019 一并补上；`CHAT_API.md` 的 UGC 队列段补齐新类型与处置语义
+
+#### 3. 既有代码的真实缺陷（无 plan，可随手批次收口）
+
+> 2026-09-02 admin-hardening 会话收口：captcha 两缺陷已修、compose 镜像经核实已全部钉版本、
+> B8 测试夹具已建（见下节）。剩余条目为限流/分发多实例化与 husky tsc。
+
+| 级别 | 位置                             | 问题                                                                                                                                                                                                                                                                                                                                               |
+| ---- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ✅   | `handler/captcha.go:83-90`       | 已修：`Validate` 改为比对成功才删，输错不再作废验证码                                                                                                                                                                                                                                                                                              |
+| ✅   | `handler/captcha.go:52`          | 已修：captcha id 改 `crypto/rand` 128bit hex，Redis key 加 `captcha:` 命名空间                                                                                                                                                                                                                                                                     |
+| ✅   | `deploy/docker-compose.yml`      | 核实 minio/certbot/prometheus 均已钉版本号（此前登记有误）                                                                                                                                                                                                                                                                                         |
+| ✅   | `middleware/ratelimit.go:92-107` | 已修：改 Redis Lua 原子令牌桶（scope 隔离各端点档位），Redis 故障 fail-open 放行并计指标                                                                                                                                                                                                                                                           |
+| ✅   | `.husky/` 钩子不跑 `tsc`         | 已修（2026-09-04）：staged 含 ts/tsx 时跑 typecheck。**2026-09-05 扩到 `pnpm turbo typecheck` 全量 8 包** —— 原先只跑 web + desktop，会用 app 的宽松设置盖掉 shared/ui 两包新加的门禁                                                                                                                                                              |
+| ✅   | Redis 集成用例曾 `t.Skipf`       | 已修：`ws` 包 presence 跨实例三例（`presence_integration_test.go`）改用 `internal/testutil.NewRedis(t)` 的进程内 miniredis，不再连 dev 的 `:6380`。此前连不上即跳过，等于这三例在 CI 从未真正执行。全仓 Redis 用例已无 skip；剩余 `t.Skipf` 只有 MinIO 两处（`storage/minio_test.go`、`handler/file_test.go`），对象存储无进程内替身，仍需真实依赖 |
+| 🟡   | 个人状态文本不过审核             | K11 的 `status_text` 是自由文本且会随资料推送给好友，但 `UpdateProfile` 未调 `moderation.Check`（昵称/签名都调了）。缺的是 UGC 类型：塞现成的 `UGCTypeBio` 会把管理端审核队列标错类目，需新增 `UGCTypeStatus` 并接管理端处理，故未随朋友圈后端批次一起做                                                                                           |
+| ✅   | 消息分发 `Dispatcher`            | 已修：新增 RedisDispatcher（`dispatcher.backend=redis`），发布前只投本机 + host_id 去重；默认 inproc 单实例行为不变                                                                                                                                                                                                                                |
+
+#### 4. J 泳道 — 用户体验与无障碍（新增，未立项）
+
+6.1 已承诺 WCAG 2.1 AA，但从未系统验证过。**这条泳道不是"新奇功能"，是把已承诺的质量补上。**
+
+| 编号 | 条目                  | 说明                                                                     |
+| ---- | --------------------- | ------------------------------------------------------------------------ |
+| J1   | 键盘可达性与焦点管理  | 全部弹窗/抽屉做焦点陷阱与 Esc 关闭；Tab 序与可见焦点环；跳转到主内容链接 |
+| J2   | 屏幕阅读器语义        | `aria-label` / `role` 系统化；新消息与在线状态用 live region 播报        |
+| J3   | 快捷键一览表 + 自定义 | 现有快捷键无处可查；先出一览表，再考虑自定义                             |
+| J4   | 骨架屏与 CLS 收敛     | MSW mock 已有，骨架屏未全覆盖；目标 CLS < 0.1                            |
+| J5   | 空状态 / 错误态统一   | 各页空状态文案与插图各写一套，收敛成共享组件                             |
+| J6   | 首次使用引导          | 新用户进来没有任何 onboarding                                            |
+| J7   | 动效降级              | 尊重 `prefers-reduced-motion`；aurora orb / cursor-glow 应可关           |
+| J8   | 字号缩放与大字体模式  | 系统字号放大时布局不应溢出                                               |
+| J9   | 离线态与重连反馈      | WS 断线目前静默重连，用户不知道自己处于离线                              |
+| J10  | i18n 文案质量         | ja-JP / ko-KR 为机翻，未经母语校对；key 集合已由 `check:i18n` 守住       |
+
+#### 5. C5–C9 — 性能与容量（新增，未立项）
+
+已做的是点状优化（虚拟滚动、`pg_trgm` 索引、限流）；**从未做过一次量化测量**。
+
+| 编号 | 条目              | 目标与手段                                                                    |
+| ---- | ----------------- | ----------------------------------------------------------------------------- |
+| C5   | 首屏与包体        | 路由级 code split；依赖体积审计；es2019 产物大小基线与预算（超预算 CI 报警）  |
+| C6   | 长列表与图片内存  | 虚拟滚动已有；缺图片解码节流与滚出视口后的内存回收，长会话滑久了会卡          |
+| C7   | DB 慢查询         | 开 `pg_stat_statements`；排 N+1（会话列表 + 未读数 + 最后一条消息是重点嫌疑） |
+| C8   | WS 吞吐与消息压测 | k6/vegeta 打并发连接与消息扇出，定 QPS 与 P99 目标（阶段四「压测」的具体化）  |
+| C9   | 移动端启动与内存  | 旧机型 Chrome 74 WebView 冷启动时间、内存峰值；对照 `08b4e88` 的白屏教训      |
+
+#### 6. B6–B9 — 文档与质量门禁（新增）
+
+| 编号 | 条目               | 状态                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B6   | 四份主文档口径对齐 | ✅ 已完成（README / AGENTS / MASTER_PLAN / ROADMAP 端口与完成度）                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| B7   | CI 门禁补齐        | 部分完成（2026-09-02）：覆盖率门禁已入 CI——后端钉 40%、shared 60%、ui 53%、design-system 46%（现状基线-2pt；基线后端 43%、ui 55.8%、design-system 48.9%），覆盖率产物传 artifact；re-raise 待办：后端 handler(18.7%)/repository(17.6%)/middleware(6.8%) 补测后分步上调至 80%、ui 组件 functions 覆盖 43.3% 需补、design-system 补 skins.ts / legacyWebViewCompat.ts 测试、`@vitest/coverage-v8` 正式进 devDependencies（当前 CI 内临时 `pnpm add -w`）；`tsc --noEmit`、`go vet` 已在 CI；`docs/DB_SCHEMA.md` 已按 001-015 重建 |
+| B8   | 测试基建           | ✅ 后端已完成（2026-09-02）：`server/internal/testutil/` 提供 `NewRedis`（miniredis）与 `NewDB`（每测试进程独立库 + 全量 goose 迁移 + 用例级事务回滚），全部直连 dev 库的 handler/service/repository/router 集成测试已迁移，测试不再污染 dev 库；顺带补上 002 迁移缺失的 `users.short_id`（此前只存在于 dev 库 AutoMigrate 漂移）。前端统一 render helper 未做                                                                                                                                                                  |
+| B9   | 压测与容量文档     | 待做：C8 产出的数字要落成文档，否则下次还得重测                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+
+#### 7. R1 — 远程操控电脑（新增，未立项）
+
+QQ「远程协助」式的**用户级**远程桌面能力（不是管理员运维工具）：IM 会话内发起请求 →
+对方确认 → 由桌面端（Tauri）作为受控/控制端，通过 WebRTC 或专用中继通道传输屏幕画面与
+输入事件。**未立项、无 plan**，登记待办防止丢失。立项前需回答：
+
+- 通道选型：WebRTC DataChannel（P2P 打洞 + TURN 兜底）vs 自建中继；与现有 WS Hub 的关系
+- 受控端权限模型：全控 / 仅观看 / 剪贴板与文件互传粒度；连接中的显著标识与随时断开
+- 安全：确认机制防误点、加密要求（是否纳入 E2EE 口径）、审计与防滥用（管理端是否需要可见性）
+- 平台边界：仅桌面 ↔ 桌面起步；移动端只观看还是不参与
+
+#### 8. K 泳道 — 体验增强候选池（2026-08-30 发散，全部未立项）
+
+发散讨论产出的功能候选（阶段三 / 阶段四清单里的对应 checkbox 是同一批东西的勾选视图，
+细节与依赖以本表为准）；立项时从本表挑项展开 plan，做完把状态改为 ✅ 并同步勾选。
+规模：S ≤ 2 天 / M 3-5 天。推荐优先级（价值密度）：**K3、K12、K17 → K16**（K1/K6/K7/K8 已完成）。
+
+| 编号 | 条目                                         | 价值                           | 规模 | 依赖 / 备注                                                      |
+| ---- | -------------------------------------------- | ------------------------------ | ---- | ---------------------------------------------------------------- |
+| K1   | 消息编辑（就地编辑 + 「已编辑」角标）        | 高频刚需，撤回体验补完         | M    | ✅ 2026-09-05：5 分钟窗口 + 全量编辑历史 + 编辑重跑审核          |
+| K2   | 定时发送 / 稍后提醒                          | 跨时区异步协作                 | M    | 服务端定时器 + 延迟投递语义；离线场景投递保证                    |
+| K3   | 命令面板（Ctrl+K）                           | 桌面效率标签，SearchModal 升维 | S-M  | 纯前端；动作注册表供插件式扩展                                   |
+| K4   | 聊天记录导出（JSON/HTML）                    | 数据自主权                     | M    | 按会话全量拉取 + 媒体对象打包策略（内链 or 引用）                |
+| K5   | 消息翻译                                     | 国际化延伸                     | M    | 自托管机翻服务选型（LibreTranslate/Argos），密钥不出域           |
+| K6   | 视频消息（≤120s）                            | 补齐基础消息类型               | M    | ✅ 2026-09-04：文件选择（不录制）+ 客户端 canvas 抽帧封面        |
+| K7   | 会话媒体相册                                 | 翻历史截图高频痛点             | M    | ✅ 2026-09-04：type 过滤 + seq 游标分页，复用图片 Lightbox       |
+| K8   | 语音倍速播放                                 | 语音重度用户                   | S    | ✅ 2026-09-04：1x/1.5x/2x 全局速率，跨播放保持                   |
+| K9   | 贴纸 DIY（H1d）                              | 与商城闭环，差异化             | M    | 依赖 H1b ✅；canvas 裁剪/加字 → content_hash 复用收藏通道        |
+| K10  | 群投票 / 接龙                                | 群活跃基础设施                 | M    | 新消息类型 or 结构化卡片；结果实时聚合帧                         |
+| K11  | 个人状态                                     | 轻社交不打扰信号               | S-M  | ✅ 2026-09-21：emoji + 文本 + 时长，到期读时判定；头像状态角标   |
+| K12  | 桌面托盘 + 未读角标                          | 桌面 IM 入场券                 | S-M  | Tauri tray plugin；未读计数已有（mention_unread）                |
+| K13  | 多账号切换                                   | 分身需求                       | M    | 依赖 A8 多设备会话债收口（账号隔离的本地存储分层）               |
+| K14  | 草稿云同步                                   | 小而美                         | S    | `conversation_settings` 或独立 draft 表 + WS 增量                |
+| K15  | 设备管理页                                   | 账号安全自主权                 | M    | 与 A8 多设备会话债同批设计（device/session 表）                  |
+| K16  | 阅后即焚                                     | 隐私差异化卖点                 | M    | 与 E2EE 联动；服务端不留副本的销毁语义要过 GC/审计口径           |
+| K17  | 新设备登录通知                               | 低成本高安全感                 | S    | 登录成功钩子 → 既有 notifyIncoming / Web Push 通道               |
+| K18  | 搜索体验重做（UI + 类型过滤 + 桌面独立窗口） | 现状能搜但难用，且搜不到文件   | M    | 详见下方第 10 节；与 K3 命令面板同改 SearchModal，**须合并设计** |
+
+#### 9. L1 — 离线本地消息库（新增，未立项）
+
+**现状问题**：断网启动任何一端，**会话列表与历史消息全是空的** —— 所有数据都靠
+进程内内存 + 实时拉后端，本地不落盘。现代 IM（微信/QQ/Telegram）断网都能翻历史。
+既有的 D3「PWA 离线可用」只 precache 了 app shell（打得开壳子），**不含业务数据**；
+J9「离线态与重连反馈」只管提示文案，也不解决有没有数据看。
+
+**方向**：客户端建本地消息库（桌面/移动 SQLite，Web 侧 IndexedDB），
+WS 帧与增量拉取双写本地，冷启动先渲染本地再后台对账。**未立项、无 plan**，
+登记待办防止丢失。立项前需回答：
+
+- **存储选型三端不一致**：Tauri 桌面/安卓可用 SQLite（`tauri-plugin-sql`），但 Web 端
+  没有 SQLite，只能 IndexedDB（或 wa-sqlite + OPFS，旧 WebView 存疑 —— 本仓 target 是
+  es2019 兼容 Chrome 74）。是抽一层统一读写接口、还是 Web 端只做降级缓存？
+- **与 E2EE 的冲突**：单聊已端到端加密，若本地明文落盘，E2EE 的威胁模型就破了一半
+  （拿到设备即拿到全部明文）。需要定：本地加密（SQLCipher / 系统 keychain 托管密钥）
+  还是密文落盘、读时解密？
+- **撤回与清空必须回放到本地**：本仓语义是「撤回 = 访问撤销」（见 H1 审计批），
+  消息撤回、`cleared_before_seq` 清空记录、消息编辑都得同步删改本地副本，
+  **否则断网仍能看到已撤回内容**，等于开了个绕过撤回的后门。
+- **同步模型**：复用既有 `seq` 游标做增量补齐；断线期间的空洞如何探测与回填；
+  多设备（A8 债）各自本地库的一致性口径。
+- **容量与清理**：本地保留窗口（条数/天数）、媒体要不要缓存（与对象 GC 的关系）、
+  账号退出/切换时的清库责任（与 K13 多账号切换的本地存储分层同一套）。
+- **范围**：会话列表 + 消息正文优先；搜索是否也走本地（与 K18 相关）。
+
+#### 10. K18 — 搜索体验重做（新增，未立项）
+
+用户反馈现状搜索「太丑」且搜不到文件。经核对代码，问题分三块：
+
+| 问题                     | 现状                                                                                                                                                                                      |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **搜不到文件/图片/视频** | `GET /messages/search`（`handler/message.go`）只接 `q` / `conversation_id` / `before` / `limit`，**没有类型过滤参数**，后端也没有按消息类型检索的路径。相册（K7）只能按会话看，不能全局搜 |
+| **UI 简陋**              | 结果是单一扁平列表，没有分组（联系人/群/消息/文件）、没有预览、没有筛选器                                                                                                                 |
+| **桌面端形态不对**       | 桌面也复用移动端的模态框，屏幕再大也只有一个窄弹窗                                                                                                                                        |
+
+**方向**：
+
+- 后端：`/messages/search` 加类型过滤（文件/图片/视频/语音/链接），
+  按 `msg_type` 走既有 `pg_trgm` 索引；文件名需要可检索（确认当前是否只索引了正文）
+- 前端：结果按类别分组 + 筛选器 + 媒体缩略图预览
+- 桌面端：独立搜索窗口。**本仓已有现成先例可抄** —— 通话就是用
+  `MainLayout` 的 `callMode: "window"` 开 Tauri 独立原生窗口承载的（见 `CallHost`），
+  搜索窗口复用同一套 `WebviewWindow` 模式即可，不用另起炉灶
+
+**立项前需回答**：与 K3（命令面板 Ctrl+K，本身就写着「SearchModal 升维」）**高度重叠**，
+两者必须合并成一次设计 —— 否则会把同一个 SearchModal 前后改两遍。
+另：是否等 L1 落地后让搜索直接走本地库（离线可搜），还是继续只走服务端。
+
+---
+
+## 六、设计原则
+
+### 6.1 视觉设计
+
+- **不过度参考 QQ/微信**：采用现代、简约的北欧风格（干净线条、留白、柔和阴影）
+- **色彩方案**：以蓝灰为主色调，传达专业与可靠
+- **暗黑模式**：从 Day 1 就支持
+- **响应式**：移动端优先，再适配大屏
+- **无障碍**：满足 WCAG 2.1 AA 级标准
+
+### 6.2 工程规范
+
+- **GitFlow 工作流**：`main` / `develop` / `feature/*` / `bugfix/*` / `release/*` / `hotfix/*`
+- **Commit 规范**：Conventional Commits（`feat:` / `fix:` / `docs:` / `refactor:` 等）
+- **Code Review**：每个 PR 至少一人 Review 通过后方可合并
+- **测试覆盖率**：后端 ≥ 80%，前端 ≥ 60%（核心组件 100%）
+- **CI/CD**：GitHub Actions 自动化构建、测试、部署
+
+---
+
+## 七、GitFlow 分支规范
+
+| 分支        | 用途         | 命名示例                                       |
+| ----------- | ------------ | ---------------------------------------------- |
+| `main`      | 生产环境代码 | `main`                                         |
+| `develop`   | 开发主线     | `develop`                                      |
+| `feature/*` | 新功能开发   | `feature/user-login`、`feature/message-search` |
+| `bugfix/*`  | Bug 修复     | `bugfix/login-error-handling`                  |
+| `release/*` | 发布准备     | `release/v1.0.0`                               |
+| `hotfix/*`  | 紧急生产修复 | `hotfix/v1.0.1-security-patch`                 |
+
+---
+
+## 八、Commit 信息规范
+
+采用 [Conventional Commits](https://www.conventionalcommits.org/) 规范：
+
+```
+<type>(<scope>): <subject>
+
+[optional body]
+
+[optional footer]
+```
+
+**类型 (type)** ：
+
+- `feat`: 新功能
+- `fix`: Bug 修复
+- `docs`: 文档更新
+- `style`: 代码格式（不影响功能）
+- `refactor`: 重构
+- `perf`: 性能优化
+- `test`: 测试相关
+- `chore`: 构建/工具/依赖
+- `ci`: CI/CD 配置变更
+
+**示例：**
+
+```
+feat(chat): add real-time message delivery via WebSocket
+fix(auth): resolve token refresh expiration bug
+docs(api): update WebSocket protocol documentation
+```
+
+---
+
+## 九、开发环境配置
+
+### 9.1 所需工具
+
+| 工具           | 版本要求                                 | 用途                 |
+| -------------- | ---------------------------------------- | -------------------- |
+| Go             | ≥ 1.25（`server/go.mod` 声明 1.25.7）    | 后端服务             |
+| Node.js        | ≥ 20.19（仓库固定 22.23.0，见 `.nvmrc`） | 前端构建             |
+| pnpm           | ≥ 10（`packageManager` 钉 10.22.0）      | 包管理               |
+| Docker         | ≥ 26.x                                   | 容器运行时           |
+| Docker Compose | ≥ v2.27                                  | 服务编排             |
+| Rust           | latest stable                            | Tauri 桌面端与移动端 |
+| Android Studio | latest                                   | Android 构建         |
+| Xcode          | latest                                   | iOS 构建（仅 macOS） |
+
+### 9.2 快速启动
+
+依赖服务（PostgreSQL / Redis / MinIO）、种子数据、后端、前端全部由 `pnpm dev:*` 一键编排。
+**不要手敲底层命令** —— docker / goose / go run / vite 的启动参数与就绪等待都封装在
+`scripts/dev.mjs` 里，绕过它会漏掉迁移与健康检查。
+
+```bash
+git clone <repository-url> yuanchat
+cd yuanchat
+pnpm install          # 安装依赖（preinstall 跑 check-env.mjs 校验 Node/Go/Rust 版本）
+
+pnpm dev:web          # 真实后端 + Web：docker(pg/redis/minio) → seed → Go 服务 → Vite
+pnpm dev:web:mock     # 免后端：MSW Mock + demo 数据
+pnpm dev:desktop      # 真实后端 + Tauri 桌面窗口
+pnpm dev:android      # 真实后端 + Tauri Android（自动 adb reverse 8085/8086）
+pnpm dev:server       # 仅后端
+pnpm dev:stop         # 停止全部（应用进程 + docker 容器）
+```
+
+后端监听 **REST :8085 + WS :8086**（见 `server/config/config.yaml`）。分步启动、打包、测试与门禁
+命令的完整表格见 [`DEVELOPMENT.md`](./DEVELOPMENT.md)。
+
+---
+
+## 十、数据库选型
+
+| 数据库            | 用途                                | 推荐度     |
+| ----------------- | ----------------------------------- | ---------- |
+| **PostgreSQL**    | 用户、群组、关系等结构化数据        | ⭐⭐⭐⭐⭐ |
+| **Redis**         | 会话缓存、在线状态、消息队列        | ⭐⭐⭐⭐⭐ |
+| **MinIO**         | 文件/图片/语音存储（兼容 S3）       | ⭐⭐⭐⭐⭐ |
+| **Elasticsearch** | 消息全文搜索                        | ⭐⭐⭐⭐   |
+| **MongoDB**       | 消息历史归档（可选替代 PostgreSQL） | ⭐⭐⭐     |
+
+**实际采用**：PostgreSQL + Redis + MinIO 三件套。消息全文搜索用 PostgreSQL 的 `pg_trgm`
+GIN 索引实现（`migrations/003_message_search_index.sql`），**未引入 Elasticsearch**；
+MongoDB 亦未引入，消息历史留在 PostgreSQL。Redis 用于图形验证码、限流与分布式 presence，
+未用作消息队列。
+
+---
+
+## 十一、安全设计
+
+- [x] HTTPS/TLS 全链路加密（生产 nginx TLS 1.2/1.3 + certbot 自动续期，
+      `X-Content-Type-Options` / `X-Frame-Options` / `Referrer-Policy` 已下发；
+      HSTS 默认注释关闭，待证书稳定后开启）
+- [x] JWT + Refresh Token 鉴权（access 15m / refresh 168h，滑动轮换）
+- [x] 密码 bcrypt 哈希（cost 12）
+- [x] SQL 注入防护（GORM 参数化查询）
+- [ ] XSS 防护：输入校验已做（Gin binding 校验 + 服务端约束，React 默认转义），
+      但 **Content-Security-Policy 未下发**（nginx 无 CSP 头，Tauri `csp` 为 `null`）
+- [ ] CSRF Token（**未做**；当前鉴权走 Authorization 头而非 Cookie，风险有限）
+- [x] 速率限制（`middleware.LimitByIP`，注册/登录/刷新/上传/举报等端点按档位限流）
+- [x] WebSocket 连接认证（`?token=` 传 access token，`jwt.Validate` 校验后才升级）
+- [x] 文件上传类型/大小校验（`upload.allowed_types` 白名单 + `max_file_size` 100MB）
+- [x] 端到端加密（X3DH + Double Ratchet，仅单聊，用户自行开启）
+
+---
+
+## 十二、交付节奏
+
+按批次迭代交付，版本与批次的映射见 [`ROADMAP.md`](./ROADMAP.md)，逐版本变更见
+[`CHANGELOG.md`](../CHANGELOG.md)。tag 名与计划阶段并非严格对应，实际交付内容以 CHANGELOG 为准。
+
+| 版本   | 交付内容                                                                                                                             |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| v0.1.0 | MVP：认证、单聊（文本/图片/文件/语音/reactions）、联系人、在线状态、群聊、Web + 桌面 + Android 骨架、CI/CD                           |
+| v0.2.0 | 删好友与黑名单、群角色管理、@提及 / 引用回复 / 转发、Sentry 错误监控、goose 迁移 + Prometheus 指标 + Grafana 看板、E2E 接 CI         |
+| v0.3.0 | 端到端加密（单聊）、管理后台 + 内容审核、ja-JP / ko-KR 翻译 + i18n CI 门禁、分布式 Presence、PWA、生产部署编排、后端端口改 8085/8086 |
+
+发版由 tag `v*` 触发 GitHub Actions 打包 Web + 桌面三平台 + Android，流程见
+[`RELEASE.md`](./RELEASE.md)。
+
+---
+
+## 十三、文档索引
+
+| 文档                                                         | 内容                                             | 状态        |
+| ------------------------------------------------------------ | ------------------------------------------------ | ----------- |
+| [MASTER_PLAN.md](./MASTER_PLAN.md)                           | 总体计划书                                       | ✅ 已完成   |
+| [ARCHITECTURE.md](./ARCHITECTURE.md)                         | 详细架构设计                                     | ✅ 已完成   |
+| [CHAT_API.md](./CHAT_API.md)                                 | 聊天 REST API + WebSocket 协议                   | ✅ 已完成   |
+| [DB_SCHEMA.md](./DB_SCHEMA.md)                               | 数据库设计 + goose 迁移工作流                    | ✅ 已完成   |
+| [DEVELOPMENT.md](./DEVELOPMENT.md)                           | 开发与打包指南（启动/测试）                      | ✅ 持续更新 |
+| [ROADMAP.md](./ROADMAP.md)                                   | 迭代路线图（批次 → 版本映射）                    | ✅ 持续更新 |
+| [RELEASE.md](./RELEASE.md)                                   | 发版指南（release-it + CI 签名）                 | ✅ 已完成   |
+| [design/](./design/)                                         | UI/UX 设计规范（7 份专题）                       | ✅ 已完成   |
+| [deploy/self-hosted.md](./deploy/self-hosted.md)             | 自托管部署（域名/证书/备份）                     | ✅ 已完成   |
+| [deploy/env.md](./deploy/env.md)                             | 环境变量清单                                     | ✅ 已完成   |
+| [deploy/server-and-domain.md](./deploy/server-and-domain.md) | 服务器与域名选购（配置推导 + 国内外价位 + 备案） | ✅ 已完成   |
+| [observability/logging.md](./observability/logging.md)       | 结构化日志 + loki 查询                           | ✅ 已完成   |
+| [superpowers/](./superpowers/)                               | SDD 产物：specs/ + plans/                        | ✅ 持续更新 |
+| [../CHANGELOG.md](../CHANGELOG.md)                           | 变更日志（release-it 自动生成）                  | ✅ 持续更新 |

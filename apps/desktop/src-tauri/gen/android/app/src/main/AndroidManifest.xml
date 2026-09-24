@@ -1,20 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 语音消息录制。WebView 的 getUserMedia 会经 onPermissionRequest 转成这两项运行时申请，
+         清单里不声明的话 requestPermissions 直接返回拒绝、系统弹框根本不出现，
+         前端只能看到 getUserMedia 失败（表现为「无麦克风权限」） -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- required=false：没有麦克风的设备（部分 TV / 模拟器）照样能装，只是录不了音 -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
+    <!-- 扫码登录。barcode-scanner 插件在原生层用 CameraX 取景，
+         权限由插件的 requestPermissions 在运行时申请，清单里不声明则直接被系统拒绝 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- required=false：无摄像头设备（部分 TV / 模拟器）仍可安装，只是扫不了码 -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
+
+    <!-- 通话前台服务。通话中切后台，系统会在几十秒内回收进程，WebSocket 与
+         PeerConnection 一起断掉，表现为「锁屏就掉话」。前台服务把进程钉住。
+         Android 14+ 还要求按用途细分 microphone / camera 子类型，只声明
+         FOREGROUND_SERVICE 会在 startForeground 时抛 SecurityException；
+         POST_NOTIFICATIONS 是 Android 13+ 展示常驻通知的前提，没有它
+         startForeground 不报错但通知不可见，用户无从知道自己还在通话中 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/Theme.yuanchat_desktop"
         android:usesCleartextTraffic="${usesCleartextTraffic}">
+        <!-- adjustResize：Android 11 以下没有 IME inset 可读，只能靠系统把窗口改矮，
+             WebView 的 visualViewport 才会收缩、输入框才会被顶到键盘上方。
+             Android 11 及以上走 MainActivity 里的 edge-to-edge + IME inset 分支。 -->
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
             android:launchMode="singleTask"
             android:label="@string/main_activity_title"
             android:name=".MainActivity"
+            android:windowSoftInputMode="adjustResize"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -23,6 +52,14 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- foregroundServiceType 必须同时列出 microphone 与 camera：类型在启动时
+             由 startForeground 指定，清单里没声明的类型会被系统直接拒绝；
+             语音通话与视频通话共用这一个服务，故两者都要在册 -->
+        <service
+            android:name=".CallForegroundService"
+            android:foregroundServiceType="microphone|camera"
+            android:exported="false" />
 
         <provider
           android:name="androidx.core.content.FileProvider"

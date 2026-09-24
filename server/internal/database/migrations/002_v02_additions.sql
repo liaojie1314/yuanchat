@@ -46,6 +46,14 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS mentions       UUID[];
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS client_msg_id  VARCHAR(64);
 
 -- ============================================
+-- users.short_id：QQ 号风格短号（模型为 uniqueIndex）。
+-- 此列历史上只存在于开发库的 AutoMigrate 漂移里，任何 goose 迁移都没建过，
+-- 补进迁移使全新库（如集成测试库）也能建出与模型一致的 users 表。
+-- ============================================
+ALTER TABLE users ADD COLUMN IF NOT EXISTS short_id BIGINT;
+CREATE UNIQUE INDEX IF NOT EXISTS users_short_id_key ON users(short_id);
+
+-- ============================================
 -- messages: 修正联合唯一索引（旧 GORM AutoMigrate 可能建了单列索引）
 -- ============================================
 DROP INDEX IF EXISTS idx_conversation_seq;
@@ -61,6 +69,8 @@ ALTER TABLE messages DROP COLUMN IF EXISTS client_msg_id;
 ALTER TABLE messages DROP COLUMN IF EXISTS mentions;
 ALTER TABLE messages DROP COLUMN IF EXISTS reply_to_id;
 ALTER TABLE conversation_members DROP COLUMN IF EXISTS mention_unread;
+DROP INDEX IF EXISTS users_short_id_key;
+ALTER TABLE users DROP COLUMN IF EXISTS short_id;
 DROP TABLE IF EXISTS blocklists;
 DROP TABLE IF EXISTS message_reactions;
 

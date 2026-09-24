@@ -50,7 +50,7 @@ export function LoginPage() {
     <div className="surface-gradient grid min-h-screen place-items-center">
       <div className="w-full max-w-sm rounded-lg border border-outline-variant bg-surface px-8 py-10 shadow-lg">
         <div className="mb-8 text-center">
-          <div className="brand-gradient mx-auto mb-3 grid h-14 w-14 place-items-center rounded-lg text-xl font-bold text-white">
+          <div className="brand-gradient mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-lg text-xl font-bold text-white">
             元
           </div>
           <h1 className="text-title-lg font-semibold text-on-surface">{t("admin.login.title")}</h1>

@@ -28,7 +28,9 @@ export class RegisterPage {
     // 按钮内含两个 svg（验证码图片 + hover 时的 RefreshCw 图标），
     // 取第一个即验证码图片本身，避免 strict mode violation
     this.captchaImage = this.captchaButton.locator("svg").first();
-    this.registerButton = page.getByRole("button", { name: /注 册|注册中…/ });
+    // 按钮文案来自 zh-CN 词条（playwright.config.ts 已把 locale 钉在 zh-CN）。
+    // 两字按钮中间的排版空格属样式取舍，用 \s* 兼容有无空格两种写法；首尾锚定避免命中含「注册」的其他控件
+    this.registerButton = page.getByRole("button", { name: /^(注\s*册|注册中…)$/ });
     this.loginLink = page.getByRole("link", { name: "立即登录" });
   }
 

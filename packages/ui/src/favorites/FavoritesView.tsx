@@ -1,0 +1,231 @@
+/**
+ * FavoritesView — 我的收藏页面
+ *
+ * @description
+ * 展示当前用户收藏的消息列表，支持按类型标签页筛选（全部/文字/图片/文件）。
+ * 点击"删除"按钮取消收藏，长列表支持翻页加载。
+ *
+ * @param embedded - 嵌在设置页内部时置 true（见 SettingsSections 的 FavoritesSection）：
+ *   隐去自带页头、也不自己撑满高度和滚动，标题与卡片外框由设置页统一给，
+ *   免得在设置右栏里出现两层滚动容器
+ */
+import { useCallback, useEffect, useState } from "react";
+import { FileText, Image, Loader2, MessageSquare, Mic, Smile, Star, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import {
+  captureException,
+  listFavorites,
+  previewBodyOf,
+  removeFavorite,
+  showToast,
+} from "@yuanchat/shared";
+import type { FavoriteItem } from "@yuanchat/shared";
+import { cn } from "@yuanchat/shared/utils";
+
+type TabType = 0 | 1 | 2 | 3; // 0=全部 1=文字 2=图片 3=文件
+
+/** message_type → 会话预览用的类型标记（与服务端 preview_kind 同名）。 */
+const KIND_BY_TYPE: Record<number, string> = {
+  1: "text",
+  2: "image",
+  3: "file",
+  4: "voice",
+  5: "video",
+  6: "system",
+  7: "encrypted",
+  8: "sticker",
+};
+
+/**
+ * 解析收藏 content JSON，返回可显示的摘要文本。
+ *
+ * @remarks 非文本类型的占位文案走 i18n（原实现对任何带 key 的 content 一律返回
+ *   硬编码英文 `"[media]"`，且贴纸没有分支）。文件优先显示文件名。
+ */
+function parseExcerpt(item: FavoriteItem): string {
+  const kind = KIND_BY_TYPE[item.message_type];
+  try {
+    const c = JSON.parse(item.content) as Record<string, unknown>;
+    if ((kind === "text" || kind === "system") && typeof c.text === "string") {
+      return c.text.slice(0, 80);
+    }
+    if (kind === "file" && typeof c.name === "string" && c.name) return c.name;
+  } catch {
+    // content 非合法 JSON 时退到类型占位文案
+  }
+  return previewBodyOf(kind);
+}
+
+/** 消息类型 → 图标组件。 */
+function TypeIcon({ type }: { type: number }) {
+  if (type === 2) return <Image size={16} className="shrink-0 text-blue-400" />;
+  if (type === 3) return <FileText size={16} className="shrink-0 text-orange-400" />;
+  if (type === 4) return <Mic size={16} className="shrink-0 text-green-400" />;
+  if (type === 8) return <Smile size={16} className="shrink-0 text-yellow-400" />;
+  return <MessageSquare size={16} className="text-on-surface-variant shrink-0" />;
+}
+
+export function FavoritesView({ embedded = false }: { embedded?: boolean } = {}) {
+  const { t } = useTranslation();
+  const [tab, setTab] = useState<TabType>(0);
+  const [items, setItems] = useState<FavoriteItem[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [cursor, setCursor] = useState<string | undefined>(undefined);
+
+  const load = useCallback(
+    async (reset = false) => {
+      if (loading) return;
+      setLoading(true);
+      try {
+        const res = await listFavorites({
+          before: reset ? undefined : cursor,
+          limit: 20,
+          type: tab || undefined,
+        });
+        setItems((prev) => (reset ? res.favorites : [...prev, ...res.favorites]));
+        setHasMore(res.has_more);
+        const last = res.favorites[res.favorites.length - 1];
+        setCursor(last ? last.created_at : undefined);
+      } catch (err) {
+        captureException(err, { context: "FavoritesView.load" });
+        showToast("error", t("favorites.loadFailed"));
+      } finally {
+        setLoading(false);
+      }
+    },
+
+    [loading, cursor, tab, t],
+  );
+
+  // tab 切换时重置列表
+  useEffect(() => {
+    setCursor(undefined);
+    setItems([]);
+    setHasMore(false);
+    void (async () => {
+      setLoading(true);
+      try {
+        const res = await listFavorites({ limit: 20, type: tab || undefined });
+        setItems(res.favorites);
+        setHasMore(res.has_more);
+        const last = res.favorites[res.favorites.length - 1];
+        setCursor(last ? last.created_at : undefined);
+      } catch (err) {
+        captureException(err, { context: "FavoritesView.tabChange" });
+        showToast("error", t("favorites.loadFailed"));
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  const handleRemove = async (messageId: string) => {
+    try {
+      await removeFavorite(messageId);
+      setItems((prev) => prev.filter((f) => f.message_id !== messageId));
+      showToast("info", t("favorites.removed"));
+    } catch (err) {
+      captureException(err, { context: "FavoritesView.remove" });
+      showToast("error", t("favorites.removeFailed"));
+    }
+  };
+
+  const TABS: { type: TabType; labelKey: string }[] = [
+    { type: 0, labelKey: "favorites.all" },
+    { type: 1, labelKey: "favorites.text" },
+    { type: 2, labelKey: "favorites.image" },
+    { type: 3, labelKey: "favorites.file" },
+  ];
+
+  return (
+    <div className={cn("flex flex-col", embedded ? "min-h-0" : "h-full")}>
+      {/* 页头（嵌入设置页时不渲染：那边已有标题与返回） */}
+      {!embedded && (
+        <header className="border-outline-variant bg-surface-container-low flex h-[60px] shrink-0 items-center gap-2 border-b px-4">
+          <Star size={20} className="text-primary shrink-0" />
+          <h1 className="text-title-md text-on-surface font-semibold">{t("favorites.title")}</h1>
+          <div className="flex-1" />
+        </header>
+      )}
+
+      {/* 类型标签页 */}
+      <div className="border-outline-variant flex shrink-0 gap-1 border-b px-3 pt-2 pb-0">
+        {TABS.map(({ type, labelKey }) => (
+          <button
+            key={type}
+            onClick={() => setTab(type)}
+            className={cn(
+              "rounded-t-lg px-3 py-1.5 text-sm font-medium transition-colors",
+              tab === type
+                ? "bg-primary-container text-primary border-primary border-b-2"
+                : "text-on-surface-variant hover:bg-surface-container",
+            )}
+          >
+            {t(labelKey)}
+          </button>
+        ))}
+      </div>
+
+      {/* 列表：整页时自己滚，嵌入时交给设置页右栏滚，免得套两层滚动条 */}
+      <div className={cn(embedded ? "" : "min-h-0 flex-1 overflow-y-auto")}>
+        {loading && items.length === 0 && (
+          <div className="flex h-32 items-center justify-center">
+            <Loader2 size={20} className="text-primary animate-spin" />
+          </div>
+        )}
+
+        {!loading && items.length === 0 && (
+          <div
+            className={cn(
+              "text-on-surface-variant flex flex-col items-center justify-center gap-2 text-sm",
+              embedded ? "h-32" : "h-48",
+            )}
+          >
+            <Star size={28} className="opacity-30" />
+            <p>{t("favorites.empty")}</p>
+          </div>
+        )}
+
+        <ul className="divide-outline-variant divide-y">
+          {items.map((item) => (
+            <li
+              key={item.id}
+              className="hover:bg-surface-container-high flex items-start gap-3 px-4 py-3 transition-colors"
+            >
+              <TypeIcon type={item.message_type} />
+              <div className="min-w-0 flex-1">
+                <div className="text-label-sm text-on-surface-variant mb-0.5 flex items-center gap-1.5">
+                  <span className="truncate font-medium">{item.conv_name}</span>
+                  <span className="opacity-60">·</span>
+                  <span className="truncate opacity-80">{item.sender_nickname}</span>
+                </div>
+                <p className="text-on-surface line-clamp-2 text-sm">{parseExcerpt(item)}</p>
+              </div>
+              <button
+                onClick={() => void handleRemove(item.message_id)}
+                aria-label={t("favorites.remove")}
+                className="text-on-surface-variant hover:bg-error/10 hover:text-error shrink-0 rounded-lg p-1 transition-colors"
+              >
+                <Trash2 size={16} />
+              </button>
+            </li>
+          ))}
+        </ul>
+
+        {hasMore && (
+          <div className="flex justify-center py-3">
+            <button
+              onClick={() => void load()}
+              disabled={loading}
+              className="text-primary text-sm disabled:opacity-50"
+            >
+              {loading ? <Loader2 size={16} className="animate-spin" /> : t("common.loadMore")}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

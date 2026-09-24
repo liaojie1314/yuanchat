@@ -6,11 +6,11 @@ import (
 	"github.com/google/uuid"
 )
 
-// Report 用户举报（消息/用户），进入 admin 审核队列。
+// Report 用户举报（消息/用户/表情包），进入 admin 审核队列。
 type Report struct {
 	ID         uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
 	ReporterID uuid.UUID  `gorm:"type:uuid;not null" json:"reporter_id"`
-	TargetType string     `gorm:"type:varchar(32);not null" json:"target_type"` // message | user
+	TargetType string     `gorm:"type:varchar(32);not null" json:"target_type"` // message | user | sticker_pack
 	TargetID   uuid.UUID  `gorm:"type:uuid;not null" json:"target_id"`
 	Reason     string     `gorm:"type:varchar(500);not null" json:"reason"`
 	Status     int16      `gorm:"type:smallint;not null;default:0" json:"status"`
@@ -31,6 +31,7 @@ const (
 
 // Report 目标类型
 const (
-	ReportTargetMessage = "message"
-	ReportTargetUser    = "user"
+	ReportTargetMessage     = "message"
+	ReportTargetUser        = "user"
+	ReportTargetStickerPack = "sticker_pack"
 )

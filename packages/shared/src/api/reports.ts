@@ -24,3 +24,15 @@ export async function reportUser(
     reason,
   });
 }
+
+/** 举报一个表情包（admin 处置后下架该包）。 */
+export async function reportStickerPack(
+  packId: string,
+  reason = "",
+): Promise<{ id: string; status: number }> {
+  return apiPost("/api/v1/reports", {
+    target_type: "sticker_pack",
+    target_id: packId,
+    reason,
+  });
+}

@@ -10,8 +10,10 @@ export function usePagedQuery<T>(
   // 额外重载信号：值变化时重新加载（如会话类型 tab），解决
   // fetcher 引用不稳定无法直接进依赖的问题
   version: unknown = 0,
+  // 初始搜索词：支持深链预填（如举报列表按 target_id 跳转用户检索）
+  initialQ = "",
 ) {
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(initialQ);
   const [page, setPage] = useState(1);
   const [list, setList] = useState<T[]>([]);
   const [total, setTotal] = useState(0);

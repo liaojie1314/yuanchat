@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { AppErrorBoundary } from "../AppErrorBoundary";
+import { AppErrorBoundary } from "../primitives/AppErrorBoundary";
 
 const mockCaptureException = vi.fn();
 vi.mock("@yuanchat/shared", () => ({
@@ -14,7 +14,7 @@ const ThrowingChild = () => {
 describe("AppErrorBoundary", () => {
   beforeEach(() => {
     mockCaptureException.mockClear();
-    // Suppress console.error from React for expected boundary errors
+    // 屏蔽 React 对预期内边界错误打出的 console.error
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 

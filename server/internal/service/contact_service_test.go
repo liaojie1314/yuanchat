@@ -10,36 +10,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/repository"
+	"github.com/yuanchat/server/internal/testutil"
 	"go.uber.org/zap"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
-	"gorm.io/gorm/schema"
 )
 
-// testDB 连接本地开发库（deploy/docker-compose.yml 的 postgres :5434）。
+// testDB 返回独立测试库上的事务句柄（跑完整迁移、用例结束回滚），
 // 数据库不可达时跳过集成用例（CI 无 DB 环境仍绿）。
 func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := "host=localhost port=5434 user=yuanchat password=yuanchat_dev dbname=yuanchat sslmode=disable"
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
-		NamingStrategy: schema.NamingStrategy{
-			SingularTable: true,
-		},
-		SkipDefaultTransaction: true,
-	})
-	if err != nil {
-		t.Skipf("dev postgres unavailable, skip integration test: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil || sqlDB.Ping() != nil {
-		t.Skip("dev postgres unavailable, skip integration test")
-	}
-	if err := db.AutoMigrate(&model.FriendRequest{}, &model.MessageReaction{}); err != nil {
-		t.Fatalf("migrate friend_requests: %v", err)
-	}
-	return db
+	return testutil.NewDB(t)
 }
 
 // newTestUser 创建一次性测试用户（短号用时间戳避免冲突，用后删除）。
@@ -79,7 +59,7 @@ func newContactSvc(db *gorm.DB) *ContactService {
 }
 
 // ========================================
-// SendRequest
+// SendRequest 相关
 // ========================================
 
 func TestSendRequestRejectsSelf(t *testing.T) {
@@ -289,19 +269,19 @@ func TestSearchRelations(t *testing.T) {
 	b := newTestUser(t, db, "rel-b")
 	ctx := context.Background()
 
-	// self
+	// 自己
 	r, err := svc.Search(ctx, a.ID, *a.Phone)
 	if err != nil || r.Relation != "self" {
 		t.Fatalf("expected self, got %v / %v", r, err)
 	}
 
-	// none
+	// 无关系
 	r, err = svc.Search(ctx, a.ID, *b.Phone)
 	if err != nil || r.Relation != "none" {
 		t.Fatalf("expected none, got %v / %v", r, err)
 	}
 
-	// pending_out / pending_in
+	// 我发出的 / 我收到的待处理申请
 	req, _, _ := svc.SendRequest(ctx, a.ID, b.ID, "")
 	r, _ = svc.Search(ctx, a.ID, *b.Phone)
 	if r.Relation != "pending_out" {
@@ -312,7 +292,7 @@ func TestSearchRelations(t *testing.T) {
 		t.Fatalf("expected pending_in, got %s", r.Relation)
 	}
 
-	// friend
+	// 已是好友
 	if _, err := svc.Accept(ctx, b.ID, req.ID); err != nil {
 		t.Fatalf("accept: %v", err)
 	}

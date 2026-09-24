@@ -41,6 +41,13 @@ var (
 	ErrForwardTooMany = errors.New("too many forward targets")
 	// ErrForwardNoTarget 转发未提供任何目标会话。
 	ErrForwardNoTarget = errors.New("no forward target")
+	// ErrForwardEncrypted 端到端加密消息不可转发。
+	//
+	// 密文是针对「本会话、本棘轮状态」加密的：原样复制到另一个会话后，那边
+	// 任何人（包括转发者自己）都拿不到对应的链密钥，只会渲染成"无法解密"。
+	// 服务端又无法解密后重新加密（这正是 E2EE 的前提），所以只能在入口拒绝，
+	// 而不是让用户成功转发出一条永久乱码。
+	ErrForwardEncrypted = errors.New("encrypted message cannot be forwarded")
 )
 
 // RecallWindow 消息可撤回的时间窗口（自发送起 2 分钟）。
@@ -51,10 +58,10 @@ const MaxForwardTargets = 9
 
 // SendResult 消息落库后的结果，供 WS 层构造 ack / receive 推送。
 type SendResult struct {
-	Message           *model.Message
-	SenderNickname    string
-	MemberIDs         []uuid.UUID
-	MentionedMembers  []uuid.UUID // SendContent 校验后回填，供 WS 层构造帧
+	Message          *model.Message
+	SenderNickname   string
+	MemberIDs        []uuid.UUID
+	MentionedMembers []uuid.UUID // SendContent 校验后回填，供 WS 层构造帧
 }
 
 // RecallResult 撤回结果，供 handler 构造 message.recalled 推送。
@@ -212,15 +219,8 @@ func (s *MessageService) SendContent(
 		ReplyToID:      replyTo,
 	}
 	// 敏感词审核：命中标记 flagged 进审核队列，消息正常发送（不阻塞）
-	if s.moderation != nil && messageType == model.MessageTypeText {
-		var tc model.MessageContentText
-		if err := json.Unmarshal([]byte(contentJSON), &tc); err == nil {
-			if hit := s.moderation.Check(tc.Text); hit != "" {
-				msg.Flagged = true
-				s.logger.Info("message flagged by moderation",
-					zap.String("word", hit), zap.String("sender", senderID.String()))
-			}
-		}
+	if s.textHitsModeration(messageType, contentJSON, senderID) {
+		msg.Flagged = true
 	}
 	if len(validMentions) > 0 {
 		strs := make(pq.StringArray, len(validMentions))
@@ -248,13 +248,44 @@ func (s *MessageService) SendContent(
 	if err != nil || sender == nil {
 		return nil, fmt.Errorf("load sender: %w", err)
 	}
+	senderNickname := sender.Nickname
+
+	// 群会话署名取本人群昵称（alias 非空时覆盖本名），与历史消息 COALESCE 投影保持一致
+	if conv != nil && conv.Type == model.ConversationTypeGroup {
+		if m, ok, err := s.convRepo.GetMember(ctx, convID, senderID); err != nil {
+			s.logger.Warn("load sender alias failed", zap.Error(err))
+		} else if ok && m.Alias != nil && *m.Alias != "" {
+			senderNickname = *m.Alias
+		}
+	}
 
 	return &SendResult{
 		Message:          msg,
-		SenderNickname:   sender.Nickname,
+		SenderNickname:   senderNickname,
 		MemberIDs:        memberIDs,
 		MentionedMembers: validMentions,
 	}, nil
+}
+
+// textHitsModeration 判定文本是否命中敏感词并记日志，命中返回 true。
+//
+// 发送与编辑两条路径共用：若编辑不走这里，「先发干净文本 → 编辑成敏感词」
+// 就能完全绕过内容审核。命中只打标不拦截，沿用既有「打标不阻塞」范式。
+func (s *MessageService) textHitsModeration(messageType int16, contentJSON string, actorID uuid.UUID) bool {
+	if s.moderation == nil || messageType != model.MessageTypeText {
+		return false
+	}
+	var tc model.MessageContentText
+	if err := json.Unmarshal([]byte(contentJSON), &tc); err != nil {
+		return false
+	}
+	hit := s.moderation.Check(tc.Text)
+	if hit == "" {
+		return false
+	}
+	s.logger.Info("message flagged by moderation",
+		zap.String("word", hit), zap.String("actor", actorID.String()))
+	return true
 }
 
 // Forward 一次转发到多个目标会话：source 与所有 target 都必须是 actor 参与的会话。
@@ -284,6 +315,10 @@ func (s *MessageService) Forward(
 	if src.MessageType == model.MessageTypeSystem {
 		return nil, ErrMessageNotFound
 	}
+	// E2EE 密文换会话即不可解，转发出去只会是一条永久"无法解密"，入口直接拒绝
+	if src.MessageType == model.MessageTypeE2EE {
+		return nil, ErrForwardEncrypted
+	}
 	// actor 必须是 source 会话成员，且必须是每个 target 会话成员
 	if ok, err := s.convRepo.IsMember(ctx, src.ConversationID, actorID); err != nil {
 		return nil, err
@@ -311,13 +346,14 @@ func (s *MessageService) Forward(
 
 // GetHistory 校验成员身份后按 seq 降序分页取历史消息。
 // 返回的切片仍为降序，由 handler/前端决定展示顺序。
+// 成员行的 cleared_before_seq 作为下界：单侧清空后旧消息对本人不可见（对方不受影响）。
 func (s *MessageService) GetHistory(
 	ctx context.Context,
 	userID, convID uuid.UUID,
 	beforeSeq int64,
 	limit int,
 ) ([]repository.MessageWithSender, error) {
-	ok, err := s.convRepo.IsMember(ctx, convID, userID)
+	member, ok, err := s.convRepo.GetMember(ctx, convID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("check membership: %w", err)
 	}
@@ -328,7 +364,7 @@ func (s *MessageService) GetHistory(
 	if limit <= 0 || limit > 100 {
 		limit = 30
 	}
-	messages, err := s.msgRepo.ListBefore(ctx, convID, beforeSeq, limit)
+	messages, err := s.msgRepo.ListBefore(ctx, convID, beforeSeq, member.ClearedBeforeSeq, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -349,6 +385,124 @@ func (s *MessageService) GetHistory(
 		}
 	}
 	return messages, nil
+}
+
+// ErrInvalidMediaType 相册 type 参数不在白名单内。
+var ErrInvalidMediaType = errors.New("invalid media type")
+
+// mediaTypeGroups 相册 type 参数 → 消息类型集合。
+//
+// 刻意不含 text(1)/system(6)/e2ee(7)：前两者没有对象可展示，E2EE 密文服务端无法解读
+// （content 里没有 key），放进来只会得到点不开的空格子。
+var mediaTypeGroups = map[string][]int16{
+	"all": {
+		model.MessageTypeImage, model.MessageTypeFile, model.MessageTypeVoice,
+		model.MessageTypeVideo, model.MessageTypeSticker,
+	},
+	"image":   {model.MessageTypeImage},
+	"file":    {model.MessageTypeFile},
+	"voice":   {model.MessageTypeVoice},
+	"video":   {model.MessageTypeVideo},
+	"sticker": {model.MessageTypeSticker},
+}
+
+// MediaItemView 相册条目（handler 直接序列化的形状，omitempty 字段按消息类型填充）。
+type MediaItemView struct {
+	MessageID      uuid.UUID `json:"message_id"`
+	Seq            int64     `json:"seq"`
+	MessageType    int16     `json:"message_type"`
+	SenderNickname string    `json:"sender_nickname"`
+	CreatedAt      time.Time `json:"created_at"`
+	Key            string    `json:"key"`
+	ThumbKey       string    `json:"thumb_key,omitempty"`
+	Name           string    `json:"name,omitempty"`
+	Size           int64     `json:"size,omitempty"`
+	Duration       int       `json:"duration,omitempty"`
+	Width          int       `json:"width,omitempty"`
+	Height         int       `json:"height,omitempty"`
+	StickerID      string    `json:"sticker_id,omitempty"`
+}
+
+// GetMedia 拉取会话媒体相册：校验成员身份与 type 参数，按 seq 游标倒序分页。
+//
+// 可见性口径与 GetHistory 完全一致——成员才可读（否则 ErrNotMember），
+// 并以成员行的 cleared_before_seq 为下界（单侧清空后旧媒体对本人不可见）。
+// filter 不在 mediaTypeGroups 内时返回 ErrInvalidMediaType（handler 映射 400）。
+func (s *MessageService) GetMedia(
+	ctx context.Context,
+	userID, convID uuid.UUID,
+	filter string,
+	beforeSeq int64,
+	limit int,
+) ([]MediaItemView, error) {
+	member, ok, err := s.convRepo.GetMember(ctx, convID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("check membership: %w", err)
+	}
+	if !ok {
+		return nil, ErrNotMember
+	}
+
+	types, ok := mediaTypeGroups[filter]
+	if !ok {
+		return nil, ErrInvalidMediaType
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+
+	rows, err := s.msgRepo.ListMedia(ctx, convID, types, beforeSeq, member.ClearedBeforeSeq, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list media: %w", err)
+	}
+
+	items := make([]MediaItemView, 0, len(rows))
+	for _, r := range rows {
+		item := MediaItemView{
+			MessageID:      r.ID,
+			Seq:            r.Seq,
+			MessageType:    r.MessageType,
+			SenderNickname: r.SenderNickname,
+			CreatedAt:      r.CreatedAt,
+		}
+		// content 是 jsonb 自由结构，按类型取字段而非按 struct 反序列化：
+		// 一次遍历要同时处理 image/file/voice/video/sticker 五种形状。
+		var content map[string]any
+		if err := json.Unmarshal([]byte(r.Content), &content); err != nil {
+			// 脏数据跳过而非整页失败：相册是浏览视图，单条坏 content 不该让整页 500。
+			s.logger.Warn("media item has invalid content json",
+				zap.String("message_id", r.ID.String()), zap.Error(err))
+			continue
+		}
+		if k, _ := content["key"].(string); k != "" {
+			item.Key = k
+		}
+		if tk, _ := content["thumb_key"].(string); tk != "" {
+			item.ThumbKey = tk
+		}
+		if n, _ := content["name"].(string); n != "" {
+			item.Name = n
+		}
+		// jsonb 数字经 encoding/json 一律落 float64，故先取 float64 再收窄
+		if sz, _ := content["size"].(float64); sz > 0 {
+			item.Size = int64(sz)
+		}
+		if d, _ := content["duration"].(float64); d > 0 {
+			item.Duration = int(d)
+		}
+		if w, _ := content["width"].(float64); w > 0 {
+			item.Width = int(w)
+		}
+		if h, _ := content["height"].(float64); h > 0 {
+			item.Height = int(h)
+		}
+		// 局部变量不叫 s：那会遮蔽 *MessageService 接收者
+		if sid, _ := content["sticker_id"].(string); sid != "" {
+			item.StickerID = sid
+		}
+		items = append(items, item)
+	}
+	return items, nil
 }
 
 // MarkRead 推进用户已读进度并返回会话成员（供推送已读回执）。

@@ -52,6 +52,8 @@ export interface Conversation {
   isMuted: boolean;
   /** 是否置顶（置顶会话在列表中单独分组靠前显示） */
   isPinned?: boolean;
+  /** 置顶时间（ISO 字符串，服务端 pinned_at；置顶组内按此倒序） */
+  pinnedAt?: string;
   /** 单聊对方的在线状态（不设置时回退 isOnline 布尔值） */
   presence?: Presence;
   /** 未发送的草稿内容，非空时列表预览显示 [草稿] 前缀 */
@@ -60,6 +62,20 @@ export interface Conversation {
   mentionedMe?: boolean;
   /** 群聊成员总数 */
   memberCount?: number;
+  /**
+   * 群聊成员头像（最多 9 个，按成员列表顺序；仅群聊有，用于拼合群头像）
+   *
+   * @remarks 未设头像的成员占一个空串，不跳过——按下标渲染才不会错位，
+   * 空串位置由调用方用该成员昵称首字兜底。群自身设了 avatarUrl 时优先用群头像。
+   */
+  memberAvatars?: string[];
+  /**
+   * 群聊成员昵称（与 {@link Conversation.memberAvatars} 同序等长）
+   *
+   * @remarks 只用于头像缺失那一格：取首字显示并据此算稳定配色。
+   *   缺这个数组时调用方退回群名首字，不会报错。
+   */
+  memberNames?: string[];
   /** 群聊当前在线人数 */
   onlineCount?: number;
   /** 群公告/置顶消息（聊天窗口顶部 pin-bar 显示） */
@@ -74,6 +90,10 @@ export interface Conversation {
   memberVersion?: number;
   /** 群消息 @ 我未读标记（列表侧显示 [@我] 前缀 / 红点，进入会话调 MarkRead 清零） */
   mentionUnread?: boolean;
+  /** 群公告全文（管理员编辑，空/undefined 表示未设置或已清除；详情面板 + 顶部横幅显示） */
+  announcement?: string;
+  /** 公告最近一次更新时间（RFC3339），横幅未读态据此与 localStorage 已读标记比对 */
+  announcementUpdatedAt?: string;
 }
 
 interface ConversationState {

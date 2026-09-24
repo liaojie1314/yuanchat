@@ -43,6 +43,9 @@ Thumbs.db
 # ====================
 deploy/data/
 deploy/logs/
+# install.sh 从 .template envsubst 渲染的产物（coturn 那份含真实密钥与外网 IP）
+deploy/coturn/turnserver.prod.conf
+deploy/nginx/nginx.conf
 
 # ====================
 # Tauri / Desktop
@@ -96,4 +99,14 @@ test-results/
 playwright-report/
 .playwright-mcp/
 
+# ====================
+# GUI 手工验证截图（本地生成，不提交）
+# ====================
+gui-test-screenshots/
+
 .design/
+
+# ====================
+# understand everything
+# ====================
+.ua/

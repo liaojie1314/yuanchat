@@ -31,7 +31,7 @@ type CreateGroupBody struct {
 
 // Create 建群：校验全员为好友后创建群会话，推送 conversation.created 给全部成员。
 //
-//	@Summary		Create group conversation
+//	@Summary		创建群聊
 //	@Tags			chat
 //	@Security		BearerAuth
 //	@Success		201	{object}	Response
@@ -77,9 +77,9 @@ func (h *ConversationHandler) Create(c *gin.Context) {
 	Created(c, dto)
 }
 
-// List returns all conversations the current user participates in.
+// List 返回当前用户参与的全部会话。
 //
-//	@Summary		List conversations
+//	@Summary		会话列表
 //	@Tags			chat
 //	@Security		BearerAuth
 //	@Success		200	{object}	Response
@@ -125,4 +125,51 @@ func (h *ConversationHandler) Members(c *gin.Context) {
 		return
 	}
 	Success(c, gin.H{"members": members})
+}
+
+// ConversationSettingsBody 会话个人设置请求体（至少携带一个字段）。
+type ConversationSettingsBody struct {
+	IsPinned *bool `json:"is_pinned"`
+	IsMuted  *bool `json:"is_muted"`
+}
+
+// UpdateSettings 更新本人会话设置（PUT /conversations/:id/settings，member 维度）。
+//
+// 多端同步：变更成功后向本人全部设备推 conversation.updated
+// （仅推本人，照 Leave 的 pushRemoved 模式；其他成员不感知）。
+func (h *ConversationHandler) UpdateSettings(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		Unauthorized(c, "unauthorized")
+		return
+	}
+	convID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid conversation id")
+		return
+	}
+	var body ConversationSettingsBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	if body.IsPinned == nil && body.IsMuted == nil {
+		BadRequest(c, "at least one of is_pinned / is_muted required")
+		return
+	}
+
+	res, err := h.svc.UpdateSettings(c.Request.Context(), userID, convID,
+		service.ConversationSettingsInput{IsPinned: body.IsPinned, IsMuted: body.IsMuted})
+	if err != nil {
+		h.groupErr(c, err)
+		return
+	}
+
+	h.pushUpdated([]uuid.UUID{userID}, ws.ConversationUpdatedPayload{
+		ConversationID: convID,
+		IsPinned:       &res.IsPinned,
+		PinnedAt:       res.PinnedAt,
+		IsMuted:        &res.IsMuted,
+	})
+	Success(c, gin.H{"is_pinned": res.IsPinned, "pinned_at": res.PinnedAt, "is_muted": res.IsMuted})
 }

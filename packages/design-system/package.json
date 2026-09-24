@@ -17,7 +17,8 @@
   "scripts": {
     "build": "echo 'design-system: no build needed'",
     "lint": "echo 'design-system: no lint'",
-    "clean": "echo 'design-system: clean'",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist coverage",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
@@ -30,6 +31,7 @@
     "tailwindcss": "^3.4.17",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
+    "typescript": "~5.6.0",
     "vitest": "^2.1.0"
   }
 }

@@ -6,7 +6,8 @@
 #
 # 与开发用 docker-compose.yml 的区别：
 # - 应用自身（server/web/admin）也容器化，不再本机 go run / vite dev
-# - 前置 nginx 做 TLS 终止 + 四域名反代；数据库/Redis/MinIO 不暴露公网端口
+# - 前置 nginx 做 TLS 终止 + 五域名反代；数据库/Redis 不暴露公网端口，
+#   MinIO 也不映射端口，但客户端要下载对象，故经 nginx 的存储子域反代对外
 # - 全部凭据来自 .env，无硬编码默认密码
 
 name: yuanchat
@@ -46,15 +47,16 @@ services:
     networks: [yuanchat-net]
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: yuanchat-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
-      # 预签名 URL 里的 host 必须是客户端可达的公网地址
-      MINIO_SERVER_URL: https://${DOMAIN_API}/s3
+      # 预签名 URL 里的 host 必须是客户端可达的公网地址，且要与 nginx 上
+      # 存储子域的 server_name 完全一致 —— SigV4 签名覆盖 Host 头，不一致会签名校验失败
+      MINIO_SERVER_URL: https://${DOMAIN_STORAGE}
     volumes:
       - minio_data:/data
     healthcheck:
@@ -70,8 +72,8 @@ services:
       context: ../server
       dockerfile: Dockerfile
       args:
-        VERSION: ${APP_VERSION:-prod}
-    image: yuanchat/server:${APP_VERSION:-latest}
+        VERSION: ${APP_VERSION:?APP_VERSION required (explicit release tag, no latest)}
+    image: yuanchat/server:${APP_VERSION:?APP_VERSION required (explicit release tag, no latest)}
     container_name: yuanchat-migrate
     restart: "no"
     entrypoint: ["/app/migrate", "up"]
@@ -91,12 +93,25 @@ services:
       YUANCHAT_MINIO_ENDPOINT: minio:9000
       YUANCHAT_MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       YUANCHAT_MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      # 下发给客户端的对外地址：ENDPOINT 是 compose 内网主机名，浏览器/手机解析不了。
+      # 必须与 minio 的 MINIO_SERVER_URL、nginx 存储子域三者一致
+      YUANCHAT_MINIO_PUBLIC_ENDPOINT: ${DOMAIN_STORAGE}
+      YUANCHAT_MINIO_PUBLIC_USE_SSL: "true"
       YUANCHAT_LOG_FORMAT: json
       YUANCHAT_LOG_OUTPUT: stdout
       YUANCHAT_PRESENCE_BACKEND: ${PRESENCE_BACKEND:-local}
       YUANCHAT_PUSH_VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       YUANCHAT_PUSH_VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       YUANCHAT_PUSH_SUBJECT: mailto:${ADMIN_EMAIL}
+      # TURN：与 coturn 容器共用同一套取值，任一项不一致都会让通话在 NAT 后打不通。
+      # SECRET/REALM 两边同源（install.sh 用同样的 TURN_SECRET / DOMAIN_APP 渲染
+      # coturn/turnserver.prod.conf），HOST 必须是客户端可达的公网域名 ——
+      # 填 coturn 这个内网服务名浏览器解析不了（同 MINIO_PUBLIC_ENDPOINT 的道理）
+      YUANCHAT_TURN_ENABLED: "true"
+      YUANCHAT_TURN_HOST: ${DOMAIN_APP}
+      YUANCHAT_TURN_PORT: "3478"
+      YUANCHAT_TURN_REALM: ${DOMAIN_APP}
+      YUANCHAT_TURN_STATIC_AUTH_SECRET: ${TURN_SECRET:?TURN_SECRET required (install.sh 会自动生成；手工部署请先填 deploy/.env)}
       TZ: ${TZ:-Asia/Shanghai}
     depends_on:
       postgres:
@@ -108,8 +123,8 @@ services:
       context: ../server
       dockerfile: Dockerfile
       args:
-        VERSION: ${APP_VERSION:-prod}
-    image: yuanchat/server:${APP_VERSION:-latest}
+        VERSION: ${APP_VERSION:?APP_VERSION required (explicit release tag, no latest)}
+    image: yuanchat/server:${APP_VERSION:?APP_VERSION required (explicit release tag, no latest)}
     container_name: yuanchat-server
     restart: unless-stopped
     environment: *server_env
@@ -131,7 +146,7 @@ services:
       args:
         VITE_API_BASE_URL: https://${DOMAIN_API}
         VITE_WS_URL: wss://${DOMAIN_WS}
-    image: yuanchat/web:${APP_VERSION:-latest}
+    image: yuanchat/web:${APP_VERSION:?APP_VERSION required (explicit release tag, no latest)}
     container_name: yuanchat-web
     restart: unless-stopped
     networks: [yuanchat-net]
@@ -142,7 +157,7 @@ services:
       dockerfile: apps/admin/Dockerfile
       args:
         VITE_API_BASE_URL: https://${DOMAIN_API}
-    image: yuanchat/admin:${APP_VERSION:-latest}
+    image: yuanchat/admin:${APP_VERSION:?APP_VERSION required (explicit release tag, no latest)}
     container_name: yuanchat-admin
     restart: unless-stopped
     networks: [yuanchat-net]
@@ -169,7 +184,7 @@ services:
 
   # 证书续期：每 12h 检查一次，到期前 30 天自动续
   certbot:
-    image: certbot/certbot:latest
+    image: certbot/certbot:v5.7.0
     container_name: yuanchat-certbot
     restart: unless-stopped
     volumes:
@@ -181,7 +196,7 @@ services:
 
   # ---------- 可观测（可选，profile 启用）----------
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.54.1
     container_name: yuanchat-prometheus
     restart: unless-stopped
     profiles: [observability]
@@ -211,6 +226,22 @@ services:
     command: -config.file=/etc/loki/local-config.yaml
     volumes:
       - loki_data:/loki
+    networks: [yuanchat-net]
+
+  # WebRTC 中继。nginx 反代不了 UDP relay，因此 coturn 自己发布端口 ——
+  # 这是除 80/443 之外唯一对外开放的一组端口。
+  coturn:
+    image: coturn/coturn:4.7.0
+    container_name: yuanchat-coturn
+    restart: unless-stopped
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "49160-49200:49160-49200/udp"
+    volumes:
+      # turnserver.prod.conf 由 install.sh 从 .template envsubst 生成（含真实密钥，不入库）
+      - ./coturn/turnserver.prod.conf:/etc/coturn/turnserver.conf:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]
     networks: [yuanchat-net]
 
 volumes:

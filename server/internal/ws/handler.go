@@ -20,7 +20,15 @@ import (
 const opTimeout = 5 * time.Second
 
 // maxTextLen 文本消息最大长度（字符数）。
+//
+// 与 service.MaxEditTextLen 是同一口径的两处闸门（发送走这里，编辑走服务层），
+// 改动其中一个必须同步另一个，否则两条入口的上限会漂移。
 const maxTextLen = 4000
+
+// TokenVersionReader 读取用户当前的令牌吊销版本号。
+type TokenVersionReader interface {
+	TokenVersion(ctx context.Context, userID uuid.UUID) (int, error)
+}
 
 // Handler 处理 /ws 升级请求与业务帧派发。
 type Handler struct {
@@ -31,9 +39,27 @@ type Handler struct {
 	isProd   bool
 	upgrader websocket.Upgrader
 	logger   *zap.Logger
+	// versions 供建连时校验 access 令牌的 tv 声明是否仍与库中一致
+	versions TokenVersionReader
 	// offlinePush 消息落库后对「无任何 WS 连接」的成员补推浏览器通知
 	//（router 注入；nil 表示未启用 Web Push）
 	offlinePush func(recipients []uuid.UUID, info OfflineMsgInfo)
+	// resolveSticker 校验发送者对该贴纸的可发送权限，并返回服务端权威的对象元数据
+	//（router 注入）。nil 时贴纸帧退化为仅字段非空校验——生产装配必然非 nil，
+	// 仅 buildContent 的纯单测会留空。
+	resolveSticker func(ctx context.Context, senderID, stickerID uuid.UUID) (objectKey string, width, height int, err error)
+	// ---- 通话信令依赖（router 注入；三者缺一即拒绝通话帧，不空指针崩读协程）----
+	callSvc      *service.CallService
+	callMembers  func(ctx context.Context, userID, convID uuid.UUID) ([]uuid.UUID, error)
+	callProfiles func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]UserBrief, error)
+	onCallEnd    func(ctx context.Context, room *service.Room, reason service.EndReason, duration int)
+}
+
+// SetStickerResolver 注入贴纸可发送性校验（router 装配时调用）。
+func (h *Handler) SetStickerResolver(
+	fn func(ctx context.Context, senderID, stickerID uuid.UUID) (string, int, int, error),
+) {
+	h.resolveSticker = fn
 }
 
 // OfflineMsgInfo 离线推送所需的消息摘要（避免 ws 层依赖 push 层类型）。
@@ -51,6 +77,10 @@ func (h *Handler) SetOfflinePush(fn func(recipients []uuid.UUID, info OfflineMsg
 }
 
 // NewHandler 创建 WebSocket Handler。
+//
+// versions 为必需依赖：建连时要用它校验令牌版本号，传 nil 会在首次建连时 panic。
+// 与 SetOfflinePush / SetStickerResolver 那两个可选回调不同，
+// 安全校验不能以「未注入即跳过」的方式退化。
 func NewHandler(
 	hub *Hub,
 	msgSvc *service.MessageService,
@@ -58,14 +88,16 @@ func NewHandler(
 	cfg config.WebSocketConfig,
 	isProd bool,
 	logger *zap.Logger,
+	versions TokenVersionReader,
 ) *Handler {
 	h := &Handler{
-		hub:    hub,
-		msgSvc: msgSvc,
-		tokens: tokens,
-		cfg:    cfg,
-		isProd: isProd,
-		logger: logger,
+		hub:      hub,
+		msgSvc:   msgSvc,
+		tokens:   tokens,
+		cfg:      cfg,
+		isProd:   isProd,
+		logger:   logger,
+		versions: versions,
 	}
 	h.upgrader = websocket.Upgrader{
 		ReadBufferSize:  4096,
@@ -99,6 +131,25 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 改密后 token_version 递增，早先签发的 access 令牌不得再建立连接。
+	// 建连是低频动作，这一次查库可接受；REST 侧不做同样校验（见迁移 014 的说明）。
+	// 读不到版本号时一律拒绝，不放行。
+	current, err := h.versions.TokenVersion(r.Context(), claims.UserID)
+	if err != nil {
+		h.logger.Error("读取 token_version 失败",
+			zap.String("user_id", claims.UserID.String()), zap.Error(err))
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if claims.TokenVersion != current {
+		h.logger.Info("ws 拒绝已吊销的令牌",
+			zap.String("user_id", claims.UserID.String()),
+			zap.Int("token_tv", claims.TokenVersion),
+			zap.Int("current_tv", current))
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		h.logger.Warn("ws upgrade failed", zap.Error(err))
@@ -108,11 +159,13 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	client := &Client{
 		userID:   claims.UserID,
 		deviceID: claims.DeviceID,
-		conn:     conn,
-		send:     make(chan []byte, sendBufferSize),
-		hub:      h.hub,
-		handler:  h,
-		logger:   h.logger,
+		// 连接级唯一标识：通话信令按它点对点定址（device_id 是平台标签，多设备同值）
+		connID:  uuid.New(),
+		conn:    conn,
+		send:    make(chan []byte, sendBufferSize),
+		hub:     h.hub,
+		handler: h,
+		logger:  h.logger,
 	}
 
 	if !h.hub.Register(client) {
@@ -142,6 +195,14 @@ func (h *Handler) dispatch(c *Client, env *Envelope) {
 		h.handleRead(c, env)
 	case TypeTyping:
 		h.handleTyping(c, env)
+	case TypeCallInvite:
+		h.handleCallInvite(c, env)
+	case TypeCallAnswer:
+		h.handleCallAnswer(c, env)
+	case TypeCallLeave:
+		h.handleCallLeave(c, env)
+	case TypeCallSignal:
+		h.handleCallSignal(c, env)
 	case TypePing:
 		// 应用层心跳：读侧任意帧都会顺延 read deadline（readPump 逻辑），
 		// 回 pong 让客户端确认链路活性（半开连接探测）
@@ -282,6 +343,41 @@ func (h *Handler) buildContent(c *Client, p *SendPayload) (int16, string, bool) 
 			return 0, "", false
 		}
 		return model.MessageTypeImage, string(raw), true
+	case "sticker":
+		// sticker_id 必须是合法 UUID：原实现只判非空，可塞满帧上限（64KB）的垃圾
+		// 落进 messages.content JSONB 并向全会话扇出，绕过文本路径的 4000 字限制。
+		stickerID, err := uuid.Parse(p.Content.StickerID)
+		if err != nil {
+			c.sendError(400, "sticker content requires a valid sticker_id", p.ClientMsgID)
+			return 0, "", false
+		}
+		// 查库校验归属并取回权威元数据：客户端传来的 key/width/height 一律不采信。
+		// 原实现完全不查库，可以填别人的 sticker_id、不存在的 id，或把任意
+		// files/ 下的 key 当贴纸发出去（Add 的 images/ 前缀检查在此路径上不生效）。
+		objectKey, width, height := p.Content.Key, p.Content.Width, p.Content.Height
+		if h.resolveSticker != nil {
+			rctx, rcancel := context.WithTimeout(context.Background(), opTimeout)
+			objectKey, width, height, err = h.resolveSticker(rctx, c.userID, stickerID)
+			rcancel()
+			if err != nil {
+				c.sendError(403, "sticker not available to sender", p.ClientMsgID)
+				return 0, "", false
+			}
+		} else if objectKey == "" || width <= 0 || height <= 0 {
+			c.sendError(400, "sticker content requires sticker_id/key/width/height", p.ClientMsgID)
+			return 0, "", false
+		}
+		raw, err := json.Marshal(struct {
+			StickerID string `json:"sticker_id"`
+			Key       string `json:"key"`
+			Width     int    `json:"width"`
+			Height    int    `json:"height"`
+		}{stickerID.String(), objectKey, width, height})
+		if err != nil {
+			c.sendError(400, "invalid sticker content", p.ClientMsgID)
+			return 0, "", false
+		}
+		return model.MessageTypeSticker, string(raw), true
 	case "file":
 		if p.Content.Key == "" || p.Content.Name == "" || p.Content.Size <= 0 {
 			c.sendError(400, "file content requires key/name/size", p.ClientMsgID)
@@ -316,6 +412,35 @@ func (h *Handler) buildContent(c *Client, p *SendPayload) (int16, string, bool) 
 			return 0, "", false
 		}
 		return model.MessageTypeVoice, string(raw), true
+	case "video":
+		// 视频消息：与 image/file/voice 同构。key 为主视频对象键（files/ 前缀），
+		// thumb_key 为客户端生成的 JPEG 封面键（images/ 前缀）。
+		// 时长上限 120s（spec M2）；体积上限不在此校验——上传阶段的
+		// max_file_size（100MB）已经拦住，这里再判一遍只会两处口径漂移。
+		if p.Content.Key == "" || p.Content.ThumbKey == "" || p.Content.Name == "" ||
+			p.Content.Size <= 0 || p.Content.Duration <= 0 || p.Content.Duration > 120 ||
+			p.Content.Width <= 0 || p.Content.Height <= 0 {
+			c.sendError(400, "video content requires key/thumb_key/name/size(1-120s)/width/height", p.ClientMsgID)
+			return 0, "", false
+		}
+		if len([]rune(p.Content.Name)) > 255 {
+			c.sendError(400, "video name too long", p.ClientMsgID)
+			return 0, "", false
+		}
+		raw, err := json.Marshal(model.MessageContentVideo{
+			Key:      p.Content.Key,
+			ThumbKey: p.Content.ThumbKey,
+			Name:     p.Content.Name,
+			Size:     p.Content.Size,
+			Duration: p.Content.Duration,
+			Width:    p.Content.Width,
+			Height:   p.Content.Height,
+		})
+		if err != nil {
+			c.sendError(400, "invalid video content", p.ClientMsgID)
+			return 0, "", false
+		}
+		return model.MessageTypeVideo, string(raw), true
 	case "e2ee":
 		// 端到端加密：服务端不理解密文语义，只校验结构完整性后原样落库。
 		// 任何字段都不参与索引/搜索/审核——这是 E2EE 的设计前提。

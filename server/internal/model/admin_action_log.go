@@ -24,11 +24,22 @@ func (AdminActionLog) TableName() string { return "admin_action_logs" }
 
 // Admin 审计动作常量
 const (
-	AdminActionBanUser       = "ban_user"
-	AdminActionUnbanUser     = "unban_user"
-	AdminActionDissolveConv  = "dissolve_conversation"
-	AdminActionDeleteMessage = "delete_message"
-	AdminActionClearFlag     = "clear_flag"
-	AdminActionReportKeep    = "report_keep"
-	AdminActionReportDelete  = "report_delete"
+	AdminActionBanUser         = "ban_user"
+	AdminActionUnbanUser       = "unban_user"
+	AdminActionDissolveConv    = "dissolve_conversation"
+	AdminActionDeleteMessage   = "delete_message"
+	AdminActionClearFlag       = "clear_flag"
+	AdminActionReportKeep      = "report_keep"
+	AdminActionReportDelete    = "report_delete"
+	AdminActionTakeDownPack    = "take_down_sticker_pack"
+	AdminActionUntakeDownPack  = "untake_down_sticker_pack"
+	AdminActionSetPackOfficial = "set_sticker_pack_official"
+	AdminActionClearPackFlag   = "clear_sticker_pack_flag"
+	// AdminActionResetAvatar 管理端重置用户头像（avatar_url 置空，恢复默认头像）。
+	AdminActionResetAvatar = "reset_avatar"
+	// AdminActionViewMessageEdits 管理员查看消息编辑历史（取证动作，须留痕）。
+	AdminActionViewMessageEdits = "view_message_edits"
+	// 朋友圈处置：删帖 / 删评论（内容本体软删，本表只记审计）
+	AdminActionDeleteMomentPost    = "delete_moment_post"
+	AdminActionDeleteMomentComment = "delete_moment_comment"
 )

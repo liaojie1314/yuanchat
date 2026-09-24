@@ -2,17 +2,21 @@
  * 用户管理页 — 检索、封禁/解封
  */
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "@yuanchat/ui";
-import { listUsers, banUser, unbanUser, type AdminUser } from "../api";
+import { listUsers, banUser, unbanUser, resetUserAvatar, type AdminUser } from "../api";
 import { usePagedQuery } from "../hooks/usePagedQuery";
 import { SearchBox, DataTable, Pager, EmptyRow } from "../components/Table";
 
 export function UsersPage() {
   const { t } = useTranslation();
+  // 举报列表深链 /users?q=<target_id>：初始搜索词取 URL 参数（后端支持按 ID 精确匹配）
+  const [searchParams] = useSearchParams();
   const { q, search, page, setPage, list, total, totalPages, loading, refresh } =
-    usePagedQuery<AdminUser>((query, p) => listUsers(query, p));
+    usePagedQuery<AdminUser>((query, p) => listUsers(query, p), 20, 0, searchParams.get("q") ?? "");
   const [banTarget, setBanTarget] = useState<AdminUser | null>(null);
+  const [avatarTarget, setAvatarTarget] = useState<AdminUser | null>(null);
 
   const headers = [
     t("admin.users.colUser"),
@@ -54,14 +58,14 @@ export function UsersPage() {
                   </span>
                 )}
               </div>
-              <span className="text-on-surface-variant text-label-sm">#{u.short_id}</span>
+              <span className="text-label-sm text-on-surface-variant">#{u.short_id}</span>
             </td>
-            <td className="text-on-surface-variant px-4 py-3 text-body-md">
+            <td className="px-4 py-3 text-body-md text-on-surface-variant">
               {u.phone || u.email || "—"}
             </td>
             <td className="px-4 py-3">
               {u.status === 2 ? (
-                <span className="text-error-on-container rounded bg-error-container px-2 py-0.5 text-label-sm">
+                <span className="rounded bg-error-container px-2 py-0.5 text-label-sm text-error-on-container">
                   {t("admin.users.statusBanned")}
                 </span>
               ) : (
@@ -70,22 +74,32 @@ export function UsersPage() {
                 </span>
               )}
             </td>
-            <td className="text-on-surface-variant px-4 py-3 text-body-md">
+            <td className="px-4 py-3 text-body-md text-on-surface-variant">
               {new Date(u.created_at).toLocaleDateString()}
             </td>
             <td className="px-4 py-3">
-              {u.role !== 1 && (
-                <button
-                  onClick={() => void handleToggleBan(u)}
-                  className={
-                    u.status === 2
-                      ? "text-label-lg text-primary hover:underline"
-                      : "text-label-lg text-error hover:underline"
-                  }
-                >
-                  {u.status === 2 ? t("admin.users.unban") : t("admin.users.ban")}
-                </button>
-              )}
+              <div className="flex items-center gap-3">
+                {u.role !== 1 && (
+                  <button
+                    onClick={() => void handleToggleBan(u)}
+                    className={
+                      u.status === 2
+                        ? "text-label-lg text-primary hover:underline"
+                        : "text-label-lg text-error hover:underline"
+                    }
+                  >
+                    {u.status === 2 ? t("admin.users.unban") : t("admin.users.ban")}
+                  </button>
+                )}
+                {u.avatar_url && (
+                  <button
+                    onClick={() => setAvatarTarget(u)}
+                    className="text-label-lg text-error hover:underline"
+                  >
+                    {t("admin.users.resetAvatar")}
+                  </button>
+                )}
+              </div>
             </td>
           </tr>
         ))}
@@ -104,6 +118,18 @@ export function UsersPage() {
           if (target) void banUser(target.id).then(refresh);
         }}
         onCancel={() => setBanTarget(null)}
+      />
+      <ConfirmDialog
+        open={avatarTarget !== null}
+        title={t("admin.users.resetAvatar")}
+        message={t("admin.users.resetAvatarConfirm", { name: avatarTarget?.nickname ?? "" })}
+        danger
+        onConfirm={() => {
+          const target = avatarTarget;
+          setAvatarTarget(null);
+          if (target) void resetUserAvatar(target.id).then(refresh);
+        }}
+        onCancel={() => setAvatarTarget(null)}
       />
     </div>
   );

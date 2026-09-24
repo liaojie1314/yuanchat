@@ -50,3 +50,26 @@ func (r *PushRepository) DeleteByEndpoint(ctx context.Context, endpoint string) 
 		Where("endpoint = ?", endpoint).
 		Delete(&model.PushSubscription{}).Error
 }
+
+// AdminPushSubscription 管理端订阅视图：订阅本体 + 所属用户昵称。
+type AdminPushSubscription struct {
+	model.PushSubscription
+	UserNickname *string `json:"user_nickname"`
+}
+
+// ListAll 分页列出全部推送订阅（最新在前），附所属用户昵称。
+// 供管理端概览的订阅视图使用；只读，不做任何清理动作。
+func (r *PushRepository) ListAll(ctx context.Context, offset, limit int) ([]AdminPushSubscription, int64, error) {
+	tx := r.db.WithContext(ctx).Model(&model.PushSubscription{})
+	var total int64
+	if err := tx.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var subs []AdminPushSubscription
+	err := tx.
+		Select("push_subscriptions.*, users.nickname AS user_nickname").
+		Joins("LEFT JOIN users ON users.id = push_subscriptions.user_id").
+		Order("push_subscriptions.created_at DESC").Offset(offset).Limit(limit).
+		Scan(&subs).Error
+	return subs, total, err
+}
