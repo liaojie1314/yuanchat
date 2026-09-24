@@ -2,7 +2,7 @@
   "name": "yuanchat",
   "private": true,
   "type": "module",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "元聊 YuanChat — 企业级即时通讯软件 Monorepo",
   "scripts": {
     "dev": "turbo dev",
