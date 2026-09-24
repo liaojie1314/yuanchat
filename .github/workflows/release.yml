@@ -108,15 +108,16 @@ jobs:
           - platform: linux
             os: ubuntu-22.04
             args: ""
-          # --no-default-features 关掉 Linux 专属的通话助手 bin（理由见
-          # src-tauri/Cargo.toml 的 [features] 注释），否则 macOS 的
-          # universal 包会因为助手没被 lipo 进通用目录而打包失败
           - platform: windows
             os: windows-latest
-            args: "--no-default-features"
+            args: ""
+          # `--` 之后的参数才会透传给 cargo —— tauri build 自己没有
+          # --no-default-features 这个选项。关掉 Linux 专属的通话助手 bin，
+          # 否则 universal 包会因为助手没被 lipo 进通用目录而打包失败
+          # （理由见 src-tauri/Cargo.toml 的 [features] 注释）
           - platform: macos
             os: macos-latest
-            args: "--target universal-apple-darwin --no-default-features"
+            args: "--target universal-apple-darwin -- --no-default-features"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -153,9 +154,18 @@ jobs:
         # 本机通常早就装过，所以这个缺口只会在干净的 runner 上暴露。
         # 运行期还要 gstreamer1.0-nice 等插件包，那是装在终端用户机器上的，
         # 打包机不需要（清单见 docs/DEVELOPMENT.md）。
+        #
+        # purge 那步是 GitHub ubuntu-22.04 镜像的坑：镜像预装了 LLVM 自带的
+        # libunwind-*-dev，与 Ubuntu 仓库的 libunwind-dev 冲突，而
+        # libgstreamer1.0-dev 恰好依赖后者，于是 apt 报 "held broken packages"
+        # 且不指名冲突方。本 job 用不到 LLVM，先摘掉即可。
+        # 不改用 ubuntu-24.04（那个镜像没这问题）是因为会把产物的 glibc 下限
+        # 从 2.35 抬到 2.39，老发行版的用户就装不上了。
         run: |
           sudo apt-get update
+          sudo apt-get purge -y 'libunwind-.*-dev' || true
           sudo apt-get install -y \
+            libunwind-dev \
             libwebkit2gtk-4.1-dev \
             libgtk-3-dev \
             libayatana-appindicator3-dev \
@@ -169,6 +179,9 @@ jobs:
             wget \
             file \
             libxdo-dev
+          # 早失败早暴露：.pc 文件缺了的话，后面 gstreamer-sys 的报错很难读
+          pkg-config --exists gstreamer-1.0 gstreamer-sdp-1.0 gstreamer-webrtc-1.0 \
+            || { echo "::error::gstreamer pkg-config 文件缺失，通话助手无法编译"; exit 1; }
 
       - name: Install
         run: pnpm install --frozen-lockfile

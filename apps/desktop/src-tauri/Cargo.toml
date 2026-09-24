@@ -18,12 +18,12 @@ name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 # 通话助手默认编进来，Linux 的 dev 与打包因此不必额外传参；
-# macOS / Windows 在 CI 里用 --no-default-features 关掉它。
-# 关掉的理由不只是"那两个平台用不上"：cargo 会为包里每个 bin 都产出二进制，
-# tauri 的 bundler 又会把它们统统塞进安装包，于是各自多带一个空壳程序；
-# 到了 universal-apple-darwin 更会直接打包失败 —— tauri 只把主程序 lipo 进
-# target/universal-apple-darwin/release/，助手仍停在两个单架构目录里，
-# bundler 去通用目录取它就报 "does not exist"。
+# macOS 在 CI 里用 `-- --no-default-features` 关掉它（`--` 之后才透传给 cargo）。
+# 非关不可的是 macOS：cargo 会为包里每个 bin 都产出二进制，tauri 的 bundler
+# 又会把它们统统塞进安装包，而 universal-apple-darwin 下 tauri 只把主程序 lipo
+# 进 target/universal-apple-darwin/release/，助手仍停在两个单架构目录里，
+# bundler 去通用目录取它就报 "does not exist"，整个打包失败。
+# Windows 不关：那边只是白带一个空壳二进制，没有副作用，犯不着动已经能跑的配置。
 [features]
 default = ["call-helper"]
 call-helper = []
