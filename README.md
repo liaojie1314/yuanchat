@@ -2,14 +2,14 @@
 
 即时通讯软件 — 从零构建的现代 IM 解决方案。
 
-**当前状态**：v0.3.0（Web + Desktop 三平台 + Android APK 由 GitHub Actions 自动打包）。
+**当前状态**：v0.4.0（Web + Desktop 三平台 + Android APK 由 GitHub Actions 自动打包）。
 
 ## 平台支持（Tauri 2 统一桌面 + 移动端）
 
 | 平台            | 技术                                | 状态                                      |
 | --------------- | ----------------------------------- | ----------------------------------------- |
 | Web             | React + Vite                        | ✅ 可用（`.tar.gz` 静态部署，PWA 可安装） |
-| Desktop Linux   | Tauri 2                             | ✅ 可用（`.deb` + `.AppImage`）           |
+| Desktop Linux   | Tauri 2                             | ✅ 可用（`.deb` + `.AppImage` + `.rpm`）  |
 | Desktop Windows | Tauri 2                             | ✅ 可用（`.msi` + `.exe`）                |
 | Desktop macOS   | Tauri 2（universal Intel + M 系列） | ✅ 可用（`.dmg`）                         |
 | Android         | Tauri 2                             | ✅ 可用（签名 APK）                       |
@@ -82,6 +82,15 @@
 - **通话记录进消息流**：接通显示时长、未接显示未接，预览由客户端按当前语言渲染（服务端不回传中文）
 - **桌面端独立通话窗口**；**安卓前台服务保活**（锁屏/切后台不掉线）
 - **Linux 桌面端走原生 GStreamer 后端**：WebKitGTK 没编进 GstWebRTC，`RTCPeerConnection` 整个类不存在，故媒体面下沉到独立助手进程，画面经本地 MJPEG 服务送回 WebView（依赖清单见 [DEVELOPMENT.md](docs/DEVELOPMENT.md)）
+
+### 朋友圈与个人状态
+
+- **信息流**：发布图文动态、按可见范围投递，`(created_at, id)` 复合游标分页；发布页、他人主页、媒体网格
+- **互动**：点赞（幂等）、评论与回复、互动消息聚合页；`moment.activity` 帧实时推送（前后端共用 golden 契约）
+- **可见性单一真源**：好友关系 + 黑名单 + 可见范围全部收敛到唯一的 `VisiblePostsScope`，列表、媒体授权、GC 引用共用同一份判断 —— 读一套写一套就是越权
+- **删帖 = 访问撤销**：帖子删除后其媒体对象随即不可读，不留可被直链访问的残留
+- **个人状态**：状态 emoji + 文案，带过期时间（服务端读时判定，过期即吐空），头像状态角标
+- **治理**：管理后台可删动态/删评论并留审计日志
 
 ### 实时状态与通知
 
@@ -169,7 +178,7 @@ pnpm release:dry        # 模拟运行，看会做什么
 | 平台            | 产物                                                    |
 | --------------- | ------------------------------------------------------- |
 | Web             | `yuanchat-web-vX.Y.Z.tar.gz`                            |
-| Linux Desktop   | `.deb` + `.AppImage`                                    |
+| Linux Desktop   | `.deb` + `.AppImage` + `.rpm`                           |
 | Windows Desktop | `.msi` + `.exe`                                         |
 | macOS Desktop   | `.dmg`（Intel + M 系列 universal binary）               |
 | Android         | `.apk`（按 ABI 分包：arm64-v8a / armeabi-v7a / x86_64） |
@@ -183,7 +192,7 @@ pnpm release:dry        # 模拟运行，看会做什么
 - **[聊天 API 与 WebSocket 协议](docs/CHAT_API.md)** — REST 端点 + WS 帧 + 系统消息约定
 - **[数据库设计](docs/DB_SCHEMA.md)** — 表结构 + 索引 + 迁移
 - **[开发与打包指南](docs/DEVELOPMENT.md)** — 启动/构建/调试/测试命令，i18n 与旧 WebView 兼容约定
-- **[常见问题排查](.claude/TROUBLESHOOTING.md)** — 按平台分类的踩坑记录（白屏、软键盘、旧 WebView 静默失效、语言持久化…）
+- **[常见问题排查](docs/TROUBLESHOOTING.md)** — 按平台分类的踩坑记录（白屏、软键盘、旧 WebView 静默失效、语言持久化…）
 - **[发版指南](docs/RELEASE.md)** — release-it + GitHub Actions + 签名策略
 - **[UI/UX 设计规范](docs/design/README.md)** — Material Design 3 Aurora 主题、组件、多端适配
 

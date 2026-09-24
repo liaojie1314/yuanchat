@@ -49,10 +49,24 @@ pnpm install                # 安装所有 workspace 依赖
 
 **Linux 桌面端额外依赖（语音 / 视频通话）**：
 
+分两类，**缺哪一类的报错长相完全不同**：
+
 ```bash
+# ① 编译期：通话助手要链接 gstreamer，缺了 cargo 直接挂在
+#    "failed to run custom build command for gstreamer-sys"
+sudo apt install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+                 libgstreamer-plugins-bad1.0-dev
+
+# ② 运行期：插件在跑通话时才按需加载，缺了能编译能启动，
+#    只是通话到某一步静默失效（对应关系见下表）
 sudo apt install gstreamer1.0-nice gstreamer1.0-plugins-base \
                  gstreamer1.0-plugins-good gstreamer1.0-plugins-bad
 ```
+
+> 装过运行期插件包的机器往往连带装过 `-dev`，所以第 ① 类的缺失在开发机上基本
+> 遇不到，只有干净环境（CI runner、新装的机器）才暴露。CI 的安装清单见
+> `.github/workflows/release.yml`，踩坑记录见
+> [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md#发版--ci-打包)。
 
 Linux 上的通话**不经过 WebView**。Ubuntu 与 GNOME 官方 Flatpak runtime 的 WebKitGTK
 都没有把 GstWebRTC 后端编进去 —— `navigator.mediaDevices` 正常，`RTCPeerConnection`
@@ -238,7 +252,7 @@ pnpm --filter @yuanchat/desktop tauri android dev
 > **白屏问题**：如果应用白屏，分两类排查：
 >
 > **A. 页面完全空白且终端无报错（JS 语法不兼容）** — 最隐蔽，详见
-> [`.claude/TROUBLESHOOTING.md`](../.claude/TROUBLESHOOTING.md) 的「应用白屏（旧 WebView 语法不兼容）」。
+> [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md) 的「应用白屏（旧 WebView 语法不兼容）」。
 > 要点：旧 Android（如 API 29 自带 **Chrome 74**）的 System WebView 不支持
 > `?.` / `??`（ES2020，需 Chrome 80+）。
 >
@@ -288,7 +302,7 @@ pnpm --filter @yuanchat/desktop tauri android build
 
 构建产物位置：`apps/desktop/src-tauri/gen/android/app/build/outputs/`
 
-> 常见问题排查见 [`.claude/TROUBLESHOOTING.md`](../.claude/TROUBLESHOOTING.md)
+> 常见问题排查见 [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md)
 
 ### `gen/android` 的版本控制约定
 
@@ -296,7 +310,7 @@ pnpm --filter @yuanchat/desktop tauri android build
 
 - `app/src/main/java/.../MainActivity.kt` — 用户扩展点，Tauri **只生成一次、构建不覆盖**
   （被覆盖的是 `generated/TauriActivity.kt`）。当前含**软键盘适配**的 `WindowInsets` 监听，
-  软键盘弹起时把 IME 高度作为 padding 应用到内容区（详见 `.claude/TROUBLESHOOTING.md`
+  软键盘弹起时把 IME 高度作为 padding 应用到内容区（详见 `docs/TROUBLESHOOTING.md`
   「软键盘遮挡输入框」）。
 - `app/src/main/AndroidManifest.xml`、`build.gradle.kts`、`res/`、Gradle Wrapper 等。
 
@@ -909,7 +923,7 @@ macOS / Windows 代码签名（可选，用 `if` 门控——secrets 存在时�
   **i18n key**，由调用方 `t(result.errors[0])` 翻译。往里塞中文提示会绕过整套 i18n
 - **切换语言只走 `useThemeStore.setLocale()`**（内部已 `i18n.changeLanguage`），组件里不要再自己调
   `i18n.changeLanguage`；冷启动的语言恢复由 themeStore 的 `onRehydrateStorage` 负责，
-  原因见 [`.claude/TROUBLESHOOTING.md`](../.claude/TROUBLESHOOTING.md) 的
+  原因见 [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md) 的
   「切换语言后重开应用又变回系统语言」
 - **新增文案必须四语同时补齐**，否则 `pnpm check:i18n` 直接失败（见第七章）
 - **`<html lang>` 自动跟随**：`packages/design-system/src/i18n/index.ts` 挂了 `languageChanged`
@@ -942,8 +956,8 @@ Android WebView 会把「滚动时才浮现的覆盖式滚动条」换成**常�
 1. 任何 `package.json` scripts 的**增删改**，必须同步更新本文档的对应章节
 2. 任何 Tauri 配置（`tauri.conf.json`、`capabilities/`）的变更，必须同步更新本文档
 3. 环境变量的**新增/修改/删除**，必须同步更新本文档第八章
-4. 故障排查 / 踩坑记录 → 追加到 `.claude/TROUBLESHOOTING.md`（按平台分类）
-5. 本文档和 `.claude/TROUBLESHOOTING.md` 必须并行更新，所有 AI 会话必须遵守此规则
+4. 故障排查 / 踩坑记录 → 追加到 `docs/TROUBLESHOOTING.md`（按平台分类）
+5. 本文档和 `docs/TROUBLESHOOTING.md` 必须并行更新，所有 AI 会话必须遵守此规则
 6. `.github/workflows/` 的变更须同步更新本文档"CI/CD 与发版"章节，签名策略变化须更新 `docs/RELEASE.md`
 
 ### 多实例部署配置

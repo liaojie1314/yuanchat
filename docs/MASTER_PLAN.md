@@ -13,7 +13,7 @@
 | 后端语言    | Go (Golang)                                                       |
 | 容器化      | Docker Compose（开发与生产编排都在 `deploy/`，未使用 Kubernetes） |
 | 文档位置    | `docs/` 目录（本文档所在目录）                                    |
-| AI 辅助文档 | `AGENTS.md`（根目录约束）、`.claude/TROUBLESHOOTING.md`           |
+| AI 辅助文档 | `AGENTS.md`（根目录约束）、`docs/TROUBLESHOOTING.md`              |
 
 ---
 
@@ -133,6 +133,7 @@ yuanchat/
 │   ├── DEVELOPMENT.md            # 开发与打包指南（启动/构建/调试/测试）
 │   ├── ROADMAP.md                # 迭代路线图
 │   ├── RELEASE.md                # 发版指南
+│   ├── TROUBLESHOOTING.md        # 按平台分类的踩坑记录（含发版 / CI 打包）
 │   ├── design/                   # UI/UX 设计规范（7 份专题 + README）
 │   ├── deploy/                   # 部署文档（self-hosted.md / env.md / server-and-domain.md）
 │   ├── observability/            # 可观测性（logging.md）
@@ -141,8 +142,7 @@ yuanchat/
 ├── AGENTS.md                     # AI Agent 指南（根目录，核心约束清单）
 ├── CHANGELOG.md                  # 变更日志（release-it + conventional-changelog 生成）
 ├── contracts/                    # 前后端黄金契约（message-send.golden.json）
-├── .claude/                      # 🤖 Claude Code 项目配置
-│   ├── TROUBLESHOOTING.md        # 按平台分类的踩坑记录
+├── .claude/                      # 🤖 Claude Code 项目配置（.gitignore 忽略，本机私有）
 │   └── settings.local.json       # 本地权限设置
 │
 ├── server/                       # 🔧 后端 Go 服务（单进程双端口：REST :8085 + WS :8086）
@@ -618,7 +618,7 @@ Linux 原生后端要点（详见设计文档 §3.11a）：媒体面下沉到独
 | 🟡   | **三端真机实测部分完成**：Web 端已实测（跨账号看图、点赞落库、WS 实时推送、admin 处置链路）。**桌面（Tauri）与安卓模拟器仍未走查** —— plan Task 16 Step 3 列的底栏四项布局、九宫格不溢出、发布页软键盘、返回键语义待补 |
 | 🟡   | 个人状态文本不过审核 —— 见 §3 同名条目（需新增 `UGCTypeStatus` 并接管理端，故未随本批做）                                                                                                                              |
 | ⚪   | `GroupAvatar` 三列布局（5 人及以上）的空头像格只出色块不写字：格子仅外框 1/3 宽，写字必糊。两列及以内才取昵称首字                                                                                                      |
-| 🟡   | **README 四端截图只完成两端**：Web 与管理后台已截（`docs/screenshots/`，统一 1920×1080）。桌面与安卓待补，补齐后再一次性写进 README —— 桌面首次构建要从零编译 Rust，单独排时间                                         |
+| 🟡   | ~~**README 四端截图只完成两端**~~ —— ✅ 2026-09-23 补齐：Web / 桌面 / 管理后台 / 安卓四端实图已全部截好放进 `docs/screenshots/` 并写入 README                                                                          |
 
 #### 2.10 朋友圈实测收口批（✅ 已完成，2026-09-22）
 
@@ -647,6 +647,44 @@ Linux 原生后端要点（详见设计文档 §3.11a）：媒体面下沉到独
   改用本仓惯例 `vi.stubGlobal`。此前该用例一直是红的
 - **文档补账**：`DB_SCHEMA.md` 此前停在 017，朋友圈四表（018）从未落文档，
   本批连同 019 一并补上；`CHAT_API.md` 的 UGC 队列段补齐新类型与处置语义
+
+#### 2.11 v0.4.0 发版与发版流水线修复（✅ 已完成，2026-09-24）
+
+分支：直接在 `main` 上修（用户当次授权），修完 `--no-ff` 回合 dev。
+
+- **发版本身**：`release-it` 打 `v0.4.0` → CHANGELOG → GitHub Release；
+  发版后在本地 `registry:2.8.3`（`:5000`）构建并推入
+  `yuanchat/{server,web,admin}:0.4.0`
+- **`.dockerignore`**：镜像构建上下文从 6.46GB 降到 91MB。此前 `apps/web` /
+  `apps/admin` 两个 Dockerfile 的 context 是仓库根目录，`src-tauri/target`
+  一个目录就 30G，光传上下文要几分钟且随打包次数无限增长
+- **流水线三处修复**（五个平台红了三个，全是**本机有、干净 runner 没有**的环境差异）：
+  - Linux：补 gstreamer 三个 `-dev` 包（通话助手编译期依赖，与 `DEVELOPMENT.md`
+    里那组运行期插件包不是一回事）；并在装之前 purge 掉 runner 镜像预装的
+    LLVM `libunwind-*-dev` —— 它与 `libgstreamer1.0-dev` 依赖的 `libunwind-dev`
+    冲突，apt 只报 held broken packages 且不指名冲突方
+  - macOS：tauri 打 universal 包时只把**主程序** lipo 进通用目录，第二个 bin
+    （通话助手）留在两个单架构目录里，bundler 取不到即整体失败。加一步
+    `Pre-lipo call helper (macos)` 在构建前自己补齐
+  - Android：`android-actions/setup-android` 的 `packages` 默认值含已被 Google
+    下架的旧版 `tools` 包，显式覆盖为 `platform-tools`
+- **一条昂贵的教训**：中途试过用 `required-features` 按平台裁剪通话助手 bin，
+  结果**三端一起挂**且 Windows 报的是 WiX `light.exe` 失败，面目全非。根因是
+  tauri-cli 的 `get_binaries` 判定 bin 启用**只看 CLI 的 `-f` 参数，不看 cargo 的
+  default features**；一旦判成禁用，它转而按 `src/bin/` 的文件名要 `call_helper`，
+  与 `[[bin]] name` 产出的 `yuanchat-call-helper` 对不上。最终 `Cargo.toml`
+  逐字节还原，改动收敛为 `release.yml` 一个文件、纯增量、不碰任何源码
+- **文档回写**：`RELEASE.md`（产物表、`ref` 必填的补跑姿势、故障排查条目）、
+  `TROUBLESHOOTING.md` 新增「发版 / CI 打包」节、`DEVELOPMENT.md` 区分
+  编译期/运行期两类 gstreamer 包、README 补上从未记录过的朋友圈与个人状态
+- **踩坑记录从 `.claude/` 迁到 `docs/`**：`.gitignore` 忽略整个 `.claude/`，
+  这份 29KB 的踩坑记录**从未进过仓库** —— README、AGENTS.md、MASTER_PLAN、
+  DEVELOPMENT 共 12 处引用它，对任何 clone 仓库的人都是死链，积累的排查经验
+  也只存在于一台机器上。按 AGENTS.md 第 6 条（文档统一放 `docs/`）移入仓库并改全引用
+
+最终 5 个 job 全绿，Release 19 个资产：web `.tar.gz`；Linux `.deb`/`.AppImage`/`.rpm`；
+Windows `.msi`/`.exe`；macOS universal `.dmg` + `.app.tar.gz`；Android 四个 ABI 的 APK；
+`latest.json` 合并了 11 个平台键。
 
 #### 3. 既有代码的真实缺陷（无 plan，可随手批次收口）
 

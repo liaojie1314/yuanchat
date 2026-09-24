@@ -136,13 +136,21 @@ release-it 会：
 
 tag push 触发 `.github/workflows/release.yml`，并行构建 5 个平台：
 
-| 平台            | Runner         | 产物                                      |
-| --------------- | -------------- | ----------------------------------------- |
-| Web             | ubuntu-latest  | `yuanchat-web-vX.Y.Z.tar.gz`（Vite dist） |
-| Linux Desktop   | ubuntu-latest  | `.deb` + `.AppImage`                      |
-| Windows Desktop | windows-latest | `.msi` + `.exe`                           |
-| macOS Desktop   | macos-latest   | `.dmg`（x64 + aarch64）                   |
-| Android         | ubuntu-latest  | `yuanchat-vX.Y.Z.apk`（signed）           |
+| 平台            | Runner         | 产物                                                               |
+| --------------- | -------------- | ------------------------------------------------------------------ |
+| Web             | ubuntu-latest  | `yuanchat-web-vX.Y.Z.tar.gz`（Vite dist）                          |
+| Linux Desktop   | ubuntu-22.04   | `.deb` + `.AppImage` + `.rpm`                                      |
+| Windows Desktop | windows-latest | `.msi` + `.exe`                                                    |
+| macOS Desktop   | macos-latest   | `.dmg`（universal，Intel + Apple Silicon 合一）                    |
+| Android         | ubuntu-22.04   | 按 ABI 分包 4 个签名 APK（arm64-v8a / armeabi-v7a / x86 / x86_64） |
+
+除 `.dmg` 外的桌面产物还各带一个 `.sig`（updater 的 minisign 签名），
+另有一份 `latest.json` 记录各平台更新地址 —— 它由**每个 desktop job 分别上传**，
+tauri-action 会先读回 Release 上已有的那份再合并自己的平台键，
+所以三端分先后跑完也不会互相覆盖。
+
+Linux runner 钉在 `ubuntu-22.04` 而非 latest：产物的 glibc 下限跟着构建机走，
+换 24.04 会从 2.35 抬到 2.39，老发行版用户直接装不上。
 
 产物自动 attach 到对应的 GitHub Release。全程约 20-30 分钟。
 
@@ -222,6 +230,17 @@ Actions 页面 → Release workflow → Run workflow：
 > 例：Android 打包失败修复后，`tag=v0.3.0` + `only=android` 即可只重跑 APK，
 > 桌面端/Web 已上传的产物不受影响。
 
+> ⚠️ **修的是 CI 脚本本身时，`ref` 必填。** tag 指向的是修复之前那个 commit，
+> Actions 页面的「Re-run failed jobs」和留空 `ref` 都会继续用那份坏代码与坏
+> workflow 跑，看上去改了却毫无变化。正确姿势是把 `ref` 指到修好的分支：
+>
+> ```bash
+> gh workflow run release.yml --ref main -f tag=v0.4.0 -f ref=main -f only=desktop
+> ```
+>
+> 重跑已成功的平台是安全的：tauri-action 上传前会先删掉同名旧资产，
+> `softprops/action-gh-release` 同理，不会因为「资产已存在」而失败。
+
 ## 六、故障排查
 
 ### 发版前本地预检（强烈建议）
@@ -236,6 +255,13 @@ cd apps/desktop && pnpm tauri build                  # 桌面端（本机平台�
 cd apps/desktop && pnpm tauri android build --apk --target aarch64   # Android（需 NDK）
 ```
 
+**但要清楚它挡不住什么。** 本地预检验证的是「代码能编译、能打包」，验证不了
+「干净机器上依赖装不装得上」—— 开发机早被历史操作装满了各种 `-dev` 包，
+runner 是空的。v0.4.0 那轮就是本地全绿、CI 五个平台红了三个，三条全是环境差异
+（缺 gstreamer `-dev`、runner 镜像的 libunwind 冲突、setup-android 的下架包）。
+这类问题只能靠读 CI 日志定位，改 workflow 前先把工具语义查准，
+别靠猜参数试错 —— 每猜错一轮就是 20 分钟，而且坏 commit 已经落在共享分支上。
+
 ### Android 打包报 `Permission xxx not found`
 
 capabilities 里引用了移动端不存在的插件权限（如 `updater:default`、`process:default`
@@ -248,10 +274,27 @@ capabilities 里引用了移动端不存在的插件权限（如 `updater:defaul
 
 - 检查 `ANDROID_KEYSTORE_BASE64` 是否完整（换行符可能导致 base64 解码失败，用 `base64 -w0` 生成）
 - 检查 keystore 密码/别名 secrets 是否匹配 keystore 实际值
+- 若失败在 `Setup Android SDK` 一步且报 `Failed to find package 'tools'`：
+  `android-actions/setup-android` 的 `packages` 默认值含已被 Google 下架的旧版 `tools` 包，
+  workflow 里已显式覆盖成 `platform-tools`
 
 ### Tauri Linux 依赖缺失
 
-Actions 里已装：`libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev`。本地开发额外需要，见 `docs/DEVELOPMENT.md`。
+Actions 里已装：`libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev
+librsvg2-dev libxdo-dev`，外加通话助手编译期要的
+`libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-plugins-bad1.0-dev`
+和一个 `libunwind-dev`（装它之前要先 `apt-get purge 'libunwind-.*-dev'`，
+runner 镜像预装的 LLVM 版本与它冲突）。本地开发另需运行期插件包，见
+`docs/DEVELOPMENT.md`；两类包的区别与各自的报错长相见
+[`docs/TROUBLESHOOTING.md` 的「发版 / CI 打包」节](TROUBLESHOOTING.md#发版--ci-打包)。
+
+### macOS universal 包报某个二进制 does not exist
+
+tauri 打 universal 包时只把**主程序** lipo 进 `target/universal-apple-darwin/release/`，
+本仓的第二个 bin（通话助手）要在构建前自己补一次 lipo，workflow 里已有
+`Pre-lipo call helper (macos)` 这一步。**不要**改用 `required-features` 去按平台关掉这个
+bin —— tauri 判定 bin 启用只看 CLI 的 `-f` 参数、不看 cargo 的 default features，
+一关就会转而按 `src/bin/` 的文件名找 `call_helper`，三个平台一起挂。详见上述排查文档。
 
 ### release-it 报 requireBranch 错
 
