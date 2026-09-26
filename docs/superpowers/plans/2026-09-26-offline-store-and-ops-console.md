@@ -3254,7 +3254,7 @@ git commit -m "feat(localdb): 本地库会话单例与 after_seq 客户端"
 - Produces:
   - `RECONCILE_PAGE = 50` / `RECONCILE_MAX_ROUNDS = 20`
   - `persistMessages(convId: string, msgs: ChatMessage[]): void` —— **fire-and-forget**，内部吞掉全部异常
-  - `hydrateConversation(convId: string, limit?: number): Promise<ChatMessage[]>` —— 本地读；无库或无数据返回 `[]`
+  - `hydrateMessages(convId: string, limit?: number): Promise<ChatMessage[]>` —— 本地读；无库或无数据返回 `[]`
   - `noteIncoming(convId: string, seq: number): Promise<boolean>` —— 推进水位，返回**是否发现空洞**
   - `reconcileConversation(convId: string, selfUserId: string): Promise<ChatMessage[]>` —— 三道闸门的 `after_seq` 循环，返回补回来的消息
 
@@ -3281,7 +3281,7 @@ import {
 } from "../localdb";
 import {
   persistMessages,
-  hydrateConversation,
+  hydrateMessages,
   noteIncoming,
   reconcileConversation,
   localRowOf,
@@ -3335,25 +3335,25 @@ describe("闸门常量", () => {
   });
 });
 
-describe("persistMessages / hydrateConversation", () => {
+describe("persistMessages / hydrateMessages", () => {
   it("落盘后能水合回来，按 seq 升序", async () => {
     persistMessages(CONV, [msg(2), msg(1), msg(3)]);
     await vi.waitFor(async () => {
-      expect((await hydrateConversation(CONV)).map((m) => m.seq)).toEqual([1, 2, 3]);
+      expect((await hydrateMessages(CONV)).map((m) => m.seq)).toEqual([1, 2, 3]);
     });
   });
 
   it("无 seq 的乐观条目不落盘（它属 outbox 职责）", async () => {
     persistMessages(CONV, [{ ...msg(1), seq: undefined } as ChatMessage]);
     await vi.waitFor(async () => {
-      expect(await hydrateConversation(CONV)).toHaveLength(0);
+      expect(await hydrateMessages(CONV)).toHaveLength(0);
     });
   });
 
   it("降级模式（无库）下落盘与水合都不抛错", async () => {
     await purgeLocalStore();
     expect(() => persistMessages(CONV, [msg(1)])).not.toThrow();
-    await expect(hydrateConversation(CONV)).resolves.toEqual([]);
+    await expect(hydrateMessages(CONV)).resolves.toEqual([]);
     await initLocalStore("reconcile-test");
   });
 
@@ -3411,7 +3411,7 @@ describe("reconcileConversation —— 三道闸门", () => {
     const got = await reconcileConversation(CONV, SELF);
 
     expect(got).toEqual([]);
-    expect((await hydrateConversation(CONV)).map((m) => m.seq)).toEqual([1, 2, 3]);
+    expect((await hydrateMessages(CONV)).map((m) => m.seq)).toEqual([1, 2, 3]);
     expect((await getConversation(localDb()!, CONV))!.maxSeq).toBe(3);
   });
 
@@ -3528,7 +3528,7 @@ export function persistMessages(convId: string, msgs: ChatMessage[]): void {
 }
 
 /** 从本地库水合某会话最近的消息；无库或无数据返回空数组。 */
-export async function hydrateConversation(
+export async function hydrateMessages(
   convId: string,
   limit: number = RECONCILE_PAGE,
 ): Promise<ChatMessage[]> {
@@ -3628,7 +3628,7 @@ if (typeof msg.seq === "number") {
 ```ts
 // 冷启动先渲染本地：断网时这是用户唯一能看到的内容
 if ((get().messagesByConv[conversationId] ?? []).length === 0) {
-  const local = await hydrateConversation(conversationId);
+  const local = await hydrateMessages(conversationId);
   if (local.length > 0) {
     set((s) => ({ messagesByConv: { ...s.messagesByConv, [conversationId]: local } }));
   }
