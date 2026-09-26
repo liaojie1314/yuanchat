@@ -4365,3 +4365,315 @@ git add packages/shared/src/store packages/shared/src/ws/chatSocket.ts \
         packages/shared/src/__tests__/outboxSync.test.ts
 git commit -m "feat(localdb): 离线发送队列与上线串行补发"
 ```
+
+---
+
+> **Task 14 起改用紧凑写法**：文件清单、接口契约、关键断言与易错点照旧写全，
+> 但不再逐行铺测试代码 —— Task 1-13 已建立本计划的测试范式（`fake-indexeddb/auto`
+> 顶部 import、`beforeEach` 开库、`afterEach` purge、断言写中文用例名），照抄即可。
+
+### Task 14: 撤回 / 编辑 / 清空回放到本地
+
+**Files:**
+
+- Modify: `packages/shared/src/store/messageLocalSync.ts`（追加三个回放函数）
+- Modify: `packages/shared/src/store/messageStore.ts`（`applyRecall` / `applyEdited` / `clearConversation` 挂钩）
+- Modify: `packages/ui/src/chat/ChatWindow.tsx`（会话关闭时触发 `pruneConversation`）
+- Test: `packages/shared/src/__tests__/messageReplay.test.ts`
+
+**Interfaces:**
+
+- Consumes: Task 4 的 `dropMessages` / `dropMessagesBelowSeq` / `pruneConversation`；Task 2 的 `patchConversation`
+- Produces:
+  - `replayRecall(convId: string, messageId: string): void` —— fire-and-forget
+  - `replayEdit(convId: string, messageId: string, text: string, editCount: number): void`
+  - `replayClear(convId: string, clearedBeforeSeq: number): void`
+  - `pruneOnLeave(convId: string): void` —— 会话关闭时的淘汰入口
+
+**这个 task 兑现 spec 的三条不可让步不变量。** 关键点：
+
+1. **撤回走 `dropMessages` 而不是「改成占位行」。** 本仓语义是「撤回 = 访问撤销」：
+   留一行占位在本地、blob 却不删，断网就能看到已撤回的图片。UI 的占位气泡由内存态
+   （`applyRecall` 已有逻辑）负责渲染，**本地库直接删行 + 删 blob**。
+2. **编辑是就地改 dto**，不删不增：读出行 → 改 `dto.text` / `dto.edited` / `dto.editCount` → 写回。
+3. **清空走 `dropMessagesBelowSeq` + 推进 `clearedBeforeSeq` 水位**，两步必做 ——
+   只删不推水位，下次 `after_seq` 补齐会把删掉的原样拉回来。
+4. **淘汰时机是「会话关闭」**（`ChatWindow` 的 `useEffect` cleanup），不是写入时。
+
+**必测断言**（对应 spec 的不变量）：
+
+- 撤回一条图片消息 → 本地行没了、blob 没了、`mediaBytesTotal` 下降
+- 撤回一条**已被保留窗口淘汰**的消息 → no-op 不抛错（且因「行在 blob 才在」不变量，不留孤儿）
+- 编辑后本地读回的 `text` 是新文本、`editCount` 正确、**seq 不变**（编辑不改位置）
+- 清空水位 3 → seq ≤ 3 的消息与 blob 全没、会话行 `clearedBeforeSeq` 变成 3
+- 清空后再跑一次 `reconcileConversation`，**不会把已清空的消息拉回来**（游标从水位起算）
+- 降级模式下四个函数都不抛错
+
+- [ ] **Step 1: 写失败测试**（按上述断言，照 Task 4/11 的测试范式）
+- [ ] **Step 2: 跑测试确认失败** —— `cd packages/shared && LANG=C.UTF-8 npx vitest run src/__tests__/messageReplay.test.ts`
+- [ ] **Step 3: 实现四个回放函数**（全部 fire-and-forget，内部 try/catch 吞异常，`localDb() === null` 时直接 return）
+- [ ] **Step 4: messageStore 挂钩** —— `applyRecall` 末尾加 `replayRecall(convId, messageId);`；`applyEdited` 末尾加 `replayEdit(convId, messageId, text, editCount);`；`clearConversation` 末尾加 `replayClear(convId, 水位)`
+- [ ] **Step 5: ChatWindow 挂钩** —— 会话切换/卸载的 `useEffect` cleanup 里调 `pruneOnLeave(上一个 convId)`
+- [ ] **Step 6: 跑测试 + 回归** —— `LANG=C.UTF-8 npx vitest run`（重点看 `messageEdit` / `messageActions` 既有用例）
+- [ ] **Step 7: Commit** —— `git commit -m "feat(localdb): 撤回编辑清空回放到本地并接入淘汰时机"`
+
+---
+
+### Task 15: 媒体缓存接入下载链路（顺带干掉 download-url 重复请求）
+
+**Files:**
+
+- Modify: `packages/shared/src/api/files.ts`（`download-url` 外面包一层本地优先）
+- Test: `packages/shared/src/__tests__/mediaCache.test.ts`
+
+**Interfaces:**
+
+- Consumes: Task 5 的 `cacheMedia` / `readMediaBlob`；Task 10 的 `localDb`
+- Produces:
+  - `resolveObjectUrl(objectKey: string, opts?: { cache?: boolean }): Promise<string>` ——
+    本地命中则返回 `URL.createObjectURL` 结果；否则签 URL → 取回字节 → 缓存 → 返回
+
+**缓存范围按裁决 L1-4**：图片与语音**缓存原件**；视频**只缓存封面 `thumbKey`**，
+本体永远走网络（`opts.cache = false`）。文件（任意扩展）也不缓存 —— 体积不可控，
+且用户对文件的预期本来就是「点了才下载」。
+
+**这条顺带收口 §2.7 登记的债**「同一对象 key 的 `download-url` 单页连发 8 次」：
+本地命中就不发请求了。但**首次加载仍会并发**（8 个 `<img>` 同时挂载），所以还要加
+一层**进行中请求的 in-flight 去重表**（`Map<objectKey, Promise<string>>`），
+同 key 的并发调用共享同一个 Promise。缺这层，首屏 8 张图仍是 8 个请求。
+
+**必测断言**：
+
+- 首次调用签 URL 并写入缓存；第二次**不再**调 `download-url`
+- 同 key **并发** 8 次只签 1 次 URL（in-flight 去重）
+- `opts.cache = false` 时不写缓存，两次调用都签 URL
+- 缓存写入失败（`cacheMedia` 返回 false）时**照常返回可用 URL**（功能不因缓存失败退化）
+- 降级模式（无本地库）下行为与今天完全一致
+- `URL.createObjectURL` 产出的 URL 由调用方负责 revoke —— 沿用 `revokeAllLocalPreviews` 既有约定，**本函数不自行 revoke**（提前 revoke 会让正在渲染的 `<img>` 变成裂图）
+
+- [ ] **Step 1** 写失败测试（mock `download-url` 端点与 `fetch`）
+- [ ] **Step 2** 跑测试确认失败
+- [ ] **Step 3** 实现 `resolveObjectUrl`（含 in-flight Map，`finally` 里清表）
+- [ ] **Step 4** 把 `ImageLightbox` / `MessageBubble` 图片 / `voicePlayer` / 视频封面四处的取 URL 改走它
+- [ ] **Step 5** 跑测试 + `pnpm --filter @yuanchat/ui test` 回归
+- [ ] **Step 6** Commit —— `git commit -m "feat(localdb): 媒体本地缓存接入下载链路并去重并发请求"`
+
+---
+
+### Task 16: 登录初始化与登出删库
+
+**Files:**
+
+- Modify: `packages/shared/src/hooks/useChatBootstrap.ts`（登录后 `initLocalStore` + `restoreOutbox`）
+- Modify: `packages/shared/src/store/resetStores.ts`（`resetChatStores` 里加 `purgeLocalStore`）
+- Test: `packages/shared/src/__tests__/localStoreLifecycle.test.ts`
+
+**Interfaces:**
+
+- Consumes: Task 10 的 `initLocalStore` / `purgeLocalStore`；Task 13 的 `restoreOutbox`
+- Produces: 无新导出（纯接线）
+
+**要点**：
+
+1. `useChatBootstrap` 里，`initLocalStore(user.id)` 必须在 `loadConversations()`
+   **之前** await —— 否则冷启动水合拿不到句柄，本地数据白存。
+2. `initLocalStore` 返回 false（降级）时**照常继续**，不阻塞登录。
+3. `restoreOutbox()` 的结果要合并进 `messageStore`，让上次没发出去的消息以 `failed`
+   气泡出现在对应会话末尾。
+4. `resetChatStores()` 目前是**同步**函数，而 `purgeLocalStore` 是异步。
+   **不要把 resetChatStores 改成 async**（它被多处同步调用）—— 用
+   `void purgeLocalStore();` fire-and-forget，并在注释里写明「删库是幂等的，
+   下次 initLocalStore 会开新库，即使删除还在进行中也不会读到旧账号数据
+   （库名带 userId，不同账号本来就是不同库）」。
+
+**必测断言**：
+
+- 登录 A → 存数据 → 登出 → 登录 B：B 看不到 A 的任何数据
+- 登出后再登录 A：A 的数据**已被删掉**（登出即清，不是留着）
+- `initLocalStore` 返回 false 时 bootstrap 不抛错、不阻塞
+- `restoreOutbox` 恢复出的条目状态是 `failed` 且带 `clientMsgId`
+
+- [ ] **Step 1** 写失败测试
+- [ ] **Step 2** 跑测试确认失败
+- [ ] **Step 3** 接线三处
+- [ ] **Step 4** 跑测试 + `LANG=C.UTF-8 pnpm --filter @yuanchat/shared test` 全量回归
+- [ ] **Step 5** `pnpm turbo typecheck`
+- [ ] **Step 6** Commit —— `git commit -m "feat(localdb): 登录初始化本地库、登出清库并恢复待发队列"`
+
+---
+
+## Stage D — 离线态、下拉刷新与桌面对账
+
+### Task 17: `useNetworkStatus` 三态
+
+**Files:**
+
+- Create: `packages/shared/src/hooks/useNetworkStatus.ts`
+- Test: `packages/shared/src/__tests__/useNetworkStatus.test.ts`
+
+**Interfaces:**
+
+- Consumes: `chatSocket` 的连接状态（需确认它是否已对外暴露状态；若没有，本 task 顺带加一个 `chatSocket.onStateChange` 回调或轻量订阅，**不要在 hook 里轮询**）
+- Produces:
+  - `type NetworkPhase = "online" | "connecting" | "offline"`
+  - `useNetworkStatus(): NetworkPhase`
+
+**必须是三态，不能是布尔。** 判定：
+
+| 态           | 条件                                   |
+| ------------ | -------------------------------------- |
+| `offline`    | `!navigator.onLine`                    |
+| `connecting` | `navigator.onLine` 为真但 WS 未 `open` |
+| `online`     | 在线且 WS `open`                       |
+
+合并成布尔会在 WS 每次短暂重连时误报「断网」，用户看到的是一条无端闪烁的红条。
+
+**易错点**：
+
+- `navigator.onLine` 在 Linux WebKitGTK 上可能恒为 `true`（桌面端实测项）。
+  因此**不能只靠它** —— `connecting` 态就是为这种情况兜底的：网卡说在线但 WS 连不上，
+  用户至少看到「连接中…」而不是一切正常的假象。
+- 测试里**禁止依赖宿主环境**：用 `vi.stubGlobal("navigator", { onLine: false })` 打桩，
+  不要读真实 `navigator`（Node 20 下 `navigator` 可能根本不存在，见 `ringtone` 单测的教训）。
+- `window` 可能不存在（`packages/shared` 的 vitest environment 是 node）→ 注册监听前
+  `typeof window === "undefined"` 守卫。
+
+**必测断言**：三态各自成立；`offline` → `online` 事件触发后转 `connecting` 再转 `online`；
+卸载时移除监听器（不泄漏）；`window` 缺失时返回 `"online"` 且不抛错。
+
+- [ ] **Step 1-6**：写失败测试 → 确认失败 → 实现 → 确认通过 → typecheck → Commit
+      （`git commit -m "feat(shared): 网络状态三态 hook"`）
+
+---
+
+### Task 18: 全局顶部离线横幅
+
+**Files:**
+
+- Create: `packages/ui/src/layout/NetworkBanner.tsx`
+- Modify: `packages/ui/src/layout/MainLayout.tsx`（挂载横幅）
+- Modify: `packages/design-system/src/i18n/locales/{zh-CN,en-US,ja-JP,ko-KR}.json`
+- Test: `packages/ui/src/__tests__/NetworkBanner.test.tsx`
+
+**Interfaces:**
+
+- Consumes: Task 17 的 `useNetworkStatus`
+- Produces: `<NetworkBanner />`（无 props，内部取状态 —— 沿用 D1 裁决：`packages/ui` 组件不接状态 prop）
+
+**新增四语 key**（`%{}` 占位符风格，本仓是 Rails 风格不是 i18next 默认）：
+
+| key                  | zh-CN      |
+| -------------------- | ---------- |
+| `network.offline`    | 当前无网络 |
+| `network.connecting` | 连接中…    |
+| `network.restored`   | 已连接     |
+
+**要点**：
+
+- **必须叠 `--safe-area-top`**：横幅贴顶，不叠会压住安卓系统时间/信号图标（A8 已有教训）。
+  写法参照 `ToastHost` 的顶部偏移（它已经叠了）。
+- `online` 态时显示 `network.restored` **2 秒后自动消失**；`offline` / `connecting` 常驻。
+- 圆角 ≤ `rounded-lg`；颜色走主题 token（暗色自动跟随）；`role="status"` + `aria-live="polite"`
+  （离线是状态变更，屏幕阅读器应播报，但不该打断当前朗读 → `polite` 不是 `assertive`）。
+- **不要用 `animate-fade-in` 之外的新动效**；且要尊重 `prefers-reduced-motion`（J7 债方向）。
+
+**必测断言**：三态各自渲染对应文案；`online` 态 2s 后消失（`vi.useFakeTimers`）；
+`role="status"` 存在；四语 key 齐全（由 `check:i18n` 门禁兜）。
+
+- [ ] **Step 1-7**：写失败测试 → 确认失败 → 实现组件 → 补四语 → 挂进 MainLayout →
+      `node scripts/check-i18n.mjs` + 测试通过 → Commit
+      （`git commit -m "feat(ui): 全局离线状态横幅"`）
+
+### Task 19: `usePullToRefresh` + `PullToRefresh` 容器
+
+Create `packages/ui/src/util/usePullToRefresh.ts` + `packages/ui/src/primitives/PullToRefresh.tsx`；Test 同名。
+
+要点：① 按 `pointer: coarse` 内部 `matchMedia` 门控（裁决 N-1，不接 prop）；② 容器必须 `overscroll-behavior-y: contain`，否则被 Chrome 自带下拉接管、安卓上永远触发不了；③ 仅 `scrollTop === 0` 且向下拖才进手势，阈值 64px 带阻尼；④ 刷新中禁重复触发，失败也收起指示器 + toast。
+
+断言：非触屏返回空 handler；`scrollTop > 0` 不触发；未达阈值回弹不刷新；刷新中二次下拉被忽略；`onRefresh` reject 时指示器收起。
+
+- [ ] 写失败测试 → 确认失败 → 实现 → 通过 → Commit `feat(ui): 下拉刷新 hook 与容器组件`
+
+### Task 20: 七屏接入下拉刷新
+
+Modify：`ConversationList` / `ContactsPanel` / `NewFriendsView` / `MomentsScreen` / `StickerMarketView` / `StickerMineView` / `MomentActivitiesView`，各包一层 `<PullToRefresh onRefresh={...}>`。
+
+要点：`onRefresh` 复用各屏已有的 load 函数，**不新造数据通路**。`ConversationList` 的 `onRefresh` 要同时触发 `loadConversations()` 与当前会话的 `reconcileConversation`。
+
+- [ ] 逐屏接入 → `pnpm --filter @yuanchat/ui test` → Commit `feat(ui): 七个主列表接入下拉刷新`
+
+### Task 21: 桌面回前台对账 + 三处局部刷新图标
+
+Modify `packages/shared/src/hooks/useChatBootstrap.ts`（`visibilitychange` → visible 且距 `meta.lastReconcileAt` > 30s 则静默对账）；`StickerMarketView` / `MomentsScreen` / `StickerMineView` 区块标题旁加刷新图标按钮。
+
+要点：搭 `chatSocket.ts:357` **现有** `visibilitychange` 监听，不新起监听器。刷新图标 `aria-label` 走 i18n（新 key `common.refresh`，四语齐）。WS 驱动的列表**一律不加**按钮（裁决 N-2）。
+
+- [ ] 实现 → check:i18n → 测试 → Commit `feat(ui): 桌面回前台自动对账与三处局部刷新`
+
+## Stage E — 运维概览重构与小任务
+
+### Task 22: 后端 `GET /admin/stats/timeseries`
+
+Modify `admin_repo.go` / `admin_stats.go` / `handler/admin.go` / `router.go:457` 附近；Test `admin_stats_test.go`。
+
+要点：`days` 取值 7–90，越界 **400 拒绝**（不静默夹取）；`WHERE created_at >= now() - interval` 走既有 `idx_messages_created`；**空日补零**返回连续日期序列（前端不补洞）；只读不写审计。
+
+断言：`days=30` 返回 30 个点；`days=0` / `days=91` → 400；无数据的日子值为 0 而非缺项；非 admin → 403。
+
+- [ ] TDD 五步 → Commit `feat(server): 管理端概览时间序列端点`
+
+### Task 23: 手写 SVG 图表三组件
+
+Create `apps/admin/src/components/charts/{Sparkline,LineChart,DonutChart}.tsx`；Test 同目录。
+
+要点：零依赖纯 SVG；取色走主题 token（暗色自动跟随）；**必须 `role="img"` + `aria-label` 描述数据要点**（不能只给哑图）；空数据渲染占位不崩；单点数据不除零。
+
+- [ ] TDD 五步 → Commit `feat(admin): 零依赖 SVG 图表组件`
+
+### Task 24: 概览页重构
+
+Modify `apps/admin/src/pages/Overview.tsx` + `api.ts`（加 timeseries 类型与函数）+ 四语 locale。
+
+布局四层：① 顶部 4 张关键指标大卡（含 sparkline + 环比）② 中部两列（消息量趋势折线 + 类型占比环形）③ 治理项独立一栏（有积压才高亮，沿用现有 `GovernanceCard`）④ 次要区（存储 + 推送订阅）。
+
+顺带：admin 内 **4 处 `rounded-xl` → `rounded-lg`**；新增文案补四语；骨架屏固定宽高保证 CLS 为零。
+
+- [ ] 实现 → check:i18n → `pnpm --filter @yuanchat/admin typecheck` → Commit `feat(admin): 概览页重构为分层看板`
+
+### Task 25: Button hover/focus + ConfirmDialog 无障碍
+
+Modify `packages/ui/src/primitives/Button.tsx` + `ConfirmDialog.tsx`；Test 同名。
+
+Button：danger 变体补 `hover:` 态（现在**零 hover**）；全变体把 `focus:outline-none` 换成 `focus-visible:ring-2 focus-visible:ring-offset-2`（ring 是 box-shadow 不占位，不破布局）。
+
+ConfirmDialog：补 `role="dialog"` / `aria-modal="true"` / `aria-labelledby`；Esc 关闭；焦点陷阱；打开时初始焦点落在取消键（危险操作不该默认聚焦确认）；关闭后焦点还原。
+
+断言：四变体各有 hover class；`focus-visible` ring 存在；Esc 触发 `onCancel`；Tab 在弹窗内循环；初始焦点在取消键。**影响全仓所有按钮，需三端走查。**
+
+- [ ] TDD 五步 → Commit `fix(ui): 补齐按钮悬停与焦点态、弹窗无障碍语义`
+
+### Task 26: 三个 app 的 tsconfig target 降到 ES2019
+
+Modify `apps/{web,desktop,admin}/tsconfig.json` 的 `"target": "ES2021"` → `"ES2019"`。
+
+**单独一个 commit，不与其他项混。** 降 target 后 tsc 可能开始拦一些 lib 类型（`Array.at` 等），若报错则逐个改为 ES2019 可用写法，**不要为了过编译把 target 改回去**。
+
+- [ ] 改 → `pnpm turbo typecheck` → 有错则修 → Commit `chore(build): 三端 tsconfig target 对齐 es2019`
+
+### Task 27: WS 卸载中止不再上报 Sentry
+
+Modify `packages/shared/src/ws/chatSocket.ts` 的 `onerror`。
+
+要点：区分「页面卸载中止」与「真实故障」—— 在 `beforeunload` / `pagehide` 里置一个 `unloading` 标志，`onerror` 见到它就只 `debug` 不 `captureException`。
+
+- [ ] 加测试（卸载态下不调 captureException）→ 实现 → Commit `fix(shared): 页面卸载中止的 WS 握手不再上报 Sentry`
+
+## Stage F — 收尾
+
+### Task 28: 文档回写
+
+Modify `docs/MASTER_PLAN.md`（§9 L1 标 ✅ 并写交付面；§4 J9 标 ✅；阶段四「数据统计面板」勾选；**§2.7 的 design-system tsconfig 债标 ✅ 已过期**；新发现的债当次登记）、`docs/CHAT_API.md`、`docs/DB_SCHEMA.md`、`docs/DEVELOPMENT.md`（若启动命令有变）。
+
+新债登记候选（实测后按实际填）：本地库无加密、多标签页并发不加锁、视频本体不缓存、离线不可发文件/图片（仅文本进 outbox，若本批如此）、`navigator.onLine` 在 WebKitGTK 的不可靠性。
+
+- [ ] 回写 → Commit `docs: 回写 L1 与运维概览交付状态及新登记债`
