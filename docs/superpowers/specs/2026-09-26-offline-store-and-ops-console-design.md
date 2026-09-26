@@ -12,13 +12,13 @@ localStorage）。既有 D3「PWA 离线可用」只 precache 了 app shell—�
 
 三项现状核实（写 spec 前逐条验证）：
 
-| 项              | 现状                                                                       |
-| --------------- | -------------------------------------------------------------------------- |
-| 本地落盘        | 零。`packages/shared/src/store/*` 全内存                                   |
-| 下拉刷新        | 零。全仓无任何 pull-to-refresh 实现                                        |
-| 网络监听        | 仅 `chatSocket.ts:369` 的 `online` 事件用于跳过退避重连，**UI 完全无感知** |
-| 增量拉取端点    | 无。`GET /messages` 只有 `before_seq`（向前翻），没有向后补空洞的能力      |
-| `client_msg_id` | 有列（`001_baseline.sql:82`）但**无唯一索引、服务端无去重逻辑**            |
+| 项              | 现状                                                                                     |
+| --------------- | ---------------------------------------------------------------------------------------- |
+| 本地落盘        | 零。`packages/shared/src/store/*` 全内存                                                 |
+| 下拉刷新        | 零。全仓无任何 pull-to-refresh 实现                                                      |
+| 网络监听        | 仅 `chatSocket.ts:369` 的 `online` 事件用于跳过退避重连，**UI 完全无感知**               |
+| 增量拉取端点    | 无。`GET /api/v1/conversations/:id/messages` 只有 `before_seq`（向前翻），无法向后补空洞 |
+| `client_msg_id` | 有列（`001_baseline.sql:82`）但**无唯一索引、服务端无去重逻辑**                          |
 
 同时，管理端概览页（`apps/admin/src/pages/Overview.tsx`，370 行）是 23 个等权小方块
 竖着堆叠，无层级、无趋势、无图表；`GET /admin/stats` 只返回标量快照，没有任何时间序列。
@@ -93,7 +93,7 @@ packages/shared/src/localdb/
 
 1. 读本地 `by_conv_seq` 最近 **50 条**（与服务端一页等量，避免首屏渲染量两端不一致）
    → 立即渲染
-2. 联网则 `GET /messages?conversation_id=&after_seq=<本地 maxSeq>&limit=50` 补空洞
+2. 联网则 `GET /api/v1/conversations/<id>/messages?after_seq=<本地 maxSeq>&limit=50` 补空洞
 3. 本地为空时退回现有 `before_seq=0` 路径（首次进会话即此路径）
 4. 双写本地并推进 `maxSeq`
 
@@ -129,7 +129,7 @@ lastMessage/unread 由现有 `GET /conversations` 一次拉回；**各会话的�
 
 ### 3.4 新端点：`after_seq` 向后翻页
 
-`GET /messages` 增加两个查询参数，**与 `before_seq` 互斥**（同时给按 400 拒绝，
+`GET /api/v1/conversations/:id/messages`（`router.go:360`）增加两个查询参数，**与 `before_seq` 互斥**（同时给按 400 拒绝，
 不静默取其一）：
 
 | 参数        | 语义                                |
@@ -138,7 +138,8 @@ lastMessage/unread 由现有 `GET /conversations` 一次拉回；**各会话的�
 | `limit`     | 默认 50，上限 100                   |
 
 响应加 `has_more`（`len(items) == limit`）。**可见性口径与 `GetHistory` 完全一致**
-（成员校验 + `status=1` + `seq > cleared_before_seq`）——复用同一个查询构造，
+（成员校验 + `deleted_at IS NULL` + `seq > cleared_before_seq`；**注意 `ListBefore` 刻意
+不过滤 `status`** —— 撤回消息要作为占位行回给客户端）——复用同一个查询构造，
 不允许第二处独立判断，否则两条路径会漂移成越权。
 
 **客户端循环上限**：循环拉取直到 `has_more == false` **或**已补满保留窗口（500 条）
@@ -333,15 +334,15 @@ put 失败且 err.name === "QuotaExceededError"
 
 ## 六、顺带的小任务
 
-| 项                                                                                 | 说明                                                                                                         |
-| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `Button` 补 danger hover + 全变体 `focus-visible` 焦点环                           | 根因：`Button.tsx:41` danger 变体**零 hover**，且全变体 `focus:outline-none` 无替代。一处改全仓受益（J1 债） |
-| `ConfirmDialog` 补 `role="dialog"` / `aria-modal` / Esc 关闭 / 焦点陷阱 / 初始焦点 | J1 债                                                                                                        |
-| admin 4 处 `rounded-xl` → `rounded-lg`                                             | 圆角规范违规                                                                                                 |
-| `packages/design-system` 补 `tsconfig.json` + `typecheck` 脚本                     | `turbo typecheck` 一直漏它（§2.7 登记债）                                                                    |
-| 两端 app `tsconfig` `target` ES2021 → ES2019                                       | 与 `vite build.target=es2019` 对齐（§2.7 登记债）。**可能引出连锁类型错误，plan 里单独留时间**               |
-| WS 卸载中止不再上报 Sentry                                                         | 区分「页面卸载中止」与「真实故障」（§2.7 登记债）                                                            |
-| `download-url` 去重                                                                | 被 §3.8 媒体缓存天然吸收                                                                                     |
+| 项                                                                                 | 说明                                                                                                                                       |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Button` 补 danger hover + 全变体 `focus-visible` 焦点环                           | 根因：`Button.tsx:41` danger 变体**零 hover**，且全变体 `focus:outline-none` 无替代。一处改全仓受益（J1 债）                               |
+| `ConfirmDialog` 补 `role="dialog"` / `aria-modal` / Esc 关闭 / 焦点陷阱 / 初始焦点 | J1 债                                                                                                                                      |
+| admin 4 处 `rounded-xl` → `rounded-lg`                                             | 圆角规范违规                                                                                                                               |
+| ~~`packages/design-system` 补 tsconfig~~ **已过期，不做**                          | 实测 `tsconfig.json` + `vitest.config.ts` + `typecheck` 脚本均已存在，`turbo typecheck` 已覆盖 6 包含它。改为回写 MASTER_PLAN 状态         |
+| **三个** app `tsconfig` `target` ES2021 → ES2019                                   | 实测 web/desktop/**admin** 三者 tsconfig 均为 ES2021，而三者 `vite build.target` 均已是 es2019。**可能引出连锁类型错误，plan 里单列 task** |
+| WS 卸载中止不再上报 Sentry                                                         | 区分「页面卸载中止」与「真实故障」（§2.7 登记债）                                                                                          |
+| `download-url` 去重                                                                | 被 §3.8 媒体缓存天然吸收                                                                                                                   |
 
 ## 七、明确不做（本批）
 
