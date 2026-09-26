@@ -16,7 +16,15 @@
 
 - **注释与文档**：所有注释**只能写中文**，禁止写进度/批次信息。所有导出函数/组件/Store/Hook 必须写 JSDoc；Go 所有导出函数/包必须写 godoc。关键并发/事务/错误分支必须注释。**先写注释再写代码**。
 - **i18n**：所有用户可见文案**禁止硬编码**，必须走 `react-i18next` 的 `t()`，并在 `packages/design-system/src/i18n/locales/` 的 `zh-CN.json` / `en-US.json` / `ja-JP.json` / `ko-KR.json` **四份全部补齐**。占位符是 **`%{var}`**（Rails 风格，见 `i18n/index.ts` 的 `interpolation.prefix`），写成 `{{var}}` 不会插值。`node scripts/check-i18n.mjs` 会挡下漏翻、写错 key 与死键。
-- **ES2019 底线**：不得使用 `?.` / `??` / `||=` / `replaceAll` / `.at()` / `structuredClone` 等 ES2020+ 语法与 API。`vite.config.ts` 的 `build.target` 必须保持 `es2019`（旧 Android WebView 如 Chrome 74 解析期 SyntaxError → 白屏）。
+- **ES2019 底线（区分「语法」与「API」，两者规则不同）**：
+  - **语法**（`?.` / `??` / `||=` / 可选 catch 绑定等）**源码里可以写** —— `vite.config.ts` 的
+    `build.target: es2019` 会把它们转译掉，实测现有源码已有 180+ 处 `??`。
+    **前提是 `build.target` 必须保持 `es2019`**，不得改成 `chrome105` / `es2020`
+    （旧 Android WebView 如 Chrome 74 解析期 SyntaxError → 白屏）。
+  - **运行时 API**（`replaceAll` / `.at()` / `structuredClone` / `Object.hasOwn` /
+    `Array.prototype.flat` 之外的新方法）**禁止裸用** —— 转译器不会给它们补实现，
+    旧 WebView 上是运行期 TypeError。要用必须先确认目标 WebView 支持或加 polyfill。
+  - **未经转译的静态资源**（`public/*.js`，原样复制进 dist）里两类都禁止。
 - **圆角上限 `rounded-lg`**（本仓 lg = 16px），禁止 `rounded-xl` / `rounded-2xl`（`rounded-full` 圆形除外）。
 - **根字号是 14px**，Tailwind rem 刻度整体缩水 14/16。要精确 px 用方括号任意值（例：`min-h-6` 只有 21px，低于 WCAG 2.5.8 的 24px 触控下限，必须写 `min-h-[24px]`）。
 - **源码目录按领域分子文件夹**，禁止在 `packages/ui/src` 等目录平铺堆文件。
@@ -2752,4 +2760,1608 @@ git add server/go.mod server/go.sum \
         server/internal/service/message_send_idempotent_test.go \
         server/internal/ws/handler.go docs/DB_SCHEMA.md
 git commit -m "feat(server): 发送幂等化，离线补发不再产生重复消息"
+```
+
+---
+
+## Stage C — 前端接线（L1 开始产生用户可见效果）
+
+**贯穿 Stage C 的形状决定**：本地库 `LocalMessageRow.dto` 里存的是**已派生的
+`ChatMessage`**，不是服务端 `MessageDTO`。理由：REST 路径经 `mapMessage` 得到
+`ChatMessage`、WS 路径直接构造 `ChatMessage`，两条路已经汇聚在同一形状上；
+存 DTO 反而要额外写一个「WS 帧 → DTO」转换器。冷启动读出来直接渲染。
+
+**代价与对策**：`ChatMessage` 含两类**不可持久化**的瞬态字段，落库前必须剥掉——
+
+- `image.localUrl` / `file.localUrl` / `voice.localUrl`：`URL.createObjectURL` 产物，
+  刷新后即失效（`resetStores.ts` 的 `revokeAllLocalPreviews` 就在 revoke 它们），
+  存下来会得到一批点不开的死链接。
+- `status`：`"sending"` / `"failed"` 属于 outbox 的职责范围。已确认消息一律按
+  `"sent"` 读回，真实已读态由 `applyRead` 按 seq 水位重算。
+
+`localdb` 保持 `dto: unknown` 不认识 `ChatMessage`（依赖方向是 store → localdb，
+反过来会成环）；形状知识放在 store 侧的适配器里。
+
+### Task 10: 本地库会话单例 + `after_seq` 客户端
+
+**Files:**
+
+- Create: `packages/shared/src/localdb/session.ts`
+- Create: `packages/shared/src/store/messageLocalSync.ts`
+- Modify: `packages/shared/src/localdb/index.ts`
+- Modify: `packages/shared/src/api/chat.ts`（追加 `fetchMessagesAfter`）
+- Test: `packages/shared/src/__tests__/localdb.session.test.ts`
+- Test: `packages/shared/src/__tests__/messageLocalSync.test.ts`
+
+**Interfaces:**
+
+- Consumes: Task 1 的 `openLocalDb` / `deleteLocalDb`；Task 3 的 `LocalMessageRow`；既有 `ChatMessage` / `mapMessage` / `apiGet`
+- Produces:
+  - `initLocalStore(userId: string): Promise<boolean>` —— 打开并缓存句柄，返回是否可用
+  - `localDb(): IDBDatabase | null` —— **同步**访问器，`null` 表示降级模式
+  - `closeLocalStore(): void`
+  - `purgeLocalStore(): Promise<void>` —— 关闭并删掉当前账号的库
+  - `localRowOf(m: ChatMessage): LocalMessageRow` —— 剥掉瞬态字段
+  - `chatMessageOf(row: LocalMessageRow): ChatMessage`
+  - `mediaKeysOf(m: ChatMessage): string[]` —— 抽出该消息**独占**的对象 key（图片 / 文件 / 语音 / 视频本体 + 封面）。**不含贴纸**，见下
+  - `fetchMessagesAfter(conversationId: string, afterSeq: number, limit: number, selfUserId: string): Promise<{ messages: ChatMessage[]; hasMore: boolean }>`
+
+`localDb()` 刻意做成**同步**：store 的 action 里到处 `await` 一个句柄会把每个
+写路径都变成异步，而降级模式下这些 await 全是白等。
+
+- [ ] **Step 1: 写 session 失败测试**
+
+创建 `packages/shared/src/__tests__/localdb.session.test.ts`：
+
+```ts
+import "fake-indexeddb/auto";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import {
+  initLocalStore,
+  localDb,
+  closeLocalStore,
+  purgeLocalStore,
+  putMessages,
+  listMessagesDesc,
+  dbNameOf,
+} from "../localdb";
+
+afterEach(() => {
+  closeLocalStore();
+  vi.unstubAllGlobals();
+});
+
+describe("localdb/session", () => {
+  it("未初始化时 localDb() 返回 null", () => {
+    expect(localDb()).toBeNull();
+  });
+
+  it("初始化成功后 localDb() 返回句柄", async () => {
+    expect(await initLocalStore("s1")).toBe(true);
+    expect(localDb()).not.toBeNull();
+    await purgeLocalStore();
+  });
+
+  it("IDB 不可用时初始化返回 false 且 localDb() 仍为 null（降级模式）", async () => {
+    vi.stubGlobal("indexedDB", undefined);
+    expect(await initLocalStore("s2")).toBe(false);
+    expect(localDb()).toBeNull();
+  });
+
+  it("切换账号时关旧库开新库，数据不串", async () => {
+    await initLocalStore("userA");
+    await putMessages(localDb()!, [
+      { id: "a1", conversationId: "c", seq: 1, dto: {}, mediaKeys: [] },
+    ]);
+
+    await initLocalStore("userB");
+    expect(await listMessagesDesc(localDb()!, "c", 0, 10)).toHaveLength(0);
+
+    await initLocalStore("userA");
+    expect(await listMessagesDesc(localDb()!, "c", 0, 10)).toHaveLength(1);
+
+    await purgeLocalStore();
+    await initLocalStore("userB");
+    await purgeLocalStore();
+  });
+
+  it("purgeLocalStore 删库并把句柄清成 null", async () => {
+    await initLocalStore("s3");
+    await putMessages(localDb()!, [
+      { id: "x", conversationId: "c", seq: 1, dto: {}, mediaKeys: [] },
+    ]);
+    await purgeLocalStore();
+    expect(localDb()).toBeNull();
+
+    // 库真的没了：重开是空的
+    await initLocalStore("s3");
+    expect(await listMessagesDesc(localDb()!, "c", 0, 10)).toHaveLength(0);
+    await purgeLocalStore();
+  });
+
+  it("未初始化时 purgeLocalStore 不抛错", async () => {
+    await expect(purgeLocalStore()).resolves.toBeUndefined();
+  });
+
+  it("库名走 dbNameOf，便于外部核对", async () => {
+    await initLocalStore("s4");
+    expect(dbNameOf("s4")).toBe("yuanchat-l1-s4");
+    await purgeLocalStore();
+  });
+});
+```
+
+- [ ] **Step 2: 写 `session.ts`**
+
+```ts
+/**
+ * 本地库的进程内单例：持有「当前账号的库句柄」。
+ *
+ * 句柄访问器 localDb() 刻意是**同步**的 —— store 的每个写路径都 await 一个
+ * 句柄会把它们全变成异步，而在降级模式（IDB 不可用）下这些 await 全是白等。
+ */
+import { openLocalDb, deleteLocalDb } from "./db";
+
+let current: IDBDatabase | null = null;
+let currentUserId: string | null = null;
+
+/**
+ * 打开指定账号的本地库并缓存句柄，返回本地库是否可用。
+ *
+ * 返回 false 即降级模式：调用方跳过一切本地读写，应用行为退化成纯内存
+ * （与引入 L1 之前完全一致），**不得因此报错或阻塞登录**。
+ */
+export async function initLocalStore(userId: string): Promise<boolean> {
+  if (currentUserId === userId && current !== null) return true;
+  closeLocalStore();
+  const db = await openLocalDb(userId);
+  if (db === null) return false;
+  current = db;
+  currentUserId = userId;
+  return true;
+}
+
+/** 当前账号的库句柄；null 表示降级模式，调用方应跳过本地读写。 */
+export function localDb(): IDBDatabase | null {
+  return current;
+}
+
+/** 关闭句柄（不删库）。切账号与登出都先走这里。 */
+export function closeLocalStore(): void {
+  if (current !== null) {
+    current.close();
+    current = null;
+  }
+  currentUserId = null;
+}
+
+/**
+ * 关闭并删除当前账号的库。
+ *
+ * 登出/切号时调用：一个账号一个库，删库即彻底清掉跨账号残留。
+ * 未初始化时是 no-op（登出路径可能在登录失败后被调用）。
+ */
+export async function purgeLocalStore(): Promise<void> {
+  const userId = currentUserId;
+  closeLocalStore();
+  if (userId === null) return;
+  await deleteLocalDb(userId);
+}
+```
+
+在 `localdb/index.ts` 追加 `export * from "./session";`。
+
+- [ ] **Step 3: 跑 session 测试确认通过**
+
+Run: `cd packages/shared && LANG=C.UTF-8 npx vitest run src/__tests__/localdb.session.test.ts`
+Expected: PASS（7 个用例）
+
+- [ ] **Step 4: 写适配器失败测试**
+
+创建 `packages/shared/src/__tests__/messageLocalSync.test.ts`：
+
+```ts
+import { describe, it, expect } from "vitest";
+import { localRowOf, chatMessageOf, mediaKeysOf } from "../store/messageLocalSync";
+import type { ChatMessage } from "../store/messageStore";
+
+/** 造一条最小文本消息 */
+function text(over: Partial<ChatMessage> = {}): ChatMessage {
+  return {
+    id: "m1",
+    conversationId: "c1",
+    kind: "text",
+    isSelf: true,
+    senderName: "我",
+    text: "hi",
+    time: "10:00",
+    status: "sent",
+    seq: 5,
+    createdAtMs: 1_700_000_000_000,
+    ...over,
+  } as ChatMessage;
+}
+
+describe("localRowOf —— 剥掉瞬态字段", () => {
+  it("剥掉 image.localUrl（刷新后即为死链）", () => {
+    const m = text({
+      kind: "image",
+      image: { key: "k1", localUrl: "blob:abc", width: 10, height: 10 },
+    } as Partial<ChatMessage>);
+    const row = localRowOf(m);
+    const back = chatMessageOf(row);
+    expect(back.image!.localUrl).toBeUndefined();
+    expect(back.image!.key).toBe("k1");
+  });
+
+  it("剥掉 file.localUrl 与 voice.localUrl", () => {
+    const f = localRowOf(
+      text({
+        kind: "file",
+        file: { key: "f1", name: "a.pdf", size: "3.2 MB", ext: "PDF", localUrl: "blob:f" },
+      } as Partial<ChatMessage>),
+    );
+    expect(chatMessageOf(f).file!.localUrl).toBeUndefined();
+
+    const v = localRowOf(
+      text({
+        kind: "voice",
+        voice: { key: "v1", seconds: 3, wave: [], localUrl: "blob:v" },
+      } as Partial<ChatMessage>),
+    );
+    expect(chatMessageOf(v).voice!.localUrl).toBeUndefined();
+  });
+
+  it("status 一律按 sent 读回（sending/failed 属 outbox 职责）", () => {
+    expect(chatMessageOf(localRowOf(text({ status: "sending" }))).status).toBe("sent");
+    expect(chatMessageOf(localRowOf(text({ status: "failed" }))).status).toBe("sent");
+    expect(chatMessageOf(localRowOf(text({ status: "read" }))).status).toBe("sent");
+  });
+
+  it("id / conversationId / seq 原样保留，供索引与游标使用", () => {
+    const row = localRowOf(text({ seq: 42 }));
+    expect(row.id).toBe("m1");
+    expect(row.conversationId).toBe("c1");
+    expect(row.seq).toBe(42);
+  });
+
+  it("无 seq 的消息（乐观条目）seq 记为 0，由调用方负责不落库", () => {
+    const row = localRowOf(text({ seq: undefined } as Partial<ChatMessage>));
+    expect(row.seq).toBe(0);
+  });
+
+  it("往返不丢正文与时间", () => {
+    const back = chatMessageOf(localRowOf(text()));
+    expect(back.text).toBe("hi");
+    expect(back.createdAtMs).toBe(1_700_000_000_000);
+  });
+});
+
+describe("mediaKeysOf —— 撤回时要删哪些 blob", () => {
+  it("文本消息无 key", () => {
+    expect(mediaKeysOf(text())).toEqual([]);
+  });
+
+  it("图片取 image.key", () => {
+    expect(
+      mediaKeysOf(
+        text({ kind: "image", image: { key: "k1", width: 1, height: 1 } } as Partial<ChatMessage>),
+      ),
+    ).toEqual(["k1"]);
+  });
+
+  it("视频同时取 key 与 thumbKey（封面也要随撤回删掉）", () => {
+    const keys = mediaKeysOf(
+      text({
+        kind: "video",
+        video: {
+          key: "v1",
+          thumbKey: "t1",
+          name: "a.mp4",
+          size: "1.0 MB",
+          duration: 2,
+          width: 1,
+          height: 1,
+        },
+      } as Partial<ChatMessage>),
+    );
+    expect(keys.sort()).toEqual(["t1", "v1"]);
+  });
+
+  it("语音与文件各取自己的 key", () => {
+    expect(
+      mediaKeysOf(
+        text({ kind: "voice", voice: { key: "v", seconds: 1, wave: [] } } as Partial<ChatMessage>),
+      ),
+    ).toEqual(["v"]);
+    expect(
+      mediaKeysOf(
+        text({
+          kind: "file",
+          file: { key: "f", name: "n", size: "1 B", ext: "TXT" },
+        } as Partial<ChatMessage>),
+      ),
+    ).toEqual(["f"]);
+  });
+
+  it("贴纸 key 不算进来（内容寻址共享对象，撤回不能删别处在用的图）", () => {
+    expect(
+      mediaKeysOf(
+        text({
+          kind: "sticker",
+          sticker: { stickerId: "s1", key: "shared-sticker-key", width: 1, height: 1 },
+        } as Partial<ChatMessage>),
+      ),
+    ).toEqual([]);
+  });
+
+  it("缺 key 的媒体消息不产出空字符串（否则会去删 key 为空的行）", () => {
+    expect(
+      mediaKeysOf(text({ kind: "image", image: { width: 1, height: 1 } } as Partial<ChatMessage>)),
+    ).toEqual([]);
+  });
+});
+```
+
+- [ ] **Step 5: 写 `messageLocalSync.ts`**
+
+```ts
+/**
+ * `ChatMessage` 与本地库行之间的适配。
+ *
+ * 放在 store 侧而不是 localdb 侧：依赖方向是 store → localdb，
+ * 反过来让 localdb 认识 ChatMessage 会成环。
+ */
+import type { LocalMessageRow } from "../localdb";
+import type { ChatMessage } from "./messageStore";
+
+/**
+ * 抽出该消息引用的对象存储 key。
+ *
+ * 撤回与保留窗口淘汰要靠它决定删哪些 blob，**视频必须连封面 thumbKey 一起给**
+ * ——只删本体会留下一个能被渲染命中的孤儿封面。
+ * 缺 key 的媒体消息返回空数组，不能产出空字符串（那会去删 key 为空的行）。
+ */
+export function mediaKeysOf(m: ChatMessage): string[] {
+  const keys: string[] = [];
+  const push = (k?: string) => {
+    if (typeof k === "string" && k !== "") keys.push(k);
+  };
+  if (m.image) push(m.image.key);
+  if (m.file) push(m.file.key);
+  if (m.voice) push(m.voice.key);
+  if (m.video) {
+    push(m.video.key);
+    push(m.video.thumbKey);
+  }
+  // **刻意不含 sticker**：贴纸对象是内容寻址去重的**共享**资源，同一个 key
+  // 被大量消息、收藏面板与表情选择器共用。把它算进「这条消息的 blob」，
+  // 撤回一条贴纸消息就会删掉别处仍在渲染的那张图。贴纸缓存的回收交给
+  // LRU 配额淘汰，不绑消息生命周期。
+  return keys;
+}
+
+/** 去掉一个媒体载荷里的 localUrl（blob: URL 刷新后即失效，存下来是死链）。 */
+function stripLocalUrl<T extends { localUrl?: string }>(payload: T | undefined): T | undefined {
+  if (payload === undefined) return undefined;
+  const copy = { ...payload };
+  delete copy.localUrl;
+  return copy;
+}
+
+/**
+ * 把内存消息转成可落盘的行。
+ *
+ * 剥掉两类瞬态字段：blob: 形式的 localUrl（刷新即失效），以及
+ * sending/failed 状态（属 outbox 职责，已确认消息一律按 sent 存）。
+ */
+export function localRowOf(m: ChatMessage): LocalMessageRow {
+  const persisted: ChatMessage = {
+    ...m,
+    status: "sent",
+    image: stripLocalUrl(m.image),
+    file: stripLocalUrl(m.file),
+    voice: stripLocalUrl(m.voice),
+  };
+  return {
+    id: m.id,
+    conversationId: m.conversationId,
+    seq: typeof m.seq === "number" ? m.seq : 0,
+    dto: persisted,
+    mediaKeys: mediaKeysOf(m),
+  };
+}
+
+/** 把本地行读回成内存消息。 */
+export function chatMessageOf(row: LocalMessageRow): ChatMessage {
+  return row.dto as ChatMessage;
+}
+```
+
+> **已核实**：`packages/shared/tsconfig.json` 只开了 `strict` + `noUnusedLocals`
+> （**未开** `exactOptionalPropertyTypes`），因此 `delete copy.localUrl` 对可选属性合法，
+> 上面的写法可直接用。
+
+- [ ] **Step 6: 写 `fetchMessagesAfter`**
+
+在 `packages/shared/src/api/chat.ts` 的 `fetchMessages` 之后追加：
+
+```ts
+/**
+ * 增量补齐：拉取 seq > afterSeq 的消息（服务端返回**升序**，无需 reverse）。
+ *
+ * 与 `fetchMessages` 的区别只在方向：前者向前翻历史（降序），本函数向后补
+ * 断线期间的空洞（升序）。两者的 `before_seq` / `after_seq` 在服务端互斥。
+ */
+export async function fetchMessagesAfter(
+  conversationId: string,
+  afterSeq: number,
+  limit: number,
+  selfUserId: string,
+): Promise<{ messages: ChatMessage[]; hasMore: boolean }> {
+  const data = await apiGet<{ messages: MessageDTO[]; has_more: boolean }>(
+    "/api/v1/conversations/" +
+      conversationId +
+      "/messages?after_seq=" +
+      afterSeq +
+      "&limit=" +
+      limit,
+  );
+  // 服务端已按 seq 升序返回，与前端展示序一致，**不要 reverse**
+  const messages = (data.messages || []).map((m) => mapMessage(m, selfUserId));
+  backfillQuotes(messages);
+  return { messages, hasMore: !!data.has_more };
+}
+```
+
+- [ ] **Step 7: 跑适配器测试确认通过**
+
+Run: `cd packages/shared && LANG=C.UTF-8 npx vitest run src/__tests__/messageLocalSync.test.ts src/__tests__/localdb.session.test.ts`
+Expected: PASS（18 个用例）
+
+- [ ] **Step 8: 补 MSW mock**
+
+在 `packages/shared/src/mocks/` 里给 `after_seq` 补 handler（沿用既有消息历史 handler 的写法，
+按 `after_seq` 返回升序切片 + `has_more`）。**MSW 必须覆盖正常/空/错误三态**
+（加载态由前端自身控制），否则 E2E 与 mock 模式会打到真网络。
+
+- [ ] **Step 9: 类型检查 + Commit**
+
+Run: `pnpm --filter @yuanchat/shared typecheck`
+Expected: 0 错误
+
+```bash
+git add packages/shared/src/localdb packages/shared/src/store/messageLocalSync.ts \
+        packages/shared/src/api/chat.ts packages/shared/src/mocks \
+        packages/shared/src/__tests__/localdb.session.test.ts \
+        packages/shared/src/__tests__/messageLocalSync.test.ts
+git commit -m "feat(localdb): 本地库会话单例与 after_seq 客户端"
+```
+
+---
+
+### Task 11: messageStore 双写、冷启动水合与空洞补齐
+
+**Files:**
+
+- Modify: `packages/shared/src/store/messageLocalSync.ts`（追加持久化/水合/对账）
+- Modify: `packages/shared/src/store/messageStore.ts`（`receiveMessage` / `loadHistory` / `loadMore` / `applyAck` 挂钩）
+- Test: `packages/shared/src/__tests__/messageReconcile.test.ts`
+
+**Interfaces:**
+
+- Consumes: Task 10 的 `localDb` / `localRowOf` / `chatMessageOf` / `fetchMessagesAfter`；Task 3 的 `putMessages` / `listMessagesDesc` / `advanceWatermark` / `maxStoredSeq`；Task 2 的 `getConversation` / `patchConversation`
+- Produces:
+  - `RECONCILE_PAGE = 50` / `RECONCILE_MAX_ROUNDS = 20`
+  - `persistMessages(convId: string, msgs: ChatMessage[]): void` —— **fire-and-forget**，内部吞掉全部异常
+  - `hydrateConversation(convId: string, limit?: number): Promise<ChatMessage[]>` —— 本地读；无库或无数据返回 `[]`
+  - `noteIncoming(convId: string, seq: number): Promise<boolean>` —— 推进水位，返回**是否发现空洞**
+  - `reconcileConversation(convId: string, selfUserId: string): Promise<ChatMessage[]>` —— 三道闸门的 `after_seq` 循环，返回补回来的消息
+
+**`persistMessages` 必须 fire-and-forget。** `receiveMessage` 今天是同步的、由 WS 帧处理器
+直接调用；把它改成 async 会波及整条帧处理链。落盘失败只能吞（降级模式本来就没库）。
+
+**三道闸门缺一不可**：`has_more == false` **或** 已补满保留窗口 500 **或** 循环达 20 轮。
+只靠 `has_more` 时，一个长期离线的账号会在进会话瞬间拉几千条并撑爆本地库。
+
+- [ ] **Step 1: 写失败测试**
+
+创建 `packages/shared/src/__tests__/messageReconcile.test.ts`：
+
+```ts
+import "fake-indexeddb/auto";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  initLocalStore,
+  purgeLocalStore,
+  localDb,
+  putConversations,
+  getConversation,
+  putMessages,
+} from "../localdb";
+import {
+  persistMessages,
+  hydrateConversation,
+  noteIncoming,
+  reconcileConversation,
+  localRowOf,
+  RECONCILE_PAGE,
+  RECONCILE_MAX_ROUNDS,
+} from "../store/messageLocalSync";
+import type { ChatMessage } from "../store/messageStore";
+
+const CONV = "c1";
+const SELF = "me";
+
+const fetchAfter = vi.hoisted(() => vi.fn());
+vi.mock("../api/chat", async (importOriginal) => {
+  const real = (await importOriginal()) as Record<string, unknown>;
+  return { ...real, fetchMessagesAfter: fetchAfter };
+});
+
+function msg(seq: number): ChatMessage {
+  return {
+    id: "m" + seq,
+    conversationId: CONV,
+    kind: "text",
+    isSelf: false,
+    text: "t" + seq,
+    time: "10:00",
+    seq,
+    status: "sent",
+  } as ChatMessage;
+}
+
+/** 落一行会话投影，水位为 maxSeq */
+async function seedConv(maxSeq: number): Promise<void> {
+  await putConversations(localDb()!, [
+    { id: CONV, dto: {}, maxSeq, clearedBeforeSeq: 0, updatedAt: 1 },
+  ]);
+}
+
+beforeEach(async () => {
+  fetchAfter.mockReset();
+  await initLocalStore("reconcile-test");
+});
+
+afterEach(async () => {
+  await purgeLocalStore();
+});
+
+describe("闸门常量", () => {
+  it("每页 50、最多 20 轮", () => {
+    expect(RECONCILE_PAGE).toBe(50);
+    expect(RECONCILE_MAX_ROUNDS).toBe(20);
+  });
+});
+
+describe("persistMessages / hydrateConversation", () => {
+  it("落盘后能水合回来，按 seq 升序", async () => {
+    persistMessages(CONV, [msg(2), msg(1), msg(3)]);
+    await vi.waitFor(async () => {
+      expect((await hydrateConversation(CONV)).map((m) => m.seq)).toEqual([1, 2, 3]);
+    });
+  });
+
+  it("无 seq 的乐观条目不落盘（它属 outbox 职责）", async () => {
+    persistMessages(CONV, [{ ...msg(1), seq: undefined } as ChatMessage]);
+    await vi.waitFor(async () => {
+      expect(await hydrateConversation(CONV)).toHaveLength(0);
+    });
+  });
+
+  it("降级模式（无库）下落盘与水合都不抛错", async () => {
+    await purgeLocalStore();
+    expect(() => persistMessages(CONV, [msg(1)])).not.toThrow();
+    await expect(hydrateConversation(CONV)).resolves.toEqual([]);
+    await initLocalStore("reconcile-test");
+  });
+
+  it("落盘失败被吞掉，不向上抛", async () => {
+    vi.spyOn(localDb()!, "transaction").mockImplementation((() => {
+      throw new DOMException("boom", "UnknownError");
+    }) as IDBDatabase["transaction"]);
+    expect(() => persistMessages(CONV, [msg(1)])).not.toThrow();
+  });
+});
+
+describe("noteIncoming —— 水位推进与空洞判定", () => {
+  it("连续到达推进水位、不报空洞", async () => {
+    await seedConv(10);
+    expect(await noteIncoming(CONV, 11)).toBe(false);
+    expect((await getConversation(localDb()!, CONV))!.maxSeq).toBe(11);
+  });
+
+  it("跳号报空洞且水位不动（这条钉住永久丢空洞的缺陷）", async () => {
+    await seedConv(10);
+    expect(await noteIncoming(CONV, 15)).toBe(true);
+    expect((await getConversation(localDb()!, CONV))!.maxSeq).toBe(10);
+  });
+
+  it("重复帧不报空洞、水位不动", async () => {
+    await seedConv(10);
+    expect(await noteIncoming(CONV, 10)).toBe(false);
+    expect((await getConversation(localDb()!, CONV))!.maxSeq).toBe(10);
+  });
+
+  it("会话行不存在时不报空洞（还没拉过列表，不该触发补齐）", async () => {
+    expect(await noteIncoming("unknown-conv", 5)).toBe(false);
+  });
+});
+
+describe("reconcileConversation —— 三道闸门", () => {
+  it("has_more=false 时一轮即停", async () => {
+    await seedConv(10);
+    fetchAfter.mockResolvedValueOnce({ messages: [msg(11), msg(12)], hasMore: false });
+
+    const got = await reconcileConversation(CONV, SELF);
+
+    expect(fetchAfter).toHaveBeenCalledTimes(1);
+    expect(fetchAfter).toHaveBeenCalledWith(CONV, 10, RECONCILE_PAGE, SELF);
+    expect(got.map((m) => m.seq)).toEqual([11, 12]);
+    expect((await getConversation(localDb()!, CONV))!.maxSeq).toBe(12);
+  });
+
+  // Review Focus 2：空结果不能清空已渲染的消息
+  it("服务端回空数组时不动本地已有消息，也不动水位", async () => {
+    await seedConv(3);
+    await putMessages(localDb()!, [msg(1), msg(2), msg(3)].map(localRowOf));
+    fetchAfter.mockResolvedValueOnce({ messages: [], hasMore: false });
+
+    const got = await reconcileConversation(CONV, SELF);
+
+    expect(got).toEqual([]);
+    expect((await hydrateConversation(CONV)).map((m) => m.seq)).toEqual([1, 2, 3]);
+    expect((await getConversation(localDb()!, CONV))!.maxSeq).toBe(3);
+  });
+
+  it("has_more=true 时按游标续拉，游标取上一页最大 seq", async () => {
+    await seedConv(0);
+    fetchAfter
+      .mockResolvedValueOnce({ messages: [msg(1), msg(2)], hasMore: true })
+      .mockResolvedValueOnce({ messages: [msg(3)], hasMore: false });
+
+    await reconcileConversation(CONV, SELF);
+
+    expect(fetchAfter).toHaveBeenNthCalledWith(1, CONV, 0, RECONCILE_PAGE, SELF);
+    expect(fetchAfter).toHaveBeenNthCalledWith(2, CONV, 2, RECONCILE_PAGE, SELF);
+  });
+
+  it("循环轮数达上限即停（防长期离线账号把本地库撑爆）", async () => {
+    await seedConv(0);
+    // 永远 hasMore=true：只靠 has_more 会无限循环
+    let n = 0;
+    fetchAfter.mockImplementation(() => {
+      n++;
+      return Promise.resolve({ messages: [msg(n)], hasMore: true });
+    });
+
+    await reconcileConversation(CONV, SELF);
+
+    expect(fetchAfter).toHaveBeenCalledTimes(RECONCILE_MAX_ROUNDS);
+  });
+
+  it("补满保留窗口即停，即使 has_more 仍为 true", async () => {
+    await seedConv(0);
+    let base = 0;
+    fetchAfter.mockImplementation(() => {
+      const page = Array.from({ length: RECONCILE_PAGE }, (_, i) => msg(base + i + 1));
+      base += RECONCILE_PAGE;
+      return Promise.resolve({ messages: page, hasMore: true });
+    });
+
+    await reconcileConversation(CONV, SELF);
+
+    // 500 / 50 = 10 轮就该停，远小于 20 轮上限
+    expect(fetchAfter).toHaveBeenCalledTimes(10);
+  });
+
+  it("网络失败时返回已补到的部分，不抛错", async () => {
+    await seedConv(0);
+    fetchAfter
+      .mockResolvedValueOnce({ messages: [msg(1)], hasMore: true })
+      .mockRejectedValueOnce(new Error("offline"));
+
+    const got = await reconcileConversation(CONV, SELF);
+
+    expect(got.map((m) => m.seq)).toEqual([1]);
+    expect((await getConversation(localDb()!, CONV))!.maxSeq).toBe(1);
+  });
+
+  it("降级模式下直接返回空，不打网络", async () => {
+    await purgeLocalStore();
+    expect(await reconcileConversation(CONV, SELF)).toEqual([]);
+    expect(fetchAfter).not.toHaveBeenCalled();
+    await initLocalStore("reconcile-test");
+  });
+});
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `cd packages/shared && LANG=C.UTF-8 npx vitest run src/__tests__/messageReconcile.test.ts`
+Expected: FAIL —— `persistMessages is not a function`
+
+- [ ] **Step 3: 在 `messageLocalSync.ts` 追加实现**
+
+```ts
+import { fetchMessagesAfter } from "../api/chat";
+import {
+  localDb,
+  putMessages,
+  listMessagesDesc,
+  advanceWatermark,
+  getConversation,
+  patchConversation,
+  RETENTION_PER_CONV,
+} from "../localdb";
+
+/** 每轮补齐拉取的条数，与服务端 limit 上限 100 留有余量。 */
+export const RECONCILE_PAGE = 50;
+
+/** 补齐循环的硬上限轮数。 */
+export const RECONCILE_MAX_ROUNDS = 20;
+
+/**
+ * 把消息写入本地库。**fire-and-forget**：不返回 Promise、内部吞掉全部异常。
+ *
+ * `receiveMessage` 今天是同步的、由 WS 帧处理器直接调用；把它改成 async 会波及
+ * 整条帧处理链。落盘失败只能吞 —— 降级模式本来就没有库，而落盘是投影、不是真源。
+ *
+ * 无 seq 的乐观条目**不落盘**：它们属 outbox 的职责范围，
+ * 混进 messages store 会污染 [conversationId, seq] 索引。
+ */
+export function persistMessages(convId: string, msgs: ChatMessage[]): void {
+  const db = localDb();
+  if (db === null) return;
+  const rows = msgs
+    .filter((m) => typeof m.seq === "number" && m.seq > 0)
+    .map((m) => localRowOf({ ...m, conversationId: convId }));
+  if (rows.length === 0) return;
+  try {
+    void putMessages(db, rows).catch(() => {
+      // 落盘失败不影响在线功能，静默
+    });
+  } catch {
+    // transaction() 本身抛错（配额为 0、库已关闭）同样静默
+  }
+}
+
+/** 从本地库水合某会话最近的消息；无库或无数据返回空数组。 */
+export async function hydrateConversation(
+  convId: string,
+  limit: number = RECONCILE_PAGE,
+): Promise<ChatMessage[]> {
+  const db = localDb();
+  if (db === null) return [];
+  try {
+    const rows = await listMessagesDesc(db, convId, 0, limit);
+    return rows.map(chatMessageOf);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 记录一条新到达消息的 seq，推进「已连续确认到」的水位。
+ *
+ * 返回 true 表示发现空洞，调用方应触发 `reconcileConversation`。
+ * 会话行还不存在时返回 false —— 列表都没拉过，此时触发补齐没有意义。
+ */
+export async function noteIncoming(convId: string, seq: number): Promise<boolean> {
+  const db = localDb();
+  if (db === null) return false;
+  try {
+    const conv = await getConversation(db, convId);
+    if (conv === null) return false;
+    const { next, gap } = advanceWatermark(conv.maxSeq, seq);
+    if (next !== conv.maxSeq) await patchConversation(db, convId, { maxSeq: next });
+    return gap;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 用 `after_seq` 从本地水位往后补齐空洞，返回补回来的消息（升序）。
+ *
+ * 三道闸门缺一不可：`hasMore === false` **或** 累计已达保留窗口 **或** 轮数达上限。
+ * 只靠 hasMore 时，一个长期离线的账号会在进会话瞬间拉几千条并撑爆本地库。
+ *
+ * 任一轮网络失败即停并返回已补到的部分：补齐是尽力而为的，失败不该让进会话失败。
+ * **服务端回空数组时不动本地任何数据** —— 空结果表示「没有更新」，
+ * 误当成「服务端说这个会话是空的」去清本地就是把用户的历史擦掉。
+ */
+export async function reconcileConversation(
+  convId: string,
+  selfUserId: string,
+): Promise<ChatMessage[]> {
+  const db = localDb();
+  if (db === null) return [];
+  const conv = await getConversation(db, convId);
+  let cursor = conv === null ? 0 : conv.maxSeq;
+  const collected: ChatMessage[] = [];
+
+  for (let round = 0; round < RECONCILE_MAX_ROUNDS; round++) {
+    let page: { messages: ChatMessage[]; hasMore: boolean };
+    try {
+      page = await fetchMessagesAfter(convId, cursor, RECONCILE_PAGE, selfUserId);
+    } catch {
+      break;
+    }
+    if (page.messages.length === 0) break;
+
+    persistMessages(convId, page.messages);
+    collected.push(...page.messages);
+
+    const last = page.messages[page.messages.length - 1];
+    cursor = typeof last.seq === "number" ? last.seq : cursor;
+    // 补齐过程是连续的，故水位可直接推到本页末尾
+    await patchConversation(db, convId, { maxSeq: cursor });
+
+    if (!page.hasMore) break;
+    if (collected.length >= RETENTION_PER_CONV) break;
+  }
+  return collected;
+}
+```
+
+- [ ] **Step 4: messageStore 挂钩**
+
+四处改动，**每处都只加一行、不改既有控制流**：
+
+1. `receiveMessage` 末尾（追加进 `messagesByConv` 之后）：
+
+```ts
+// 双写本地 + 空洞探测。fire-and-forget：帧处理链保持同步。
+persistMessages(msg.conversationId, [msg]);
+if (typeof msg.seq === "number") {
+  void noteIncoming(msg.conversationId, msg.seq).then((gap) => {
+    // 发现空洞立即补齐：帧丢失或应用启动前的窗口都会造成跳号
+    if (gap) void reconcileConversation(msg.conversationId, selfUserId());
+  });
+}
+```
+
+2. `loadHistory` 开头（`if (mockMode) return;` 之后、现有「已有消息则跳过」判断**之前**）：
+
+```ts
+// 冷启动先渲染本地：断网时这是用户唯一能看到的内容
+if ((get().messagesByConv[conversationId] ?? []).length === 0) {
+  const local = await hydrateConversation(conversationId);
+  if (local.length > 0) {
+    set((s) => ({ messagesByConv: { ...s.messagesByConv, [conversationId]: local } }));
+  }
+}
+```
+
+3. `loadHistory` 的 `fetchMessages` 成功分支之后追加 `persistMessages(conversationId, messages);`；
+   `loadMore` 的成功分支同样追加一行。
+
+4. `applyAck` 里，把已确认消息落盘（seq 此时才有）：在现有 `set(...)` 之后追加
+
+```ts
+// ack 到达后该消息才有 seq，此刻才能落进 messages store
+const confirmed = (get().messagesByConv[convId] ?? []).find((m) => m.id === messageId);
+if (confirmed !== undefined) persistMessages(convId, [confirmed]);
+```
+
+> **`loadHistory` 的既有短路必须保留在本地水合之后**：原代码是
+> `if (已有消息) return;`。水合插在它之前，否则第二次进会话时会跳过水合直接返回，
+> 而第一次进会话（列表为空）走完水合后又被短路挡住不去拉网络 —— 两种顺序都错，
+> 正确顺序是**先水合、再判断是否还需要打网络**。
+
+- [ ] **Step 5: 跑测试确认通过 + 回归 messageStore 既有测试**
+
+Run: `cd packages/shared && LANG=C.UTF-8 npx vitest run src/__tests__/messageReconcile.test.ts`
+Expected: PASS（15 个用例）
+
+Run: `cd packages/shared && LANG=C.UTF-8 npx vitest run`
+Expected: PASS，既有用例零失败（重点看 `messageStore` / `chatApi` 相关）
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/shared/src/store packages/shared/src/__tests__/messageReconcile.test.ts
+git commit -m "feat(localdb): 消息双写、冷启动水合与空洞增量补齐"
+```
+
+---
+
+### Task 12: 会话列表双写、冷启动渲染与僵尸会话清理
+
+**Files:**
+
+- Create: `packages/shared/src/store/conversationLocalSync.ts`
+- Modify: `packages/shared/src/store/conversationStore.ts`（`loadConversations` / `addConversation` / `updateConversation` / `removeConversation` 挂钩）
+- Test: `packages/shared/src/__tests__/conversationLocalSync.test.ts`
+
+**Interfaces:**
+
+- Consumes: Task 2 的 `replaceConversations` / `putConversations` / `listConversations` / `deleteConversations` / `getConversation`；Task 4 的 `dropMessages`；Task 10 的 `localDb`
+- Produces:
+  - `persistConversationList(list: Conversation[]): Promise<void>` —— **整表替换**，并清掉不在新列表里的会话的本地消息
+  - `hydrateConversationList(): Promise<Conversation[]>`
+  - `persistConversationPatch(id: string, conv: Conversation): void` —— fire-and-forget
+  - `forgetConversation(id: string): Promise<void>` —— 删会话行 + 删其全部本地消息与 blob
+
+**Review Focus 3 落在这里。** 服务端列表回来时，本地有、列表里没有的会话**必须删掉**：
+那是已解散的群或自己已被踢出的会话，留着就是一个点进去就 403 的僵尸条目。
+而且它的本地消息与 blob 也要一并清 —— 否则用户被踢出群之后，**断网仍能翻那个群的历史**。
+
+- [ ] **Step 1: 写失败测试**
+
+创建 `packages/shared/src/__tests__/conversationLocalSync.test.ts`：
+
+```ts
+import "fake-indexeddb/auto";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import {
+  initLocalStore,
+  purgeLocalStore,
+  localDb,
+  putMessages,
+  putMedia,
+  getMedia,
+  listMessagesDesc,
+} from "../localdb";
+import {
+  persistConversationList,
+  hydrateConversationList,
+  persistConversationPatch,
+  forgetConversation,
+} from "../store/conversationLocalSync";
+import type { Conversation } from "../store/conversationStore";
+
+function conv(id: string, name = "会话"): Conversation {
+  return { id, name, type: "group", lastSeq: 0, unread: 0 } as Conversation;
+}
+
+beforeEach(async () => {
+  await initLocalStore("conv-sync-test");
+});
+
+afterEach(async () => {
+  await purgeLocalStore();
+});
+
+describe("列表落盘与水合", () => {
+  it("落盘后水合回同一批会话", async () => {
+    await persistConversationList([conv("a"), conv("b")]);
+    expect((await hydrateConversationList()).map((c) => c.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("水合保留服务端 DTO 的全部字段", async () => {
+    await persistConversationList([{ ...conv("a"), name: "特定名字", unread: 7 } as Conversation]);
+    const got = (await hydrateConversationList())[0];
+    expect(got.name).toBe("特定名字");
+    expect(got.unread).toBe(7);
+  });
+
+  it("降级模式下落盘与水合都不抛错", async () => {
+    await purgeLocalStore();
+    await expect(persistConversationList([conv("a")])).resolves.toBeUndefined();
+    await expect(hydrateConversationList()).resolves.toEqual([]);
+    await initLocalStore("conv-sync-test");
+  });
+
+  it("空列表落盘会清空本地（服务端确实回了零会话）", async () => {
+    await persistConversationList([conv("a")]);
+    await persistConversationList([]);
+    expect(await hydrateConversationList()).toEqual([]);
+  });
+});
+
+// Review Focus 3：僵尸会话必须连消息与 blob 一起清掉
+describe("僵尸会话清理", () => {
+  it("新列表里没有的会话被删掉", async () => {
+    await persistConversationList([conv("a"), conv("gone")]);
+    await persistConversationList([conv("a")]);
+    expect((await hydrateConversationList()).map((c) => c.id)).toEqual(["a"]);
+  });
+
+  it("被删会话的本地消息与 blob 一并清掉（否则被踢出群后断网仍能翻历史）", async () => {
+    await persistConversationList([conv("kicked")]);
+    await putMedia(localDb()!, "grp-img", new ArrayBuffer(100), "image/jpeg");
+    await putMessages(localDb()!, [
+      { id: "m1", conversationId: "kicked", seq: 1, dto: {}, mediaKeys: ["grp-img"] },
+    ]);
+
+    await persistConversationList([]); // 服务端已不含该会话
+
+    expect(await listMessagesDesc(localDb()!, "kicked", 0, 10)).toHaveLength(0);
+    expect(await getMedia(localDb()!, "grp-img")).toBeNull();
+  });
+
+  it("仍在列表里的会话，其消息不受影响", async () => {
+    await persistConversationList([conv("keep"), conv("drop")]);
+    await putMessages(localDb()!, [
+      { id: "k1", conversationId: "keep", seq: 1, dto: {}, mediaKeys: [] },
+      { id: "d1", conversationId: "drop", seq: 1, dto: {}, mediaKeys: [] },
+    ]);
+
+    await persistConversationList([conv("keep")]);
+
+    expect(await listMessagesDesc(localDb()!, "keep", 0, 10)).toHaveLength(1);
+    expect(await listMessagesDesc(localDb()!, "drop", 0, 10)).toHaveLength(0);
+  });
+
+  it("水位不因整表替换而丢失（同一会话再次落盘保留 maxSeq）", async () => {
+    await persistConversationList([conv("a")]);
+    await localDb()!; // 显式水位改写
+    const db = localDb()!;
+    const tx = db.transaction("conversations", "readwrite");
+    const store = tx.objectStore("conversations");
+    const cur = await new Promise<Record<string, unknown>>((res) => {
+      const r = store.get("a");
+      r.onsuccess = () => res(r.result as Record<string, unknown>);
+    });
+    store.put({ ...cur, maxSeq: 42 });
+    await new Promise<void>((res) => {
+      tx.oncomplete = () => res();
+    });
+
+    await persistConversationList([conv("a")]);
+
+    const after = await new Promise<Record<string, unknown>>((res) => {
+      const t2 = localDb()!.transaction("conversations", "readonly");
+      const r = t2.objectStore("conversations").get("a");
+      r.onsuccess = () => res(r.result as Record<string, unknown>);
+    });
+    expect(after.maxSeq).toBe(42);
+  });
+});
+
+describe("局部更新与显式遗忘", () => {
+  it("persistConversationPatch 更新单条且不抛错", async () => {
+    await persistConversationList([conv("a")]);
+    persistConversationPatch("a", { ...conv("a"), name: "改名后" } as Conversation);
+    await new Promise((r) => setTimeout(r, 10));
+    expect((await hydrateConversationList())[0].name).toBe("改名后");
+  });
+
+  it("forgetConversation 删会话与其消息（主动退群/解散走它）", async () => {
+    await persistConversationList([conv("a")]);
+    await putMessages(localDb()!, [
+      { id: "m1", conversationId: "a", seq: 1, dto: {}, mediaKeys: [] },
+    ]);
+    await forgetConversation("a");
+    expect(await hydrateConversationList()).toEqual([]);
+    expect(await listMessagesDesc(localDb()!, "a", 0, 10)).toHaveLength(0);
+  });
+});
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `cd packages/shared && LANG=C.UTF-8 npx vitest run src/__tests__/conversationLocalSync.test.ts`
+Expected: FAIL —— `persistConversationList is not a function`
+
+- [ ] **Step 3: 写 `conversationLocalSync.ts`**
+
+```ts
+/**
+ * 会话列表投影的落盘与水合。
+ *
+ * 与消息侧同一姿态：本地是投影、服务端是真源。
+ */
+import {
+  localDb,
+  listConversations,
+  replaceConversations,
+  putConversations,
+  getConversation,
+  dropMessages,
+  listMessagesDesc,
+  type LocalConversationRow,
+} from "../localdb";
+import type { Conversation } from "./conversationStore";
+
+/** 取某会话在本地的全部消息 id（用于连带清理）。 */
+async function allMessageIdsOf(db: IDBDatabase, convId: string): Promise<string[]> {
+  // 取一个远超保留窗口的 limit，一次拿全（保留窗口上限 500，这里给足余量）
+  const rows = await listMessagesDesc(db, convId, 0, 10_000);
+  return rows.map((r) => r.id);
+}
+
+/**
+ * 整表替换会话列表，并清掉**不在新列表里**的会话的消息与 blob。
+ *
+ * 本地有、服务端列表没有的会话 = 已解散的群或自己已被踢出。留着它是一个点进去
+ * 就 403 的僵尸条目；而留着它的本地消息更糟 —— 用户被踢出群之后，
+ * **断网仍能翻那个群的全部历史**，等于绕过了成员校验。
+ *
+ * 同一会话再次落盘时**保留既有水位**（maxSeq / clearedBeforeSeq）：
+ * 整表替换的是服务端 DTO 快照，水位是本地状态，冲掉它会让下次补齐从 0 开始全量重拉。
+ */
+export async function persistConversationList(list: Conversation[]): Promise<void> {
+  const db = localDb();
+  if (db === null) return;
+  try {
+    const keep = new Set(list.map((c) => c.id));
+    const existing = await listConversations(db);
+
+    // 先清僵尸会话的消息与 blob（会话行本身由 replaceConversations 清掉）
+    for (const row of existing) {
+      if (keep.has(row.id)) continue;
+      const ids = await allMessageIdsOf(db, row.id);
+      if (ids.length > 0) await dropMessages(db, ids);
+    }
+
+    const prev = new Map(existing.map((r) => [r.id, r]));
+    const rows: LocalConversationRow[] = list.map((c) => {
+      const old = prev.get(c.id);
+      return {
+        id: c.id,
+        dto: c,
+        // 水位是本地状态，不能被服务端 DTO 快照冲掉
+        maxSeq: old === undefined ? 0 : old.maxSeq,
+        clearedBeforeSeq: old === undefined ? 0 : old.clearedBeforeSeq,
+        updatedAt: Date.now(),
+      };
+    });
+    await replaceConversations(db, rows);
+  } catch {
+    // 落盘失败不影响在线功能
+  }
+}
+
+/** 从本地水合会话列表；无库或无数据返回空数组。 */
+export async function hydrateConversationList(): Promise<Conversation[]> {
+  const db = localDb();
+  if (db === null) return [];
+  try {
+    const rows = await listConversations(db);
+    return rows.map((r) => r.dto as Conversation);
+  } catch {
+    return [];
+  }
+}
+
+/** 单条会话落盘（新建/改名/未读变化）。fire-and-forget。 */
+export function persistConversationPatch(id: string, conv: Conversation): void {
+  const db = localDb();
+  if (db === null) return;
+  void (async () => {
+    try {
+      const old = await getConversation(db, id);
+      await putConversations(db, [
+        {
+          id,
+          dto: conv,
+          maxSeq: old === null ? 0 : old.maxSeq,
+          clearedBeforeSeq: old === null ? 0 : old.clearedBeforeSeq,
+          updatedAt: Date.now(),
+        },
+      ]);
+    } catch {
+      // 静默
+    }
+  })();
+}
+
+/** 显式遗忘一个会话（主动退群/解散）：删会话行 + 删其全部消息与 blob。 */
+export async function forgetConversation(id: string): Promise<void> {
+  const db = localDb();
+  if (db === null) return;
+  try {
+    const ids = await allMessageIdsOf(db, id);
+    if (ids.length > 0) await dropMessages(db, ids);
+    const rest = (await listConversations(db)).filter((r) => r.id !== id);
+    await replaceConversations(db, rest);
+  } catch {
+    // 静默
+  }
+}
+```
+
+- [ ] **Step 4: conversationStore 挂钩**
+
+```ts
+  loadConversations: async () => {
+    set({ loading: true });
+    // 冷启动先渲染本地：断网时这是用户唯一能看到的内容
+    if (get().conversations.length === 0) {
+      const local = await hydrateConversationList();
+      if (local.length > 0) set({ conversations: local });
+    }
+    try {
+      const conversations = await fetchConversations();
+      set({ conversations, loading: false });
+      // 整表替换 + 清僵尸会话（含其本地消息与 blob）
+      void persistConversationList(conversations);
+    } catch {
+      // 失败时保留已水合的本地列表，只关掉 loading
+      set({ loading: false });
+    }
+  },
+```
+
+`addConversation` / `updateConversation` 末尾各加一行
+`persistConversationPatch(id, 更新后的会话)`；`removeConversation` 末尾加
+`void forgetConversation(id)`。
+
+> **`catch` 分支刻意不清空 `conversations`**：原实现只 `set({ loading: false })`，
+> 这正是我们要的 —— 断网时保留水合出来的本地列表。**不要顺手改成清空**。
+
+- [ ] **Step 5: 跑测试 + 回归**
+
+Run: `cd packages/shared && LANG=C.UTF-8 npx vitest run src/__tests__/conversationLocalSync.test.ts src/__tests__/conversationStore.test.ts`
+Expected: PASS
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/shared/src/store packages/shared/src/__tests__/conversationLocalSync.test.ts
+git commit -m "feat(localdb): 会话列表双写与僵尸会话连带清理"
+```
+
+---
+
+### Task 13: 离线发送队列接线与上线补发
+
+**Files:**
+
+- Create: `packages/shared/src/store/outboxSync.ts`
+- Modify: `packages/shared/src/store/messageStore.ts`（`sendText` / `retrySend` / `applyAck` 挂钩）
+- Modify: `packages/shared/src/ws/chatSocket.ts`（连上后触发补发）
+- Test: `packages/shared/src/__tests__/outboxSync.test.ts`
+
+**Interfaces:**
+
+- Consumes: Task 6 的 `enqueueOutbox` / `listOutbox` / `markOutbox` / `settleOutbox` / `expireOutbox` / `dropOutbox`；Task 10 的 `localDb` / `localRowOf`
+- Produces:
+  - `enqueueSend(convId: string, clientMsgId: string, payload: unknown): void` —— fire-and-forget 入队
+  - `settleSend(clientMsgId: string, confirmed: ChatMessage): void` —— ack 到达后出队
+  - `flushOutbox(send: (payload: unknown) => boolean): Promise<{ sent: number; left: number }>` —— **串行**补发
+  - `restoreOutbox(): Promise<ChatMessage[]>` —— 冷启动把未发出的恢复成 `failed` 气泡
+
+**Review Focus 4 落在这里。** 补发途中再次断网：已成功的出队、剩余的留在队列，
+**且不进入无限重试循环** —— `send` 返回 false 即立刻停止本轮，不继续尝试后面的。
+
+`flushOutbox` 接收一个 `send` 回调而不是直接调 `chatSocket`：这样它可以被纯函数式地测试，
+不用起 WebSocket。
+
+- [ ] **Step 1: 写失败测试**
+
+创建 `packages/shared/src/__tests__/outboxSync.test.ts`：
+
+```ts
+import "fake-indexeddb/auto";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  initLocalStore,
+  purgeLocalStore,
+  localDb,
+  listOutbox,
+  listMessagesDesc,
+  OUTBOX_EXPIRE_MS,
+} from "../localdb";
+import { enqueueSend, settleSend, flushOutbox, restoreOutbox } from "../store/outboxSync";
+import type { ChatMessage } from "../store/messageStore";
+
+const CONV = "c1";
+
+function confirmed(seq: number, id = "m" + seq): ChatMessage {
+  return {
+    id,
+    conversationId: CONV,
+    kind: "text",
+    isSelf: true,
+    text: "t",
+    time: "10:00",
+    seq,
+    status: "sent",
+  } as ChatMessage;
+}
+
+/** 等 fire-and-forget 的入队落盘 */
+async function settled(): Promise<void> {
+  await new Promise((r) => setTimeout(r, 10));
+}
+
+beforeEach(async () => {
+  await initLocalStore("outbox-sync-test");
+});
+
+afterEach(async () => {
+  await purgeLocalStore();
+});
+
+describe("入队与出队", () => {
+  it("发送时入队，ack 到达后出队并落进 messages", async () => {
+    enqueueSend(CONV, "cid-1", { text: "hi" });
+    await settled();
+    expect(await listOutbox(localDb()!)).toHaveLength(1);
+
+    settleSend("cid-1", confirmed(5));
+    await settled();
+    expect(await listOutbox(localDb()!)).toHaveLength(0);
+    expect((await listMessagesDesc(localDb()!, CONV, 0, 10)).map((m) => m.seq)).toEqual([5]);
+  });
+
+  it("降级模式下入队与出队都不抛错", async () => {
+    await purgeLocalStore();
+    expect(() => enqueueSend(CONV, "cid", {})).not.toThrow();
+    expect(() => settleSend("cid", confirmed(1))).not.toThrow();
+    await initLocalStore("outbox-sync-test");
+  });
+});
+
+describe("flushOutbox —— 串行补发", () => {
+  it("按 createdAt 顺序补发（并行会打乱用户输入顺序）", async () => {
+    enqueueSend(CONV, "c1", { n: 1 });
+    await settled();
+    enqueueSend(CONV, "c2", { n: 2 });
+    await settled();
+    enqueueSend(CONV, "c3", { n: 3 });
+    await settled();
+
+    const order: number[] = [];
+    const res = await flushOutbox((p) => {
+      order.push((p as { n: number }).n);
+      return true;
+    });
+
+    expect(order).toEqual([1, 2, 3]);
+    expect(res.sent).toBe(3);
+  });
+
+  // Review Focus 4：补发途中再次断网
+  it("send 返回 false 时立刻停止本轮，不尝试后面的（防无限重试）", async () => {
+    enqueueSend(CONV, "a", { n: 1 });
+    await settled();
+    enqueueSend(CONV, "b", { n: 2 });
+    await settled();
+    enqueueSend(CONV, "c", { n: 3 });
+    await settled();
+
+    let calls = 0;
+    const res = await flushOutbox(() => {
+      calls++;
+      return calls === 1; // 第一条成功，第二条起断网
+    });
+
+    expect(calls).toBe(2); // 只试到第二条就停，不试第三条
+    expect(res.sent).toBe(1);
+    expect(res.left).toBe(2);
+  });
+
+  it("断网停下后，成功的那条被标 sending、失败的被标 failed，队列都还在", async () => {
+    enqueueSend(CONV, "a", {});
+    await settled();
+    enqueueSend(CONV, "b", {});
+    await settled();
+
+    let first = true;
+    await flushOutbox(() => {
+      const ok = first;
+      first = false;
+      return ok;
+    });
+
+    const byId = new Map((await listOutbox(localDb()!)).map((r) => [r.clientMsgId, r.status]));
+    expect(byId.get("a")).toBe("sending");
+    expect(byId.get("b")).toBe("failed");
+  });
+
+  it("expired 的条目不参与自动补发（要用户显式重发）", async () => {
+    enqueueSend(CONV, "old", {});
+    await settled();
+    // 手工把 createdAt 推到 24h 前并跑一次过期判定
+    const db = localDb()!;
+    const tx = db.transaction("outbox", "readwrite");
+    const store = tx.objectStore("outbox");
+    const cur = await new Promise<Record<string, unknown>>((res) => {
+      const r = store.get("old");
+      r.onsuccess = () => res(r.result as Record<string, unknown>);
+    });
+    store.put({ ...cur, createdAt: Date.now() - OUTBOX_EXPIRE_MS - 1, status: "expired" });
+    await new Promise<void>((res) => {
+      tx.oncomplete = () => res();
+    });
+
+    const res = await flushOutbox(() => true);
+    expect(res.sent).toBe(0);
+  });
+
+  it("队列为空时不调 send", async () => {
+    const send = vi.fn(() => true);
+    const res = await flushOutbox(send);
+    expect(send).not.toHaveBeenCalled();
+    expect(res).toEqual({ sent: 0, left: 0 });
+  });
+
+  it("降级模式下返回零且不调 send", async () => {
+    await purgeLocalStore();
+    const send = vi.fn(() => true);
+    expect(await flushOutbox(send)).toEqual({ sent: 0, left: 0 });
+    expect(send).not.toHaveBeenCalled();
+    await initLocalStore("outbox-sync-test");
+  });
+});
+
+describe("restoreOutbox —— 冷启动恢复", () => {
+  it("未发出的恢复成 failed 气泡，供用户重发", async () => {
+    enqueueSend(CONV, "cid-x", {
+      conversation_id: CONV,
+      client_msg_id: "cid-x",
+      content: { type: "text", text: "没发出去的" },
+    });
+    await settled();
+
+    const restored = await restoreOutbox();
+
+    expect(restored).toHaveLength(1);
+    expect(restored[0].status).toBe("failed");
+    expect(restored[0].clientMsgId).toBe("cid-x");
+    expect(restored[0].conversationId).toBe(CONV);
+    expect(restored[0].text).toBe("没发出去的");
+  });
+
+  it("恢复出来的条目没有 seq（还没被服务端确认过）", async () => {
+    enqueueSend(CONV, "cid-y", {
+      conversation_id: CONV,
+      client_msg_id: "cid-y",
+      content: { type: "text", text: "x" },
+    });
+    await settled();
+    expect((await restoreOutbox())[0].seq).toBeUndefined();
+  });
+
+  it("降级模式下返回空数组", async () => {
+    await purgeLocalStore();
+    expect(await restoreOutbox()).toEqual([]);
+    await initLocalStore("outbox-sync-test");
+  });
+});
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `cd packages/shared && LANG=C.UTF-8 npx vitest run src/__tests__/outboxSync.test.ts`
+Expected: FAIL —— `enqueueSend is not a function`
+
+- [ ] **Step 3: 写 `outboxSync.ts`**
+
+```ts
+/**
+ * 离线发送队列的接线：入队、ack 出队、上线串行补发、冷启动恢复。
+ */
+import {
+  localDb,
+  enqueueOutbox,
+  listOutbox,
+  markOutbox,
+  settleOutbox,
+  expireOutbox,
+  type OutboxRow,
+} from "../localdb";
+import { localRowOf } from "./messageLocalSync";
+import type { ChatMessage } from "./messageStore";
+
+/** 发送时入队（fire-and-forget，失败静默）。 */
+export function enqueueSend(convId: string, clientMsgId: string, payload: unknown): void {
+  const db = localDb();
+  if (db === null) return;
+  void enqueueOutbox(db, {
+    clientMsgId,
+    conversationId: convId,
+    payload,
+    createdAt: Date.now(),
+    status: "pending",
+    attempts: 0,
+  }).catch(() => {
+    // 入队失败只意味着「这条重启后不可恢复」，不影响本次在线发送
+  });
+}
+
+/** ack 到达：出队并把已确认消息落进 messages（单事务，见 settleOutbox）。 */
+export function settleSend(clientMsgId: string, confirmed: ChatMessage): void {
+  const db = localDb();
+  if (db === null) return;
+  void settleOutbox(db, clientMsgId, localRowOf(confirmed)).catch(() => {
+    // 静默：内存态已经是对的，本地副本缺一条只影响下次冷启动
+  });
+}
+
+/**
+ * 串行补发待发队列。
+ *
+ * `send` 返回 false 表示链路不可用 —— 此时**立刻停止本轮**，不再尝试后面的条目。
+ * 逐条硬试到底会在断网时把整个队列的 attempts 全部推高，并产生一串无意义的
+ * 失败日志；而链路恢复后下一次 `online` 事件会重新触发本函数。
+ *
+ * `expired` 的条目不参与自动补发（要用户显式重发），已在筛选里排除。
+ */
+export async function flushOutbox(
+  send: (payload: unknown) => boolean,
+): Promise<{ sent: number; left: number }> {
+  const db = localDb();
+  if (db === null) return { sent: 0, left: 0 };
+
+  await expireOutbox(db, Date.now());
+
+  let rows: OutboxRow[];
+  try {
+    rows = (await listOutbox(db)).filter((r) => r.status !== "expired");
+  } catch {
+    return { sent: 0, left: 0 };
+  }
+  if (rows.length === 0) return { sent: 0, left: 0 };
+
+  let sent = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const ok = send(row.payload);
+    if (!ok) {
+      await markOutbox(db, row.clientMsgId, "failed");
+      // 链路不可用，本轮到此为止；剩余条目留在队列等下次 online
+      return { sent, left: rows.length - sent };
+    }
+    // 标 sending 而非直接出队：真正出队要等 ack（settleSend）
+    await markOutbox(db, row.clientMsgId, "sending");
+    sent++;
+  }
+  return { sent, left: rows.length - sent };
+}
+
+/**
+ * 冷启动把队列里未发出的条目恢复成 `failed` 气泡。
+ *
+ * 恢复出来的条目**没有 seq**（服务端从未确认过），因此不会进 messages store，
+ * 只在内存时间线末尾显示，由用户决定重发还是删除。
+ */
+export async function restoreOutbox(): Promise<ChatMessage[]> {
+  const db = localDb();
+  if (db === null) return [];
+  try {
+    const rows = await listOutbox(db);
+    return rows.map((r) => {
+      const p = r.payload as { content?: { text?: string } };
+      return {
+        id: r.clientMsgId,
+        clientMsgId: r.clientMsgId,
+        conversationId: r.conversationId,
+        kind: "text",
+        isSelf: true,
+        text: p.content === undefined ? "" : (p.content.text ?? ""),
+        time: "",
+        status: "failed",
+      } as ChatMessage;
+    });
+  } catch {
+    return [];
+  }
+}
+```
+
+> **`??` 在源码里是允许的**（已核实现有源码 180+ 处在用）：`packages/shared` 作为
+> workspace 包被两端 app 以**源码**形式消费，最终由 vite 按 `build.target: es2019`
+> 统一转译，产物里不会残留。上面那行照写即可，**不必改成三元**。
+
+- [ ] **Step 4: messageStore 与 chatSocket 挂钩**
+
+1. `sendText` / `sendImage` / `sendFile` / `sendVoice` / `sendVideo` / `sendSticker` 在构造好
+   WS 载荷、调用 `chatSocket.send` **之前**各加一行 `enqueueSend(conversationId, clientMsgId, payload);`
+2. `applyAck` 里在 `persistMessages` 那行**替换**为 `settleSend(clientMsgId, confirmed);`
+   （`settleSend` 已经包含落 messages，两者重复会白写一次）
+3. `chatSocket.ts` 的 `online` 监听与连接建立成功回调里追加：
+
+```ts
+// 链路可用即补发离线期间积压的消息（串行，返回 false 即停）
+void flushOutbox((payload) => this.send(payload as Parameters<typeof this.send>[0]));
+```
+
+- [ ] **Step 5: 跑测试 + 回归**
+
+Run: `cd packages/shared && LANG=C.UTF-8 npx vitest run src/__tests__/outboxSync.test.ts src/__tests__/chatSocket.test.ts src/__tests__/messageActions.test.ts`
+Expected: PASS
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/shared/src/store packages/shared/src/ws/chatSocket.ts \
+        packages/shared/src/__tests__/outboxSync.test.ts
+git commit -m "feat(localdb): 离线发送队列与上线串行补发"
 ```
