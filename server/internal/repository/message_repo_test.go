@@ -271,3 +271,108 @@ func TestListMediaEmptyForNoMatch(t *testing.T) {
 		t.Fatalf("types 为空应返回 0 条，got %d", len(rows))
 	}
 }
+
+// historyFixture 建一个群会话 + 一名成员发送者，返回会话 id 与发送者 id。
+// 消息由调用方用 CreateWithSeq 灌入，seq 由会话自增列分配（从 1 开始）。
+func historyFixture(t *testing.T, db *gorm.DB) (uuid.UUID, uuid.UUID) {
+	t.Helper()
+	sender := newTestUser(t, db, "hist")
+	conv := &model.Conversation{Type: model.ConversationTypeGroup, LastSeq: 0}
+	if err := db.Create(conv).Error; err != nil {
+		t.Fatalf("create conv: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM messages WHERE conversation_id = ?`, conv.ID)
+		db.Exec(`DELETE FROM conversation_members WHERE conversation_id = ?`, conv.ID)
+		db.Unscoped().Delete(conv)
+	})
+	if err := db.Create(&model.ConversationMember{ConversationID: conv.ID, UserID: sender.ID}).Error; err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	return conv.ID, sender.ID
+}
+
+// TestListAfter 增量补齐：取 seq > afterSeq 的消息，升序，可见性口径与 ListBefore 一致。
+func TestListAfter(t *testing.T) {
+	db := testDB(t)
+	repo := NewMessageRepository(db)
+	ctx := context.Background()
+
+	convID, senderID := historyFixture(t, db)
+	for i := 1; i <= 5; i++ {
+		msg := &model.Message{
+			ConversationID: convID,
+			SenderID:       senderID,
+			MessageType:    model.MessageTypeText,
+			Content:        `{"text":"m"}`,
+			Status:         model.MessageStatusNormal,
+		}
+		if err := repo.CreateWithSeq(ctx, msg); err != nil {
+			t.Fatalf("seed message %d: %v", i, err)
+		}
+	}
+
+	seqs := func(rows []MessageWithSender) []int64 {
+		out := make([]int64, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, r.Seq)
+		}
+		return out
+	}
+
+	t.Run("升序返回 seq 大于游标的消息", func(t *testing.T) {
+		rows, err := repo.ListAfter(ctx, convID, 2, 0, 10)
+		if err != nil {
+			t.Fatalf("ListAfter: %v", err)
+		}
+		if got := seqs(rows); !reflect.DeepEqual(got, []int64{3, 4, 5}) {
+			t.Fatalf("want ascending [3 4 5], got %v", got)
+		}
+	})
+
+	t.Run("limit 生效且取最靠前的那批（补空洞要从缺口处往后补）", func(t *testing.T) {
+		rows, err := repo.ListAfter(ctx, convID, 0, 0, 2)
+		if err != nil {
+			t.Fatalf("ListAfter: %v", err)
+		}
+		if got := seqs(rows); !reflect.DeepEqual(got, []int64{1, 2}) {
+			t.Fatalf("want [1 2], got %v", got)
+		}
+	})
+
+	t.Run("游标等于最新 seq 时返回空（不是报错）", func(t *testing.T) {
+		rows, err := repo.ListAfter(ctx, convID, 5, 0, 10)
+		if err != nil {
+			t.Fatalf("ListAfter: %v", err)
+		}
+		if len(rows) != 0 {
+			t.Fatalf("want empty, got %d rows", len(rows))
+		}
+	})
+
+	t.Run("minSeq 水位过滤生效（清空聊天记录语义）", func(t *testing.T) {
+		rows, err := repo.ListAfter(ctx, convID, 0, 3, 10)
+		if err != nil {
+			t.Fatalf("ListAfter: %v", err)
+		}
+		if got := seqs(rows); !reflect.DeepEqual(got, []int64{4, 5}) {
+			t.Fatalf("want [4 5], got %v", got)
+		}
+	})
+
+	t.Run("撤回消息照常回占位行（与 ListBefore 同口径，不过滤 status）", func(t *testing.T) {
+		if err := db.Exec(
+			`UPDATE messages SET status = ?, content = '{}' WHERE conversation_id = ? AND seq = 4`,
+			model.MessageStatusRevoked, convID,
+		).Error; err != nil {
+			t.Fatalf("mark revoked: %v", err)
+		}
+		rows, err := repo.ListAfter(ctx, convID, 3, 0, 10)
+		if err != nil {
+			t.Fatalf("ListAfter: %v", err)
+		}
+		if len(rows) != 2 {
+			t.Fatalf("撤回消息必须仍作为占位行返回，want 2 rows, got %d", len(rows))
+		}
+	})
+}

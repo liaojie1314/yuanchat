@@ -73,25 +73,56 @@ func utcTimePtr(t *time.Time) *time.Time {
 	return &u
 }
 
-// ListBefore 取会话中 seq < beforeSeq 且 seq > minSeq 的最新 limit 条消息（seq 降序）。
-// beforeSeq ≤ 0 表示从最新一条开始取。
-// minSeq 为调用方的 cleared_before_seq 水位（0 表示不过滤）；群会话署名用成员 alias 覆盖 nickname。
-func (r *MessageRepository) ListBefore(ctx context.Context, convID uuid.UUID, beforeSeq, minSeq int64, limit int) ([]MessageWithSender, error) {
+// historyQuery 历史翻页与增量补齐**共用**的查询构造。
+//
+// 可见性口径只能有这一份：ListBefore 与 ListAfter 各写一份 Where 必然漂移，
+// 而漂移的方向就是越权。刻意**不过滤 status** —— 撤回消息要作为占位行回给
+// 客户端（相册的 ListMedia 才过滤 status=1）。
+//
+// minSeq 为调用方的 cleared_before_seq 水位（0 表示不过滤）；
+// 群会话署名用成员 alias 覆盖 nickname。
+func (r *MessageRepository) historyQuery(ctx context.Context, convID uuid.UUID, minSeq int64) *gorm.DB {
 	q := r.db.WithContext(ctx).
 		Table("messages m").
 		Select(`m.*, COALESCE(NULLIF(cm.alias, ''), u.nickname) AS sender_nickname, u.avatar_url AS sender_avatar_url`).
 		Joins("JOIN users u ON u.id = m.sender_id").
 		Joins("LEFT JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = m.sender_id").
 		Where("m.conversation_id = ? AND m.deleted_at IS NULL", convID)
-	if beforeSeq > 0 {
-		q = q.Where("m.seq < ?", beforeSeq)
-	}
 	if minSeq > 0 {
 		q = q.Where("m.seq > ?", minSeq)
+	}
+	return q
+}
+
+// ListBefore 取会话中 seq < beforeSeq 且 seq > minSeq 的最新 limit 条消息（seq 降序）。
+// beforeSeq ≤ 0 表示从最新一条开始取。
+// minSeq 为调用方的 cleared_before_seq 水位（0 表示不过滤）；群会话署名用成员 alias 覆盖 nickname。
+func (r *MessageRepository) ListBefore(ctx context.Context, convID uuid.UUID, beforeSeq, minSeq int64, limit int) ([]MessageWithSender, error) {
+	q := r.historyQuery(ctx, convID, minSeq)
+	if beforeSeq > 0 {
+		q = q.Where("m.seq < ?", beforeSeq)
 	}
 
 	var rows []MessageWithSender
 	err := q.Order("m.seq DESC").Limit(limit).Scan(&rows).Error
+	for i := range rows {
+		rows[i].EditedAt = utcTimePtr(rows[i].EditedAt)
+	}
+	return rows, err
+}
+
+// ListAfter 取会话中 seq > afterSeq 且 seq > minSeq 的最早 limit 条消息（seq **升序**）。
+//
+// 供客户端断线重连后补空洞用：从本地水位往后拉，升序保证补齐时可顺序推进水位。
+// 游标等于最新 seq 时返回空切片（不是错误）——客户端据此停止循环。
+func (r *MessageRepository) ListAfter(ctx context.Context, convID uuid.UUID, afterSeq, minSeq int64, limit int) ([]MessageWithSender, error) {
+	q := r.historyQuery(ctx, convID, minSeq)
+	if afterSeq > 0 {
+		q = q.Where("m.seq > ?", afterSeq)
+	}
+
+	var rows []MessageWithSender
+	err := q.Order("m.seq ASC").Limit(limit).Scan(&rows).Error
 	for i := range rows {
 		rows[i].EditedAt = utcTimePtr(rows[i].EditedAt)
 	}
