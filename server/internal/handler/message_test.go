@@ -204,3 +204,149 @@ func TestMediaInvalidConversationID(t *testing.T) {
 		t.Fatalf("status = %d, want 400", code)
 	}
 }
+
+// newHistoryEngine 把消息历史端点挂到独立 gin 引擎上，以中间件注入 user_id。
+// dispatcher 传 nil：History 是只读端点，不推任何 WS 帧。
+func newHistoryEngine(db *gorm.DB, userID uuid.UUID) *gin.Engine {
+	svc := service.NewMessageService(
+		repository.NewMessageRepository(db),
+		repository.NewConversationRepository(db),
+		repository.NewUserRepository(db),
+		repository.NewReactionRepository(db),
+		repository.NewBlocklistRepository(db),
+		zap.NewNop(),
+	)
+	h := NewMessageHandler(svc, nil, zap.NewNop())
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set("user_id", userID)
+		c.Next()
+	})
+	r.GET("/api/v1/conversations/:id/messages", h.History)
+	return r
+}
+
+// historyPage 历史响应的最小形状，只取断言需要的字段。
+type historyPage struct {
+	Data struct {
+		Messages []struct {
+			Seq int64 `json:"seq"`
+		} `json:"messages"`
+		HasMore bool `json:"has_more"`
+	} `json:"data"`
+}
+
+// getHistory 发一次历史请求，返回状态码与解析后的分页体。
+func getHistory(t *testing.T, r *gin.Engine, target string) (int, historyPage) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var page historyPage
+	if w.Body.Len() > 0 {
+		if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+			t.Fatalf("decode response %q: %v", w.Body.String(), err)
+		}
+	}
+	return w.Code, page
+}
+
+// seedHistoryConv 建群会话 + 单成员 + 五条文本消息（seq 1..5）。
+func seedHistoryConv(t *testing.T, db *gorm.DB, member *model.User) uuid.UUID {
+	t.Helper()
+	conv := &model.Conversation{ID: uuid.New(), Type: model.ConversationTypeGroup, LastSeq: 5}
+	if err := db.Create(conv).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	if err := db.Create(&model.ConversationMember{
+		ID: uuid.New(), ConversationID: conv.ID, UserID: member.ID,
+	}).Error; err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	for seq := int64(1); seq <= 5; seq++ {
+		msg := &model.Message{
+			ConversationID: conv.ID,
+			SenderID:       member.ID,
+			Seq:            seq,
+			MessageType:    model.MessageTypeText,
+			Status:         model.MessageStatusNormal,
+			Content:        fmt.Sprintf(`{"text":"m%d"}`, seq),
+		}
+		if err := db.Create(msg).Error; err != nil {
+			t.Fatalf("create message seq=%d: %v", seq, err)
+		}
+	}
+	return conv.ID
+}
+
+// TestHistoryAfterSeq 增量补齐端点：互斥校验、limit 夹取、空结果语义、越权拦截。
+func TestHistoryAfterSeq(t *testing.T) {
+	db := packTestDB(t)
+	member := newPackTestUser(t, db, "历史成员")
+	convID := seedHistoryConv(t, db, member)
+	r := newHistoryEngine(db, member.ID)
+	base := "/api/v1/conversations/" + convID.String() + "/messages"
+
+	t.Run("after_seq 升序返回并带 has_more", func(t *testing.T) {
+		code, page := getHistory(t, r, base+"?after_seq=2&limit=2")
+		if code != http.StatusOK {
+			t.Fatalf("want 200, got %d", code)
+		}
+		if len(page.Data.Messages) != 2 || page.Data.Messages[0].Seq != 3 || page.Data.Messages[1].Seq != 4 {
+			t.Fatalf("want ascending [3 4], got %+v", page.Data.Messages)
+		}
+		if !page.Data.HasMore {
+			t.Fatal("满页应报 has_more=true")
+		}
+	})
+
+	// Review Focus 2：游标等于最新 seq 时必须回空数组 + has_more=false
+	t.Run("after_seq 等于最新 seq 回空数组且 has_more=false", func(t *testing.T) {
+		code, page := getHistory(t, r, base+"?after_seq=5")
+		if code != http.StatusOK {
+			t.Fatalf("want 200, got %d", code)
+		}
+		if len(page.Data.Messages) != 0 {
+			t.Fatalf("want empty messages, got %d", len(page.Data.Messages))
+		}
+		if page.Data.HasMore {
+			t.Fatal("空结果不能报 has_more=true")
+		}
+	})
+
+	t.Run("after_seq=0 走升序分支从头补（不能落回 before_seq 降序）", func(t *testing.T) {
+		code, page := getHistory(t, r, base+"?after_seq=0&limit=2")
+		if code != http.StatusOK {
+			t.Fatalf("want 200, got %d", code)
+		}
+		if len(page.Data.Messages) != 2 || page.Data.Messages[0].Seq != 1 {
+			t.Fatalf("want ascending from seq 1, got %+v", page.Data.Messages)
+		}
+	})
+
+	t.Run("两个游标同时给按 400 拒绝，不静默取其一", func(t *testing.T) {
+		code, _ := getHistory(t, r, base+"?after_seq=1&before_seq=4")
+		if code != http.StatusBadRequest {
+			t.Fatalf("want 400, got %d", code)
+		}
+	})
+
+	t.Run("limit 超上限回落到 30", func(t *testing.T) {
+		code, page := getHistory(t, r, base+"?after_seq=0&limit=999")
+		if code != http.StatusOK {
+			t.Fatalf("want 200, got %d", code)
+		}
+		// 只有 5 条种子消息：回落到 30 后能全拿到，且不满页故 has_more=false
+		if len(page.Data.Messages) != 5 || page.Data.HasMore {
+			t.Fatalf("want 5 messages without has_more, got %d/%v", len(page.Data.Messages), page.Data.HasMore)
+		}
+	})
+
+	t.Run("非成员 403", func(t *testing.T) {
+		outsider := newPackTestUser(t, db, "局外人")
+		code, _ := getHistory(t, newHistoryEngine(db, outsider.ID), base+"?after_seq=0")
+		if code != http.StatusForbidden {
+			t.Fatalf("want 403, got %d", code)
+		}
+	})
+}

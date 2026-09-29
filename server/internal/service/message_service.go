@@ -368,23 +368,63 @@ func (s *MessageService) GetHistory(
 	if err != nil {
 		return nil, err
 	}
-
-	// 回填表情回应聚合（Mine 相对当前用户）
-	if len(messages) > 0 {
-		ids := make([]uuid.UUID, 0, len(messages))
-		for _, m := range messages {
-			ids = append(ids, m.ID)
-		}
-		aggs, err := s.reactionRepo.AggregateFor(ctx, ids, userID)
-		if err != nil {
-			s.logger.Warn("load reactions failed", zap.Error(err))
-			return messages, nil
-		}
-		for i := range messages {
-			messages[i].Reactions = aggs[messages[i].ID]
-		}
-	}
+	s.backfillReactions(ctx, userID, messages)
 	return messages, nil
+}
+
+// GetHistoryAfter 取 seq > afterSeq 的最早 limit 条消息（升序），供客户端补空洞。
+//
+// 成员校验、cleared_before_seq 水位、表情回应回填**全部与 GetHistory 同口径**
+// （共用 historyQuery 与 backfillReactions），故两条路径不会漂移出越权差异。
+func (s *MessageService) GetHistoryAfter(
+	ctx context.Context,
+	userID, convID uuid.UUID,
+	afterSeq int64,
+	limit int,
+) ([]repository.MessageWithSender, error) {
+	member, ok, err := s.convRepo.GetMember(ctx, convID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("check membership: %w", err)
+	}
+	if !ok {
+		return nil, ErrNotMember
+	}
+
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+	messages, err := s.msgRepo.ListAfter(ctx, convID, afterSeq, member.ClearedBeforeSeq, limit)
+	if err != nil {
+		return nil, err
+	}
+	s.backfillReactions(ctx, userID, messages)
+	return messages, nil
+}
+
+// backfillReactions 就地回填表情回应聚合（Mine 相对 userID）。
+//
+// 加载失败只记 warn 不返回错误：表情回应是附加信息，
+// 拿不到时让整个历史拉取失败是不成比例的。
+func (s *MessageService) backfillReactions(
+	ctx context.Context,
+	userID uuid.UUID,
+	messages []repository.MessageWithSender,
+) {
+	if len(messages) == 0 {
+		return
+	}
+	ids := make([]uuid.UUID, 0, len(messages))
+	for _, m := range messages {
+		ids = append(ids, m.ID)
+	}
+	aggs, err := s.reactionRepo.AggregateFor(ctx, ids, userID)
+	if err != nil {
+		s.logger.Warn("load reactions failed", zap.Error(err))
+		return
+	}
+	for i := range messages {
+		messages[i].Reactions = aggs[messages[i].ID]
+	}
 }
 
 // ErrInvalidMediaType 相册 type 参数不在白名单内。
