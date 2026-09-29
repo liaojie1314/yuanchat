@@ -82,3 +82,86 @@ export async function getMedia(db: IDBDatabase, objectKey: string): Promise<Medi
   await txDone(tx);
   return got;
 }
+
+/** 媒体缓存全局配额（200MB）。 */
+export const MEDIA_QUOTA_BYTES = 200 * 1024 * 1024;
+
+/** 触发淘汰时删到配额的这个比例（留出余量，避免刚淘汰完又立刻超限）。 */
+export const MEDIA_EVICT_TARGET = 0.8;
+
+/**
+ * 按 lastAccessAt 升序（最久未访问优先）淘汰到 targetBytes 以下，返回释放字节数。
+ *
+ * 用游标逐条删而不是先 getAll：getAll 会把所有 blob 的字节一起读进内存，
+ * 200MB 配额下等于瞬间吃掉 200MB 堆。
+ */
+export async function evictMediaTo(db: IDBDatabase, targetBytes: number): Promise<number> {
+  const total = await mediaBytesTotal(db);
+  if (total <= targetBytes) return 0;
+
+  const tx = db.transaction([STORE_MEDIA, STORE_META], "readwrite");
+  const idx = tx.objectStore(STORE_MEDIA).index("by_access");
+  let freed = 0;
+  await new Promise<void>((resolve, reject) => {
+    const req = idx.openCursor();
+    req.onsuccess = () => {
+      const cur = req.result;
+      if (cur === null || total - freed <= targetBytes) {
+        resolve();
+        return;
+      }
+      freed += (cur.value as MediaRow).bytes;
+      cur.delete();
+      cur.continue();
+    };
+    req.onerror = () => reject(req.error);
+  });
+  if (freed > 0) bumpBytes(tx, -freed);
+  await txDone(tx);
+  return freed;
+}
+
+/**
+ * 对外的媒体写入入口，带三段降级。返回是否最终缓存成功。
+ *
+ * **缓存失败绝不能升级成功能失败** —— 拿不到本地副本时调用方照常走网络，
+ * 用户看不出区别。因此本函数吞掉所有异常、只用返回值表达结果。
+ *
+ * 超配额时**先主动淘汰再写**，不等浏览器抛 QuotaExceededError：浏览器给单
+ * origin 的配额可能远小于 200MB，主动控制比被动接错更可预测。
+ */
+export async function cacheMedia(
+  db: IDBDatabase,
+  objectKey: string,
+  bufData: ArrayBuffer,
+  mimeType: string,
+): Promise<boolean> {
+  const target = Math.floor(MEDIA_QUOTA_BYTES * MEDIA_EVICT_TARGET);
+  try {
+    const total = await mediaBytesTotal(db);
+    if (total + bufData.byteLength > MEDIA_QUOTA_BYTES) {
+      await evictMediaTo(db, Math.max(0, target - bufData.byteLength));
+    }
+    await putMedia(db, objectKey, bufData, mimeType);
+    return true;
+  } catch (e) {
+    const name = e instanceof DOMException ? e.name : "";
+    if (name !== "QuotaExceededError") return false;
+    // 第二段：淘汰后重试一次
+    try {
+      await evictMediaTo(db, target);
+      await putMedia(db, objectKey, bufData, mimeType);
+      return true;
+    } catch {
+      // 第三段：放弃缓存，调用方走网络
+      return false;
+    }
+  }
+}
+
+/** 读出媒体并重建 Blob（IDB 里存的是 ArrayBuffer），未命中返回 null。 */
+export async function readMediaBlob(db: IDBDatabase, objectKey: string): Promise<Blob | null> {
+  const row = await getMedia(db, objectKey);
+  if (row === null) return null;
+  return new Blob([row.buf], { type: row.mimeType });
+}
