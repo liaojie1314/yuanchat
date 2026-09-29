@@ -14,6 +14,7 @@
 import { ensureFreshToken, needsRefresh } from "../api/tokenManager";
 import type { ConversationDTO } from "../api/chat";
 import { captureException } from "../observability/sentry";
+import { flushOutbox } from "../store/outboxSync";
 
 /**
  * 客户端 → 服务端的 `content` 载荷，与 `server/internal/ws/protocol.go` 的
@@ -476,6 +477,7 @@ class ChatSocket {
       this.bindEnvListeners();
       this.scheduleHeartbeat(this.heartbeatInterval());
       if (isRetry && this.onReconnect) this.onReconnect();
+      this.flushOfflineQueue();
     };
 
     ws.onmessage = (event) => {
@@ -547,6 +549,21 @@ class ChatSocket {
         this.connect();
       }
     }
+  }
+
+  /**
+   * 链路建立后补发本地待发队列（跨重启存活的那一份）。
+   *
+   * 与 {@link ChatSocket.flushQueue} 的内存队列是两回事：后者只活在本次进程内。
+   * 回调按「字节真的写出去了吗」返回布尔 —— 走 `this.send` 会在掉线时入内存队列
+   * 并照样返回成功，补发就永远停不下来。
+   */
+  private flushOfflineQueue() {
+    void flushOutbox((payload) => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+      this.ws.send(JSON.stringify({ type: "message.send", payload }));
+      return true;
+    });
   }
 
   private flushQueue() {

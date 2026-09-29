@@ -35,6 +35,7 @@ import {
   noteIncoming,
   reconcileConversation,
 } from "./messageLocalSync";
+import { enqueueSend, settleSend } from "./outboxSync";
 import { showToast } from "./toastStore";
 
 /** 消息在气泡里呈现的内容类别 */
@@ -836,9 +837,10 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
         }),
       },
     }));
-    // ack 到达后该消息才有 seq，此刻才能落进 messages store
+    // ack 到达后该消息才有 seq，此刻才能落进 messages store；
+    // 出队与落库同事务完成，见 settleOutbox
     const confirmed = (get().messagesByConv[convId] ?? []).find((m) => m.id === messageId);
-    if (confirmed !== undefined) persistMessages(convId, [confirmed]);
+    if (confirmed !== undefined) settleSend(clientMsgId, confirmed);
   },
 
   applyRead: (convId, seq) =>
@@ -1025,6 +1027,18 @@ async function maybeEncryptAndSend(
     }
   }
 
+  sendWithOutbox(payload);
+}
+
+/**
+ * 发一帧 message.send，并先把它记进离线待发队列。
+ *
+ * 入队与发送必须成对，故收敛成这一处：六条发送路径各自记一次极易漏，
+ * 漏掉的那条在掉线重启后就是「用户以为发出去了、实际永远消失」。
+ * 会话与幂等 id 直接取自载荷本身，不另传参，避免两处对不上。
+ */
+function sendWithOutbox(payload: ClientFrames["message.send"]): void {
+  enqueueSend(payload.conversation_id, payload.client_msg_id, payload);
   chatSocket.send("message.send", payload);
 }
 
@@ -1072,7 +1086,7 @@ async function dispatchImageSend(
   // 回填对象 key（乐观 → 确认的一部分）：ack 后本地副本失效时可据 key 签下载渲染
   writeBackImageKey(conversationId, clientMsgId, key);
 
-  chatSocket.send("message.send", {
+  sendWithOutbox({
     conversation_id: conversationId,
     content: { type: "image", key, width, height, size: blob.size },
     client_msg_id: clientMsgId,
@@ -1174,7 +1188,7 @@ async function dispatchFileSend(
     },
   }));
 
-  chatSocket.send("message.send", {
+  sendWithOutbox({
     conversation_id: conversationId,
     content: { type: "file", key, name, size: file.size },
     client_msg_id: clientMsgId,
@@ -1215,7 +1229,7 @@ async function dispatchVoiceSend(
     },
   }));
 
-  chatSocket.send("message.send", {
+  sendWithOutbox({
     conversation_id: conversationId,
     content: { type: "voice", key, duration, size: blob.size },
     client_msg_id: clientMsgId,
@@ -1308,7 +1322,7 @@ async function dispatchVideoSend(
     },
   }));
 
-  chatSocket.send("message.send", {
+  sendWithOutbox({
     conversation_id: conversationId,
     content: {
       type: "video",
@@ -1338,7 +1352,7 @@ function dispatchStickerSend(
   clientMsgId: string,
   get: () => MessageState,
 ) {
-  chatSocket.send("message.send", {
+  sendWithOutbox({
     conversation_id: conversationId,
     content: {
       type: "sticker",
