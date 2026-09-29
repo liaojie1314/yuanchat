@@ -29,6 +29,12 @@ import { asServerMessageId, chatSocket } from "../ws/chatSocket";
 import type { ClientFrames } from "../ws/chatSocket";
 import { encryptFor } from "../crypto/e2eeManager";
 import { useAuthStore } from "./authStore";
+import {
+  persistMessages,
+  hydrateMessages,
+  noteIncoming,
+  reconcileConversation,
+} from "./messageLocalSync";
 import { showToast } from "./toastStore";
 
 /** 消息在气泡里呈现的内容类别 */
@@ -364,13 +370,24 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
 
   loadHistory: async (conversationId) => {
     if (mockMode) return;
-    if ((get().messagesByConv[conversationId] ?? []).length > 0) return;
+    // 短路判据取「进来之前内存里有没有」：水合会把本地消息填进内存，
+    // 若在水合之后再判空，第一次进会话就会被自己刚填的数据挡住、永不打网络。
+    const hadInMemory = (get().messagesByConv[conversationId] ?? []).length > 0;
+    if (!hadInMemory) {
+      // 冷启动先渲染本地：断网时这是用户唯一能看到的内容
+      const local = await hydrateMessages(conversationId);
+      if (local.length > 0) {
+        set((s) => ({ messagesByConv: { ...s.messagesByConv, [conversationId]: local } }));
+      }
+    }
+    if (hadInMemory) return;
     try {
       const { messages, hasMore } = await fetchMessages(conversationId, 0, PAGE_SIZE, selfUserId());
       set((s) => ({
         messagesByConv: { ...s.messagesByConv, [conversationId]: messages },
         hasMoreByConv: { ...s.hasMoreByConv, [conversationId]: hasMore },
       }));
+      persistMessages(conversationId, messages);
     } catch {
       // 历史加载失败不阻塞聊天（保持空列表，可通过重进会话重试）
     }
@@ -395,6 +412,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
         },
         hasMoreByConv: { ...s.hasMoreByConv, [conversationId]: hasMore },
       }));
+      persistMessages(conversationId, messages);
     } catch {
       // 翻页失败保持现状，用户可再次触发
     }
@@ -773,6 +791,14 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
           : { ...s.typingByConv, [msg.conversationId]: undefined },
       };
     });
+    // 双写本地 + 空洞探测。fire-and-forget：帧处理链保持同步。
+    persistMessages(msg.conversationId, [msg]);
+    if (typeof msg.seq === "number") {
+      void noteIncoming(msg.conversationId, msg.seq).then((gap) => {
+        // 发现空洞立即补齐：帧丢失或应用启动前的窗口都会造成跳号
+        if (gap) void reconcileConversation(msg.conversationId, selfUserId());
+      });
+    }
   },
 
   applyAck: (clientMsgId, messageId, convId, seq, timestamp) => {
@@ -810,6 +836,9 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
         }),
       },
     }));
+    // ack 到达后该消息才有 seq，此刻才能落进 messages store
+    const confirmed = (get().messagesByConv[convId] ?? []).find((m) => m.id === messageId);
+    if (confirmed !== undefined) persistMessages(convId, [confirmed]);
   },
 
   applyRead: (convId, seq) =>
