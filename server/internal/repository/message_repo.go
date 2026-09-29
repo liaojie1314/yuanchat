@@ -6,9 +6,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/yuanchat/server/internal/model"
 	"gorm.io/gorm"
 )
+
+// ErrDuplicateClientMsg 同一发送者的同一 client_msg_id 已落库。
+//
+// 由唯一索引 idx_messages_sender_client_msg（迁移 020）保证。调用方收到它
+// 应当回查既有行并返回**原 ack**，而不是报错给客户端 —— 离线补发撞到它是
+// 正常路径，不是异常。
+var ErrDuplicateClientMsg = errors.New("duplicate client_msg_id")
 
 // MessageWithSender 消息 + 发送者昵称/头像的投影结果。
 type MessageWithSender struct {
@@ -48,6 +56,13 @@ func (r *MessageRepository) CreateWithSeq(ctx context.Context, msg *model.Messag
 		msg.Seq = seq
 
 		if err := tx.Create(msg).Error; err != nil {
+			// 23505 = unique_violation。只有 client_msg_id 那条部分唯一索引会在
+			// 正常业务流里被撞到（离线补发），转成哨兵错误交由上层回查既有行。
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" &&
+				pgErr.ConstraintName == "idx_messages_sender_client_msg" {
+				return ErrDuplicateClientMsg
+			}
 			return err
 		}
 
@@ -71,6 +86,27 @@ func utcTimePtr(t *time.Time) *time.Time {
 	}
 	u := t.UTC()
 	return &u
+}
+
+// FindByClientMsgID 按 (sender_id, client_msg_id) 取回既有消息，未找到返回 (nil, nil)。
+func (r *MessageRepository) FindByClientMsgID(
+	ctx context.Context,
+	senderID uuid.UUID,
+	clientMsgID string,
+) (*model.Message, error) {
+	var msg model.Message
+	err := r.db.WithContext(ctx).
+		Where("sender_id = ? AND client_msg_id = ? AND deleted_at IS NULL", senderID, clientMsgID).
+		First(&msg).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	msg.CreatedAt = utcTime(msg.CreatedAt)
+	msg.EditedAt = utcTimePtr(msg.EditedAt)
+	return &msg, nil
 }
 
 // historyQuery 历史翻页与增量补齐**共用**的查询构造。

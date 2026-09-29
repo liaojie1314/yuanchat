@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -373,6 +374,93 @@ func TestListAfter(t *testing.T) {
 		}
 		if len(rows) != 2 {
 			t.Fatalf("撤回消息必须仍作为占位行返回，want 2 rows, got %d", len(rows))
+		}
+	})
+}
+
+// TestCreateWithSeqIdempotent 同一 (sender_id, client_msg_id) 重复落库必须被唯一索引挡下。
+func TestCreateWithSeqIdempotent(t *testing.T) {
+	db := testDB(t)
+	repo := NewMessageRepository(db)
+	ctx := context.Background()
+	convID, senderID := historyFixture(t, db)
+
+	cid := "client-msg-1"
+	first := &model.Message{
+		ConversationID: convID, SenderID: senderID,
+		MessageType: model.MessageTypeText, Content: `{"text":"hello"}`,
+		Status: model.MessageStatusNormal, ClientMsgID: &cid,
+	}
+	if err := repo.CreateWithSeq(ctx, first); err != nil {
+		t.Fatalf("first send: %v", err)
+	}
+
+	t.Run("重复 client_msg_id 返回 ErrDuplicateClientMsg", func(t *testing.T) {
+		dup := &model.Message{
+			ConversationID: convID, SenderID: senderID,
+			MessageType: model.MessageTypeText, Content: `{"text":"hello"}`,
+			Status: model.MessageStatusNormal, ClientMsgID: &cid,
+		}
+		err := repo.CreateWithSeq(ctx, dup)
+		if !errors.Is(err, ErrDuplicateClientMsg) {
+			t.Fatalf("want ErrDuplicateClientMsg, got %v", err)
+		}
+	})
+
+	t.Run("冲突回滚后 seq 不泄漏（last_seq 未被白占）", func(t *testing.T) {
+		var lastSeq int64
+		if err := db.Raw(`SELECT last_seq FROM conversations WHERE id = ?`, convID).
+			Scan(&lastSeq).Error; err != nil {
+			t.Fatalf("read last_seq: %v", err)
+		}
+		if lastSeq != first.Seq {
+			t.Fatalf("冲突事务回滚后 last_seq 应仍为 %d，实际 %d（seq 被白占）", first.Seq, lastSeq)
+		}
+	})
+
+	t.Run("FindByClientMsgID 取回原行", func(t *testing.T) {
+		got, err := repo.FindByClientMsgID(ctx, senderID, cid)
+		if err != nil {
+			t.Fatalf("FindByClientMsgID: %v", err)
+		}
+		if got == nil || got.ID != first.ID || got.Seq != first.Seq {
+			t.Fatalf("want original message %s/seq %d, got %+v", first.ID, first.Seq, got)
+		}
+	})
+
+	t.Run("FindByClientMsgID 未命中返回 (nil, nil)", func(t *testing.T) {
+		got, err := repo.FindByClientMsgID(ctx, senderID, "never-sent")
+		if err != nil || got != nil {
+			t.Fatalf("want (nil, nil), got (%+v, %v)", got, err)
+		}
+	})
+
+	t.Run("不同发送者可用同一 client_msg_id", func(t *testing.T) {
+		// 消息必须落在这位发送者自己的会话里：historyFixture 先注册用户清理、
+		// 后注册会话清理，LIFO 下会话（含删消息）先跑，用户才删得掉。
+		// 放进外层会话会让用户先于消息被删 → FK 违规把整个测试事务打废。
+		otherConvID, otherSender := historyFixture(t, db)
+		other := &model.Message{
+			ConversationID: otherConvID, SenderID: otherSender,
+			MessageType: model.MessageTypeText, Content: `{"text":"hi"}`,
+			Status: model.MessageStatusNormal, ClientMsgID: &cid,
+		}
+		// 索引是 (sender_id, client_msg_id) 复合的，换人不算冲突
+		if err := repo.CreateWithSeq(ctx, other); err != nil {
+			t.Fatalf("不同发送者的同 client_msg_id 应当放行，got %v", err)
+		}
+	})
+
+	t.Run("client_msg_id 为 NULL 的消息不受约束（系统消息可多条）", func(t *testing.T) {
+		for i := 0; i < 3; i++ {
+			sys := &model.Message{
+				ConversationID: convID, SenderID: senderID,
+				MessageType: model.MessageTypeSystem, Content: `{"text":"sys"}`,
+				Status: model.MessageStatusNormal,
+			}
+			if err := repo.CreateWithSeq(ctx, sys); err != nil {
+				t.Fatalf("系统消息第 %d 条应放行，got %v", i+1, err)
+			}
 		}
 	})
 }

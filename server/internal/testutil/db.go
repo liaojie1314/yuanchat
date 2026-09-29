@@ -81,6 +81,36 @@ func NewDB(t *testing.T) *gorm.DB {
 	return tx
 }
 
+// NewPooledDB 返回测试库的**连接池**句柄（非事务），供需要真并发的用例使用。
+//
+// NewDB 返回的是单连接事务，多 goroutine 并打它只会被 database/sql 串行化，
+// 证明不了任何并发行为——要验证唯一索引在并发下的实际表现就必须走连接池。
+//
+// 代价：写入不会自动回滚，调用方须自行清理（本进程专属库在最后一个用例
+// 结束时整体删除，残留不会跨进程污染）。
+func NewPooledDB(t *testing.T) *gorm.DB {
+	t.Helper()
+
+	dbFixture.mu.Lock()
+	defer dbFixture.mu.Unlock()
+	if dbFixture.base == nil {
+		bootstrapDB()
+	}
+	if dbFixture.skip != nil {
+		t.Skipf("test postgres unavailable, skip integration test: %v", dbFixture.skip)
+	}
+	dbFixture.refs++
+	t.Cleanup(func() {
+		dbFixture.mu.Lock()
+		defer dbFixture.mu.Unlock()
+		dbFixture.refs--
+		if dbFixture.refs == 0 {
+			teardownDB()
+		}
+	})
+	return dbFixture.base
+}
+
 // bootstrapDB 清扫陈库、创建本进程专属库并执行 goose 迁移。
 // 调用方必须持有 dbFixture.mu。失败时把原因记进 dbFixture.skip，
 // 并回滚已完成的中间步骤（如删掉已建但连不上的库）。

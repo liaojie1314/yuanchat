@@ -62,6 +62,10 @@ type SendResult struct {
 	SenderNickname   string
 	MemberIDs        []uuid.UUID
 	MentionedMembers []uuid.UUID // SendContent 校验后回填，供 WS 层构造帧
+	// Duplicate 为 true 表示这条 client_msg_id 之前已落库（离线补发撞上幂等索引）。
+	// handler 应只回 ack 让客户端出队，**不重发 message.receive** —— 收件人
+	// 第一次就已经收到了。语义与 RecallResult.Idempotent 一致。
+	Duplicate bool
 }
 
 // RecallResult 撤回结果，供 handler 构造 message.recalled 推送。
@@ -234,17 +238,47 @@ func (s *MessageService) SendContent(
 	}
 
 	if err := s.msgRepo.CreateWithSeq(ctx, msg); err != nil {
-		return nil, fmt.Errorf("persist message: %w", err)
+		if !errors.Is(err, repository.ErrDuplicateClientMsg) {
+			return nil, fmt.Errorf("persist message: %w", err)
+		}
+		// 幂等路径：这条 client_msg_id 已落过库（离线补发 / ack 回程丢失后重发）。
+		// 回查原行并按重复处理，返回**原 ack**，客户端据此正常出队。
+		existing, findErr := s.msgRepo.FindByClientMsgID(ctx, senderID, clientMsgID)
+		if findErr != nil {
+			return nil, fmt.Errorf("lookup duplicate message: %w", findErr)
+		}
+		if existing == nil {
+			// 唯一索引报了冲突却查不到行：只可能是原行已被软删，
+			// 此时按正常错误上报，不伪造一个 ack。
+			return nil, fmt.Errorf("duplicate client_msg_id but original not found")
+		}
+		return s.buildSendResult(ctx, conv, existing, memberIDs, validMentions, true)
 	}
 
+	return s.buildSendResult(ctx, conv, msg, memberIDs, validMentions, false)
+}
+
+// buildSendResult 装配发送结果：mention_unread 打标 → 装载发送者署名 → 组装 SendResult。
+//
+// duplicate 为 true 时**跳过 mention_unread 打标** —— 第一次发送时已经打过了，
+// 再打一次会把对方已读掉的 @ 红点重新点亮。其余装配照常，因为 ack 仍需要
+// 发送者昵称与成员列表。
+func (s *MessageService) buildSendResult(
+	ctx context.Context,
+	conv *model.Conversation,
+	msg *model.Message,
+	memberIDs []uuid.UUID,
+	validMentions []uuid.UUID,
+	duplicate bool,
+) (*SendResult, error) {
 	// mention_unread 打标：命中成员的会话面板红点
-	if len(validMentions) > 0 {
-		if err := s.convRepo.SetMentionUnread(ctx, convID, validMentions); err != nil {
+	if !duplicate && len(validMentions) > 0 {
+		if err := s.convRepo.SetMentionUnread(ctx, msg.ConversationID, validMentions); err != nil {
 			s.logger.Warn("set mention_unread failed", zap.Error(err))
 		}
 	}
 
-	sender, err := s.userRepo.FindByID(ctx, senderID)
+	sender, err := s.userRepo.FindByID(ctx, msg.SenderID)
 	if err != nil || sender == nil {
 		return nil, fmt.Errorf("load sender: %w", err)
 	}
@@ -252,7 +286,7 @@ func (s *MessageService) SendContent(
 
 	// 群会话署名取本人群昵称（alias 非空时覆盖本名），与历史消息 COALESCE 投影保持一致
 	if conv != nil && conv.Type == model.ConversationTypeGroup {
-		if m, ok, err := s.convRepo.GetMember(ctx, convID, senderID); err != nil {
+		if m, ok, err := s.convRepo.GetMember(ctx, msg.ConversationID, msg.SenderID); err != nil {
 			s.logger.Warn("load sender alias failed", zap.Error(err))
 		} else if ok && m.Alias != nil && *m.Alias != "" {
 			senderNickname = *m.Alias
@@ -264,6 +298,7 @@ func (s *MessageService) SendContent(
 		SenderNickname:   senderNickname,
 		MemberIDs:        memberIDs,
 		MentionedMembers: validMentions,
+		Duplicate:        duplicate,
 	}, nil
 }
 
