@@ -3,3 +3,4 @@ export * from "./types";
 export * from "./db";
 export * from "./conversations";
 export * from "./messages";
+export * from "./media";
