@@ -582,6 +582,32 @@ export async function fetchMessages(
   return { messages, hasMore: !!data.has_more };
 }
 
+/**
+ * 增量补齐：拉取 seq > afterSeq 的消息（服务端返回**升序**，无需 reverse）。
+ *
+ * 与 `fetchMessages` 的区别只在方向：前者向前翻历史（降序），本函数向后补
+ * 断线期间的空洞（升序）。两者的 `before_seq` / `after_seq` 在服务端互斥。
+ */
+export async function fetchMessagesAfter(
+  conversationId: string,
+  afterSeq: number,
+  limit: number,
+  selfUserId: string,
+): Promise<{ messages: ChatMessage[]; hasMore: boolean }> {
+  const data = await apiGet<{ messages: MessageDTO[]; has_more: boolean }>(
+    "/api/v1/conversations/" +
+      conversationId +
+      "/messages?after_seq=" +
+      afterSeq +
+      "&limit=" +
+      limit,
+  );
+  // 服务端已按 seq 升序返回，与前端展示序一致，**不要 reverse**
+  const messages = (data.messages || []).map((m) => mapMessage(m, selfUserId));
+  backfillQuotes(messages);
+  return { messages, hasMore: !!data.has_more };
+}
+
 /** 相册可筛选的媒体类型（与后端 type 白名单一一对应，非白名单值后端回 400） */
 export type MediaType = "all" | "image" | "file" | "voice" | "video" | "sticker";
 
