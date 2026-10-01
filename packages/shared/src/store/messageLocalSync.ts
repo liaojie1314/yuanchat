@@ -8,10 +8,15 @@ import { fetchMessagesAfter } from "../api/chat";
 import {
   localDb,
   putMessages,
+  getMessage,
   listMessagesDesc,
+  maxStoredSeq,
   advanceWatermark,
   getConversation,
   patchConversation,
+  dropMessages,
+  dropMessagesBelowSeq,
+  pruneConversation,
   RETENTION_PER_CONV,
 } from "../localdb";
 import type { LocalMessageRow } from "../localdb";
@@ -189,4 +194,85 @@ export async function reconcileConversation(
     if (collected.length >= RETENTION_PER_CONV) break;
   }
   return collected;
+}
+
+/**
+ * 撤回回放：**直接删行 + 删 blob**，不留占位行。
+ *
+ * 本仓语义是「撤回 = 访问撤销」。留一行占位在本地、blob 却不删，断网时就能
+ * 原样看到已撤回的图片 —— 撤回等于没生效。UI 的灰字占位气泡由内存态
+ * （`applyRecall`）负责渲染，与本地投影无关。
+ *
+ * 消息已被保留窗口淘汰时落在不存在的行上，`dropMessages` 自身是 no-op：
+ * 「消息行在，blob 才在」这条不变量保证此时不会残留孤儿 blob。
+ */
+export function replayRecall(messageId: string): void {
+  const db = localDb();
+  if (db === null) return;
+  void dropMessages(db, [messageId]).catch(() => {
+    // 静默：本地投影落后一步只影响离线视图
+  });
+}
+
+/**
+ * 编辑回放：**就地改 dto**，不删不增。
+ *
+ * seq 不变是硬要求 —— 它既是 [conversationId, seq] 索引的一半，也是消息在
+ * 时间线上的位置；编辑改位置会让消息在用户眼前跳走。
+ */
+export function replayEdit(messageId: string, text: string, editCount: number): void {
+  const db = localDb();
+  if (db === null) return;
+  void (async () => {
+    try {
+      const row = await getMessage(db, messageId);
+      // 本地没这条（已被淘汰）就不凭空造行：造出来的行缺 mediaKeys 与真实 dto
+      if (row === null) return;
+      const dto = { ...(row.dto as ChatMessage), text, edited: true, editCount };
+      await putMessages(db, [{ ...row, dto }]);
+    } catch {
+      // 静默
+    }
+  })();
+}
+
+/**
+ * 清空回放：删掉本地全部已存消息与 blob，并推进 `clearedBeforeSeq` 水位。
+ *
+ * **两步必做。** 只删不推水位，下一次 `after_seq` 补齐会把刚删掉的原样拉回来。
+ *
+ * 水位取「本地已存最大 seq」与「已确认水位」的较大者，由本函数自己算 ——
+ * 调用方只知道内存里渲染过的那些消息，用它算水位会在「没开过会话就清空」时
+ * 给出 0，于是本地那 500 行一条都删不掉。服务端的真实水位（会话 last_seq）
+ * 必然不小于本地任何 seq，故本地取大者既不过头也不留残渣。
+ */
+export function replayClear(convId: string): void {
+  const db = localDb();
+  if (db === null) return;
+  void (async () => {
+    try {
+      const conv = await getConversation(db, convId);
+      const localMax = await maxStoredSeq(db, convId);
+      const watermark = Math.max(localMax, conv === null ? 0 : conv.maxSeq);
+      if (watermark <= 0) return;
+      await dropMessagesBelowSeq(db, convId, watermark);
+      await patchConversation(db, convId, { clearedBeforeSeq: watermark });
+    } catch {
+      // 静默
+    }
+  })();
+}
+
+/**
+ * 会话关闭时跑一次保留窗口淘汰。
+ *
+ * 时机刻意不是「写入时」：用户正往上翻历史时淘汰，会把刚渲染出来的旧消息删掉，
+ * 表现为列表在手里跳。
+ */
+export function pruneOnLeave(convId: string): void {
+  const db = localDb();
+  if (db === null) return;
+  void pruneConversation(db, convId).catch(() => {
+    // 静默：淘汰失败只意味着本地多占一点配额，下次关闭会话再试
+  });
 }

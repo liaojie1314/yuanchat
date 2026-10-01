@@ -70,6 +70,15 @@ export async function listMessagesDesc(
   return out.reverse();
 }
 
+/** 按 id 取单条消息行，不存在返回 null（编辑回放要就地改 dto）。 */
+export async function getMessage(db: IDBDatabase, id: string): Promise<LocalMessageRow | null> {
+  const tx = db.transaction(STORE_MESSAGES, "readonly");
+  const row = await reqDone<LocalMessageRow | undefined>(
+    tx.objectStore(STORE_MESSAGES).get(id) as IDBRequest<LocalMessageRow | undefined>,
+  );
+  return row === undefined ? null : row;
+}
+
 /** 本地实际存着的最大 seq（不是水位），无消息返回 0。 */
 export async function maxStoredSeq(db: IDBDatabase, convId: string): Promise<number> {
   const newest = await listMessagesDesc(db, convId, 0, 1);

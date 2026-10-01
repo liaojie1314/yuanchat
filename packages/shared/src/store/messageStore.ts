@@ -34,6 +34,9 @@ import {
   hydrateMessages,
   noteIncoming,
   reconcileConversation,
+  replayRecall,
+  replayEdit,
+  replayClear,
 } from "./messageLocalSync";
 import { enqueueSend, settleSend } from "./outboxSync";
 import { showToast } from "./toastStore";
@@ -855,7 +858,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       },
     })),
 
-  applyRecall: (convId, messageId, _operatorName) =>
+  applyRecall: (convId, messageId, _operatorName) => {
     set((s) => {
       const list = s.messagesByConv[convId];
       if (!list || !list.some((m) => m.id === messageId)) return s;
@@ -874,9 +877,14 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
           }),
         },
       };
-    }),
+    });
+    // 本地投影直接删行删 blob（撤回 = 访问撤销），占位气泡只存在于内存态。
+    // 刻意放在 set 之外、不受「列表里有没有这条」短路影响：消息可能已被保留
+    // 窗口淘汰出内存却仍躺在本地库里，那种情况下更必须删。
+    replayRecall(messageId);
+  },
 
-  applyEdited: (convId, messageId, text, editCount) =>
+  applyEdited: (convId, messageId, text, editCount) => {
     set((s) => {
       const list = s.messagesByConv[convId];
       // 未命中直接返回原 state：Zustand 比较引用，返回新对象会让整条列表无谓重渲染
@@ -889,7 +897,9 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
           ),
         },
       };
-    }),
+    });
+    replayEdit(messageId, text, editCount);
+  },
 
   applyReaction: (convId, messageId, emoji, count, mine) =>
     set((s) => ({
@@ -960,11 +970,14 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     });
   },
 
-  clearConversation: (convId) =>
+  clearConversation: (convId) => {
     set((s) => ({
       messagesByConv: { ...s.messagesByConv, [convId]: [] },
       hasMoreByConv: { ...s.hasMoreByConv, [convId]: false },
-    })),
+    }));
+    // 本地库同步清空并推进 clearedBeforeSeq —— 只清内存的话刷新就全回来了
+    replayClear(convId);
+  },
 }));
 
 /** 经 WebSocket 发出 message.send 并挂 ack 超时（超时 → failed） */

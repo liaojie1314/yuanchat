@@ -1,6 +1,7 @@
 export * from "./store/themeStore";
 export * from "./store/conversationStore";
 export * from "./store/messageStore";
+export * from "./store/messageLocalSync";
 export * from "./store/authStore";
 export * from "./store/contactStore";
 export * from "./store/blocklistStore";
