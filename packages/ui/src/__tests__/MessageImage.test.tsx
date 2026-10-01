@@ -2,23 +2,23 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { MessageImage } from "../chat/MessageImage";
 
-// getDownloadUrl 由 files api 提供：桩掉以避免真实 fetch，断言 key→url 换取路径
-const getDownloadUrl = vi.fn(async (key: string) => "https://signed/" + key);
+// resolveObjectUrl 由 files api 提供：桩掉以避免真实 fetch，断言 key→url 换取路径
+const resolveObjectUrl = vi.fn(async (key: string) => "https://signed/" + key);
 vi.mock("@yuanchat/shared", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@yuanchat/shared")>();
-  return { ...mod, getDownloadUrl: (k: string) => getDownloadUrl(k) };
+  return { ...mod, resolveObjectUrl: (k: string) => resolveObjectUrl(k) };
 });
 
 describe("MessageImage", () => {
   beforeEach(() => {
-    getDownloadUrl.mockClear();
+    resolveObjectUrl.mockClear();
   });
 
   it("renders localUrl directly without signing a download url", () => {
     render(<MessageImage image={{ width: 800, height: 600, localUrl: "blob:local" }} />);
     const img = screen.getByRole("img", { name: "Image" }) as HTMLImageElement;
     expect(img.getAttribute("src")).toBe("blob:local");
-    expect(getDownloadUrl).not.toHaveBeenCalled();
+    expect(resolveObjectUrl).not.toHaveBeenCalled();
   });
 
   it("caps display box to a 280px longest edge, preserving aspect ratio", () => {
@@ -31,7 +31,7 @@ describe("MessageImage", () => {
 
   it("fetches a download url by key when no localUrl", async () => {
     render(<MessageImage image={{ width: 100, height: 100, key: "images/a.png" }} />);
-    await waitFor(() => expect(getDownloadUrl).toHaveBeenCalledWith("images/a.png"));
+    await waitFor(() => expect(resolveObjectUrl).toHaveBeenCalledWith("images/a.png"));
     const img = screen.getByRole("img", { name: "Image" }) as HTMLImageElement;
     expect(img.getAttribute("src")).toBe("https://signed/images/a.png");
   });
@@ -90,11 +90,11 @@ describe("MessageImage", () => {
       render(<MessageImage image={{ width: 100, height: 100, key: "images/lazy.png" }} />);
       expect(observed.length).toBe(1);
       // 未进视口：不发 presign
-      expect(getDownloadUrl).not.toHaveBeenCalled();
+      expect(resolveObjectUrl).not.toHaveBeenCalled();
 
       // 进入视口后才签名
       trigger(true);
-      await waitFor(() => expect(getDownloadUrl).toHaveBeenCalledWith("images/lazy.png"));
+      await waitFor(() => expect(resolveObjectUrl).toHaveBeenCalledWith("images/lazy.png"));
     });
 
     it("keeps the aspect-ratio skeleton box before visibility (no CLS)", () => {
@@ -111,7 +111,7 @@ describe("MessageImage", () => {
       render(<MessageImage image={{ width: 100, height: 100, localUrl: "blob:opt" }} />);
       const img = screen.getByRole("img", { name: "Image" }) as HTMLImageElement;
       expect(img.getAttribute("src")).toBe("blob:opt");
-      expect(getDownloadUrl).not.toHaveBeenCalled();
+      expect(resolveObjectUrl).not.toHaveBeenCalled();
     });
   });
 });

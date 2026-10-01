@@ -18,7 +18,7 @@
 import { useEffect, useState } from "react";
 import { Play, Video as VideoIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { formatMediaDuration, getDownloadUrl, showToast } from "@yuanchat/shared";
+import { formatMediaDuration, resolveObjectUrl, showToast } from "@yuanchat/shared";
 import type { VideoPayload } from "@yuanchat/shared";
 import { VideoPlaybackOverlay } from "./VideoPlaybackOverlay";
 
@@ -42,11 +42,11 @@ export function MessageVideo({ video }: { video: VideoPayload }) {
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [playUrl, setPlayUrl] = useState<string | null>(null);
 
-  // 封面：签一次下载 URL（getDownloadUrl 自带进程内缓存）；失败保持灰底占位
+  // 封面：本地缓存优先取 URL（封面小、随消息流反复渲染）；失败保持灰底占位
   useEffect(() => {
     if (!thumbKey) return;
     let alive = true;
-    getDownloadUrl(thumbKey)
+    resolveObjectUrl(thumbKey)
       .then((u) => {
         if (alive) setThumbUrl(u);
       })
@@ -70,7 +70,8 @@ export function MessageVideo({ video }: { video: VideoPayload }) {
       showToast("error", t("chat.video.playFailed"));
       return;
     }
-    void getDownloadUrl(key)
+    // 视频本体刻意不缓存：体积不可控，缓存它一个视频就能把配额吃光
+    void resolveObjectUrl(key, { cache: false })
       .then(setPlayUrl)
       .catch(() => showToast("error", t("chat.video.playFailed")));
   };

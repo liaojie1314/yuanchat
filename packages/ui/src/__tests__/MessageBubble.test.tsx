@@ -28,6 +28,7 @@ vi.mock("@yuanchat/shared", async (importOriginal) => {
   return {
     ...mod,
     getDownloadUrl: vi.fn(async (key: string) => "https://signed/" + key),
+    resolveObjectUrl: vi.fn(async (key: string) => "https://signed/" + key),
     showToast: vi.fn(),
   };
 });

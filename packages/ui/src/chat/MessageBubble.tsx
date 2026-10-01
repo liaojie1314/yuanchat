@@ -51,7 +51,7 @@ import {
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { canEdit, getDownloadUrl, showToast } from "@yuanchat/shared";
+import { canEdit, getDownloadUrl, resolveObjectUrl, showToast } from "@yuanchat/shared";
 import type { ChatMessage } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "../primitives/Avatar";
@@ -533,7 +533,8 @@ export function MessageBubble({
                       const resolveUrl = src
                         ? Promise.resolve(src)
                         : key
-                          ? getDownloadUrl(key)
+                          ? // 语音缓存原件：条目小，且重听同一条很常见
+                            resolveObjectUrl(key)
                           : null;
                       if (!resolveUrl) return;
                       void resolveUrl

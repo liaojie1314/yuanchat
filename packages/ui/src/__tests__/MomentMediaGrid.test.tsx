@@ -9,7 +9,11 @@ import type { MomentMediaItem } from "@yuanchat/shared";
 // 下载签名走网络，测试里桩掉
 vi.mock("@yuanchat/shared", async () => {
   const actual = await vi.importActual<typeof import("@yuanchat/shared")>("@yuanchat/shared");
-  return { ...actual, getDownloadUrl: vi.fn(async (key: string) => "blob:" + key) };
+  return {
+    ...actual,
+    getDownloadUrl: vi.fn(async (key: string) => "blob:" + key),
+    resolveObjectUrl: vi.fn(async (key: string) => "blob:" + key),
+  };
 });
 
 function items(n: number): MomentMediaItem[] {
