@@ -36,6 +36,7 @@ export { GroupAvatar } from "./primitives/GroupAvatar";
 export { ResizeHandle } from "./primitives/ResizeHandle";
 export { ToastHost } from "./primitives/Toast";
 export { ConfirmDialog } from "./primitives/ConfirmDialog";
+export { PullToRefresh } from "./primitives/PullToRefresh";
 
 // 聊天组件
 export { ConversationList } from "./chat/ConversationList";
