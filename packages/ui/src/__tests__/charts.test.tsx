@@ -19,10 +19,22 @@ describe("Sparkline", () => {
     expect(container.querySelector("polyline")).toBeTruthy();
   });
 
-  it("空数据渲染占位虚线", () => {
+  it("空数据不渲染任何图形", () => {
     const { container } = render(<Sparkline data={[]} aria-label="空数据" />);
-    expect(container.querySelector("line")).toBeTruthy();
-    expect(container.querySelector("polyline")).toBeNull();
+    expect(container.querySelector("svg")).toBeNull();
+  });
+
+  it("全零序列不渲染（贴底平线不表达趋势）", () => {
+    const { container } = render(
+      <Sparkline
+        data={[
+          { date: "2026-09-01", value: 0 },
+          { date: "2026-09-02", value: 0 },
+        ]}
+        aria-label="全零"
+      />,
+    );
+    expect(container.querySelector("svg")).toBeNull();
   });
 
   it("单点不崩溃", () => {

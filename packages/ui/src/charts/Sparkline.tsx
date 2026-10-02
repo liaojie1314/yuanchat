@@ -52,6 +52,9 @@ function toPoints(data: SparklinePoint[], w: number, h: number): string {
 /**
  * Sparkline 迷你折线图。
  *
+ * @remarks 数据里**没有任何正值**时返回 null 而不画一条贴底平线 ——
+ * 那样的线不表达趋势，只会让人以为图坏了。
+ *
  * @example
  * ```tsx
  * <Sparkline data={pts} aria-label="近 30 天消息量" className="text-primary" />
@@ -66,6 +69,10 @@ export function Sparkline({
 }: SparklineProps) {
   const points = useMemo(() => toPoints(data, width, height), [data, width, height]);
 
+  // 全 0 / 空数据不画：平线贴底看不出趋势，反而像渲染坏了
+  const hasSignal = data.some((d) => d.value > 0);
+  if (!hasSignal) return null;
+
   return (
     <svg
       width={width}
@@ -74,30 +81,16 @@ export function Sparkline({
       role="img"
       aria-label={ariaLabel}
       className={className}
-      style={{ display: "block", overflow: "visible" }}
+      style={{ display: "block" }}
     >
-      {points ? (
-        <polyline
-          points={points}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      ) : (
-        // 空数据：画一条灰色虚线占位
-        <line
-          x1={0}
-          y1={height / 2}
-          x2={width}
-          y2={height / 2}
-          stroke="currentColor"
-          strokeWidth="1"
-          strokeDasharray="3 3"
-          opacity="0.3"
-        />
-      )}
+      <polyline
+        points={points}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

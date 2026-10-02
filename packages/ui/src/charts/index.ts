@@ -13,3 +13,7 @@ export type { LineChartProps, LineSeries } from "./LineChart";
 
 export { DonutChart } from "./DonutChart";
 export type { DonutChartProps, DonutSlice } from "./DonutChart";
+
+export { CHART_PALETTE, CHART_MUTED, chartColor } from "./palette";
+
+export { useElementWidth } from "./useElementWidth";

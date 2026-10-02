@@ -601,6 +601,7 @@
   "admin.nav.overview": "운영 개요",
   "admin.overview.trend30days": "최근 30일 트렌드",
   "admin.overview.msgTypeDistribution": "메시지 유형 분포",
+  "admin.overview.typeOther": "기타",
   "admin.overview.refresh": "새로고침",
   "admin.overview.loadFailed": "지표 로드에 실패했습니다. 새로고침으로 재시도하세요",
   "admin.overview.sectionUsers": "사용자",

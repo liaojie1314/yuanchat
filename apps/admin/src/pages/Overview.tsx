@@ -28,7 +28,7 @@ import {
   type StatsTimeseriesResult,
 } from "../api";
 import { DataTable, Pager, EmptyRow } from "../components/Table";
-import { Sparkline, LineChart, DonutChart } from "@yuanchat/ui/charts";
+import { Sparkline, LineChart, DonutChart, chartColor, CHART_MUTED } from "@yuanchat/ui/charts";
 import type { SparklinePoint, LineSeries, DonutSlice } from "@yuanchat/ui/charts";
 import { cn } from "@yuanchat/shared/utils";
 
@@ -46,22 +46,27 @@ function MetricCard({
   sparkline?: SparklinePoint[];
   sparklineLabel?: string;
 }) {
+  // 有趋势可看时才占位：全 0 序列 Sparkline 会自己返回 null，
+  // 留一个空容器会把卡片撑高、数字与相邻卡片错位
+  const showSpark = sparkline !== undefined && sparkline.some((p) => p.value > 0);
   return (
-    <div className="flex items-start justify-between rounded-lg border border-outline-variant bg-surface-container-low px-4 py-3 shadow-elevation-1">
-      <div className="min-w-0">
-        <p className="text-label-md text-on-surface-variant">{label}</p>
-        <p className="mt-1 text-title-lg font-semibold tabular-nums text-on-surface">
+    <div className="flex flex-col rounded-lg border border-outline-variant bg-surface-container-low px-4 py-3 shadow-elevation-1">
+      <p className="text-label-md text-on-surface-variant">{label}</p>
+      <div className="mt-1 flex items-end justify-between gap-2">
+        <p className="text-title-lg font-semibold tabular-nums text-on-surface">
           {value.toLocaleString()}
         </p>
-        {hint !== undefined && <p className="text-label-sm text-on-surface-variant">{hint}</p>}
+        {showSpark && (
+          <Sparkline
+            data={sparkline}
+            aria-label={sparklineLabel ?? label}
+            width={72}
+            height={24}
+            className="shrink-0 text-primary opacity-80"
+          />
+        )}
       </div>
-      {sparkline && sparkline.length > 0 && (
-        <Sparkline
-          data={sparkline}
-          aria-label={sparklineLabel ?? label}
-          className="mt-1 shrink-0 text-primary opacity-70"
-        />
-      )}
+      {hint !== undefined && <p className="text-label-sm text-on-surface-variant">{hint}</p>}
     </div>
   );
 }
@@ -219,33 +224,53 @@ export function OverviewPage() {
 
   const m = stats?.moderation;
 
-  // 时间序列折线图数据
+  // 时间序列折线图数据：只保留真的有数据的系列。
+  // 全 0 的系列画出来就是贴底的直线，图例里还占一项，纯噪声。
   const tsLabels = timeseries?.points.map((p) => p.date) ?? [];
-  const tsSeries: LineSeries[] = timeseries
+  const tsCandidates: LineSeries[] = timeseries
     ? [
         {
           key: "messages",
           label: t("admin.overview.messagesTotal"),
           values: timeseries.points.map((p) => p.messages),
-          color: "var(--color-primary, #5B9BD5)",
+          color: chartColor(0),
         },
         {
           key: "new_users",
           label: t("admin.overview.usersNewToday"),
           values: timeseries.points.map((p) => p.new_users),
-          color: "var(--color-secondary, #72A98F)",
+          color: chartColor(1),
         },
       ]
     : [];
+  const tsSeries = tsCandidates.filter((s) => s.values.some((v) => v > 0));
 
-  // 消息类型环形图数据
-  const donutSlices: DonutSlice[] = stats
-    ? TYPE_KEYS.map(({ type, labelKey }) => ({
-        key: type,
-        label: t(labelKey),
-        value: stats.messages.by_type[type] ?? 0,
-      })).filter((s) => s.value > 0)
-    : [];
+  // 消息类型环形图数据：五个主要类型 + 「其他」差额。
+  // 颜色在**构造时就钉死**（而不是让 DonutChart 按序取色）：主类目按
+  // chartColor 顺序取，兜底的「其他」固定中性灰。两边都从同一份 slice
+  // 读 color，图例色块与弧段必然一致，不会因过滤/重排错位。
+  const donutSlices: DonutSlice[] = (() => {
+    if (!stats) return [];
+    const main = TYPE_KEYS.map(({ type, labelKey }) => ({
+      key: type,
+      label: t(labelKey),
+      value: stats.messages.by_type[type] ?? 0,
+    }))
+      .filter((s) => s.value > 0)
+      .map((s, i) => ({ ...s, color: chartColor(i) }));
+    const rest = stats.messages.total - main.reduce((acc, s) => acc + s.value, 0);
+    return rest > 0
+      ? [
+          ...main,
+          {
+            key: "__other__",
+            label: t("admin.overview.typeOther"),
+            value: rest,
+            color: CHART_MUTED,
+          },
+        ]
+      : main;
+  })();
 
   return (
     <div>
@@ -324,46 +349,55 @@ export function OverviewPage() {
 
       {/* ── 第二层：折线图 + 环形图 ── */}
       {(timeseries || stats) && (
-        <div className="mt-6 flex flex-col gap-4 md:flex-row">
+        <div className="mt-6 flex flex-col gap-4 lg:flex-row">
           {timeseries && (
-            <div className="flex-1 rounded-lg border border-outline-variant bg-surface-container-low p-4 shadow-elevation-1">
-              <p className="mb-2 text-label-md text-on-surface-variant">
+            <div className="min-w-0 flex-1 rounded-lg border border-outline-variant bg-surface-container-low p-4 shadow-elevation-1">
+              <p className="mb-3 text-label-md text-on-surface-variant">
                 {t("admin.overview.trend30days")}
               </p>
               <LineChart
                 xLabels={tsLabels}
                 series={tsSeries}
-                width={560}
-                height={160}
+                height={220}
                 aria-label={t("admin.overview.trend30days")}
                 className="w-full text-on-surface-variant"
-                maxXTicks={8}
+                maxXTicks={7}
+                showLegend
               />
             </div>
           )}
           {stats && donutSlices.length > 0 && (
-            <div className="flex shrink-0 flex-col items-center justify-center gap-3 rounded-lg border border-outline-variant bg-surface-container-low px-6 py-4 shadow-elevation-1">
+            <div className="flex w-full shrink-0 flex-col items-center gap-4 rounded-lg border border-outline-variant bg-surface-container-low px-5 py-4 shadow-elevation-1 lg:w-[26rem]">
               <p className="text-label-md text-on-surface-variant">
                 {t("admin.overview.msgTypeDistribution")}
               </p>
               <DonutChart
                 slices={donutSlices}
-                size={100}
+                size={180}
+                thickness={24}
+                centerLabel={t("admin.overview.messagesTotal")}
                 aria-label={t("admin.overview.msgTypeDistribution")}
+                className="text-on-surface"
               />
-              <div className="flex flex-wrap justify-center gap-x-3 gap-y-1">
-                {TYPE_KEYS.map(({ type, labelKey }) => (
-                  <span
-                    key={type}
-                    className="rounded-lg border border-outline-variant bg-surface-container-low px-3 py-1.5 text-label-md text-on-surface-variant"
+              {/* 图例两列排布：单列 6 项会把面板撑得比折线图还高，
+                  两列既省纵向空间又让图标/数字两列对齐 */}
+              <ul className="grid w-full grid-cols-2 gap-x-4 gap-y-2">
+                {donutSlices.map((s) => (
+                  <li
+                    key={s.key}
+                    className="flex items-center gap-2 text-label-md text-on-surface-variant"
                   >
-                    {t(labelKey)}
-                    <span className="ml-2 font-semibold tabular-nums text-on-surface">
-                      {(stats.messages.by_type[type] ?? 0).toLocaleString()}
+                    <span
+                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ background: s.color }}
+                    />
+                    <span className="truncate">{s.label}</span>
+                    <span className="ml-auto font-semibold tabular-nums text-on-surface">
+                      {s.value.toLocaleString()}
                     </span>
-                  </span>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </div>
           )}
         </div>

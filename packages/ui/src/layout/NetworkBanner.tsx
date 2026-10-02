@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { CloudOff, Loader2, Wifi } from "lucide-react";
-import { useNetworkStatus } from "@yuanchat/shared";
+import { useNetworkStatus, consumeNetworkLost } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { useTranslation } from "react-i18next";
 
@@ -11,8 +11,12 @@ const RESTORED_LINGER_MS = 2000;
  * 全局网络状态横幅：贴顶，`MainLayout` 挂载一次。
  *
  * 三态分工：`offline` / `connecting` 常驻（问题还在，提示不该消失），
- * `online` 只在**刚从非在线态恢复**时显示「已连接」并 2 秒后自动收起 ——
- * 一直挂一条绿条属于噪音，而从未断过网的会话根本不该看到任何东西。
+ * `online` 只在**真的从断网恢复**时显示「已连接」并 2 秒后自动收起。
+ *
+ * 「真的断过」由 {@link consumeNetworkLost} 判定，而不是比对本进程内的
+ * 前后两态 —— 后者会把两种正常场景误报成恢复：登录页（WS 尚未建立
+ * 即 `connecting`）和每次硬刷新（整页重载重建 WS）。两者用户都没经历过
+ * 断网，弹「已连接」纯属噪音。
  *
  * 顶部偏移叠安全区：安卓沉浸式状态栏下 WebView 铺到状态栏之下，
  * 不叠 `--safe-area-top` 会压住系统时间/信号图标（该变量由原生下发，
@@ -25,13 +29,14 @@ export function NetworkBanner() {
   const { t } = useTranslation();
   const phase = useNetworkStatus();
   const [showRestored, setShowRestored] = useState(false);
-  // 记住上一个态：只有「非在线 → 在线」才算恢复，首次挂载就在线不算
   const prevPhase = useRef(phase);
 
   useEffect(() => {
-    const wasDown = prevPhase.current !== "online";
+    const recovered = prevPhase.current !== "online" && phase === "online";
     prevPhase.current = phase;
-    if (phase !== "online" || !wasDown) return;
+    if (!recovered) return;
+    // 消费标记：没有「断过网」记录就说明这次跃迁只是首次连接或页面重载
+    if (!consumeNetworkLost()) return;
     setShowRestored(true);
     const timer = setTimeout(() => setShowRestored(false), RESTORED_LINGER_MS);
     return () => clearTimeout(timer);

@@ -60,7 +60,13 @@ export { useResizable } from "./hooks/useResizable";
 export { useKeyboardAwareViewport } from "./hooks/useKeyboardAwareViewport";
 export { useBreakpoint, BREAKPOINTS } from "./hooks/useBreakpoint";
 export type { Breakpoint } from "./hooks/useBreakpoint";
-export { useNetworkStatus, networkPhase, subscribeNetworkPhase } from "./hooks/useNetworkStatus";
+export {
+  useNetworkStatus,
+  networkPhase,
+  subscribeNetworkPhase,
+  markNetworkLost,
+  consumeNetworkLost,
+} from "./hooks/useNetworkStatus";
 export type { NetworkPhase } from "./hooks/useNetworkStatus";
 export { useChatBootstrap, isMockEnabled } from "./hooks/useChatBootstrap";
 export { useCallSocket, callFrameHandlers } from "./hooks/useCallSocket";

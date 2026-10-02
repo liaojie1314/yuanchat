@@ -601,6 +601,7 @@
   "admin.nav.overview": "運営概況",
   "admin.overview.trend30days": "過去30日間のトレンド",
   "admin.overview.msgTypeDistribution": "メッセージタイプ分布",
+  "admin.overview.typeOther": "その他",
   "admin.overview.refresh": "更新",
   "admin.overview.loadFailed": "指標の読み込みに失敗しました。更新を押して再試行してください",
   "admin.overview.sectionUsers": "ユーザー",

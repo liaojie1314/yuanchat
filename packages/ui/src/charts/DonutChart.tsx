@@ -1,10 +1,12 @@
 /**
  * DonutChart — 环形占比图，用于消息类型分布等场景。
  *
- * 纯 SVG，无第三方依赖。支持 2-6 个分段，超出部分聚合进 "其他"。
- * 空数据退化成灰色满圆占位，单条数据仍正常渲染。
+ * 纯 SVG，无第三方依赖。鼠标悬停某段时该段加粗高亮、中心显示该类目
+ * 占比；移出恢复总量。分段可 Tab 聚焦（键盘可达）。图例由外部渲染，
+ * 颜色用 {@link donutColor} 取，保证色块与弧段一致。
  */
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { CHART_MUTED, chartColor } from "./palette";
 
 /** 单个分段。 */
 export interface DonutSlice {
@@ -21,26 +23,20 @@ export interface DonutSlice {
 export interface DonutChartProps {
   /** 数据分段列表，超过 6 条时末尾聚合为"其他" */
   slices: DonutSlice[];
-  /** SVG 尺寸（宽=高，px），默认 120 */
+  /** SVG 尺寸（宽=高，px），默认 140 */
   size?: number;
   /** 圆环厚度（px），默认 18 */
   thickness?: number;
+  /** 中心常驻标题（无 hover 时显示，通常配总量） */
+  centerLabel?: string;
   /** 描述整张图的无障碍标签 */
   "aria-label": string;
   /** 额外 className */
   className?: string;
 }
 
-// 与 primary token 调色板协调的分类色组（最多 6 色）
-const PALETTE = [
-  "var(--color-primary, #5B9BD5)",
-  "var(--color-secondary, #72A98F)",
-  "var(--color-tertiary, #C08B5C)",
-  "#E07070",
-  "#8B72C8",
-  "#C8B45A",
-];
-const MUTED = "var(--color-outline-variant, #C2C8D3)";
+// 色板来自 palette.ts：定性色板 + 中性灰兜底，相邻分段一眼可分
+const MUTED = CHART_MUTED;
 const MAX_SLICES = 6;
 
 /** 极坐标 → 直角坐标。 */
@@ -66,51 +62,63 @@ function arcPath(cx: number, cy: number, r: number, startAngle: number, endAngle
  * ```tsx
  * <DonutChart
  *   slices={[{ key: "text", label: "文本", value: 120 }, ...]}
+ *   centerLabel="总消息"
  *   aria-label="消息类型分布"
  * />
  * ```
  */
 export function DonutChart({
   slices,
-  size = 120,
+  size = 140,
   thickness = 18,
+  centerLabel,
   "aria-label": ariaLabel,
   className,
 }: DonutChartProps) {
   const cx = size / 2;
   const cy = size / 2;
   const r = (size - thickness) / 2;
+  const [active, setActive] = useState<string | null>(null);
 
-  const paths = useMemo(() => {
-    // 聚合超出上限的分段
-    let items = slices.filter((s) => s.value > 0);
-    if (items.length > MAX_SLICES) {
-      const head = items.slice(0, MAX_SLICES - 1);
-      const rest = items.slice(MAX_SLICES - 1);
+  const { total, paths } = useMemo(() => {
+    let list = slices.filter((s) => s.value > 0);
+    if (list.length > MAX_SLICES) {
+      const head = list.slice(0, MAX_SLICES - 1);
+      const rest = list.slice(MAX_SLICES - 1);
       const otherVal = rest.reduce((acc, s) => acc + s.value, 0);
-      items = [...head, { key: "__other__", label: "其他", value: otherVal }];
+      list = [...head, { key: "__other__", label: "其他", value: otherVal }];
     }
-
-    if (items.length === 0) return [];
-
-    const total = items.reduce((acc, s) => acc + s.value, 0);
-    if (total === 0) return [];
+    const total = list.reduce((acc, s) => acc + s.value, 0);
+    if (total === 0) return { total: 0, paths: [] };
 
     const TAU = Math.PI * 2;
     const START = -Math.PI / 2; // 从顶部开始
+    const GAP = list.length > 1 ? 0.03 : 0; // 分段间隙（弧度）
     let angle = START;
-    const GAP = items.length > 1 ? 0.025 : 0; // 分段间隙（弧度）
 
-    return items.map((slice, i) => {
+    const paths = list.map((slice, i) => {
       const sweep = (slice.value / total) * TAU - GAP;
       const endAngle = angle + sweep;
       const path = arcPath(cx, cy, r, angle, endAngle);
-      const midAngle = angle + sweep / 2;
-      const color = slice.color ?? PALETTE[i % PALETTE.length];
       angle = endAngle + GAP;
-      return { key: slice.key, path, color, midAngle, label: slice.label, value: slice.value };
+      return {
+        key: slice.key,
+        label: slice.label,
+        value: slice.value,
+        color: slice.color ?? chartColor(i),
+        path,
+      };
     });
+    return { total, paths };
   }, [slices, cx, cy, r]);
+
+  const activePath = paths.find((p) => p.key === active);
+  const centerValue = activePath
+    ? `${Math.round((activePath.value / total) * 100)}%`
+    : total > 0
+      ? total.toLocaleString()
+      : "";
+  const centerText = activePath ? activePath.label : (centerLabel ?? "");
 
   return (
     <svg
@@ -120,7 +128,8 @@ export function DonutChart({
       role="img"
       aria-label={ariaLabel}
       className={className}
-      style={{ display: "block" }}
+      style={{ display: "block", overflow: "visible" }}
+      onMouseLeave={() => setActive(null)}
     >
       {paths.length === 0 ? (
         // 空数据：灰色满圆占位
@@ -134,16 +143,56 @@ export function DonutChart({
           opacity={0.4}
         />
       ) : (
-        paths.map(({ key, path, color }) => (
-          <path
-            key={key}
-            d={path}
-            fill="none"
-            stroke={color}
-            strokeWidth={thickness}
-            strokeLinecap="round"
-          />
-        ))
+        paths.map(({ key, path, color, label }) => {
+          const on = active === key;
+          return (
+            <path
+              key={key}
+              d={path}
+              fill="none"
+              stroke={color}
+              // hover 加粗而非改半径：改半径要重算 path，成本高且会跳动
+              strokeWidth={on ? thickness + 6 : thickness}
+              tabIndex={0}
+              aria-label={label}
+              onMouseEnter={() => setActive(key)}
+              onFocus={() => setActive(key)}
+              onBlur={() => setActive(null)}
+              style={{ cursor: "pointer", transition: "stroke-width 120ms ease", outline: "none" }}
+            />
+          );
+        })
+      )}
+      {/* 中心文字：hover 时显示该段名称与占比，否则显示总量 */}
+      {(centerText || centerValue) && (
+        <g pointerEvents="none">
+          {centerValue && (
+            <text
+              x={cx}
+              y={centerText ? cy - 3 : cy + 4}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize={size > 120 ? 18 : 15}
+              fontWeight={600}
+              fill="currentColor"
+            >
+              {centerValue}
+            </text>
+          )}
+          {centerText && (
+            <text
+              x={cx}
+              y={cy + 15}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize={11}
+              fill="currentColor"
+              opacity={0.65}
+            >
+              {centerText}
+            </text>
+          )}
+        </g>
       )}
     </svg>
   );

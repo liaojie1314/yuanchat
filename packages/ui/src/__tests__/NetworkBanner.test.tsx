@@ -3,14 +3,17 @@ import { render, screen, act } from "@testing-library/react";
 import { NetworkBanner } from "../layout/NetworkBanner";
 
 const phase = vi.hoisted(() => vi.fn());
+const lost = vi.hoisted(() => vi.fn());
 vi.mock("@yuanchat/shared", async (importOriginal) => {
   const real = (await importOriginal()) as Record<string, unknown>;
-  return { ...real, useNetworkStatus: () => phase() };
+  return { ...real, useNetworkStatus: () => phase(), consumeNetworkLost: () => lost() };
 });
 
 beforeEach(() => {
   phase.mockReset();
   phase.mockReturnValue("online");
+  lost.mockReset();
+  lost.mockReturnValue(true);
 });
 
 afterEach(() => {
@@ -49,6 +52,18 @@ describe("NetworkBanner", () => {
     act(() => {
       vi.advanceTimersByTime(2000);
     });
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("登录/硬刷新这类首次连接不提示「已连接」（没断过网就不该报恢复）", () => {
+    // consumeNetworkLost 返回 false = 本次跃迁不是从真实断网恢复
+    lost.mockReturnValue(false);
+    phase.mockReturnValue("connecting");
+    const { rerender } = render(<NetworkBanner />);
+    expect(screen.getByRole("status")).toHaveTextContent("Connecting");
+
+    phase.mockReturnValue("online");
+    rerender(<NetworkBanner />);
     expect(screen.queryByRole("status")).toBeNull();
   });
 
