@@ -335,6 +335,8 @@ class ChatSocket {
   private lastErrorReport = 0;
   /** 重连成功后的回调（bootstrap 用来拉增量数据） */
   onReconnect: (() => void) | null = null;
+  /** 「是否已连接」的订阅者（UI 的网络状态条用它，避免轮询） */
+  private stateListeners = new Set<(open: boolean) => void>();
 
   // ---- 心跳状态 ----
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
@@ -430,16 +432,38 @@ class ChatSocket {
     return this.state === "open";
   }
 
+  /**
+   * 订阅「是否已连接」的变化，返回取消订阅函数。
+   *
+   * 刻意只对外暴露布尔而不是内部四态：外部关心的是「现在能不能发消息」。
+   * 有了它 UI 不必轮询 isOpen() —— 轮询既晚一拍又白耗。
+   */
+  onStateChange(fn: (open: boolean) => void): () => void {
+    this.stateListeners.add(fn);
+    return () => {
+      this.stateListeners.delete(fn);
+    };
+  }
+
+  /** 写状态的唯一入口：只在「是否已连接」真的翻转时通知订阅者。 */
+  private setState(next: SocketState) {
+    const wasOpen = this.state === "open";
+    this.state = next;
+    const isOpen = next === "open";
+    if (wasOpen === isOpen) return;
+    for (const fn of this.stateListeners) fn(isOpen);
+  }
+
   connect() {
     if (this.state === "connecting" || this.state === "open") return;
 
     // token 临近过期：先静默刷新再拨号，避免注定 401 的握手
     //（服务端只在握手时校验 token，已建立的连接不受过期影响）
     if (needsRefresh()) {
-      this.state = "connecting";
+      this.setState("connecting");
       void ensureFreshToken().then(() => {
         if (this.state !== "connecting") return; // 刷新期间被主动断开
-        this.state = "idle";
+        this.setState("idle");
         // 刷新失败时仍尝试拨号：登出场景 token 已清、dial 自然跳过；
         // 网络抖动场景则靠 401 握手失败 → 退避重连兜底
         this.dial();
@@ -456,14 +480,14 @@ class ChatSocket {
     const token = this.tokenProvider();
     if (!token) return;
 
-    this.state = "connecting";
+    this.setState("connecting");
     const isRetry = this.retries > 0;
 
     let ws: WebSocket;
     try {
       ws = new WebSocket(WS_BASE + "/ws?token=" + encodeURIComponent(token));
     } catch {
-      this.state = "closed";
+      this.setState("closed");
       this.scheduleReconnect();
       return;
     }
@@ -471,7 +495,7 @@ class ChatSocket {
 
     ws.onopen = () => {
       if (this.ws !== ws) return;
-      this.state = "open";
+      this.setState("open");
       this.retries = 0;
       this.flushQueue();
       this.bindEnvListeners();
@@ -489,7 +513,7 @@ class ChatSocket {
       this.ws = null;
       this.stopHeartbeat();
       if (this.state === "closed") return; // 主动断开，不重连
-      this.state = "closed";
+      this.setState("closed");
       const code = event && event.code;
       if (code && code !== 1000 && code !== 1001) {
         const now = Date.now();
@@ -515,7 +539,7 @@ class ChatSocket {
 
   /** 主动断开（登出/卸载时调用），不触发重连 */
   disconnect() {
-    this.state = "closed";
+    this.setState("closed");
     this.retries = 0;
     this.stopHeartbeat();
     if (this.reconnectTimer) {
@@ -529,7 +553,7 @@ class ChatSocket {
       ws.close();
     }
     this.queue = [];
-    this.state = "idle";
+    this.setState("idle");
   }
 
   /**
