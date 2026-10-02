@@ -599,6 +599,8 @@
   "admin.common.next": "Next",
   "admin.common.total": "%{count} total",
   "admin.nav.overview": "Overview",
+  "admin.overview.trend30days": "Trend — last 30 days",
+  "admin.overview.msgTypeDistribution": "Message type distribution",
   "admin.overview.refresh": "Refresh",
   "admin.overview.loadFailed": "Failed to load metrics. Click refresh to retry.",
   "admin.overview.sectionUsers": "Users",

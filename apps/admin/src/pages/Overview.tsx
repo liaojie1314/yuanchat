@@ -1,7 +1,9 @@
 /**
- * 概览页 — 管理后台默认首页：运营指标卡片网格 + 待处理治理项深链 +
- * 推送订阅分页表格。全部只读，数据来自 GET /admin/stats 与
- * GET /admin/push-subscriptions。
+ * 概览页 — 管理后台默认首页：四层看板布局
+ *   1. 指标卡片（含 Sparkline）
+ *   2. 时间序列折线图
+ *   3. 治理深链
+ *   4. 次要区块（存储统计 + 推送订阅）
  */
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -17,24 +19,49 @@ import {
 } from "lucide-react";
 import {
   getStats,
+  getTimeseries,
   listPushSubscriptions,
   getStorageStats,
   type AdminStats,
   type AdminPushSubscription,
   type StorageStats,
+  type StatsTimeseriesResult,
 } from "../api";
 import { DataTable, Pager, EmptyRow } from "../components/Table";
+import { Sparkline, LineChart, DonutChart } from "@yuanchat/ui/charts";
+import type { SparklinePoint, LineSeries, DonutSlice } from "@yuanchat/ui/charts";
 import { cn } from "@yuanchat/shared/utils";
 
-/** 指标卡片：标签 + 数值（tabular-nums 保证数字对齐）。 */
-function MetricCard({ label, value, hint }: { label: string; value: number; hint?: string }) {
+/** 指标卡片：标签 + 数值 + 可选趋势 Sparkline（tabular-nums 保证数字对齐）。 */
+function MetricCard({
+  label,
+  value,
+  hint,
+  sparkline,
+  sparklineLabel,
+}: {
+  label: string;
+  value: number;
+  hint?: string;
+  sparkline?: SparklinePoint[];
+  sparklineLabel?: string;
+}) {
   return (
-    <div className="rounded-xl border border-outline-variant bg-surface-container-low px-4 py-3 shadow-elevation-1">
-      <p className="text-label-md text-on-surface-variant">{label}</p>
-      <p className="mt-1 text-title-lg font-semibold tabular-nums text-on-surface">
-        {value.toLocaleString()}
-      </p>
-      {hint !== undefined && <p className="text-label-sm text-on-surface-variant">{hint}</p>}
+    <div className="flex items-start justify-between rounded-lg border border-outline-variant bg-surface-container-low px-4 py-3 shadow-elevation-1">
+      <div className="min-w-0">
+        <p className="text-label-md text-on-surface-variant">{label}</p>
+        <p className="mt-1 text-title-lg font-semibold tabular-nums text-on-surface">
+          {value.toLocaleString()}
+        </p>
+        {hint !== undefined && <p className="text-label-sm text-on-surface-variant">{hint}</p>}
+      </div>
+      {sparkline && sparkline.length > 0 && (
+        <Sparkline
+          data={sparkline}
+          aria-label={sparklineLabel ?? label}
+          className="mt-1 shrink-0 text-primary opacity-70"
+        />
+      )}
     </div>
   );
 }
@@ -42,7 +69,7 @@ function MetricCard({ label, value, hint }: { label: string; value: number; hint
 /** 指标卡片骨架（固定高度，CLS 为零）。 */
 function MetricCardSkeleton() {
   return (
-    <div className="h-[84px] animate-pulse rounded-xl bg-surface-container" aria-hidden="true" />
+    <div className="h-[84px] animate-pulse rounded-lg bg-surface-container" aria-hidden="true" />
   );
 }
 
@@ -63,7 +90,7 @@ function GovernanceCard({ label, value, to }: { label: string; value: number; to
     <Link
       to={to}
       className={cn(
-        "group flex items-center justify-between rounded-xl border px-4 py-3 shadow-elevation-1 transition-colors",
+        "group flex items-center justify-between rounded-lg border px-4 py-3 shadow-elevation-1 transition-colors",
         urgent
           ? "border-error/40 bg-error-container/40 hover:bg-error-container/70"
           : "border-outline-variant bg-surface-container-low hover:bg-surface-container",
@@ -121,12 +148,22 @@ function formatBytes(bytes: number | null): string {
   return `${v.toFixed(1)} ${units[i]}`;
 }
 
-/** 概览页组件：一次拉取聚合指标，订阅表格独立分页加载。 */
+/** 把时间序列点转成 Sparkline 所需格式。 */
+function toSparkline(
+  points: StatsTimeseriesResult["points"],
+  key: keyof Omit<StatsTimeseriesResult["points"][0], "date">,
+): SparklinePoint[] {
+  return points.map((p) => ({ date: p.date, value: p[key] }));
+}
+
+/** 概览页组件：四层看板布局 — 指标卡片、折线图、治理深链、次要区块。 */
 export function OverviewPage() {
   const { t } = useTranslation();
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [failed, setFailed] = useState(false);
-  // 存储统计区块状态（独立于指标刷新）
+  const [timeseries, setTimeseries] = useState<StatsTimeseriesResult | null>(null);
+
+  // 存储统计区块（独立于指标刷新）
   const [storage, setStorage] = useState<StorageStats | null>(null);
   const [storageLoading, setStorageLoading] = useState(true);
   const [storageFailed, setStorageFailed] = useState(false);
@@ -136,7 +173,11 @@ export function OverviewPage() {
     getStats()
       .then(setStats)
       .catch(() => setFailed(true));
-    // 存储统计独立拉取：失败只影响本区块，不牵连指标卡片
+    getTimeseries(30)
+      .then(setTimeseries)
+      .catch(() => {
+        // 时间序列加载失败只影响图表区域，不影响指标卡片
+      });
     setStorageFailed(false);
     setStorageLoading(true);
     getStorageStats()
@@ -178,14 +219,43 @@ export function OverviewPage() {
 
   const m = stats?.moderation;
 
+  // 时间序列折线图数据
+  const tsLabels = timeseries?.points.map((p) => p.date) ?? [];
+  const tsSeries: LineSeries[] = timeseries
+    ? [
+        {
+          key: "messages",
+          label: t("admin.overview.messagesTotal"),
+          values: timeseries.points.map((p) => p.messages),
+          color: "var(--color-primary, #5B9BD5)",
+        },
+        {
+          key: "new_users",
+          label: t("admin.overview.usersNewToday"),
+          values: timeseries.points.map((p) => p.new_users),
+          color: "var(--color-secondary, #72A98F)",
+        },
+      ]
+    : [];
+
+  // 消息类型环形图数据
+  const donutSlices: DonutSlice[] = stats
+    ? TYPE_KEYS.map(({ type, labelKey }) => ({
+        key: type,
+        label: t(labelKey),
+        value: stats.messages.by_type[type] ?? 0,
+      })).filter((s) => s.value > 0)
+    : [];
+
   return (
     <div>
+      {/* 页头 */}
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-title-lg font-semibold text-on-surface">{t("admin.nav.overview")}</h1>
         <button
           onClick={load}
           aria-label={t("admin.overview.refresh")}
-          className="flex items-center gap-1.5 rounded-lg border border-outline-variant px-3 py-1.5 text-label-lg text-on-surface hover:bg-surface-container"
+          className="flex items-center gap-1.5 rounded-lg border border-outline-variant px-3 py-1.5 text-label-lg text-on-surface hover:bg-surface-container focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
         >
           <RefreshCw size={14} />
           {t("admin.overview.refresh")}
@@ -194,14 +264,19 @@ export function OverviewPage() {
 
       {failed && <p className="mb-4 text-body-md text-error">{t("admin.overview.loadFailed")}</p>}
 
-      {/* 用户与运行时 */}
+      {/* ── 第一层：指标卡片 ── */}
       <SectionTitle icon={Users} label={t("admin.overview.sectionUsers")} />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         {!stats ? (
           Array.from({ length: 5 }, (_, i) => <MetricCardSkeleton key={i} />)
         ) : (
           <>
-            <MetricCard label={t("admin.overview.usersTotal")} value={stats.users.total} />
+            <MetricCard
+              label={t("admin.overview.usersTotal")}
+              value={stats.users.total}
+              sparkline={timeseries ? toSparkline(timeseries.points, "new_users") : undefined}
+              sparklineLabel={t("admin.overview.usersNewToday")}
+            />
             <MetricCard label={t("admin.overview.usersBanned")} value={stats.users.banned} />
             <MetricCard label={t("admin.overview.usersNewToday")} value={stats.users.new_today} />
             <MetricCard
@@ -217,7 +292,6 @@ export function OverviewPage() {
         )}
       </div>
 
-      {/* 会话与消息 */}
       <div className="mt-6">
         <SectionTitle icon={MessagesSquare} label={t("admin.overview.sectionMessages")} />
       </div>
@@ -230,7 +304,12 @@ export function OverviewPage() {
               label={t("admin.overview.conversationsTotal")}
               value={stats.conversations.total}
             />
-            <MetricCard label={t("admin.overview.messagesTotal")} value={stats.messages.total} />
+            <MetricCard
+              label={t("admin.overview.messagesTotal")}
+              value={stats.messages.total}
+              sparkline={timeseries ? toSparkline(timeseries.points, "messages") : undefined}
+              sparklineLabel={t("admin.overview.messagesTotal")}
+            />
             <MetricCard label={t("admin.overview.messagesToday")} value={stats.messages.today} />
             <MetricCard
               label={t("admin.overview.friendRequestsToday")}
@@ -243,24 +322,54 @@ export function OverviewPage() {
         )}
       </div>
 
-      {/* 各消息类型计数 */}
-      {stats && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {TYPE_KEYS.map(({ type, labelKey }) => (
-            <span
-              key={type}
-              className="rounded-lg border border-outline-variant bg-surface-container-low px-3 py-1.5 text-label-md text-on-surface-variant"
-            >
-              {t(labelKey)}
-              <span className="ml-2 font-semibold tabular-nums text-on-surface">
-                {(stats.messages.by_type[type] ?? 0).toLocaleString()}
-              </span>
-            </span>
-          ))}
+      {/* ── 第二层：折线图 + 环形图 ── */}
+      {(timeseries || stats) && (
+        <div className="mt-6 flex flex-col gap-4 md:flex-row">
+          {timeseries && (
+            <div className="flex-1 rounded-lg border border-outline-variant bg-surface-container-low p-4 shadow-elevation-1">
+              <p className="mb-2 text-label-md text-on-surface-variant">
+                {t("admin.overview.trend30days")}
+              </p>
+              <LineChart
+                xLabels={tsLabels}
+                series={tsSeries}
+                width={560}
+                height={160}
+                aria-label={t("admin.overview.trend30days")}
+                className="w-full text-on-surface-variant"
+                maxXTicks={8}
+              />
+            </div>
+          )}
+          {stats && donutSlices.length > 0 && (
+            <div className="flex shrink-0 flex-col items-center justify-center gap-3 rounded-lg border border-outline-variant bg-surface-container-low px-6 py-4 shadow-elevation-1">
+              <p className="text-label-md text-on-surface-variant">
+                {t("admin.overview.msgTypeDistribution")}
+              </p>
+              <DonutChart
+                slices={donutSlices}
+                size={100}
+                aria-label={t("admin.overview.msgTypeDistribution")}
+              />
+              <div className="flex flex-wrap justify-center gap-x-3 gap-y-1">
+                {TYPE_KEYS.map(({ type, labelKey }) => (
+                  <span
+                    key={type}
+                    className="rounded-lg border border-outline-variant bg-surface-container-low px-3 py-1.5 text-label-md text-on-surface-variant"
+                  >
+                    {t(labelKey)}
+                    <span className="ml-2 font-semibold tabular-nums text-on-surface">
+                      {(stats.messages.by_type[type] ?? 0).toLocaleString()}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* 待处理治理项深链 */}
+      {/* ── 第三层：治理深链 ── */}
       <div className="mt-6">
         <SectionTitle icon={ShieldAlert} label={t("admin.overview.sectionModeration")} />
       </div>
@@ -298,7 +407,7 @@ export function OverviewPage() {
         )}
       </div>
 
-      {/* 存储统计（DB 聚合口径：按对象类别的引用计数与已知字节数） */}
+      {/* ── 第四层：次要区块（存储 + 推送订阅） ── */}
       <div className="mt-6">
         <SectionTitle icon={HardDrive} label={t("admin.storage.title")} />
       </div>
@@ -313,7 +422,7 @@ export function OverviewPage() {
             return (
               <div
                 key={category}
-                className="rounded-xl border border-outline-variant bg-surface-container-low px-4 py-3 shadow-elevation-1"
+                className="rounded-lg border border-outline-variant bg-surface-container-low px-4 py-3 shadow-elevation-1"
               >
                 <p className="text-label-md text-on-surface-variant">{t(labelKey)}</p>
                 <p className="mt-1 text-title-md font-semibold tabular-nums text-on-surface">
@@ -327,7 +436,6 @@ export function OverviewPage() {
           })}
       </div>
 
-      {/* 推送订阅 */}
       <div className="mt-6">
         <SectionTitle icon={Bell} label={t("admin.overview.pushSubs")} />
       </div>
