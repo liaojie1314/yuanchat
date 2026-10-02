@@ -21,14 +21,20 @@
  * @example
  * <ConversationList />
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Search, Plus, Bell, BellOff, Pin, PinOff, Users, UserPlus, ScanLine } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { applyConversationSetting, useConversationStore } from "@yuanchat/shared";
+import {
+  applyConversationSetting,
+  reconcileConversation,
+  useAuthStore,
+  useConversationStore,
+} from "@yuanchat/shared";
 import type { Conversation } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "../primitives/Avatar";
 import { GroupAvatar } from "../primitives/GroupAvatar";
+import { PullToRefresh } from "../primitives/PullToRefresh";
 import { useLongPress } from "../util/useLongPress";
 import type { UseLongPressResult } from "../util/useLongPress";
 
@@ -101,6 +107,22 @@ export function ConversationList({
   const setActive = useConversationStore((s) => s.setActive);
   const clearUnread = useConversationStore((s) => s.clearUnread);
   const loading = useConversationStore((s) => s.loading);
+  const loadConversations = useConversationStore((s) => s.loadConversations);
+
+  /**
+   * 下拉刷新：重拉会话列表，顺带给当前打开的会话对一次账。
+   *
+   * 两件事都要做 —— 列表只带最后一条消息，拉完也补不上聊天记录里的空洞；
+   * 而用户下拉的动机往往就是「我怀疑现在看到的不是最新的」。
+   */
+  const handleRefresh = useCallback(async () => {
+    await loadConversations();
+    const activeConv = useConversationStore.getState().activeId;
+    const uid = useAuthStore.getState().user?.id;
+    if (activeConv !== null && activeConv !== "" && uid !== undefined) {
+      await reconcileConversation(activeConv, uid);
+    }
+  }, [loadConversations]);
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -308,7 +330,11 @@ export function ConversationList({
       </div>
 
       {/* 会话列表（置顶分组 + 全部） */}
-      <div ref={scrollerRef} className="flex-1 overflow-y-auto px-2 pb-3">
+      <PullToRefresh
+        ref={scrollerRef}
+        onRefresh={handleRefresh}
+        className="flex-1 overflow-y-auto px-2 pb-3"
+      >
         {loading && conversations.length === 0 ? (
           <ConversationSkeleton />
         ) : (
@@ -354,7 +380,7 @@ export function ConversationList({
             )}
           </>
         )}
-      </div>
+      </PullToRefresh>
 
       {/* 会话快捷菜单：整个列表共用一个，落点即呼出点 */}
       {contextMenu && (

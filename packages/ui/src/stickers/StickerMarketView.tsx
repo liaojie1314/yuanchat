@@ -18,6 +18,7 @@ import { ArrowLeft, Loader2, PackageOpen, Sticker } from "lucide-react";
 import { captureException, listMarketPacks, showToast, useBreakpoint } from "@yuanchat/shared";
 import { useBackTo } from "../util/useBackTo";
 import type { MarketPackItem } from "@yuanchat/shared";
+import { PullToRefresh } from "../primitives/PullToRefresh";
 import { StickerPackCover } from "./StickerPackCover";
 import { packOwnerText } from "./stickerPackUtils";
 
@@ -89,8 +90,15 @@ export function StickerMarketView() {
   // 点「重试」时递增，驱动首屏 effect 重跑
   const [retryTick, setRetryTick] = useState(0);
 
-  const loadFirstPage = useCallback(async () => {
-    setState("loading");
+  /**
+   * 拉第一页。
+   *
+   * @param quiet - 静默刷新（下拉触发）：不切 loading 把网格换成骨架，
+   *   失败也不切 error 把网格换成错误页，而是抛给下拉容器弹 toast ——
+   *   手上那屏旧数据比一张错误页有用。
+   */
+  const loadFirstPage = useCallback(async (quiet = false) => {
+    if (!quiet) setState("loading");
     try {
       const page = await listMarketPacks({ limit: PAGE_SIZE });
       setPacks(page.packs);
@@ -98,6 +106,7 @@ export function StickerMarketView() {
       setState("done");
     } catch (err) {
       captureException(err, { context: "StickerMarketView.load" });
+      if (quiet) throw err;
       setState("error");
     }
   }, []);
@@ -157,7 +166,10 @@ export function StickerMarketView() {
       </header>
 
       {/* 列表主体 */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <PullToRefresh
+        onRefresh={() => loadFirstPage(true)}
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
         {state === "loading" && (
           <div
             className="mx-auto grid w-full max-w-6xl grid-cols-2 gap-3 p-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
@@ -215,7 +227,7 @@ export function StickerMarketView() {
             )}
           </>
         )}
-      </div>
+      </PullToRefresh>
     </div>
   );
 }
