@@ -41,7 +41,7 @@ import { decryptFrom } from "../crypto/e2eeManager";
 import { captureException } from "../observability/sentry";
 import { usePresenceStore } from "../store/presenceStore";
 import { resetChatStores, revokeAllLocalPreviews } from "../store/resetStores";
-import { startLocalStore } from "../store/localStoreLifecycle";
+import { startLocalStore, reconcileOnForeground } from "../store/localStoreLifecycle";
 import { showToast } from "../store/toastStore";
 import { previewBodyOf } from "../utils/messagePreview";
 import type { ChatMessage } from "../store/messageStore";
@@ -446,6 +446,10 @@ function wireSocket() {
     if (activeId) useMessageStore.getState().loadHistory(activeId);
     // 掉线期间可能漏好友申请/同意推送
     void useContactStore.getState().loadRequests();
+  };
+
+  chatSocket.onForeground = () => {
+    reconcileOnForeground();
   };
 
   // 登出（isAuthenticated true→false）时回收 blob 并清空聊天 store，防跨账号残留

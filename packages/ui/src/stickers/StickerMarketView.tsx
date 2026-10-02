@@ -19,6 +19,7 @@ import { captureException, listMarketPacks, showToast, useBreakpoint } from "@yu
 import { useBackTo } from "../util/useBackTo";
 import type { MarketPackItem } from "@yuanchat/shared";
 import { PullToRefresh } from "../primitives/PullToRefresh";
+import { RefreshButton } from "../primitives/RefreshButton";
 import { StickerPackCover } from "./StickerPackCover";
 import { packOwnerText } from "./stickerPackUtils";
 
@@ -149,6 +150,7 @@ export function StickerMarketView() {
         )}
         <h1 className="text-title-md text-on-surface font-semibold">{t("sticker.market.title")}</h1>
         <div className="flex-1" />
+        <RefreshButton onRefresh={() => loadFirstPage(true)} />
         <button
           type="button"
           onClick={() => navigate("/stickers/mine")}

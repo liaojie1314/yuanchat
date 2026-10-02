@@ -32,6 +32,7 @@ import {
 import type { MomentPost } from "@yuanchat/shared";
 import { ConfirmDialog } from "../primitives/ConfirmDialog";
 import { PullToRefresh } from "../primitives/PullToRefresh";
+import { RefreshButton } from "../primitives/RefreshButton";
 import { MomentPostCard } from "./MomentPostCard";
 
 /** 距底多少像素开始拉下一页 */
@@ -213,6 +214,7 @@ export function MomentsScreen({ userId }: { userId?: string }) {
         <h1 className="text-title-md text-on-surface min-w-0 flex-1 truncate font-semibold">
           {userId && peerName ? peerName : t("moments.title")}
         </h1>
+        <RefreshButton onRefresh={handleRefresh} />
         {userId ? null : (
           <>
             <button

@@ -9,6 +9,7 @@
   "common.search": "搜索",
   "common.loading": "加载中…",
   "common.retry": "重试",
+  "common.refresh": "刷新",
   "common.opFailed": "操作失败，请重试",
   "common.noData": "暂无数据",
   "common.empty": "暂无内容",

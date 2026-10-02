@@ -18,6 +18,7 @@ import type { MyPackItem } from "@yuanchat/shared";
 import { StickerPackCover } from "./StickerPackCover";
 import { ConfirmDialog } from "../primitives/ConfirmDialog";
 import { PullToRefresh } from "../primitives/PullToRefresh";
+import { RefreshButton } from "../primitives/RefreshButton";
 
 export function StickerMineView() {
   const { t } = useTranslation();
@@ -90,6 +91,7 @@ export function StickerMineView() {
           {t("sticker.market.myPacks")}
         </h1>
         <div className="flex-1" />
+        <RefreshButton onRefresh={() => load(true)} />
         <button
           type="button"
           onClick={() => navigate("/stickers/publish")}

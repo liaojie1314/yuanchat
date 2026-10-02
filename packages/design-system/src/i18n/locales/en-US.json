@@ -9,6 +9,7 @@
   "common.search": "Search",
   "common.loading": "Loading…",
   "common.retry": "Retry",
+  "common.refresh": "Refresh",
   "common.opFailed": "Operation failed, please retry",
   "common.noData": "No Data",
   "common.empty": "No content",

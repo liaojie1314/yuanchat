@@ -9,6 +9,7 @@
   "common.search": "検索",
   "common.loading": "読み込み中…",
   "common.retry": "再試行",
+  "common.refresh": "更新",
   "common.opFailed": "操作に失敗しました。再試行してください",
   "common.noData": "データがありません",
   "common.empty": "内容がありません",

@@ -335,6 +335,13 @@ class ChatSocket {
   private lastErrorReport = 0;
   /** 重连成功后的回调（bootstrap 用来拉增量数据） */
   onReconnect: (() => void) | null = null;
+  /**
+   * 回到前台时的回调（bootstrap 用来静默对账）。
+   *
+   * 由上层注入而不是在这里直接调 store：会话 store 自己 import 本模块，
+   * 反向 import 回去就是循环依赖。
+   */
+  onForeground: (() => void) | null = null;
   /** 「是否已连接」的订阅者（UI 的网络状态条用它，避免轮询） */
   private stateListeners = new Set<(open: boolean) => void>();
 
@@ -365,6 +372,10 @@ class ChatSocket {
             document.visibilityState === "visible" ? 0 : this.heartbeatInterval(),
           );
         }
+        // 回前台顺带让上层对一次账（桌面端切窗口期间可能漏帧）。
+        // 搭这条现有监听而不另起一个：同一个事件两个监听器触发顺序不保证，
+        // 心跳与对账挤在一起反而更难排查。
+        if (document.visibilityState === "visible") this.onForeground?.();
       });
     }
     if (typeof window !== "undefined") {

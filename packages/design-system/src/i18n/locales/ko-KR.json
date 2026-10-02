@@ -9,6 +9,7 @@
   "common.search": "검색",
   "common.loading": "로딩 중…",
   "common.retry": "다시 시도",
+  "common.refresh": "새로 고침",
   "common.opFailed": "작업에 실패했습니다. 다시 시도해 주세요",
   "common.noData": "데이터가 없습니다",
   "common.empty": "내용이 없습니다",
