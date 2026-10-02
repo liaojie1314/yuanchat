@@ -7,6 +7,7 @@ import { useMomentsStore } from "./momentsStore";
 import { usePresenceStore } from "./presenceStore";
 import { resetIceServersCache } from "../webrtc/iceServers";
 import { ringtone } from "../webrtc/ringtone";
+import { purgeLocalStore } from "../localdb";
 
 /** 登出/切换账号时调用：revoke 全部本地图片 blob 后清空聊天相关 store，防内存泄漏与跨账号数据残留 */
 export function resetChatStores(): void {
@@ -35,6 +36,11 @@ export function resetChatStores(): void {
   ringtone.stop();
   useCallStore.getState().reset();
   resetIceServersCache();
+  // 本地消息库整个删掉：一个账号一个库（库名带 userId），删库即彻底清掉跨账号残留。
+  // 刻意 fire-and-forget 而不把本函数改成 async —— 它有多处同步调用方。
+  // 删库是幂等的，且即使删除还在进行中也不会读到旧账号数据：
+  // 下次 initLocalStore 开的是另一个库名，两者本来就不是同一个库。
+  void purgeLocalStore();
 }
 
 /** 遍历所有会话消息，撤销未清理的本地 blob 预览 URL（图片 + 文件 + 语音 + 视频） */

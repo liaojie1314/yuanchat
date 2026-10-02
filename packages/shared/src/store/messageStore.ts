@@ -374,21 +374,31 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
 
   loadHistory: async (conversationId) => {
     if (mockMode) return;
-    // 短路判据取「进来之前内存里有没有」：水合会把本地消息填进内存，
-    // 若在水合之后再判空，第一次进会话就会被自己刚填的数据挡住、永不打网络。
-    const hadInMemory = (get().messagesByConv[conversationId] ?? []).length > 0;
-    if (!hadInMemory) {
+    // 短路判据取「进来之前内存里有没有**已确认**消息」。两处讲究：
+    // 1) 水合会把本地消息填进内存，若在水合之后再判空，第一次进会话就会被
+    //    自己刚填的数据挡住、永不打网络；
+    // 2) 判「已确认」而不是「非空」—— 冷启动恢复出来的 failed 气泡没有 seq，
+    //    算进来的话一条没发出去的消息会把整个会话的历史永久挡死。
+    const unconfirmed = (get().messagesByConv[conversationId] ?? []).filter(
+      (m) => typeof m.seq !== "number",
+    );
+    const hadConfirmed = (get().messagesByConv[conversationId] ?? []).length > unconfirmed.length;
+    if (!hadConfirmed) {
       // 冷启动先渲染本地：断网时这是用户唯一能看到的内容
       const local = await hydrateMessages(conversationId);
       if (local.length > 0) {
-        set((s) => ({ messagesByConv: { ...s.messagesByConv, [conversationId]: local } }));
+        set((s) => ({
+          messagesByConv: { ...s.messagesByConv, [conversationId]: [...local, ...unconfirmed] },
+        }));
       }
     }
-    if (hadInMemory) return;
+    if (hadConfirmed) return;
     try {
       const { messages, hasMore } = await fetchMessages(conversationId, 0, PAGE_SIZE, selfUserId());
       set((s) => ({
-        messagesByConv: { ...s.messagesByConv, [conversationId]: messages },
+        // 未确认条目（sending / failed）接在服务端历史之后：它们不在服务端，
+        // 整列表替换会把用户「没发出去」的那条悄悄抹掉
+        messagesByConv: { ...s.messagesByConv, [conversationId]: [...messages, ...unconfirmed] },
         hasMoreByConv: { ...s.hasMoreByConv, [conversationId]: hasMore },
       }));
       persistMessages(conversationId, messages);
