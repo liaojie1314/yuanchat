@@ -50,6 +50,27 @@ describe("Button", () => {
     expect(btn.className).toContain("bg-error");
   });
 
+  // 四变体逐个盯 hover：弹窗里的按钮曾经「鼠标放上去没反应」——
+  // danger 压根没有 hover 态，ghost 的 hover 底色又与弹窗面板同色，视觉上等于没有
+  it.each([
+    ["primary", "hover:bg-primary/90"],
+    ["secondary", "hover:bg-surface-container-high"],
+    ["ghost", "hover:bg-surface-container-high"],
+    ["danger", "hover:bg-error/90"],
+  ] as const)("gives the %s variant a visible hover state", (variant, hoverClass) => {
+    render(<Button variant={variant}>hover</Button>);
+    expect(screen.getByRole("button").className).toContain(hoverClass);
+  });
+
+  it("shows a focus ring only for keyboard focus", () => {
+    render(<Button>focus</Button>);
+    const btn = screen.getByRole("button");
+    expect(btn.className).toContain("focus-visible:ring-2");
+    expect(btn.className).toContain("focus-visible:ring-offset-2");
+    // 旧 WebView 不认 :focus-visible，整条规则失效后原生 outline 仍在 —— 故不再全局抹掉它
+    expect(btn.className).not.toContain("focus:outline-none");
+  });
+
   it("applies additional className", () => {
     render(<Button className="extra-class">按钮</Button>);
     const btn = screen.getByRole("button");

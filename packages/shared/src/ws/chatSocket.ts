@@ -359,10 +359,29 @@ class ChatSocket {
     return lowBattery ? HEARTBEAT_FG_LOW_BATTERY_MS : HEARTBEAT_FG_MS;
   }
 
+  /**
+   * 页面卸载标志。
+   *
+   * 浏览器关闭 / 跳转时，正在握手的 WS 连接会被强制中断并触发 onerror。
+   * 这不是真实故障，不应上报 Sentry。两个事件都监听是因为 Safari 不保证
+   * beforeunload 能可靠触发，pagehide 在 BFCache 场景下也会触发（导航回来时
+   * 页面会被恢复，不影响逻辑，标志不会被重置）。
+   */
+  private unloading = false;
+
   /** 绑定环境信号（可见性/电量/网络恢复），只绑一次 */
   private bindEnvListeners() {
     if (this.envListenersBound) return;
     this.envListenersBound = true;
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("beforeunload", () => {
+        this.unloading = true;
+      });
+      window.addEventListener("pagehide", () => {
+        this.unloading = true;
+      });
+    }
 
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", () => {
@@ -540,6 +559,9 @@ class ChatSocket {
     };
 
     ws.onerror = () => {
+      // 页面卸载时 WS 握手被浏览器强制中断会触发 onerror，这不是真实故障。
+      // unloading 标志由 beforeunload/pagehide 置位，见 bindEnvListeners。
+      if (this.unloading) return;
       const now = Date.now();
       if (now - this.lastErrorReport > 30000) {
         this.lastErrorReport = now;
