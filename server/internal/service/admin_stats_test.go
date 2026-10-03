@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -72,7 +73,7 @@ func statsTodayStart() time.Time {
 // seedStatsMessage 插入一条消息（含所属会话），按参数累计到 fixture。
 func seedStatsMessage(t *testing.T, db *gorm.DB, f *adminStatsFixture, sender uuid.UUID, msgType int16, flagged bool, createdAt time.Time, softDeleted bool) {
 	t.Helper()
-	conv := &model.Conversation{ID: uuid.New(), Type: model.ConversationTypePrivate, LastSeq: 1}
+	conv := &model.Conversation{ID: uuid.New(), Type: model.ConversationTypePrivate, LastSeq: 1, CreatedAt: createdAt}
 	if err := db.Create(conv).Error; err != nil {
 		t.Fatalf("seed conversation: %v", err)
 	}
@@ -298,5 +299,86 @@ func TestAdminPushSubscriptionsPagination(t *testing.T) {
 	empty, total3, err := svc.SearchPushSubscriptions(ctx, 9, 3)
 	if err != nil || total3 != 5 || len(empty) != 0 {
 		t.Fatalf("page 9 = err %v, total %d, len %d", err, total3, len(empty))
+	}
+}
+
+// TestAdminStatsTimeseriesZeroFill 校验概览时间序列的连续性：days=30 必须返回
+// 30 个点、日期自起点逐日递增、无数据的日子补 0 而非缺项（补洞是后端的事，
+// 前端拿到的序列可以直接画）。
+func TestAdminStatsTimeseriesZeroFill(t *testing.T) {
+	db := adminTestDB(t)
+	svc := newStatsSvc(db)
+	ctx := context.Background()
+
+	f := &adminStatsFixture{byType: map[string]int64{}}
+	today := statsTodayStart()
+	u := seedStatsUser(t, db, f, model.UserStatusNormal, today.Add(time.Hour))
+
+	// 今天两条、三天前一条；中间两天刻意留空，用于验证补零
+	seedStatsMessage(t, db, f, u.ID, model.MessageTypeText, false, today.Add(time.Hour), false)
+	seedStatsMessage(t, db, f, u.ID, model.MessageTypeImage, false, today.Add(2*time.Hour), false)
+	seedStatsMessage(t, db, f, u.ID, model.MessageTypeText, false, today.AddDate(0, 0, -3).Add(time.Hour), false)
+
+	ts, err := svc.StatsTimeseries(ctx, 30)
+	if err != nil {
+		t.Fatalf("StatsTimeseries: %v", err)
+	}
+	if ts.Days != 30 {
+		t.Fatalf("days = %d, want 30", ts.Days)
+	}
+	if len(ts.Points) != 30 {
+		t.Fatalf("len(points) = %d, want 30", len(ts.Points))
+	}
+
+	// 日期必须连续且以今天收尾
+	for i, p := range ts.Points {
+		want := today.AddDate(0, 0, -(29 - i)).Format("2006-01-02")
+		if p.Date != want {
+			t.Fatalf("points[%d].date = %q, want %q", i, p.Date, want)
+		}
+	}
+
+	last := ts.Points[29]
+	if last.Messages != 2 {
+		t.Fatalf("今日 messages = %d, want 2", last.Messages)
+	}
+	if last.NewUsers != 1 {
+		t.Fatalf("今日 new_users = %d, want 1", last.NewUsers)
+	}
+	if last.NewConversations != 2 {
+		t.Fatalf("今日 new_conversations = %d, want 2（每条消息各自建一个会话）", last.NewConversations)
+	}
+	if ts.Points[26].Messages != 1 {
+		t.Fatalf("三天前 messages = %d, want 1", ts.Points[26].Messages)
+	}
+	// 空日补零：前一天与两天前都没造数据
+	if ts.Points[27].Messages != 0 || ts.Points[28].Messages != 0 {
+		t.Fatalf("空日未补零: points[27]=%d points[28]=%d", ts.Points[27].Messages, ts.Points[28].Messages)
+	}
+	if ts.Points[0].Messages != 0 || ts.Points[0].NewUsers != 0 {
+		t.Fatalf("序列起点未补零: %+v", ts.Points[0])
+	}
+}
+
+// TestAdminStatsTimeseriesDaysRange 校验 days 越界一律报 ErrInvalidStatsDays：
+// 静默夹取会让调用方拿到与请求不符的区间却无从察觉。
+func TestAdminStatsTimeseriesDaysRange(t *testing.T) {
+	db := adminTestDB(t)
+	svc := newStatsSvc(db)
+	ctx := context.Background()
+
+	for _, days := range []int{-1, 0, 6, 91, 365} {
+		if _, err := svc.StatsTimeseries(ctx, days); !errors.Is(err, ErrInvalidStatsDays) {
+			t.Fatalf("days=%d err = %v, want ErrInvalidStatsDays", days, err)
+		}
+	}
+	for _, days := range []int{7, 90} {
+		ts, err := svc.StatsTimeseries(ctx, days)
+		if err != nil {
+			t.Fatalf("days=%d: %v", days, err)
+		}
+		if len(ts.Points) != days {
+			t.Fatalf("days=%d len(points) = %d", days, len(ts.Points))
+		}
 	}
 }

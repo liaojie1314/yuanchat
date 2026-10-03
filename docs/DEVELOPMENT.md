@@ -175,6 +175,37 @@ Mock 模式下直接注入 demo 数据（`packages/shared/src/mocks/demoData.ts`
 
 > **桌面端同理**：`pnpm --filter @yuanchat/desktop dev:mock` / `dev:real`，或 `pnpm tauri:dev` 前设置 `VITE_ENABLE_MOCK`。
 
+### 验证离线本地库（必须生产构建 + 显式关 Mock）
+
+离线能力**不能在 dev server 上验证**，有两个坑：
+
+1. **dev server 没有预缓存**：Vite dev 下 JS 模块按需从服务端拉取，断网后应用代码
+   本身就加载不到，页面白屏 —— 那是 dev 的特性，不是本地库失效。只有生产构建注入的
+   Service Worker 预缓存了 app shell，才对应真实离线场景。
+2. **`--mode development` 会把 Mock 带进构建**：`.env.development` 里有
+   `VITE_ENABLE_MOCK=true`，于是断网后渲染出来的是 MSW 的 demo 数据，看着「离线可用」
+   实则**假阳性**。必须显式 `VITE_ENABLE_MOCK=false`。
+
+```bash
+# 1. 起基础设施 + 真后端
+pnpm dev:server
+
+# 2. 打生产构建，指向本地后端并强制关 Mock
+cd apps/web
+VITE_API_BASE_URL=http://localhost:8085 \
+VITE_WS_URL=ws://localhost:8086 \
+VITE_ENABLE_MOCK=false \
+npx vite build --mode development   # 产物含 dist/service-worker.js
+
+# 3. 以生产方式伺服
+npx vite preview --port 4173
+```
+
+浏览器里登录 → 进一条会话把历史拉进本地库 → DevTools Application → Service Workers
+确认已 `activated` → Network 勾 Offline → **整页重载**。会话列表与历史消息仍能渲染，
+就说明数据来自 IndexedDB（重载清空了所有内存状态，渲染得出来只可能来自本地库）。
+断网横幅应出现，恢复网络后「已连接」出现并 2 秒收起。
+
 ---
 
 ## 二、桌面端（Tauri 2）

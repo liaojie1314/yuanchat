@@ -817,3 +817,33 @@ func (h *AdminHandler) ListPushSubscriptions(c *gin.Context) {
 	}
 	Paginated(c, subs, total, page, size)
 }
+
+// StatsTimeseries 管理端时间序列统计（逐日消息量 + 新增用户）。
+// 参数 days 须在 7–90 之间，越界返回 400（不静默夹取）。
+// 只读端点，不写审计日志；走 idx_messages_created 索引。
+//
+//	@Summary		管理端：概览时间序列
+//	@Tags			admin
+//	@Security		BearerAuth
+//	@Param			days	query	int	true	"窗口天数（7–90）"
+//	@Success		200	{object}	Response
+//	@Router			/api/v1/admin/stats/timeseries [get]
+func (h *AdminHandler) StatsTimeseries(c *gin.Context) {
+	daysStr := c.Query("days")
+	days, err := strconv.Atoi(daysStr)
+	if err != nil || days < 1 {
+		BadRequest(c, "days must be an integer between 7 and 90")
+		return
+	}
+	ts, err := h.svc.StatsTimeseries(c.Request.Context(), days)
+	if errors.Is(err, service.ErrInvalidStatsDays) {
+		BadRequest(c, "days must be between 7 and 90")
+		return
+	}
+	if err != nil {
+		h.logger.Error("admin stats timeseries failed", zap.Error(err))
+		InternalError(c, "stats timeseries failed")
+		return
+	}
+	Success(c, ts)
+}

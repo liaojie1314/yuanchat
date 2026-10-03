@@ -31,6 +31,8 @@ import {
 } from "@yuanchat/shared";
 import type { MomentPost } from "@yuanchat/shared";
 import { ConfirmDialog } from "../primitives/ConfirmDialog";
+import { PullToRefresh } from "../primitives/PullToRefresh";
+import { RefreshButton } from "../primitives/RefreshButton";
 import { MomentPostCard } from "./MomentPostCard";
 
 /** 距底多少像素开始拉下一页 */
@@ -166,6 +168,12 @@ export function MomentsScreen({ userId }: { userId?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, retryTick]);
 
+  /** 下拉刷新：回到第一页重拉，顺带清掉错误态；失败由容器弹 toast，列表保留旧内容 */
+  const handleRefresh = async () => {
+    setFailed(false);
+    await feed.load();
+  };
+
   /** 触底续页：加载中 / 无更多 / 错误态时不触发 */
   const handleScroll = () => {
     const el = scrollRef.current;
@@ -206,6 +214,7 @@ export function MomentsScreen({ userId }: { userId?: string }) {
         <h1 className="text-title-md text-on-surface min-w-0 flex-1 truncate font-semibold">
           {userId && peerName ? peerName : t("moments.title")}
         </h1>
+        <RefreshButton onRefresh={handleRefresh} />
         {userId ? null : (
           <>
             <button
@@ -236,7 +245,12 @@ export function MomentsScreen({ userId }: { userId?: string }) {
         )}
       </header>
 
-      <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto">
+      <PullToRefresh
+        ref={scrollRef}
+        onRefresh={handleRefresh}
+        onScroll={handleScroll}
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
         {failed ? (
           <div className="flex h-64 flex-col items-center justify-center gap-3 text-sm">
             <p className="text-on-surface-variant">{t("moments.loadFailed")}</p>
@@ -289,7 +303,7 @@ export function MomentsScreen({ userId }: { userId?: string }) {
             )}
           </>
         )}
-      </div>
+      </PullToRefresh>
 
       <ConfirmDialog
         open={pendingDelete !== null}

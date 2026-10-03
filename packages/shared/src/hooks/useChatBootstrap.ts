@@ -41,6 +41,7 @@ import { decryptFrom } from "../crypto/e2eeManager";
 import { captureException } from "../observability/sentry";
 import { usePresenceStore } from "../store/presenceStore";
 import { resetChatStores, revokeAllLocalPreviews } from "../store/resetStores";
+import { startLocalStore, reconcileOnForeground } from "../store/localStoreLifecycle";
 import { showToast } from "../store/toastStore";
 import { previewBodyOf } from "../utils/messagePreview";
 import type { ChatMessage } from "../store/messageStore";
@@ -447,6 +448,10 @@ function wireSocket() {
     void useContactStore.getState().loadRequests();
   };
 
+  chatSocket.onForeground = () => {
+    reconcileOnForeground();
+  };
+
   // 登出（isAuthenticated true→false）时回收 blob 并清空聊天 store，防跨账号残留
   useAuthStore.subscribe((s, prev) => {
     if (prev.isAuthenticated && !s.isAuthenticated) resetChatStores();
@@ -493,21 +498,31 @@ export function useChatBootstrap() {
     }
 
     wireSocket();
-    // 快照串在列表加载之后（applyPresenceSnapshot 按 peerId 匹配，须先有列表）
-    void useConversationStore
-      .getState()
-      .loadConversations()
-      .then(() => fetchPresence())
-      .then((ids) => {
+    let alive = true;
+    void (async () => {
+      // 本地库必须在拉列表之前开好：冷启动水合与 WS 建连后的离线补发都要靠句柄，
+      // 开晚了本地数据白存、积压的消息这一轮也补不出去。
+      // 返回 false 即降级模式（IDB 不可用），照常往下走，不阻塞登录。
+      const userId = useAuthStore.getState().user?.id;
+      if (userId) await startLocalStore(userId);
+      if (!alive) return;
+      // 快照串在列表加载之后（applyPresenceSnapshot 按 peerId 匹配，须先有列表）
+      try {
+        await useConversationStore.getState().loadConversations();
+        const ids = await fetchPresence();
+        if (!alive) return;
         useConversationStore.getState().applyPresenceSnapshot(ids);
         usePresenceStore.getState().applySnapshot(ids);
-      })
-      .catch(() => {});
+      } catch {
+        // 列表或快照拉取失败不影响建连，本地水合出来的内容照旧可用
+      }
+      if (alive) chatSocket.connect();
+    })();
     // 申请列表随登录拉取（"新的朋友"角标；好友列表进通讯录页再拉）
     void useContactStore.getState().loadRequests();
-    chatSocket.connect();
 
     return () => {
+      alive = false;
       chatSocket.disconnect();
     };
   }, []);

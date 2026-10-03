@@ -16,6 +16,7 @@
  */
 import { sha256 } from "@noble/hashes/sha2.js";
 import { apiGet, apiPost } from "./client";
+import { localDb, cacheMedia, readMediaBlob } from "../localdb";
 
 /** 预签名上传票据：客户端凭 uploadUrl PUT 直传，objectKey 用于后续 message.send / 下载 */
 export interface UploadTicket {
@@ -108,10 +109,19 @@ const EARLY_EXPIRE_MS = 5 * 60 * 1000;
 /** 测试辅助：清空下载 URL 缓存 */
 export function __resetDownloadUrlCache(): void {
   downloadCache.clear();
+  signInflight.clear();
 }
 
 /**
- * 换取对象的预签名下载 URL，带进程内缓存。
+ * objectKey → 正在进行中的签名请求。
+ *
+ * 没有这张表，一屏 8 个 `<img>` 同时挂载时 8 次调用全在首个响应落地前撞空缓存，
+ * 于是同一个 key 连发 8 个 `download-url` —— 进程内缓存只防「先后」，不防「同时」。
+ */
+const signInflight = new Map<string, Promise<string>>();
+
+/**
+ * 换取对象的预签名下载 URL，带进程内缓存与并发去重。
  *
  * @remarks 同一张图在消息流会被反复渲染，缓存避免重复签名请求；
  *   缓存条目在服务端 TTL 到期前 5 分钟即失效重取，防止渲染时正好过期。
@@ -121,12 +131,23 @@ export async function getDownloadUrl(key: string): Promise<string> {
   if (hit && hit.expiresAt > Date.now()) {
     return hit.url;
   }
-  const dto = await apiGet<DownloadUrlDTO>(
-    "/api/v1/files/download-url?key=" + encodeURIComponent(key),
-  );
-  const ttlMs = Math.max(0, dto.expires_in * 1000 - EARLY_EXPIRE_MS);
-  downloadCache.set(key, { url: dto.url, expiresAt: Date.now() + ttlMs });
-  return dto.url;
+  const pending = signInflight.get(key);
+  if (pending !== undefined) return pending;
+  const task = (async () => {
+    const dto = await apiGet<DownloadUrlDTO>(
+      "/api/v1/files/download-url?key=" + encodeURIComponent(key),
+    );
+    const ttlMs = Math.max(0, dto.expires_in * 1000 - EARLY_EXPIRE_MS);
+    downloadCache.set(key, { url: dto.url, expiresAt: Date.now() + ttlMs });
+    return dto.url;
+  })();
+  signInflight.set(key, task);
+  try {
+    return await task;
+  } finally {
+    // 失败也要清表，否则这个 key 永久卡在一个已 reject 的 Promise 上，再也签不出来
+    signInflight.delete(key);
+  }
 }
 
 // ========================================
@@ -509,4 +530,110 @@ export async function hashBlob(blob: Blob): Promise<string> {
     hex += digest[i].toString(16).padStart(2, "0");
   }
   return hex;
+}
+
+// ========================================
+// 媒体本地缓存：本地优先取对象 URL
+// ========================================
+
+/** objectKey → 正在进行中的「取可用 URL」任务（含取字节与写缓存） */
+const objectUrlInflight = new Map<string, Promise<string>>();
+
+/**
+ * objectKey → 已创建的 blob URL，一个 key 只建一个。
+ *
+ * 消息列表是虚拟滚动的：同一张图随滚动反复挂载，不复用就是每次一个新 blob URL，
+ * 每个都钉住一份字节直到进程退出。上限到了按插入序淘汰最老的并 revoke。
+ */
+const blobUrls = new Map<string, string>();
+
+/** blob URL 复用表上限（超出按插入序淘汰最老的） */
+const MAX_BLOB_URLS = 200;
+
+/** 建一个 blob URL 并登记进复用表；同 key 已有则直接复用。 */
+function rememberBlobUrl(objectKey: string, blob: Blob): string {
+  const existing = blobUrls.get(objectKey);
+  if (existing !== undefined) return existing;
+  const url = URL.createObjectURL(blob);
+  blobUrls.set(objectKey, url);
+  if (blobUrls.size > MAX_BLOB_URLS) {
+    const oldest = blobUrls.keys().next();
+    if (!oldest.done) {
+      const stale = blobUrls.get(oldest.value);
+      blobUrls.delete(oldest.value);
+      if (stale !== undefined) URL.revokeObjectURL(stale);
+    }
+  }
+  return url;
+}
+
+/** 测试辅助：清空 objectUrl in-flight 表与 blob URL 复用表 */
+export function __resetObjectUrlInflight(): void {
+  objectUrlInflight.clear();
+  for (const url of blobUrls.values()) URL.revokeObjectURL(url);
+  blobUrls.clear();
+}
+
+/**
+ * 取一个对象的可渲染 URL，**本地缓存优先**。
+ *
+ * 命中本地即不发任何请求，断网也能渲染；未命中则签 URL → 取回字节 → 写缓存 →
+ * 返回 blob URL。取字节或写缓存失败时回落到预签名 URL 本身 ——
+ * 缓存是优化，功能不能因它失败而退化。
+ *
+ * 缓存范围：图片与语音缓存原件，视频**只缓存封面**（传 thumbKey 进来），
+ * 视频本体与文件传 `{ cache: false }` 永远走网络 —— 体积不可控，
+ * 且用户对文件的预期本来就是「点了才下载」。
+ *
+ * 同一个 key **始终返回同一个 blob URL**（见 blobUrls），因此调用方不需要也**不应该**
+ * revoke 它 —— 消息列表是虚拟滚动的，行会反复挂载卸载，每次新建一个 URL 会让
+ * blob 以可见速度堆积，而卸载时 revoke 又会把别处仍在渲染的同一张图弄成裂图。
+ */
+export async function resolveObjectUrl(
+  objectKey: string,
+  opts?: { cache?: boolean },
+): Promise<string> {
+  if (opts?.cache === false) return getDownloadUrl(objectKey);
+
+  const pending = objectUrlInflight.get(objectKey);
+  if (pending !== undefined) return pending;
+
+  const reused = blobUrls.get(objectKey);
+  if (reused !== undefined) return reused;
+
+  const task = (async () => {
+    const db = localDb();
+    if (db === null) return getDownloadUrl(objectKey);
+    try {
+      const cached = await readMediaBlob(db, objectKey);
+      if (cached !== null) return rememberBlobUrl(objectKey, cached);
+    } catch {
+      // 本地读失败就当未命中，继续走网络
+    }
+    const signed = await getDownloadUrl(objectKey);
+    let buf: ArrayBuffer;
+    let mime: string;
+    try {
+      const res = await fetch(signed);
+      if (!res.ok) return signed;
+      buf = await res.arrayBuffer();
+      mime = res.headers.get("content-type") ?? "application/octet-stream";
+    } catch {
+      // 取字节失败（离线/CORS）：预签名 URL 交给 <img> 自己去试
+      return signed;
+    }
+    try {
+      await cacheMedia(db, objectKey, buf, mime);
+    } catch {
+      // 配额或事务异常：不缓存，但 URL 照给
+    }
+    return rememberBlobUrl(objectKey, new Blob([buf], { type: mime }));
+  })();
+
+  objectUrlInflight.set(objectKey, task);
+  try {
+    return await task;
+  } finally {
+    objectUrlInflight.delete(objectKey);
+  }
 }

@@ -8,13 +8,14 @@
  * - 功能入口「新的朋友」（带待处理角标）
  * - 字母分组好友列表 + 右侧字母索引条（≥5 人启用快跳）
  */
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Ban, Search, UserPlus, UserRoundPlus, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useContactStore, usePresenceStore, groupFriends } from "@yuanchat/shared";
 import type { Friend } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "../primitives/Avatar";
+import { PullToRefresh } from "../primitives/PullToRefresh";
 
 /** 字母索引启用阈值：好友数达到该值才显示快跳条 */
 const INDEX_BAR_MIN_FRIENDS = 5;
@@ -49,6 +50,13 @@ export function ContactsPanel({
   const friends = useContactStore((s) => s.friends);
   const requests = useContactStore((s) => s.requests);
   const onlineIds = usePresenceStore((s) => s.onlineIds);
+  const loadFriends = useContactStore((s) => s.loadFriends);
+  const loadRequests = useContactStore((s) => s.loadRequests);
+
+  /** 下拉刷新：好友列表与好友申请一起重拉，待处理角标也要跟着更新 */
+  const handleRefresh = useCallback(async () => {
+    await Promise.all([loadFriends(), loadRequests()]);
+  }, [loadFriends, loadRequests]);
   const pendingCount = useMemo(
     () => requests.filter((r) => r.direction === "in" && r.status === 0).length,
     [requests],
@@ -155,8 +163,9 @@ export function ContactsPanel({
 
       {/* 字母分组列表 + 索引条 */}
       <div className="relative min-h-0 flex-1">
-        <div
+        <PullToRefresh
           ref={listRef}
+          onRefresh={handleRefresh}
           className={cn("h-full overflow-y-auto px-2 pb-3", showIndexBar && "pr-10")}
         >
           {groups.length === 0 && (
@@ -196,7 +205,7 @@ export function ContactsPanel({
               ))}
             </div>
           ))}
-        </div>
+        </PullToRefresh>
 
         {/* 字母索引条：裸字母贴在面板分隔线上会被当成漏出的乱码，
             收进半透明胶囊内并给足点击区，才像一个可操作控件 */}

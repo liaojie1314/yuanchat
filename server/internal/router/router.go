@@ -455,6 +455,7 @@ func Setup(
 		admin.GET("/audit-logs", adminH.ListAuditLogs)
 		// 只读概览：聚合指标与推送订阅视图，不写审计日志
 		admin.GET("/stats", adminH.Stats)
+		admin.GET("/stats/timeseries", adminH.StatsTimeseries)
 		admin.GET("/storage-stats", adminH.StorageStats)
 		admin.GET("/push-subscriptions", adminH.ListPushSubscriptions)
 	}

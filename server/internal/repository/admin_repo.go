@@ -497,3 +497,85 @@ func (r *AdminRepository) ListLogs(ctx context.Context, actorID *uuid.UUID, acti
 		Scan(&logs).Error
 	return logs, total, err
 }
+
+// TimeseriesPoint 单日时间序列数据点（空日补零，前端无需补洞）。
+type TimeseriesPoint struct {
+	// Date 日期字符串，格式 2006-01-02
+	Date string `json:"date"`
+	// Messages 该日未删除消息数（走 idx_messages_created 索引）
+	Messages int64 `json:"messages"`
+	// NewUsers 该日按 created_at 新增用户数
+	NewUsers int64 `json:"new_users"`
+	// NewConversations 该日新建会话数
+	NewConversations int64 `json:"new_conversations"`
+}
+
+// CountTimeseries 返回最近 days 天（含今天）的逐日数据序列。
+// 空日在 SQL 层补零，调用方拿到的序列长度恒为 days，日期升序排列。
+// days 由调用方保证在 7–90 范围内（service 层校验）。
+func (r *AdminRepository) CountTimeseries(ctx context.Context, days int) ([]TimeseriesPoint, error) {
+	type row struct {
+		DayIdx           int   `gorm:"column:day_idx"`
+		Messages         int64 `gorm:"column:messages"`
+		NewUsers         int64 `gorm:"column:new_users"`
+		NewConversations int64 `gorm:"column:new_conversations"`
+	}
+	// 窗口边界用 Go 本地时区零点，避免 CURRENT_DATE（UTC）与 dayStart()（本地时区）
+	// 在非零偏移时区（如 UTC+8）出现 8 小时错位，导致当日记录落入 PostgreSQL 昨日桶。
+	windowStart := dayStart().AddDate(0, 0, -(days - 1))
+	windowEnd := dayStart().AddDate(0, 0, 1) // 独占上界
+	var rows []row
+	// 用整数偏移量（0..days-1）代替日期字符串作为分组键：
+	// floor(epoch差 / 86400) 在任何时区下都给出相对 windowStart 的完整天数，
+	// 不依赖 PostgreSQL DATE_TRUNC（后者按 UTC 截断）。
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT
+			g.idx                        AS day_idx,
+			COALESCE(m.cnt, 0)           AS messages,
+			COALESCE(u.cnt, 0)           AS new_users,
+			COALESCE(cv.cnt, 0)          AS new_conversations
+		FROM generate_series(0, ? - 1) AS g(idx)
+		LEFT JOIN (
+			SELECT floor(extract(epoch from (created_at - ?::timestamptz)) / 86400)::int AS d,
+			       COUNT(*) AS cnt
+			FROM messages
+			WHERE deleted_at IS NULL
+			  AND created_at >= ?::timestamptz AND created_at < ?::timestamptz
+			GROUP BY 1
+		) m ON m.d = g.idx
+		LEFT JOIN (
+			SELECT floor(extract(epoch from (created_at - ?::timestamptz)) / 86400)::int AS d,
+			       COUNT(*) AS cnt
+			FROM users
+			WHERE deleted_at IS NULL
+			  AND created_at >= ?::timestamptz AND created_at < ?::timestamptz
+			GROUP BY 1
+		) u ON u.d = g.idx
+		LEFT JOIN (
+			SELECT floor(extract(epoch from (created_at - ?::timestamptz)) / 86400)::int AS d,
+			       COUNT(*) AS cnt
+			FROM conversations
+			WHERE deleted_at IS NULL
+			  AND created_at >= ?::timestamptz AND created_at < ?::timestamptz
+			GROUP BY 1
+		) cv ON cv.d = g.idx
+		ORDER BY g.idx ASC
+	`, days,
+		windowStart, windowStart, windowEnd,
+		windowStart, windowStart, windowEnd,
+		windowStart, windowStart, windowEnd,
+	).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TimeseriesPoint, len(rows))
+	for i, row := range rows {
+		out[i] = TimeseriesPoint{
+			Date:             windowStart.AddDate(0, 0, row.DayIdx).Format("2006-01-02"),
+			Messages:         row.Messages,
+			NewUsers:         row.NewUsers,
+			NewConversations: row.NewConversations,
+		}
+	}
+	return out, nil
+}

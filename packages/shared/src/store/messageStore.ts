@@ -29,6 +29,16 @@ import { asServerMessageId, chatSocket } from "../ws/chatSocket";
 import type { ClientFrames } from "../ws/chatSocket";
 import { encryptFor } from "../crypto/e2eeManager";
 import { useAuthStore } from "./authStore";
+import {
+  persistMessages,
+  hydrateMessages,
+  noteIncoming,
+  reconcileConversation,
+  replayRecall,
+  replayEdit,
+  replayClear,
+} from "./messageLocalSync";
+import { enqueueSend, settleSend } from "./outboxSync";
 import { showToast } from "./toastStore";
 
 /** 消息在气泡里呈现的内容类别 */
@@ -364,13 +374,34 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
 
   loadHistory: async (conversationId) => {
     if (mockMode) return;
-    if ((get().messagesByConv[conversationId] ?? []).length > 0) return;
+    // 短路判据取「进来之前内存里有没有**已确认**消息」。两处讲究：
+    // 1) 水合会把本地消息填进内存，若在水合之后再判空，第一次进会话就会被
+    //    自己刚填的数据挡住、永不打网络；
+    // 2) 判「已确认」而不是「非空」—— 冷启动恢复出来的 failed 气泡没有 seq，
+    //    算进来的话一条没发出去的消息会把整个会话的历史永久挡死。
+    const unconfirmed = (get().messagesByConv[conversationId] ?? []).filter(
+      (m) => typeof m.seq !== "number",
+    );
+    const hadConfirmed = (get().messagesByConv[conversationId] ?? []).length > unconfirmed.length;
+    if (!hadConfirmed) {
+      // 冷启动先渲染本地：断网时这是用户唯一能看到的内容
+      const local = await hydrateMessages(conversationId);
+      if (local.length > 0) {
+        set((s) => ({
+          messagesByConv: { ...s.messagesByConv, [conversationId]: [...local, ...unconfirmed] },
+        }));
+      }
+    }
+    if (hadConfirmed) return;
     try {
       const { messages, hasMore } = await fetchMessages(conversationId, 0, PAGE_SIZE, selfUserId());
       set((s) => ({
-        messagesByConv: { ...s.messagesByConv, [conversationId]: messages },
+        // 未确认条目（sending / failed）接在服务端历史之后：它们不在服务端，
+        // 整列表替换会把用户「没发出去」的那条悄悄抹掉
+        messagesByConv: { ...s.messagesByConv, [conversationId]: [...messages, ...unconfirmed] },
         hasMoreByConv: { ...s.hasMoreByConv, [conversationId]: hasMore },
       }));
+      persistMessages(conversationId, messages);
     } catch {
       // 历史加载失败不阻塞聊天（保持空列表，可通过重进会话重试）
     }
@@ -395,6 +426,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
         },
         hasMoreByConv: { ...s.hasMoreByConv, [conversationId]: hasMore },
       }));
+      persistMessages(conversationId, messages);
     } catch {
       // 翻页失败保持现状，用户可再次触发
     }
@@ -773,6 +805,14 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
           : { ...s.typingByConv, [msg.conversationId]: undefined },
       };
     });
+    // 双写本地 + 空洞探测。fire-and-forget：帧处理链保持同步。
+    persistMessages(msg.conversationId, [msg]);
+    if (typeof msg.seq === "number") {
+      void noteIncoming(msg.conversationId, msg.seq).then((gap) => {
+        // 发现空洞立即补齐：帧丢失或应用启动前的窗口都会造成跳号
+        if (gap) void reconcileConversation(msg.conversationId, selfUserId());
+      });
+    }
   },
 
   applyAck: (clientMsgId, messageId, convId, seq, timestamp) => {
@@ -810,6 +850,10 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
         }),
       },
     }));
+    // ack 到达后该消息才有 seq，此刻才能落进 messages store；
+    // 出队与落库同事务完成，见 settleOutbox
+    const confirmed = (get().messagesByConv[convId] ?? []).find((m) => m.id === messageId);
+    if (confirmed !== undefined) settleSend(clientMsgId, confirmed);
   },
 
   applyRead: (convId, seq) =>
@@ -824,7 +868,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       },
     })),
 
-  applyRecall: (convId, messageId, _operatorName) =>
+  applyRecall: (convId, messageId, _operatorName) => {
     set((s) => {
       const list = s.messagesByConv[convId];
       if (!list || !list.some((m) => m.id === messageId)) return s;
@@ -843,9 +887,14 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
           }),
         },
       };
-    }),
+    });
+    // 本地投影直接删行删 blob（撤回 = 访问撤销），占位气泡只存在于内存态。
+    // 刻意放在 set 之外、不受「列表里有没有这条」短路影响：消息可能已被保留
+    // 窗口淘汰出内存却仍躺在本地库里，那种情况下更必须删。
+    replayRecall(messageId);
+  },
 
-  applyEdited: (convId, messageId, text, editCount) =>
+  applyEdited: (convId, messageId, text, editCount) => {
     set((s) => {
       const list = s.messagesByConv[convId];
       // 未命中直接返回原 state：Zustand 比较引用，返回新对象会让整条列表无谓重渲染
@@ -858,7 +907,9 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
           ),
         },
       };
-    }),
+    });
+    replayEdit(messageId, text, editCount);
+  },
 
   applyReaction: (convId, messageId, emoji, count, mine) =>
     set((s) => ({
@@ -929,11 +980,14 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     });
   },
 
-  clearConversation: (convId) =>
+  clearConversation: (convId) => {
     set((s) => ({
       messagesByConv: { ...s.messagesByConv, [convId]: [] },
       hasMoreByConv: { ...s.hasMoreByConv, [convId]: false },
-    })),
+    }));
+    // 本地库同步清空并推进 clearedBeforeSeq —— 只清内存的话刷新就全回来了
+    replayClear(convId);
+  },
 }));
 
 /** 经 WebSocket 发出 message.send 并挂 ack 超时（超时 → failed） */
@@ -996,6 +1050,18 @@ async function maybeEncryptAndSend(
     }
   }
 
+  sendWithOutbox(payload);
+}
+
+/**
+ * 发一帧 message.send，并先把它记进离线待发队列。
+ *
+ * 入队与发送必须成对，故收敛成这一处：六条发送路径各自记一次极易漏，
+ * 漏掉的那条在掉线重启后就是「用户以为发出去了、实际永远消失」。
+ * 会话与幂等 id 直接取自载荷本身，不另传参，避免两处对不上。
+ */
+function sendWithOutbox(payload: ClientFrames["message.send"]): void {
+  enqueueSend(payload.conversation_id, payload.client_msg_id, payload);
   chatSocket.send("message.send", payload);
 }
 
@@ -1043,7 +1109,7 @@ async function dispatchImageSend(
   // 回填对象 key（乐观 → 确认的一部分）：ack 后本地副本失效时可据 key 签下载渲染
   writeBackImageKey(conversationId, clientMsgId, key);
 
-  chatSocket.send("message.send", {
+  sendWithOutbox({
     conversation_id: conversationId,
     content: { type: "image", key, width, height, size: blob.size },
     client_msg_id: clientMsgId,
@@ -1145,7 +1211,7 @@ async function dispatchFileSend(
     },
   }));
 
-  chatSocket.send("message.send", {
+  sendWithOutbox({
     conversation_id: conversationId,
     content: { type: "file", key, name, size: file.size },
     client_msg_id: clientMsgId,
@@ -1186,7 +1252,7 @@ async function dispatchVoiceSend(
     },
   }));
 
-  chatSocket.send("message.send", {
+  sendWithOutbox({
     conversation_id: conversationId,
     content: { type: "voice", key, duration, size: blob.size },
     client_msg_id: clientMsgId,
@@ -1279,7 +1345,7 @@ async function dispatchVideoSend(
     },
   }));
 
-  chatSocket.send("message.send", {
+  sendWithOutbox({
     conversation_id: conversationId,
     content: {
       type: "video",
@@ -1309,7 +1375,7 @@ function dispatchStickerSend(
   clientMsgId: string,
   get: () => MessageState,
 ) {
-  chatSocket.send("message.send", {
+  sendWithOutbox({
     conversation_id: conversationId,
     content: {
       type: "sticker",

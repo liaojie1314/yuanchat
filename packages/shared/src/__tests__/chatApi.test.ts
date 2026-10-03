@@ -140,8 +140,8 @@ describe("formatDateDivider", () => {
     String(d.getDate()).padStart(2, "0");
 
   it("今天/昨天/日期", async () => {
-    // CI runner locale 是 en_US → detectLocale() 走 en-US 分支导致 i18n.t 返回英文；
-    // 本用例验证的是"今天/昨天/月日"的分支逻辑，强制切 zh-CN 保证 locale 无关
+    // detectLocale() 兜底是 zh-CN，但 runner 的 navigator.language 不该左右本用例；
+    // 这里验证的是"今天/昨天/月日"的分支逻辑，强制切 zh-CN 保证 locale 无关
     const { default: i18n } = await import("@yuanchat/design-system/i18n");
     await i18n.changeLanguage("zh-CN");
 

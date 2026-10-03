@@ -495,6 +495,13 @@ const MEDIA_TYPE_BY_KIND: Record<string, 2 | 3 | 4 | 5 | 8> = {
   sticker: 8,
 };
 
+/** 全部 kind → 后端 message_type（历史 DTO 用，比相册多出 text / system） */
+const MOCK_MSG_TYPE_BY_KIND: Record<string, number> = {
+  ...MEDIA_TYPE_BY_KIND,
+  text: 1,
+  system: 6,
+};
+
 /**
  * demo 文件/视频消息的字节数。
  *
@@ -550,6 +557,52 @@ interface MockMediaItem {
   width?: number;
   height?: number;
   sticker_id?: string;
+}
+
+/** demo 消息 → 历史 DTO；content 按后端各类型的 JSON 形状序列化（见 ws/handler.go 的 buildContent） */
+function toMockMessageDTO(m: ChatMessage): Record<string, unknown> {
+  const contentOf = (): unknown => {
+    if (m.kind === "image")
+      return { key: m.image?.key, width: m.image?.width, height: m.image?.height, size: 102400 };
+    if (m.kind === "file")
+      return { key: m.file?.key, name: m.file?.name, size: DEMO_MEDIA_BYTES.file };
+    if (m.kind === "voice") return { key: m.voice?.key, duration: m.voice?.seconds, size: 20480 };
+    if (m.kind === "video")
+      return {
+        key: m.video?.key,
+        thumb_key: m.video?.thumbKey,
+        name: m.video?.name,
+        size: DEMO_MEDIA_BYTES.video,
+        duration: m.video?.duration,
+        width: m.video?.width,
+        height: m.video?.height,
+      };
+    if (m.kind === "sticker")
+      return {
+        sticker_id: m.sticker?.stickerId,
+        key: m.sticker?.key,
+        width: m.sticker?.width,
+        height: m.sticker?.height,
+      };
+    return { text: m.text ?? "" };
+  };
+  return {
+    id: m.id,
+    conversation_id: m.conversationId,
+    sender_id: m.isSelf ? MOCK_USER.id : (m.senderId ?? "peer_001"),
+    seq: m.seq ?? 0,
+    message_type: MOCK_MSG_TYPE_BY_KIND[m.kind] ?? 1,
+    content: JSON.stringify(contentOf()),
+    // 撤回样本在 demo 里用 recalled 标记，DTO 侧对应 status=2
+    status: m.recalled ? 2 : 1,
+    reply_to_id: m.replyToId ?? null,
+    mentions: m.mentions ?? null,
+    client_msg_id: m.clientMsgId ?? null,
+    created_at: new Date(m.createdAtMs ?? Date.now()).toISOString(),
+    edit_count: m.editCount ?? 0,
+    sender_nickname: m.senderName ?? MOCK_USER.nickname,
+    sender_avatar_url: null,
+  };
 }
 
 /** demo 消息 → 相册条目；按类型只填该类型有的字段（无 key 的样本由调用方过滤掉） */
@@ -863,6 +916,51 @@ export const handlers = [
     await delay(200);
     return apiOk({});
   }),
+
+  // --------------------------------------------------
+  // 会话 — 消息历史（双向游标：before_seq 往前翻、after_seq 往后补）
+  // GET /api/v1/conversations/:id/messages?before_seq=&after_seq=&limit=
+  //
+  // 两个游标与后端同口径**互斥**：两者都 > 0 时回 400，避免前端在 mock 下
+  // 写出真实后端会拒的调用。走哪个分支看「after_seq 是否出现」而非值是否 > 0 ——
+  // 断线补齐首次会带 after_seq=0（从头补），那是合法请求。
+  // --------------------------------------------------
+  http.get(
+    "http://localhost:8085/api/v1/conversations/:id/messages",
+    async ({ params, request }) => {
+      // 300ms 延迟：让骨架屏（加载态）在演示与 E2E 里真的能看见
+      await delay(300);
+      const url = new URL(request.url);
+      // ?error=1 仅 mock 支持，供错误态+重试联调（真实后端会忽略该参数）
+      if (url.searchParams.get("error") === "1") {
+        return apiError(500, "history load failed");
+      }
+      const hasAfter = url.searchParams.get("after_seq") !== null;
+      const beforeSeq = Number(url.searchParams.get("before_seq") ?? "0") || 0;
+      const afterSeq = Number(url.searchParams.get("after_seq") ?? "0") || 0;
+      if (beforeSeq > 0 && afterSeq > 0) {
+        return apiError(400, "before_seq and after_seq are mutually exclusive");
+      }
+      const limit = Math.min(100, Number(url.searchParams.get("limit") ?? "30") || 30);
+      // 未知会话自然落空数组，即「空态」样本
+      const source = DEMO_MESSAGES[String(params.id)] ?? [];
+
+      if (hasAfter) {
+        const all = source
+          .filter((m) => (m.seq ?? 0) > afterSeq)
+          .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+        const page = all.slice(0, limit);
+        // has_more 与后端同口径：满页即视为「同方向上可能还有」（见 handler/message.go 的 History）
+        return apiOk({ messages: page.map(toMockMessageDTO), has_more: page.length === limit });
+      }
+
+      const all = source
+        .filter((m) => beforeSeq <= 0 || (m.seq ?? 0) < beforeSeq)
+        .sort((a, b) => (b.seq ?? 0) - (a.seq ?? 0));
+      const page = all.slice(0, limit);
+      return apiOk({ messages: page.map(toMockMessageDTO), has_more: page.length === limit });
+    },
+  ),
 
   // --------------------------------------------------
   // 会话 — 媒体相册（按类型聚合，seq 降序）

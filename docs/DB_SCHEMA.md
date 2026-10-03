@@ -2,7 +2,7 @@
 
 > **前置阅读**：[ARCHITECTURE.md](./ARCHITECTURE.md)
 >
-> 本文按 `server/internal/database/migrations/` 的实际迁移序（001 → 019）重建，
+> 本文按 `server/internal/database/migrations/` 的实际迁移序（001 → 020）重建，
 > 与代码严格同步；旧文档中的 Elasticsearch / MinIO 章节已过时，不在此保留。
 
 ---
@@ -27,7 +27,7 @@
 
 ---
 
-## 二、迁移明细（001 → 019）
+## 二、迁移明细（001 → 020）
 
 ### 001_baseline — 基准 Schema 快照
 
@@ -189,6 +189,23 @@
   靠 `user_id` / `conversation_id` 就能定位到要重置的那一行；**朋友圈动态与评论各自成行，
   同一个人可以有很多条**，没有这列管理端查到命中后无从处置（早先 reset 会直接 404）。
 - 朋友圈两类的处置语义也因此不同：没有「默认值」可退回，整条就是命中内容，故 reset = 删除那一条。
+
+### 020_idempotent_send — 发送幂等
+
+- `messages(sender_id, client_msg_id)` 上建**部分唯一索引** `idx_messages_sender_client_msg`，
+  条件 `WHERE client_msg_id IS NOT NULL`。
+- **这是离线发送队列（L1）的前置**：没有它，离线 outbox 补发就是个重复消息生成器。
+  典型失败场景是「服务端已落库、ack 在回程丢了」——客户端上线后重发同一条，
+  产生第二条一模一样的消息，而两端都察觉不到。
+- 为什么是部分索引：系统消息、通话记录等服务端自行产生的消息没有 `client_msg_id`，
+  不能被这条约束波及（否则多条系统消息会互相冲突）。
+- 索引是 **(sender_id, client_msg_id) 复合**的：`client_msg_id` 由客户端生成，
+  不同用户之间可能撞号，只约束「同一发送者」才是正确口径。
+- 应用侧配合：`CreateWithSeq` 把 `23505` + 该约束名转成 `repository.ErrDuplicateClientMsg`，
+  service 回查原行并返回**原 ack**（`SendResult.Duplicate = true`），
+  WS 层据此只回 ack、不重发 `message.receive`——收件人第一次就已经收到了。
+- 建索引前须先探测存量重复行；有重复时 `CREATE UNIQUE INDEX` 会失败并给出明确报错，
+  不会半途留下不一致状态，届时需人工去重后重跑。
 
 ---
 

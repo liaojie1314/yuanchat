@@ -17,6 +17,8 @@ import { captureException, deleteStickerPack, listMyPacks, showToast } from "@yu
 import type { MyPackItem } from "@yuanchat/shared";
 import { StickerPackCover } from "./StickerPackCover";
 import { ConfirmDialog } from "../primitives/ConfirmDialog";
+import { PullToRefresh } from "../primitives/PullToRefresh";
+import { RefreshButton } from "../primitives/RefreshButton";
 
 export function StickerMineView() {
   const { t } = useTranslation();
@@ -30,14 +32,22 @@ export function StickerMineView() {
   const [deleting, setDeleting] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
 
-  const load = useCallback(async () => {
-    setState("loading");
+  /**
+   * 拉我发布的表情包列表。
+   *
+   * @param quiet - 静默刷新（下拉触发）：不切 loading 态把列表换成转圈，
+   *   失败也不切 error 态把列表换成错误页，而是把异常抛给下拉容器弹 toast ——
+   *   用户手上还有一屏旧数据，刷新失败不该把它清空。
+   */
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setState("loading");
     try {
       const list = await listMyPacks();
       setPacks(list);
       setState("done");
     } catch (err) {
       captureException(err, { context: "StickerMineView.load" });
+      if (quiet) throw err;
       setState("error");
     }
   }, []);
@@ -81,6 +91,7 @@ export function StickerMineView() {
           {t("sticker.market.myPacks")}
         </h1>
         <div className="flex-1" />
+        <RefreshButton onRefresh={() => load(true)} />
         <button
           type="button"
           onClick={() => navigate("/stickers/publish")}
@@ -91,7 +102,7 @@ export function StickerMineView() {
         </button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <PullToRefresh onRefresh={() => load(true)} className="min-h-0 flex-1 overflow-y-auto">
         {state === "loading" && (
           <div className="flex h-32 items-center justify-center">
             <Loader2 size={20} className="text-primary animate-spin" />
@@ -167,7 +178,7 @@ export function StickerMineView() {
             ))}
           </ul>
         )}
-      </div>
+      </PullToRefresh>
 
       {/* 删除二次确认 */}
       <ConfirmDialog

@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/middleware"
+	"github.com/yuanchat/server/internal/repository"
 	"github.com/yuanchat/server/internal/service"
 	"github.com/yuanchat/server/internal/ws"
 	"go.uber.org/zap"
@@ -25,13 +26,18 @@ func NewMessageHandler(svc *service.MessageService, dispatcher ws.Dispatcher, lo
 	return &MessageHandler{svc: svc, dispatcher: dispatcher, logger: logger}
 }
 
-// History 分页返回某会话的消息（按 seq 倒序）。
+// History 分页返回某会话的消息。
+//
+// 两种游标互斥：before_seq 向前翻（seq 降序，翻历史）、after_seq 向后补
+// （seq 升序，断线补空洞）。同时给按 400 拒绝——静默取其一会让调用方
+// 在错误的方向上翻页却毫无察觉。
 //
 //	@Summary		拉取消息历史
 //	@Tags			chat
 //	@Security		BearerAuth
 //	@Param			id			path	string	true	"会话 id"
-//	@Param			before_seq	query	int		false	"拉取 seq < before_seq 的消息；0 表示最新"
+//	@Param			before_seq	query	int		false	"拉取 seq < before_seq 的消息（降序）；0 表示最新"
+//	@Param			after_seq	query	int		false	"拉取 seq > after_seq 的消息（升序）；与 before_seq 互斥"
 //	@Param			limit		query	int		false	"每页条数，默认 30，上限 100"
 //	@Success		200	{object}	Response
 //	@Router			/api/v1/conversations/{id}/messages [get]
@@ -49,12 +55,25 @@ func (h *MessageHandler) History(c *gin.Context) {
 	}
 
 	beforeSeq, _ := strconv.ParseInt(c.DefaultQuery("before_seq", "0"), 10, 64)
+	afterSeq, _ := strconv.ParseInt(c.DefaultQuery("after_seq", "0"), 10, 64)
+	if beforeSeq > 0 && afterSeq > 0 {
+		BadRequest(c, "before_seq and after_seq are mutually exclusive")
+		return
+	}
+
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "30"))
 	if limit <= 0 || limit > 100 {
 		limit = 30
 	}
 
-	msgs, err := h.svc.GetHistory(c.Request.Context(), userID, convID, beforeSeq, limit)
+	var msgs []repository.MessageWithSender
+	// 判「参数出现过」而不只判 afterSeq > 0：客户端首次补齐时本地水位是 0，
+	// 会传 after_seq=0，只判大于零会把它错分到 before_seq 的降序分支，补齐方向就反了。
+	if c.Query("after_seq") != "" {
+		msgs, err = h.svc.GetHistoryAfter(c.Request.Context(), userID, convID, afterSeq, limit)
+	} else {
+		msgs, err = h.svc.GetHistory(c.Request.Context(), userID, convID, beforeSeq, limit)
+	}
 	if err != nil {
 		if errors.Is(err, service.ErrNotMember) {
 			Error(c, 403, 403, "not a conversation member")
@@ -65,7 +84,7 @@ func (h *MessageHandler) History(c *gin.Context) {
 		return
 	}
 
-	// 满页说明可能还有更早的消息
+	// 满页说明同方向上可能还有更多
 	Success(c, gin.H{
 		"messages": msgs,
 		"has_more": len(msgs) == limit,
