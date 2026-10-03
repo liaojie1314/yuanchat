@@ -1107,6 +1107,14 @@ friend_requests_week, otp_today, otp_week}, "runtime": {online_connections}}`。
   计数口径：消息只统计未删除；「今日」按服务器本地时区零点；OTP 按
   `verification_codes` 审计表行数；`online_connections` 为本实例 WS 连接数
   （多实例部署下需自行聚合）。
+- `GET /api/v1/admin/stats/timeseries?days=N` — 按天时间序列（`days` 取 7–90，
+  越界返 `400`，缺省 30）：
+  `{"days": 30, "points": [{"date": "2026-10-03", "messages", "new_users",
+"new_conversations"}]}`，最旧在前、按天连续（无数据的天补 0）。
+  **时区口径**：窗口上下界由服务端按**本地时区零点**算好后作为参数下传，
+  分桶走 `floor(extract(epoch from (created_at - $start)) / 86400)`，
+  不依赖 PostgreSQL 的 `CURRENT_DATE`/`DATE_TRUNC`（那两者按 UTC 算，
+  在 UTC+8 会把当日记录错位进前一天的桶）。`date` 字段同样由服务端格式化。
 - `GET /api/v1/admin/storage-stats` — 按对象类别的存储占用（DB 聚合口径，与 GC 视角一致）：
   `{"categories": [{"category", "object_count", "total_bytes"}]}`，类别 =
   `avatar` / `sticker` / `sticker_cover`（字节未知，`total_bytes=null`）与

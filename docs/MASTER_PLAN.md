@@ -805,6 +805,30 @@ QQ「远程协助」式的**用户级**远程桌面能力（不是管理员运�
 | SVG 图表           | `packages/ui/src/charts/`：Sparkline / LineChart / DonutChart，零依赖、纯 SVG、`role=img` + `aria-label`，空/单点安全                                                      |
 | tsconfig 对齐      | 三端 app tsconfig `target`/`lib` 从 ES2021 降至 ES2019，与 vite `build.target` 一致                                                                                        |
 
+**真机实测（真实后端 `:8085`/`:8086`，非 Mock）**：
+
+| 链路       | 验证方式与结论                                                                                                                                                           |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 离线本地库 | 生产构建 + `vite preview`：登录落盘（`conversations:6 / messages:30 / media:2`）→ Service Worker 激活 → 断网 → **整页重载** → 列表与 14 条历史消息（含视频缩略图）仍渲染 |
+| 离线横幅   | 断网后「当前无网络」出现；恢复网络后「已连接」出现并 2 秒收起                                                                                                            |
+| 运营概览   | 管理端真实登录 → 概览页折线图/环形图/指标卡全部有数                                                                                                                      |
+| 三端截图   | Web（1920×1080）、桌面（Tauri 窗口）、安卓（1080×2400，模拟器真机链路）、管理端登录与概览，落 `docs/screenshots/`                                                        |
+| 默认语言   | 首启默认简体中文（仅 ja/ko 系统语言自动跟随）；此前 en 设备默认英文，安卓模拟器一上来就是英文界面                                                                        |
+
+离线验证**必须打生产构建**：dev server 下 JS 模块按需从服务端拉取，断网后应用代码本身都加载不到，
+页面白屏是 dev 的特性而非本地库失效；且须显式 `VITE_ENABLE_MOCK=false`，否则 `.env.development`
+会把 MSW mock 带进构建，渲染出的是 mock 数据，离线通过是**假阳性**。
+
+实测挡下两个只有真链路才暴露的问题：
+
+- `GET /admin/stats/timeseries` **handler 写了但路由没注册**（404）—— 单测覆盖不到路由表
+- 「已连接」横幅在首次登录与每次整页重载都弹 —— 原逻辑只看 phase 跃迁，无法区分
+  「断过网后恢复」与「首次连接」。改为 `sessionStorage` 标记真实 `offline` 事件、读取即清除
+- 安卓端所有 `adb reverse` 静默失败（`scripts/dev.mjs` 用裸 `adb`，非交互 shell 的 PATH
+  里没有 platform-tools）—— 表现为登录 "Failed to fetch"、群头像破图（头像直链指向
+  `localhost:9002` 的 MinIO），看着像应用 bug。改为从 `ANDROID_HOME` 解析 adb 路径，
+  并把「找不到 adb」与「设备没连接」分开报
+
 **当初立项前的三个问题，实际裁决**：
 
 - **存储选型**：三端统一 IndexedDB，**不用 SQLite**。Tauri 桌面/安卓虽可用

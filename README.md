@@ -17,21 +17,51 @@
 
 ## 界面预览
 
+截图均来自本机真实运行（真实后端 `:8085`/`:8086`，非 Mock）。Web 端与管理后台视口 1920×1080；
+桌面端与安卓端按应用/设备自身尺寸（Tauri 窗口由应用控制：登录 540×640、主界面 1200×800）。
+
 ### Web 端
 
-![Web 端](docs/screenshots/web-moments.png)
+| 登录                                        | 会话列表                                            |
+| ------------------------------------------- | --------------------------------------------------- |
+| ![Web 登录](docs/screenshots/web-login.png) | ![Web 会话列表](docs/screenshots/web-chat-list.png) |
+
+| 聊天窗口                                              | 通讯录                                           |
+| ----------------------------------------------------- | ------------------------------------------------ |
+| ![Web 聊天窗口](docs/screenshots/web-chat-detail.png) | ![Web 通讯录](docs/screenshots/web-contacts.png) |
+
+| 朋友圈                                          | 离线可用（断网整页重载后由本地库渲染）        |
+| ----------------------------------------------- | --------------------------------------------- |
+| ![Web 朋友圈](docs/screenshots/web-moments.png) | ![Web 离线](docs/screenshots/web-offline.png) |
 
 ### 桌面端
 
-![桌面端](docs/screenshots/desktop-moments.png)
+| 登录                                              | 会话列表                                                  |
+| ------------------------------------------------- | --------------------------------------------------------- |
+| ![桌面端登录](docs/screenshots/desktop-login.png) | ![桌面端会话列表](docs/screenshots/desktop-chat-list.png) |
+
+| 聊天窗口                                                    | 朋友圈                                                |
+| ----------------------------------------------------------- | ----------------------------------------------------- |
+| ![桌面端聊天窗口](docs/screenshots/desktop-chat-detail.png) | ![桌面端朋友圈](docs/screenshots/desktop-moments.png) |
 
 ### 管理后台
 
-![管理后台](docs/screenshots/admin-moderation.png)
+| 登录                                              | 运营概览                                         |
+| ------------------------------------------------- | ------------------------------------------------ |
+| ![管理后台登录](docs/screenshots/admin-login.png) | ![运营概览](docs/screenshots/admin-overview.png) |
+
+内容审核：
+
+![内容审核](docs/screenshots/admin-moderation.png)
 
 ### 安卓端
 
-<img src="docs/screenshots/android-moments.png" width="300" alt="安卓端" />
+<p>
+  <img src="docs/screenshots/android-login.png" width="240" alt="安卓端登录" />
+  <img src="docs/screenshots/android-chat-list.png" width="240" alt="安卓端会话列表" />
+  <img src="docs/screenshots/android-chat-detail.png" width="240" alt="安卓端聊天窗口" />
+  <img src="docs/screenshots/android-moments.png" width="240" alt="安卓端朋友圈" />
+</p>
 
 ## 已实现功能
 
@@ -102,15 +132,18 @@
 ### 管理后台与内容安全
 
 - **管理后台**（`apps/admin`，独立 Vite 应用）：用户列表/封禁解封、会话列表/解散、消息检索与删除、举报处理、审计日志；`/api/v1/admin/*` 走 JWT + `role=admin` 双重校验，写操作全部留审计日志
+- **运营概览看板**：`GET /admin/stats` 聚合指标 + `GET /admin/stats/timeseries?days=N`（7–90 天）时间序列，分层呈现核心指标卡（含 Sparkline 趋势）、消息量/新增用户/新增会话折线图、消息类型环形图、存储与推送订阅视图；图表为 `packages/ui/src/charts/` 零依赖纯 SVG 组件，带 `role=img` + `aria-label`
 - **用户举报**：任意用户举报消息/用户（`POST /reports` 带 IP 限流）→ 进管理后台工单队列
 - **敏感词标记**：命中 `moderation.words` 的消息正常投递但标记 `flagged=true` 进审核队列（不阻塞发送）
 
 ### 系统能力
 
-- **i18n**：zh-CN / en-US / ja-JP / ko-KR 四语全量覆盖（`react-i18next`，扁平 key，`pnpm check:i18n` 门禁挡漏翻/写错 key/死键），语言选择持久化，重开应用即生效
+- **i18n**：zh-CN / en-US / ja-JP / ko-KR 四语全量覆盖（`react-i18next`，扁平 key，`pnpm check:i18n` 门禁挡漏翻/写错 key/死键），语言选择持久化，重开应用即生效。首次启动**默认简体中文**（仅系统语言为 ja/ko 时自动跟随），英文等其他设备也先给中文，用户可在设置页自行切换
 - **主题**：三套皮肤（`yuan` / `ocean` / `forest`，各含亮暗两版）+ 字体缩放（`pnpm check:theme` 校验颜色工具类都在色板里）
 - **端到端加密 E2EE**：X3DH 协商 + Double Ratchet 棘轮（`packages/shared/src/crypto/`），设置页内按用户开关，仅单聊；对方未启用时自动降级明文，支持密钥备份/恢复
 - **PWA**：生产构建注入自定义 Service Worker（app shell 预缓存 + Web Push 监听），可安装到桌面/主屏
+- **离线本地消息库**：IndexedDB 五 store（`messages`/`conversations`/`media`/`outbox`/`meta`），登录开库、登出清库；冷启动先渲染本地再后台按 `seq` 水位增量对账，撤回/编辑/清空同步回放本地副本；媒体内容寻址 + 配额 LRU 缓存；断网期间文本消息入 `outbox`，上线串行补发（依赖既有幂等索引）。断网整页重载后会话列表与历史消息仍可浏览
+- **网络态反馈**：`useNetworkStatus` 三态（`online`/`connecting`/`offline`）+ 全局顶部横幅，仅在真实断网恢复后提示「已连接」并 2 秒自动收起；七个主列表支持下拉刷新，回前台 30 秒节流静默对账
 - **可观测性**：Sentry 前端错误上报（仅 production + 配了 DSN 时启用）+ Prometheus 指标（独立 `:9090/metrics`，HTTP/WS/消息计数与耗时）+ zap 结构化日志
 - **兼容性**：所有 `build.target` 保持 `es2019`，支持旧 Android WebView（Chrome 74+）——含 `Object.hasOwn` 运行时补丁、flex `gap` 的 margin 兜底、Tailwind preflight `:where()` 失效的复位补写
 

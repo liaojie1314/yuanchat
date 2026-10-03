@@ -15,6 +15,7 @@
     "test:e2e": "playwright test --config e2e/playwright.config.ts",
     "test:e2e:ui": "playwright test --config e2e/playwright.config.ts --ui",
     "test:e2e:debug": "playwright test --config e2e/playwright.config.ts --debug",
+    "check:offline": "node e2e/manual/check-offline-store.mjs",
     "clean": "rm -rf dist"
   },
   "dependencies": {
