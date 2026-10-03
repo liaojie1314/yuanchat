@@ -778,7 +778,7 @@ QQ「远程协助」式的**用户级**远程桌面能力（不是管理员运�
 | K17  | 新设备登录通知                               | 低成本高安全感                 | S    | 登录成功钩子 → 既有 notifyIncoming / Web Push 通道               |
 | K18  | 搜索体验重做（UI + 类型过滤 + 桌面独立窗口） | 现状能搜但难用，且搜不到文件   | M    | 详见下方第 10 节；与 K3 命令面板同改 SearchModal，**须合并设计** |
 
-#### 9. L1 — 离线本地消息库 + 运营仪表盘（**已完成，待合回 dev**）
+#### 9. L1 — 离线本地消息库 + 运营仪表盘（**已完成，已合入 dev 并推送**）
 
 执行：[`plans/2026-09-26-offline-store-and-ops-console.md`](superpowers/plans/2026-09-26-offline-store-and-ops-console.md)
 分支：`feature/offline-store-and-ops-console`（自 dev 切出，`--no-ff` 合回）
