@@ -27,20 +27,22 @@ import jaJP from "./locales/ja-JP.json";
 import koKR from "./locales/ko-KR.json";
 
 /**
- * 获取浏览器首选语言
- * zh-CN、zh、zh-TW → zh-CN；ja → ja-JP；ko → ko-KR；其他 → en-US
+ * 获取首次启动时的默认语言
+ * ja → ja-JP；ko → ko-KR；**其余（含 en、zh）一律 zh-CN**
  *
  * @returns 受支持的 locale 代码
  * @remarks 仅在用户从未选过语言时作为默认值；一旦手动选过，
  *   持久化的选择优先（见 themeStore 的 locale 与 onRehydrateStorage）
+ * @remarks 兜底是 zh-CN 而非 en-US：本应用以中文为第一语言，与 `fallbackLng` 一致。
+ *   英文设备也默认中文，英文用户在设置页自行切换（选择会持久化）—— 否则
+ *   系统语言为 en 的设备（含 Android 模拟器默认镜像）一上来就是英文界面。
  */
 export function detectLocale(): SupportedLocale {
   if (typeof navigator === "undefined") return "zh-CN";
   const lang = navigator.language || "zh-CN";
-  if (lang.startsWith("zh")) return "zh-CN";
   if (lang.startsWith("ja")) return "ja-JP";
   if (lang.startsWith("ko")) return "ko-KR";
-  return "en-US";
+  return "zh-CN";
 }
 
 /**

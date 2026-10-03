@@ -50,7 +50,7 @@ vi.hoisted(() => {
   // Node 21 起 globalThis 自带 navigator，且 navigator.language 取自宿主 ICU 语言环境
   // （中文机器报 zh-CN，Ubuntu runner 报 en-US）。不把它钉死，下面那条
   // 「初始语言来自系统探测」的断言就会随跑测机器的系统语言变来变去。
-  // 选 ja-JP 而非 en-US：en-US 同时是 detectLocale 的兜底分支，桩失效时断言仍会通过；
+  // 选 ja-JP 而非 zh-CN：zh-CN 是 detectLocale 的兜底分支，桩失效时断言仍会通过；
   // ja-JP 只可能由这个桩产生，真实 runner 不会报 ja。
   Object.defineProperty(globalThis, "navigator", {
     configurable: true,
