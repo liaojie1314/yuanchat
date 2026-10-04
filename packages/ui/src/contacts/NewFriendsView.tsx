@@ -12,6 +12,7 @@ import { useContactStore } from "@yuanchat/shared";
 import type { FriendRequestItem } from "@yuanchat/shared";
 import { Avatar } from "../primitives/Avatar";
 import { Button } from "../primitives/Button";
+import { PullToRefresh } from "../primitives/PullToRefresh";
 
 interface NewFriendsViewProps {
   /** 同意后回调（携带新会话 ID） */
@@ -25,6 +26,7 @@ export function NewFriendsView({ onAccepted, onBack }: NewFriendsViewProps) {
   const requests = useContactStore((s) => s.requests);
   const accept = useContactStore((s) => s.accept);
   const reject = useContactStore((s) => s.reject);
+  const loadRequests = useContactStore((s) => s.loadRequests);
 
   /** 正在处理中的申请 ID（防连点） */
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -70,7 +72,7 @@ export function NewFriendsView({ onAccepted, onBack }: NewFriendsViewProps) {
         <h2 className="text-title-md text-on-surface font-semibold">{t("contacts.newFriend")}</h2>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      <PullToRefresh onRefresh={loadRequests} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {incoming.length === 0 && outgoing.length === 0 && (
           <p className="text-body-md text-on-surface-variant py-8 text-center">
             {t("contacts.noRequests")}
@@ -119,7 +121,7 @@ export function NewFriendsView({ onAccepted, onBack }: NewFriendsViewProps) {
             ))}
           </>
         )}
-      </div>
+      </PullToRefresh>
     </div>
   );
 }

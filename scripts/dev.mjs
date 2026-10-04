@@ -44,6 +44,25 @@ const SERVER_PORTS = [8085, 8086];
  */
 const REVERSE_PORTS = [...SERVER_PORTS, 9002, 3478];
 
+/**
+ * 解析 adb 可执行文件路径。
+ *
+ * @description 优先用 `ANDROID_HOME/platform-tools/adb`，不依赖 PATH —— 从非交互
+ * shell（nohup、CI、编辑器任务）启动时 PATH 往往没有 platform-tools，裸 `adb`
+ * 直接找不到，于是所有反向转发静默失败：登录报 "Failed to fetch"、头像与图片
+ * 变成破图，看着像应用 bug，实际是转发没建起来。
+ *
+ * @returns adb 路径，`ANDROID_HOME` 下不存在时退回 PATH 里的 `adb`
+ */
+function adbPath() {
+  const home = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
+  if (home) {
+    const p = join(home, "platform-tools", "adb");
+    if (existsSync(p)) return p;
+  }
+  return "adb";
+}
+
 // ========================================
 // 参数解析
 // ========================================
@@ -208,9 +227,16 @@ function startAndroid() {
   }
   if (!mock) {
     // 真实模式：把设备的 localhost:8085/8086/9002 反向转发到宿主机后端与对象存储
+    const adb = adbPath();
     for (const port of REVERSE_PORTS) {
-      const r = spawnSync("adb", ["reverse", `tcp:${port}`, `tcp:${port}`], { stdio: "ignore" });
-      log("infra", r.status === 0 ? `adb reverse tcp:${port} ✔` : `adb reverse tcp:${port} 失败（请确认设备已连接）`);
+      const r = spawnSync(adb, ["reverse", `tcp:${port}`, `tcp:${port}`], { stdio: "ignore" });
+      if (r.status === 0) {
+        log("infra", `adb reverse tcp:${port} ✔`);
+      } else if (r.error?.code === "ENOENT") {
+        log("infra", `adb reverse tcp:${port} 失败（找不到 adb，请设置 ANDROID_HOME）`);
+      } else {
+        log("infra", `adb reverse tcp:${port} 失败（请确认设备已连接）`);
+      }
     }
   }
   log("app", `启动 Tauri Android（${mock ? "Mock" : "真实后端"}模式）…`);

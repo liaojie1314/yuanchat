@@ -21,6 +21,12 @@
 import { create } from "zustand";
 import { fetchConversations } from "../api/chat";
 import { chatSocket } from "../ws/chatSocket";
+import {
+  persistConversationList,
+  hydrateConversationList,
+  persistConversationPatch,
+  forgetConversation,
+} from "./conversationLocalSync";
 
 /** 用户/会话在线状态（比布尔 isOnline 更细，isOnline 保留兼容旧组件与测试） */
 export type Presence = "online" | "away" | "busy" | "offline";
@@ -151,10 +157,18 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
 
   loadConversations: async () => {
     set({ loading: true });
+    // 冷启动先渲染本地：断网时这是用户唯一能看到的内容
+    if (get().conversations.length === 0) {
+      const local = await hydrateConversationList();
+      if (local.length > 0) set({ conversations: local });
+    }
     try {
       const conversations = await fetchConversations();
       set({ conversations, loading: false });
+      // 整表替换 + 清僵尸会话（含其本地消息与 blob）
+      void persistConversationList(conversations);
     } catch {
+      // 失败时刻意保留已水合的本地列表，只关掉 loading
       set({ loading: false });
     }
   },
@@ -162,19 +176,28 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
   setActive: (id) => set({ activeId: id }),
 
   // 新会话插入到列表最前面（最近聊天排最上）
-  addConversation: (conv) => set((s) => ({ conversations: [conv, ...s.conversations] })),
+  addConversation: (conv) => {
+    set((s) => ({ conversations: [conv, ...s.conversations] }));
+    persistConversationPatch(conv.id, conv);
+  },
 
   // 使用 Partial<Conversation> 实现部分更新，无需传递完整对象
-  updateConversation: (id, partial) =>
+  updateConversation: (id, partial) => {
     set((s) => ({
       conversations: s.conversations.map((c) => (c.id === id ? { ...c, ...partial } : c)),
-    })),
+    }));
+    const updated = get().conversations.find((c) => c.id === id);
+    if (updated !== undefined) persistConversationPatch(id, updated);
+  },
 
-  removeConversation: (id) =>
+  removeConversation: (id) => {
     set((s) => ({
       conversations: s.conversations.filter((c) => c.id !== id),
       activeId: s.activeId === id ? null : s.activeId,
-    })),
+    }));
+    // 主动退群/解散：连本地消息与 blob 一起忘掉
+    void forgetConversation(id);
+  },
 
   applyPresence: (userId, online) =>
     set((s) => ({

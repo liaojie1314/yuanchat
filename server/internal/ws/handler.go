@@ -263,6 +263,13 @@ func (h *Handler) handleSend(c *Client, env *Envelope) {
 		h.hub.SendToUsers([]uuid.UUID{c.userID}, ack)
 	}
 
+	// 幂等重发：收件人第一次就已经收到了，只回 ack 让发送端出队即可。
+	// 再扇出一次会让在线成员的会话列表预览与未读计数无端抖动
+	// （客户端按 message_id 去重后不会多渲染一条，但抖动是真实可见的）。
+	if result.Duplicate {
+		return
+	}
+
 	receive, err := Encode(TypeMessageReceive, ReceivePayload{
 		MessageID:      result.Message.ID,
 		ConversationID: p.ConversationID,

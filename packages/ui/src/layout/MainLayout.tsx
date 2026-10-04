@@ -41,6 +41,7 @@ import { Avatar } from "../primitives/Avatar";
 import { CallHost } from "../call/CallHost";
 import { SearchModal } from "./SearchModal";
 import { ToastHost } from "../primitives/Toast";
+import { NetworkBanner } from "./NetworkBanner";
 import {
   MOBILE_NAV_ITEMS,
   DESKTOP_NAV_ITEMS,
@@ -147,6 +148,7 @@ export function MainLayout({
     return (
       <div className="bg-surface app-screen flex flex-col overflow-hidden">
         <ToastHost />
+        <NetworkBanner />
         {callMode === "overlay" ? <CallHost /> : null}
         <SearchModal show={showSearch} onClose={() => setShowSearch(false)} />
         {titleBar}
@@ -204,6 +206,7 @@ export function MainLayout({
   return (
     <div className="bg-surface app-screen flex overflow-hidden">
       <ToastHost />
+      <NetworkBanner />
       {callMode === "overlay" ? <CallHost /> : null}
       <SearchModal show={showSearch} onClose={() => setShowSearch(false)} />
       {/* 左侧品牌色导航栏 — 渐变背景 */}

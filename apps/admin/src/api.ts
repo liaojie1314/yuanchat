@@ -342,3 +342,25 @@ export interface AdminPushSubscription {
 export function listPushSubscriptions(page: number, size = 10) {
   return pagedGet<AdminPushSubscription>(`/api/v1/admin/push-subscriptions${qs({ page, size })}`);
 }
+
+/** 时间序列单日数据点（空日已在后端补零） */
+export interface TimeseriesPoint {
+  /** 日期字符串，格式 2006-01-02 */
+  date: string;
+  messages: number;
+  new_users: number;
+  new_conversations: number;
+}
+
+/** 时间序列响应体（GET /admin/stats/timeseries） */
+export interface StatsTimeseriesResult {
+  /** 请求的窗口天数（与请求参数一致） */
+  days: number;
+  /** 逐日数据点，长度恒等于 days，日期升序（最旧在前） */
+  points: TimeseriesPoint[];
+}
+
+/** 拉取运营概览时间序列（7–90 天，空日后端已补零） */
+export function getTimeseries(days = 30) {
+  return pagedGetSingle<StatsTimeseriesResult>(`/api/v1/admin/stats/timeseries${qs({ days })}`);
+}

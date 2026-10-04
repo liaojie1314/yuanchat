@@ -1,6 +1,7 @@
 export * from "./store/themeStore";
 export * from "./store/conversationStore";
 export * from "./store/messageStore";
+export * from "./store/messageLocalSync";
 export * from "./store/authStore";
 export * from "./store/contactStore";
 export * from "./store/blocklistStore";
@@ -59,6 +60,14 @@ export { useResizable } from "./hooks/useResizable";
 export { useKeyboardAwareViewport } from "./hooks/useKeyboardAwareViewport";
 export { useBreakpoint, BREAKPOINTS } from "./hooks/useBreakpoint";
 export type { Breakpoint } from "./hooks/useBreakpoint";
+export {
+  useNetworkStatus,
+  networkPhase,
+  subscribeNetworkPhase,
+  markNetworkLost,
+  consumeNetworkLost,
+} from "./hooks/useNetworkStatus";
+export type { NetworkPhase } from "./hooks/useNetworkStatus";
 export { useChatBootstrap, isMockEnabled } from "./hooks/useChatBootstrap";
 export { useCallSocket, callFrameHandlers } from "./hooks/useCallSocket";
 export { useVoiceRecorder } from "./hooks/useVoiceRecorder";

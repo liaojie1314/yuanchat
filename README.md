@@ -2,14 +2,14 @@
 
 即时通讯软件 — 从零构建的现代 IM 解决方案。
 
-**当前状态**：v0.3.0（Web + Desktop 三平台 + Android APK 由 GitHub Actions 自动打包）。
+**当前状态**：v0.4.0（Web + Desktop 三平台 + Android APK 由 GitHub Actions 自动打包）。
 
 ## 平台支持（Tauri 2 统一桌面 + 移动端）
 
 | 平台            | 技术                                | 状态                                      |
 | --------------- | ----------------------------------- | ----------------------------------------- |
 | Web             | React + Vite                        | ✅ 可用（`.tar.gz` 静态部署，PWA 可安装） |
-| Desktop Linux   | Tauri 2                             | ✅ 可用（`.deb` + `.AppImage`）           |
+| Desktop Linux   | Tauri 2                             | ✅ 可用（`.deb` + `.AppImage` + `.rpm`）  |
 | Desktop Windows | Tauri 2                             | ✅ 可用（`.msi` + `.exe`）                |
 | Desktop macOS   | Tauri 2（universal Intel + M 系列） | ✅ 可用（`.dmg`）                         |
 | Android         | Tauri 2                             | ✅ 可用（签名 APK）                       |
@@ -17,21 +17,51 @@
 
 ## 界面预览
 
+截图均来自本机真实运行（真实后端 `:8085`/`:8086`，非 Mock）。Web 端与管理后台视口 1920×1080；
+桌面端与安卓端按应用/设备自身尺寸（Tauri 窗口由应用控制：登录 540×640、主界面 1200×800）。
+
 ### Web 端
 
-![Web 端](docs/screenshots/web-moments.png)
+| 登录                                        | 会话列表                                            |
+| ------------------------------------------- | --------------------------------------------------- |
+| ![Web 登录](docs/screenshots/web-login.png) | ![Web 会话列表](docs/screenshots/web-chat-list.png) |
+
+| 聊天窗口                                              | 通讯录                                           |
+| ----------------------------------------------------- | ------------------------------------------------ |
+| ![Web 聊天窗口](docs/screenshots/web-chat-detail.png) | ![Web 通讯录](docs/screenshots/web-contacts.png) |
+
+| 朋友圈                                          | 离线可用（断网整页重载后由本地库渲染）        |
+| ----------------------------------------------- | --------------------------------------------- |
+| ![Web 朋友圈](docs/screenshots/web-moments.png) | ![Web 离线](docs/screenshots/web-offline.png) |
 
 ### 桌面端
 
-![桌面端](docs/screenshots/desktop-moments.png)
+| 登录                                              | 会话列表                                                  |
+| ------------------------------------------------- | --------------------------------------------------------- |
+| ![桌面端登录](docs/screenshots/desktop-login.png) | ![桌面端会话列表](docs/screenshots/desktop-chat-list.png) |
+
+| 聊天窗口                                                    | 朋友圈                                                |
+| ----------------------------------------------------------- | ----------------------------------------------------- |
+| ![桌面端聊天窗口](docs/screenshots/desktop-chat-detail.png) | ![桌面端朋友圈](docs/screenshots/desktop-moments.png) |
 
 ### 管理后台
 
-![管理后台](docs/screenshots/admin-moderation.png)
+| 登录                                              | 运营概览                                         |
+| ------------------------------------------------- | ------------------------------------------------ |
+| ![管理后台登录](docs/screenshots/admin-login.png) | ![运营概览](docs/screenshots/admin-overview.png) |
+
+内容审核：
+
+![内容审核](docs/screenshots/admin-moderation.png)
 
 ### 安卓端
 
-<img src="docs/screenshots/android-moments.png" width="300" alt="安卓端" />
+<p>
+  <img src="docs/screenshots/android-login.png" width="240" alt="安卓端登录" />
+  <img src="docs/screenshots/android-chat-list.png" width="240" alt="安卓端会话列表" />
+  <img src="docs/screenshots/android-chat-detail.png" width="240" alt="安卓端聊天窗口" />
+  <img src="docs/screenshots/android-moments.png" width="240" alt="安卓端朋友圈" />
+</p>
 
 ## 已实现功能
 
@@ -83,6 +113,15 @@
 - **桌面端独立通话窗口**；**安卓前台服务保活**（锁屏/切后台不掉线）
 - **Linux 桌面端走原生 GStreamer 后端**：WebKitGTK 没编进 GstWebRTC，`RTCPeerConnection` 整个类不存在，故媒体面下沉到独立助手进程，画面经本地 MJPEG 服务送回 WebView（依赖清单见 [DEVELOPMENT.md](docs/DEVELOPMENT.md)）
 
+### 朋友圈与个人状态
+
+- **信息流**：发布图文动态、按可见范围投递，`(created_at, id)` 复合游标分页；发布页、他人主页、媒体网格
+- **互动**：点赞（幂等）、评论与回复、互动消息聚合页；`moment.activity` 帧实时推送（前后端共用 golden 契约）
+- **可见性单一真源**：好友关系 + 黑名单 + 可见范围全部收敛到唯一的 `VisiblePostsScope`，列表、媒体授权、GC 引用共用同一份判断 —— 读一套写一套就是越权
+- **删帖 = 访问撤销**：帖子删除后其媒体对象随即不可读，不留可被直链访问的残留
+- **个人状态**：状态 emoji + 文案，带过期时间（服务端读时判定，过期即吐空），头像状态角标
+- **治理**：管理后台可删动态/删评论并留审计日志
+
 ### 实时状态与通知
 
 - **Presence 在线状态**：Hub 首连/末连回调 → 广播给在线好友；`GET /presence` 快照 + `presence` 帧增量
@@ -93,15 +132,18 @@
 ### 管理后台与内容安全
 
 - **管理后台**（`apps/admin`，独立 Vite 应用）：用户列表/封禁解封、会话列表/解散、消息检索与删除、举报处理、审计日志；`/api/v1/admin/*` 走 JWT + `role=admin` 双重校验，写操作全部留审计日志
+- **运营概览看板**：`GET /admin/stats` 聚合指标 + `GET /admin/stats/timeseries?days=N`（7–90 天）时间序列，分层呈现核心指标卡（含 Sparkline 趋势）、消息量/新增用户/新增会话折线图、消息类型环形图、存储与推送订阅视图；图表为 `packages/ui/src/charts/` 零依赖纯 SVG 组件，带 `role=img` + `aria-label`
 - **用户举报**：任意用户举报消息/用户（`POST /reports` 带 IP 限流）→ 进管理后台工单队列
 - **敏感词标记**：命中 `moderation.words` 的消息正常投递但标记 `flagged=true` 进审核队列（不阻塞发送）
 
 ### 系统能力
 
-- **i18n**：zh-CN / en-US / ja-JP / ko-KR 四语全量覆盖（`react-i18next`，扁平 key，`pnpm check:i18n` 门禁挡漏翻/写错 key/死键），语言选择持久化，重开应用即生效
+- **i18n**：zh-CN / en-US / ja-JP / ko-KR 四语全量覆盖（`react-i18next`，扁平 key，`pnpm check:i18n` 门禁挡漏翻/写错 key/死键），语言选择持久化，重开应用即生效。首次启动**默认简体中文**（仅系统语言为 ja/ko 时自动跟随），英文等其他设备也先给中文，用户可在设置页自行切换
 - **主题**：三套皮肤（`yuan` / `ocean` / `forest`，各含亮暗两版）+ 字体缩放（`pnpm check:theme` 校验颜色工具类都在色板里）
 - **端到端加密 E2EE**：X3DH 协商 + Double Ratchet 棘轮（`packages/shared/src/crypto/`），设置页内按用户开关，仅单聊；对方未启用时自动降级明文，支持密钥备份/恢复
 - **PWA**：生产构建注入自定义 Service Worker（app shell 预缓存 + Web Push 监听），可安装到桌面/主屏
+- **离线本地消息库**：IndexedDB 五 store（`messages`/`conversations`/`media`/`outbox`/`meta`），登录开库、登出清库；冷启动先渲染本地再后台按 `seq` 水位增量对账，撤回/编辑/清空同步回放本地副本；媒体内容寻址 + 配额 LRU 缓存；断网期间文本消息入 `outbox`，上线串行补发（依赖既有幂等索引）。断网整页重载后会话列表与历史消息仍可浏览
+- **网络态反馈**：`useNetworkStatus` 三态（`online`/`connecting`/`offline`）+ 全局顶部横幅，仅在真实断网恢复后提示「已连接」并 2 秒自动收起；七个主列表支持下拉刷新，回前台 30 秒节流静默对账
 - **可观测性**：Sentry 前端错误上报（仅 production + 配了 DSN 时启用）+ Prometheus 指标（独立 `:9090/metrics`，HTTP/WS/消息计数与耗时）+ zap 结构化日志
 - **兼容性**：所有 `build.target` 保持 `es2019`，支持旧 Android WebView（Chrome 74+）——含 `Object.hasOwn` 运行时补丁、flex `gap` 的 margin 兜底、Tailwind preflight `:where()` 失效的复位补写
 
@@ -169,7 +211,7 @@ pnpm release:dry        # 模拟运行，看会做什么
 | 平台            | 产物                                                    |
 | --------------- | ------------------------------------------------------- |
 | Web             | `yuanchat-web-vX.Y.Z.tar.gz`                            |
-| Linux Desktop   | `.deb` + `.AppImage`                                    |
+| Linux Desktop   | `.deb` + `.AppImage` + `.rpm`                           |
 | Windows Desktop | `.msi` + `.exe`                                         |
 | macOS Desktop   | `.dmg`（Intel + M 系列 universal binary）               |
 | Android         | `.apk`（按 ABI 分包：arm64-v8a / armeabi-v7a / x86_64） |
@@ -183,7 +225,7 @@ pnpm release:dry        # 模拟运行，看会做什么
 - **[聊天 API 与 WebSocket 协议](docs/CHAT_API.md)** — REST 端点 + WS 帧 + 系统消息约定
 - **[数据库设计](docs/DB_SCHEMA.md)** — 表结构 + 索引 + 迁移
 - **[开发与打包指南](docs/DEVELOPMENT.md)** — 启动/构建/调试/测试命令，i18n 与旧 WebView 兼容约定
-- **[常见问题排查](.claude/TROUBLESHOOTING.md)** — 按平台分类的踩坑记录（白屏、软键盘、旧 WebView 静默失效、语言持久化…）
+- **[常见问题排查](docs/TROUBLESHOOTING.md)** — 按平台分类的踩坑记录（白屏、软键盘、旧 WebView 静默失效、语言持久化…）
 - **[发版指南](docs/RELEASE.md)** — release-it + GitHub Actions + 签名策略
 - **[UI/UX 设计规范](docs/design/README.md)** — Material Design 3 Aurora 主题、组件、多端适配
 

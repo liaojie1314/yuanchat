@@ -14,6 +14,7 @@ import { useNavigate } from "react-router-dom";
 import { captureException, formatListTime, useMomentsStore } from "@yuanchat/shared";
 import type { MomentActivity } from "@yuanchat/shared";
 import { Avatar } from "../primitives/Avatar";
+import { PullToRefresh } from "../primitives/PullToRefresh";
 import { useObjectUrl } from "../util/useObjectUrl";
 import { useBackTo } from "../util/useBackTo";
 
@@ -96,7 +97,7 @@ export function MomentActivitiesView() {
         </h1>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <PullToRefresh onRefresh={loadActivities} className="min-h-0 flex-1 overflow-y-auto">
         {state === "error" ? (
           <div className="flex h-64 flex-col items-center justify-center gap-3 text-sm">
             <p className="text-on-surface-variant">{t("moments.loadFailed")}</p>
@@ -120,7 +121,7 @@ export function MomentActivitiesView() {
             <ActivityRow key={a.id} activity={a} onOpen={() => navigate("/moments")} />
           ))
         )}
-      </div>
+      </PullToRefresh>
     </div>
   );
 }

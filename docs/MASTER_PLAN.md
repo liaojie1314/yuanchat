@@ -13,7 +13,7 @@
 | 后端语言    | Go (Golang)                                                       |
 | 容器化      | Docker Compose（开发与生产编排都在 `deploy/`，未使用 Kubernetes） |
 | 文档位置    | `docs/` 目录（本文档所在目录）                                    |
-| AI 辅助文档 | `AGENTS.md`（根目录约束）、`.claude/TROUBLESHOOTING.md`           |
+| AI 辅助文档 | `AGENTS.md`（根目录约束）、`docs/TROUBLESHOOTING.md`              |
 
 ---
 
@@ -133,6 +133,7 @@ yuanchat/
 │   ├── DEVELOPMENT.md            # 开发与打包指南（启动/构建/调试/测试）
 │   ├── ROADMAP.md                # 迭代路线图
 │   ├── RELEASE.md                # 发版指南
+│   ├── TROUBLESHOOTING.md        # 按平台分类的踩坑记录（含发版 / CI 打包）
 │   ├── design/                   # UI/UX 设计规范（7 份专题 + README）
 │   ├── deploy/                   # 部署文档（self-hosted.md / env.md / server-and-domain.md）
 │   ├── observability/            # 可观测性（logging.md）
@@ -141,8 +142,7 @@ yuanchat/
 ├── AGENTS.md                     # AI Agent 指南（根目录，核心约束清单）
 ├── CHANGELOG.md                  # 变更日志（release-it + conventional-changelog 生成）
 ├── contracts/                    # 前后端黄金契约（message-send.golden.json）
-├── .claude/                      # 🤖 Claude Code 项目配置
-│   ├── TROUBLESHOOTING.md        # 按平台分类的踩坑记录
+├── .claude/                      # 🤖 Claude Code 项目配置（.gitignore 忽略，本机私有）
 │   └── settings.local.json       # 本地权限设置
 │
 ├── server/                       # 🔧 后端 Go 服务（单进程双端口：REST :8085 + WS :8086）
@@ -618,7 +618,7 @@ Linux 原生后端要点（详见设计文档 §3.11a）：媒体面下沉到独
 | 🟡   | **三端真机实测部分完成**：Web 端已实测（跨账号看图、点赞落库、WS 实时推送、admin 处置链路）。**桌面（Tauri）与安卓模拟器仍未走查** —— plan Task 16 Step 3 列的底栏四项布局、九宫格不溢出、发布页软键盘、返回键语义待补 |
 | 🟡   | 个人状态文本不过审核 —— 见 §3 同名条目（需新增 `UGCTypeStatus` 并接管理端，故未随本批做）                                                                                                                              |
 | ⚪   | `GroupAvatar` 三列布局（5 人及以上）的空头像格只出色块不写字：格子仅外框 1/3 宽，写字必糊。两列及以内才取昵称首字                                                                                                      |
-| 🟡   | **README 四端截图只完成两端**：Web 与管理后台已截（`docs/screenshots/`，统一 1920×1080）。桌面与安卓待补，补齐后再一次性写进 README —— 桌面首次构建要从零编译 Rust，单独排时间                                         |
+| 🟡   | ~~**README 四端截图只完成两端**~~ —— ✅ 2026-09-23 补齐：Web / 桌面 / 管理后台 / 安卓四端实图已全部截好放进 `docs/screenshots/` 并写入 README                                                                          |
 
 #### 2.10 朋友圈实测收口批（✅ 已完成，2026-09-22）
 
@@ -647,6 +647,44 @@ Linux 原生后端要点（详见设计文档 §3.11a）：媒体面下沉到独
   改用本仓惯例 `vi.stubGlobal`。此前该用例一直是红的
 - **文档补账**：`DB_SCHEMA.md` 此前停在 017，朋友圈四表（018）从未落文档，
   本批连同 019 一并补上；`CHAT_API.md` 的 UGC 队列段补齐新类型与处置语义
+
+#### 2.11 v0.4.0 发版与发版流水线修复（✅ 已完成，2026-09-24）
+
+分支：直接在 `main` 上修（用户当次授权），修完 `--no-ff` 回合 dev。
+
+- **发版本身**：`release-it` 打 `v0.4.0` → CHANGELOG → GitHub Release；
+  发版后在本地 `registry:2.8.3`（`:5000`）构建并推入
+  `yuanchat/{server,web,admin}:0.4.0`
+- **`.dockerignore`**：镜像构建上下文从 6.46GB 降到 91MB。此前 `apps/web` /
+  `apps/admin` 两个 Dockerfile 的 context 是仓库根目录，`src-tauri/target`
+  一个目录就 30G，光传上下文要几分钟且随打包次数无限增长
+- **流水线三处修复**（五个平台红了三个，全是**本机有、干净 runner 没有**的环境差异）：
+  - Linux：补 gstreamer 三个 `-dev` 包（通话助手编译期依赖，与 `DEVELOPMENT.md`
+    里那组运行期插件包不是一回事）；并在装之前 purge 掉 runner 镜像预装的
+    LLVM `libunwind-*-dev` —— 它与 `libgstreamer1.0-dev` 依赖的 `libunwind-dev`
+    冲突，apt 只报 held broken packages 且不指名冲突方
+  - macOS：tauri 打 universal 包时只把**主程序** lipo 进通用目录，第二个 bin
+    （通话助手）留在两个单架构目录里，bundler 取不到即整体失败。加一步
+    `Pre-lipo call helper (macos)` 在构建前自己补齐
+  - Android：`android-actions/setup-android` 的 `packages` 默认值含已被 Google
+    下架的旧版 `tools` 包，显式覆盖为 `platform-tools`
+- **一条昂贵的教训**：中途试过用 `required-features` 按平台裁剪通话助手 bin，
+  结果**三端一起挂**且 Windows 报的是 WiX `light.exe` 失败，面目全非。根因是
+  tauri-cli 的 `get_binaries` 判定 bin 启用**只看 CLI 的 `-f` 参数，不看 cargo 的
+  default features**；一旦判成禁用，它转而按 `src/bin/` 的文件名要 `call_helper`，
+  与 `[[bin]] name` 产出的 `yuanchat-call-helper` 对不上。最终 `Cargo.toml`
+  逐字节还原，改动收敛为 `release.yml` 一个文件、纯增量、不碰任何源码
+- **文档回写**：`RELEASE.md`（产物表、`ref` 必填的补跑姿势、故障排查条目）、
+  `TROUBLESHOOTING.md` 新增「发版 / CI 打包」节、`DEVELOPMENT.md` 区分
+  编译期/运行期两类 gstreamer 包、README 补上从未记录过的朋友圈与个人状态
+- **踩坑记录从 `.claude/` 迁到 `docs/`**：`.gitignore` 忽略整个 `.claude/`，
+  这份 29KB 的踩坑记录**从未进过仓库** —— README、AGENTS.md、MASTER_PLAN、
+  DEVELOPMENT 共 12 处引用它，对任何 clone 仓库的人都是死链，积累的排查经验
+  也只存在于一台机器上。按 AGENTS.md 第 6 条（文档统一放 `docs/`）移入仓库并改全引用
+
+最终 5 个 job 全绿，Release 19 个资产：web `.tar.gz`；Linux `.deb`/`.AppImage`/`.rpm`；
+Windows `.msi`/`.exe`；macOS universal `.dmg` + `.app.tar.gz`；Android 四个 ABI 的 APK；
+`latest.json` 合并了 11 个平台键。
 
 #### 3. 既有代码的真实缺陷（无 plan，可随手批次收口）
 
@@ -740,31 +778,73 @@ QQ「远程协助」式的**用户级**远程桌面能力（不是管理员运�
 | K17  | 新设备登录通知                               | 低成本高安全感                 | S    | 登录成功钩子 → 既有 notifyIncoming / Web Push 通道               |
 | K18  | 搜索体验重做（UI + 类型过滤 + 桌面独立窗口） | 现状能搜但难用，且搜不到文件   | M    | 详见下方第 10 节；与 K3 命令面板同改 SearchModal，**须合并设计** |
 
-#### 9. L1 — 离线本地消息库（新增，未立项）
+#### 9. L1 — 离线本地消息库 + 运营仪表盘（**已完成，已合入 dev 并推送**）
 
-**现状问题**：断网启动任何一端，**会话列表与历史消息全是空的** —— 所有数据都靠
-进程内内存 + 实时拉后端，本地不落盘。现代 IM（微信/QQ/Telegram）断网都能翻历史。
-既有的 D3「PWA 离线可用」只 precache 了 app shell（打得开壳子），**不含业务数据**；
-J9「离线态与重连反馈」只管提示文案，也不解决有没有数据看。
+执行：[`plans/2026-09-26-offline-store-and-ops-console.md`](superpowers/plans/2026-09-26-offline-store-and-ops-console.md)
+分支：`feature/offline-store-and-ops-console`（自 dev 切出，`--no-ff` 合回）
+过程记录：`.superpowers/sdd/2026-09-26-offline-store-and-ops-console/progress.md`（含逐项裁决）
 
-**方向**：客户端建本地消息库（桌面/移动 SQLite，Web 侧 IndexedDB），
-WS 帧与增量拉取双写本地，冷启动先渲染本地再后台对账。**未立项、无 plan**，
-登记待办防止丢失。立项前需回答：
+**原问题**：断网启动任何一端，会话列表与历史消息全是空的 —— 数据只在进程内内存，
+本地不落盘。D3「PWA 离线可用」只 precache 了 app shell，J9 只管提示文案。
 
-- **存储选型三端不一致**：Tauri 桌面/安卓可用 SQLite（`tauri-plugin-sql`），但 Web 端
-  没有 SQLite，只能 IndexedDB（或 wa-sqlite + OPFS，旧 WebView 存疑 —— 本仓 target 是
-  es2019 兼容 Chrome 74）。是抽一层统一读写接口、还是 Web 端只做降级缓存？
-- **与 E2EE 的冲突**：单聊已端到端加密，若本地明文落盘，E2EE 的威胁模型就破了一半
-  （拿到设备即拿到全部明文）。需要定：本地加密（SQLCipher / 系统 keychain 托管密钥）
-  还是密文落盘、读时解密？
-- **撤回与清空必须回放到本地**：本仓语义是「撤回 = 访问撤销」（见 H1 审计批），
-  消息撤回、`cleared_before_seq` 清空记录、消息编辑都得同步删改本地副本，
-  **否则断网仍能看到已撤回内容**，等于开了个绕过撤回的后门。
-- **同步模型**：复用既有 `seq` 游标做增量补齐；断线期间的空洞如何探测与回填；
-  多设备（A8 债）各自本地库的一致性口径。
-- **容量与清理**：本地保留窗口（条数/天数）、媒体要不要缓存（与对象 GC 的关系）、
-  账号退出/切换时的清库责任（与 K13 多账号切换的本地存储分层同一套）。
-- **范围**：会话列表 + 消息正文优先；搜索是否也走本地（与 K18 相关）。
+**交付面**：
+
+| 能力               | 落点                                                                                                                                                                       |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 本地库             | `packages/shared/src/localdb/`：IndexedDB 五 store（`messages` / `conversations` / `media` / `outbox` / `meta`），登录开库、登出清库                                       |
+| 冷启动             | 先渲染本地（`hydrateMessages` / `hydrateConversationList`），再后台对账；库不可用即降级纯内存，与引入前行为一致                                                            |
+| 增量对账           | `seq` 水位语义是「**连续**确认到哪」而非「见过的最大值」，收到跳号即按 `after_seq` 分页回填（`reconcileConversation`，单轮 50 条、上限 20 轮）                             |
+| 撤回/编辑/清空回放 | `replayRecall` / `replayEdit` / `replayClear` 同步删改本地副本 —— 本仓语义是「撤回 = 访问撤销」，不回放等于留了个绕过撤回的后门                                            |
+| 媒体缓存           | 内容寻址 + 配额账本 LRU（`localdb/media.ts`），图片/文件/语音/视频缩略图落 `ArrayBuffer`；贴纸刻意不计入（共享资源，按会话清理会误删别处仍在用的对象）                     |
+| 离线发送           | `outbox` 队列 + 上线串行补发（`flushOutbox`），依赖既有幂等索引 `idx_messages_sender_client_msg`；**仅文本**                                                               |
+| 网络态             | `useNetworkStatus` 三态（`online` / `connecting` / `offline`）+ 全局顶部横幅，恢复后 2 秒自动收起                                                                          |
+| 主动刷新           | 七个主列表接入下拉刷新（`usePullToRefresh` + `PullToRefresh`），回前台 30 秒节流静默对账，三处非 WS 驱动列表加局部刷新按钮                                                 |
+| 按钮无障碍         | Button 四变体补齐 hover/focus-visible 态；ConfirmDialog 补 role/aria-modal/aria-labelledby/Esc/Tab 焦点陷阱                                                                |
+| WS 卸载抑制        | `unloading` 标志（`beforeunload`/`pagehide`）在页面卸载期间抑制 Sentry 上报 WS abort 噪声                                                                                  |
+| 管理端时间序列     | `GET /api/v1/admin/stats/timeseries?days=N`（7–90，越界返 400），后端 Go 时区对齐（本地时区零点参数化，不依赖 PostgreSQL CURRENT_DATE），概览页折线图 + Sparkline + 环形图 |
+| SVG 图表           | `packages/ui/src/charts/`：Sparkline / LineChart / DonutChart，零依赖、纯 SVG、`role=img` + `aria-label`，空/单点安全                                                      |
+| tsconfig 对齐      | 三端 app tsconfig `target`/`lib` 从 ES2021 降至 ES2019，与 vite `build.target` 一致                                                                                        |
+
+**真机实测（真实后端 `:8085`/`:8086`，非 Mock）**：
+
+| 链路       | 验证方式与结论                                                                                                                                                           |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 离线本地库 | 生产构建 + `vite preview`：登录落盘（`conversations:6 / messages:30 / media:2`）→ Service Worker 激活 → 断网 → **整页重载** → 列表与 14 条历史消息（含视频缩略图）仍渲染 |
+| 离线横幅   | 断网后「当前无网络」出现；恢复网络后「已连接」出现并 2 秒收起                                                                                                            |
+| 运营概览   | 管理端真实登录 → 概览页折线图/环形图/指标卡全部有数                                                                                                                      |
+| 三端截图   | Web（1920×1080）、桌面（Tauri 窗口）、安卓（1080×2400，模拟器真机链路）、管理端登录与概览，落 `docs/screenshots/`                                                        |
+| 默认语言   | 首启默认简体中文（仅 ja/ko 系统语言自动跟随）；此前 en 设备默认英文，安卓模拟器一上来就是英文界面                                                                        |
+
+离线验证**必须打生产构建**：dev server 下 JS 模块按需从服务端拉取，断网后应用代码本身都加载不到，
+页面白屏是 dev 的特性而非本地库失效；且须显式 `VITE_ENABLE_MOCK=false`，否则 `.env.development`
+会把 MSW mock 带进构建，渲染出的是 mock 数据，离线通过是**假阳性**。
+
+实测挡下两个只有真链路才暴露的问题：
+
+- `GET /admin/stats/timeseries` **handler 写了但路由没注册**（404）—— 单测覆盖不到路由表
+- 「已连接」横幅在首次登录与每次整页重载都弹 —— 原逻辑只看 phase 跃迁，无法区分
+  「断过网后恢复」与「首次连接」。改为 `sessionStorage` 标记真实 `offline` 事件、读取即清除
+- 安卓端所有 `adb reverse` 静默失败（`scripts/dev.mjs` 用裸 `adb`，非交互 shell 的 PATH
+  里没有 platform-tools）—— 表现为登录 "Failed to fetch"、群头像破图（头像直链指向
+  `localhost:9002` 的 MinIO），看着像应用 bug。改为从 `ANDROID_HOME` 解析 adb 路径，
+  并把「找不到 adb」与「设备没连接」分开报
+
+**当初立项前的三个问题，实际裁决**：
+
+- **存储选型**：三端统一 IndexedDB，**不用 SQLite**。Tauri 桌面/安卓虽可用
+  `tauri-plugin-sql`，但那样 Web 端要单独写一套读写，等于同一份同步逻辑维护两遍；
+  本地库是**投影而非真源**（服务端才是），不需要事务强度，IDB 够用。
+- **与 E2EE 的冲突**：本版**明文落盘**，未做本地加密 —— 已登记为债（见下）。
+- **搜索**：仍只走服务端，未接本地库（K18 再定）。
+
+**L1 主动留债**：
+
+| 级别 | 条目                                                                                                                                                                                                       |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🟡   | **IDB 明文落盘**：E2EE 开启时本地副本应加密（设备密钥派生），否则 E2EE 防的是传输，存储侧仍裸露                                                                                                            |
+| 🟡   | **多标签页 IDB 写冲突**：同一域名多个标签页共享同一个 IDB，并发写 `messages` store 无锁；目前靠「只有活跃标签有 WS」缓解，但刷新两个标签页仍可竞写。修法：BroadcastChannel leader 选举 + 写权授权给 leader |
+| ⚪   | **离线发送仅限文本**：图片/文件/语音依赖预签名 URL（需联网），outbox 暂不入队非文本消息                                                                                                                    |
+| ⚪   | **两端 app tsconfig `target` 已降 ES2019**，`packages/design-system` 仍无 tsconfig（同 shared/ui 修掉前的状态），`turbo typecheck` 的 9 包覆盖里没有它                                                     |
 
 #### 10. K18 — 搜索体验重做（新增，未立项）
 

@@ -14,6 +14,7 @@
 import { ensureFreshToken, needsRefresh } from "../api/tokenManager";
 import type { ConversationDTO } from "../api/chat";
 import { captureException } from "../observability/sentry";
+import { flushOutbox } from "../store/outboxSync";
 
 /**
  * 客户端 → 服务端的 `content` 载荷，与 `server/internal/ws/protocol.go` 的
@@ -334,6 +335,15 @@ class ChatSocket {
   private lastErrorReport = 0;
   /** 重连成功后的回调（bootstrap 用来拉增量数据） */
   onReconnect: (() => void) | null = null;
+  /**
+   * 回到前台时的回调（bootstrap 用来静默对账）。
+   *
+   * 由上层注入而不是在这里直接调 store：会话 store 自己 import 本模块，
+   * 反向 import 回去就是循环依赖。
+   */
+  onForeground: (() => void) | null = null;
+  /** 「是否已连接」的订阅者（UI 的网络状态条用它，避免轮询） */
+  private stateListeners = new Set<(open: boolean) => void>();
 
   // ---- 心跳状态 ----
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
@@ -349,10 +359,29 @@ class ChatSocket {
     return lowBattery ? HEARTBEAT_FG_LOW_BATTERY_MS : HEARTBEAT_FG_MS;
   }
 
+  /**
+   * 页面卸载标志。
+   *
+   * 浏览器关闭 / 跳转时，正在握手的 WS 连接会被强制中断并触发 onerror。
+   * 这不是真实故障，不应上报 Sentry。两个事件都监听是因为 Safari 不保证
+   * beforeunload 能可靠触发，pagehide 在 BFCache 场景下也会触发（导航回来时
+   * 页面会被恢复，不影响逻辑，标志不会被重置）。
+   */
+  private unloading = false;
+
   /** 绑定环境信号（可见性/电量/网络恢复），只绑一次 */
   private bindEnvListeners() {
     if (this.envListenersBound) return;
     this.envListenersBound = true;
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("beforeunload", () => {
+        this.unloading = true;
+      });
+      window.addEventListener("pagehide", () => {
+        this.unloading = true;
+      });
+    }
 
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", () => {
@@ -362,6 +391,10 @@ class ChatSocket {
             document.visibilityState === "visible" ? 0 : this.heartbeatInterval(),
           );
         }
+        // 回前台顺带让上层对一次账（桌面端切窗口期间可能漏帧）。
+        // 搭这条现有监听而不另起一个：同一个事件两个监听器触发顺序不保证，
+        // 心跳与对账挤在一起反而更难排查。
+        if (document.visibilityState === "visible") this.onForeground?.();
       });
     }
     if (typeof window !== "undefined") {
@@ -429,16 +462,38 @@ class ChatSocket {
     return this.state === "open";
   }
 
+  /**
+   * 订阅「是否已连接」的变化，返回取消订阅函数。
+   *
+   * 刻意只对外暴露布尔而不是内部四态：外部关心的是「现在能不能发消息」。
+   * 有了它 UI 不必轮询 isOpen() —— 轮询既晚一拍又白耗。
+   */
+  onStateChange(fn: (open: boolean) => void): () => void {
+    this.stateListeners.add(fn);
+    return () => {
+      this.stateListeners.delete(fn);
+    };
+  }
+
+  /** 写状态的唯一入口：只在「是否已连接」真的翻转时通知订阅者。 */
+  private setState(next: SocketState) {
+    const wasOpen = this.state === "open";
+    this.state = next;
+    const isOpen = next === "open";
+    if (wasOpen === isOpen) return;
+    for (const fn of this.stateListeners) fn(isOpen);
+  }
+
   connect() {
     if (this.state === "connecting" || this.state === "open") return;
 
     // token 临近过期：先静默刷新再拨号，避免注定 401 的握手
     //（服务端只在握手时校验 token，已建立的连接不受过期影响）
     if (needsRefresh()) {
-      this.state = "connecting";
+      this.setState("connecting");
       void ensureFreshToken().then(() => {
         if (this.state !== "connecting") return; // 刷新期间被主动断开
-        this.state = "idle";
+        this.setState("idle");
         // 刷新失败时仍尝试拨号：登出场景 token 已清、dial 自然跳过；
         // 网络抖动场景则靠 401 握手失败 → 退避重连兜底
         this.dial();
@@ -455,14 +510,14 @@ class ChatSocket {
     const token = this.tokenProvider();
     if (!token) return;
 
-    this.state = "connecting";
+    this.setState("connecting");
     const isRetry = this.retries > 0;
 
     let ws: WebSocket;
     try {
       ws = new WebSocket(WS_BASE + "/ws?token=" + encodeURIComponent(token));
     } catch {
-      this.state = "closed";
+      this.setState("closed");
       this.scheduleReconnect();
       return;
     }
@@ -470,12 +525,13 @@ class ChatSocket {
 
     ws.onopen = () => {
       if (this.ws !== ws) return;
-      this.state = "open";
+      this.setState("open");
       this.retries = 0;
       this.flushQueue();
       this.bindEnvListeners();
       this.scheduleHeartbeat(this.heartbeatInterval());
       if (isRetry && this.onReconnect) this.onReconnect();
+      this.flushOfflineQueue();
     };
 
     ws.onmessage = (event) => {
@@ -487,7 +543,7 @@ class ChatSocket {
       this.ws = null;
       this.stopHeartbeat();
       if (this.state === "closed") return; // 主动断开，不重连
-      this.state = "closed";
+      this.setState("closed");
       const code = event && event.code;
       if (code && code !== 1000 && code !== 1001) {
         const now = Date.now();
@@ -503,6 +559,9 @@ class ChatSocket {
     };
 
     ws.onerror = () => {
+      // 页面卸载时 WS 握手被浏览器强制中断会触发 onerror，这不是真实故障。
+      // unloading 标志由 beforeunload/pagehide 置位，见 bindEnvListeners。
+      if (this.unloading) return;
       const now = Date.now();
       if (now - this.lastErrorReport > 30000) {
         this.lastErrorReport = now;
@@ -513,7 +572,7 @@ class ChatSocket {
 
   /** 主动断开（登出/卸载时调用），不触发重连 */
   disconnect() {
-    this.state = "closed";
+    this.setState("closed");
     this.retries = 0;
     this.stopHeartbeat();
     if (this.reconnectTimer) {
@@ -527,7 +586,7 @@ class ChatSocket {
       ws.close();
     }
     this.queue = [];
-    this.state = "idle";
+    this.setState("idle");
   }
 
   /**
@@ -547,6 +606,21 @@ class ChatSocket {
         this.connect();
       }
     }
+  }
+
+  /**
+   * 链路建立后补发本地待发队列（跨重启存活的那一份）。
+   *
+   * 与 {@link ChatSocket.flushQueue} 的内存队列是两回事：后者只活在本次进程内。
+   * 回调按「字节真的写出去了吗」返回布尔 —— 走 `this.send` 会在掉线时入内存队列
+   * 并照样返回成功，补发就永远停不下来。
+   */
+  private flushOfflineQueue() {
+    void flushOutbox((payload) => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+      this.ws.send(JSON.stringify({ type: "message.send", payload }));
+      return true;
+    });
   }
 
   private flushQueue() {

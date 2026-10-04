@@ -263,12 +263,26 @@ access/refresh 各自重置 TTL（15min / 7 天），持续活跃的用户永不
 
 ### GET /api/v1/conversations/:id/messages
 
-历史消息分页（seq 降序返回，前端反转为升序展示）。
+历史消息分页。两个游标**方向相反且互斥**：`before_seq` 向前翻历史（seq 降序返回，
+前端反转为升序展示）、`after_seq` 向后补空洞（seq **升序**返回，断线重连后从本地水位往后补）。
 
-| Query 参数   | 说明                                                    |
-| ------------ | ------------------------------------------------------- |
-| `before_seq` | 取 `seq < before_seq` 的消息；`0`（默认）表示从最新开始 |
-| `limit`      | 页大小，默认 30，最大 100                               |
+| Query 参数   | 说明                                                            |
+| ------------ | --------------------------------------------------------------- |
+| `before_seq` | 取 `seq < before_seq` 的消息（降序）；`0`（默认）表示从最新开始 |
+| `after_seq`  | 取 `seq > after_seq` 的消息（**升序**）；与 `before_seq` 互斥   |
+| `limit`      | 页大小，默认 30，最大 100                                       |
+
+两个游标同时给时按 `400` 拒绝（`before_seq and after_seq are mutually exclusive`），
+**不静默取其一** —— 那会让调用方在错误的方向上翻页却毫无察觉。
+
+`after_seq` 分支按「参数是否出现」判定而非「值是否大于 0」：客户端首次补齐时本地水位为 0，
+会传 `after_seq=0`，此时必须走升序分支从头补。
+
+可见性口径与 `before_seq` 路径**完全一致**（成员校验 + `deleted_at IS NULL` +
+`seq > cleared_before_seq`，共用同一份查询构造）。注意两条路径都**不过滤 `status`**——
+撤回消息要作为占位行返回给客户端（相册 `GET /media` 才过滤）。
+
+游标等于最新 `seq` 时返回空数组 + `has_more=false`（不是错误），客户端据此停止补齐循环。
 
 ```json
 {
@@ -1093,6 +1107,14 @@ friend_requests_week, otp_today, otp_week}, "runtime": {online_connections}}`。
   计数口径：消息只统计未删除；「今日」按服务器本地时区零点；OTP 按
   `verification_codes` 审计表行数；`online_connections` 为本实例 WS 连接数
   （多实例部署下需自行聚合）。
+- `GET /api/v1/admin/stats/timeseries?days=N` — 按天时间序列（`days` 取 7–90，
+  越界返 `400`，缺省 30）：
+  `{"days": 30, "points": [{"date": "2026-10-03", "messages", "new_users",
+"new_conversations"}]}`，最旧在前、按天连续（无数据的天补 0）。
+  **时区口径**：窗口上下界由服务端按**本地时区零点**算好后作为参数下传，
+  分桶走 `floor(extract(epoch from (created_at - $start)) / 86400)`，
+  不依赖 PostgreSQL 的 `CURRENT_DATE`/`DATE_TRUNC`（那两者按 UTC 算，
+  在 UTC+8 会把当日记录错位进前一天的桶）。`date` 字段同样由服务端格式化。
 - `GET /api/v1/admin/storage-stats` — 按对象类别的存储占用（DB 聚合口径，与 GC 视角一致）：
   `{"categories": [{"category", "object_count", "total_bytes"}]}`，类别 =
   `avatar` / `sticker` / `sticker_cover`（字节未知，`total_bytes=null`）与

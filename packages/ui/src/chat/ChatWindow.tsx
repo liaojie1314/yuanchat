@@ -47,6 +47,7 @@ import {
   toggleReaction,
   useAuthStore,
   fetchPublicProfile,
+  pruneOnLeave,
   useCallStore,
   useConversationStore,
   useMessageStore,
@@ -162,9 +163,14 @@ export function ChatWindow({
     overscan: 5,
   });
 
-  // 进入会话时按需加载历史（真实模式；mock 模式内部直接跳过）
+  // 进入会话时按需加载历史（真实模式；mock 模式内部直接跳过）；
+  // 离开该会话时跑一次本地保留窗口淘汰 —— 淘汰放在关闭时机而非写入时，
+  // 否则用户正往上翻历史就会把刚渲染出来的旧消息删掉，列表在手里跳。
   useEffect(() => {
-    if (activeId) void loadHistory(activeId);
+    if (!activeId) return;
+    void loadHistory(activeId);
+    const leaving = activeId;
+    return () => pruneOnLeave(leaving);
   }, [activeId, loadHistory]);
 
   // 新消息到达时自动滚动到底部（loadMore 预置不触发，避免跳动）

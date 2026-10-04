@@ -6,9 +6,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/yuanchat/server/internal/model"
 	"gorm.io/gorm"
 )
+
+// ErrDuplicateClientMsg 同一发送者的同一 client_msg_id 已落库。
+//
+// 由唯一索引 idx_messages_sender_client_msg（迁移 020）保证。调用方收到它
+// 应当回查既有行并返回**原 ack**，而不是报错给客户端 —— 离线补发撞到它是
+// 正常路径，不是异常。
+var ErrDuplicateClientMsg = errors.New("duplicate client_msg_id")
 
 // MessageWithSender 消息 + 发送者昵称/头像的投影结果。
 type MessageWithSender struct {
@@ -48,6 +56,13 @@ func (r *MessageRepository) CreateWithSeq(ctx context.Context, msg *model.Messag
 		msg.Seq = seq
 
 		if err := tx.Create(msg).Error; err != nil {
+			// 23505 = unique_violation。只有 client_msg_id 那条部分唯一索引会在
+			// 正常业务流里被撞到（离线补发），转成哨兵错误交由上层回查既有行。
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" &&
+				pgErr.ConstraintName == "idx_messages_sender_client_msg" {
+				return ErrDuplicateClientMsg
+			}
 			return err
 		}
 
@@ -73,25 +88,77 @@ func utcTimePtr(t *time.Time) *time.Time {
 	return &u
 }
 
-// ListBefore 取会话中 seq < beforeSeq 且 seq > minSeq 的最新 limit 条消息（seq 降序）。
-// beforeSeq ≤ 0 表示从最新一条开始取。
-// minSeq 为调用方的 cleared_before_seq 水位（0 表示不过滤）；群会话署名用成员 alias 覆盖 nickname。
-func (r *MessageRepository) ListBefore(ctx context.Context, convID uuid.UUID, beforeSeq, minSeq int64, limit int) ([]MessageWithSender, error) {
+// FindByClientMsgID 按 (sender_id, client_msg_id) 取回既有消息，未找到返回 (nil, nil)。
+func (r *MessageRepository) FindByClientMsgID(
+	ctx context.Context,
+	senderID uuid.UUID,
+	clientMsgID string,
+) (*model.Message, error) {
+	var msg model.Message
+	err := r.db.WithContext(ctx).
+		Where("sender_id = ? AND client_msg_id = ? AND deleted_at IS NULL", senderID, clientMsgID).
+		First(&msg).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	msg.CreatedAt = utcTime(msg.CreatedAt)
+	msg.EditedAt = utcTimePtr(msg.EditedAt)
+	return &msg, nil
+}
+
+// historyQuery 历史翻页与增量补齐**共用**的查询构造。
+//
+// 可见性口径只能有这一份：ListBefore 与 ListAfter 各写一份 Where 必然漂移，
+// 而漂移的方向就是越权。刻意**不过滤 status** —— 撤回消息要作为占位行回给
+// 客户端（相册的 ListMedia 才过滤 status=1）。
+//
+// minSeq 为调用方的 cleared_before_seq 水位（0 表示不过滤）；
+// 群会话署名用成员 alias 覆盖 nickname。
+func (r *MessageRepository) historyQuery(ctx context.Context, convID uuid.UUID, minSeq int64) *gorm.DB {
 	q := r.db.WithContext(ctx).
 		Table("messages m").
 		Select(`m.*, COALESCE(NULLIF(cm.alias, ''), u.nickname) AS sender_nickname, u.avatar_url AS sender_avatar_url`).
 		Joins("JOIN users u ON u.id = m.sender_id").
 		Joins("LEFT JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = m.sender_id").
 		Where("m.conversation_id = ? AND m.deleted_at IS NULL", convID)
-	if beforeSeq > 0 {
-		q = q.Where("m.seq < ?", beforeSeq)
-	}
 	if minSeq > 0 {
 		q = q.Where("m.seq > ?", minSeq)
+	}
+	return q
+}
+
+// ListBefore 取会话中 seq < beforeSeq 且 seq > minSeq 的最新 limit 条消息（seq 降序）。
+// beforeSeq ≤ 0 表示从最新一条开始取。
+// minSeq 为调用方的 cleared_before_seq 水位（0 表示不过滤）；群会话署名用成员 alias 覆盖 nickname。
+func (r *MessageRepository) ListBefore(ctx context.Context, convID uuid.UUID, beforeSeq, minSeq int64, limit int) ([]MessageWithSender, error) {
+	q := r.historyQuery(ctx, convID, minSeq)
+	if beforeSeq > 0 {
+		q = q.Where("m.seq < ?", beforeSeq)
 	}
 
 	var rows []MessageWithSender
 	err := q.Order("m.seq DESC").Limit(limit).Scan(&rows).Error
+	for i := range rows {
+		rows[i].EditedAt = utcTimePtr(rows[i].EditedAt)
+	}
+	return rows, err
+}
+
+// ListAfter 取会话中 seq > afterSeq 且 seq > minSeq 的最早 limit 条消息（seq **升序**）。
+//
+// 供客户端断线重连后补空洞用：从本地水位往后拉，升序保证补齐时可顺序推进水位。
+// 游标等于最新 seq 时返回空切片（不是错误）——客户端据此停止循环。
+func (r *MessageRepository) ListAfter(ctx context.Context, convID uuid.UUID, afterSeq, minSeq int64, limit int) ([]MessageWithSender, error) {
+	q := r.historyQuery(ctx, convID, minSeq)
+	if afterSeq > 0 {
+		q = q.Where("m.seq > ?", afterSeq)
+	}
+
+	var rows []MessageWithSender
+	err := q.Order("m.seq ASC").Limit(limit).Scan(&rows).Error
 	for i := range rows {
 		rows[i].EditedAt = utcTimePtr(rows[i].EditedAt)
 	}

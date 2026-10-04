@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/repository"
@@ -152,4 +154,30 @@ func (s *AdminService) SearchPushSubscriptions(ctx context.Context, page, size i
 		return nil, 0, nil
 	}
 	return s.pushRepo.ListAll(ctx, (page-1)*size, size)
+}
+
+// ErrInvalidStatsDays days 参数越界时返回此哨兵错误，
+// 调用方可据此返回 HTTP 400（不静默夹取，防止调用方拿到与请求不符的区间）。
+var ErrInvalidStatsDays = errors.New("days must be between 7 and 90")
+
+// StatsTimeseries 返回最近 days（7–90）天的逐日数据序列。
+// 空日在 repo 层补零，调用方拿到的序列长度恒为 days、日期升序连续。
+// 只读端点，不写审计日志。
+func (s *AdminService) StatsTimeseries(ctx context.Context, days int) (*StatsTimeseriesResult, error) {
+	if days < 7 || days > 90 {
+		return nil, ErrInvalidStatsDays
+	}
+	pts, err := s.repo.CountTimeseries(ctx, days)
+	if err != nil {
+		return nil, fmt.Errorf("timeseries: %w", err)
+	}
+	return &StatsTimeseriesResult{Days: days, Points: pts}, nil
+}
+
+// StatsTimeseriesResult 时间序列响应体。
+type StatsTimeseriesResult struct {
+	// Days 请求的窗口天数（与请求参数一致，方便前端校验）
+	Days int `json:"days"`
+	// Points 逐日数据点，长度恒等于 Days，日期升序（最旧在前）
+	Points []repository.TimeseriesPoint `json:"points"`
 }

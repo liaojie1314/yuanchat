@@ -4,7 +4,7 @@
  * @description
  * 承载单条图片消息的展示，覆盖乐观发送与历史/接收两条路径：
  * - `localUrl`（发送方乐观预览）存在时直接渲染，上传确认后仍沿用，避免闪烁
- * - 否则据对象 `key` 经 getDownloadUrl 换取预签名 URL 再渲染，带进程内缓存
+ * - 否则据对象 `key` 经 resolveObjectUrl 取可渲染 URL（本地缓存优先，断网也能看）
  * - 加载中显示等比占位骨架（防 CLS）；下载签名失败 / 图片加载失败显示点击重试
  *
  * 尺寸：按原始 width/height 等比缩进 {@link MAX_DISPLAY_EDGE}×{@link MAX_DISPLAY_EDGE}
@@ -18,7 +18,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ImageIcon, ImageOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { getDownloadUrl } from "@yuanchat/shared";
+import { resolveObjectUrl } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 
 /** 气泡内图片展示盒的最长边（原始尺寸等比缩进此方框，不放大小图） */
@@ -54,7 +54,7 @@ export function MessageImage({
   const key = image.key;
   // 换取的预签名下载 URL（localUrl 被撤销后 / 无 localUrl 时使用）
   const [fetchedUrl, setFetchedUrl] = useState<string | null>(null);
-  // 重取计数：点击重试自增，触发 effect 重新 getDownloadUrl
+  // 重取计数：点击重试自增，触发 effect 重新取 URL
   const [reloadTick, setReloadTick] = useState(0);
   // 可见 <img> 当前绑定的地址：只前进不回退。ack 确认后 store 会撤销并清除 localUrl，
   // 但已解码的 blob 图仍在显示（撤销只影响后续取用）；待预签名 URL 预解码完成再切 displayUrl，
@@ -94,7 +94,7 @@ export function MessageImage({
     // localUrl 清除后此 effect 重跑发起签名
     if (!visible || localUrl || !key) return;
     let alive = true;
-    getDownloadUrl(key)
+    resolveObjectUrl(key)
       .then((url) => {
         if (alive) setFetchedUrl(url);
       })
