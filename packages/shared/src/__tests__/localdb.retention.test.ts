@@ -97,6 +97,10 @@ describe("dropMessagesBelowSeq —— 清空聊天记录水位", () => {
   });
 });
 
+// 这组用例要验证 500 条保留窗口的边界，必须真的写进 499/500/501 条行，
+// 条数不能缩。fake-indexeddb 批量写本就慢，再叠上 coverage 插桩会更慢，
+// 默认 5s 在 CI runner 上不够用（曾只在远程 Coverage gate 这一步超时），
+// 故整组显式放宽超时。
 describe("pruneConversation —— 保留窗口边界", () => {
   it("499 条不淘汰", async () => {
     await putMessages(
@@ -145,4 +149,4 @@ describe("pruneConversation —— 保留窗口边界", () => {
     await putMessages(db, rows);
     expect(await pruneConversation(db, CONV)).toBe(1);
   });
-});
+}, 60_000);
