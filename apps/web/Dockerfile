@@ -39,5 +39,8 @@ COPY deploy/nginx/spa.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 
+# 必须写 127.0.0.1 而不是 localhost：镜像的 /etc/hosts 把 localhost 同时解析到
+# ::1，wget 先试 IPv6，而 spa.conf 只有 listen 80（纯 IPv4），于是 connection
+# refused → 容器被标 unhealthy，但 nginx 其实在正常对外服务，排查时极易误判。
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-    CMD wget -qO- http://localhost/ >/dev/null || exit 1
+    CMD wget -qO- http://127.0.0.1/ >/dev/null || exit 1

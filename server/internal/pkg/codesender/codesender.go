@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
+
+	"github.com/yuanchat/server/internal/config"
 )
 
 // Sender 是验证码下发通道。
@@ -42,12 +44,34 @@ func (s *LogSender) Send(_ context.Context, target, code string) error {
 //
 // provider 未知时返回错误，绝不静默退回日志通道——生产环境静默用日志通道
 // 等于验证码永远发不出去，而且不会有人发现。调用方应据此让进程启动失败。
-func New(provider string, logger *zap.Logger) (Sender, error) {
-	switch provider {
+//
+// 同理，选了真实通道却缺密钥 / 发件人时也直接报错：带着空密钥启动，
+// 要等到第一个用户来发码才会暴露，而那时他已经被冷却期锁住了。
+func New(cfg config.CodeSenderConfig, logger *zap.Logger) (Sender, error) {
+	switch cfg.Provider {
 	case "log":
 		return NewLogSender(logger), nil
+	case "smtp":
+		if cfg.Host == "" {
+			return nil, fmt.Errorf("codesender.provider=smtp 但未配置 host（如 smtp.qq.com）")
+		}
+		if cfg.From == "" {
+			return nil, fmt.Errorf("codesender.provider=smtp 但未配置 from（发件邮箱地址）")
+		}
+		if cfg.Password == "" {
+			return nil, fmt.Errorf("codesender.provider=smtp 但未配置 password（QQ/163 填授权码，不是登录密码）")
+		}
+		return NewSMTPSender(cfg.Host, cfg.Port, cfg.Username, cfg.Password, cfg.From, cfg.Subject, logger), nil
+	case "resend":
+		if cfg.APIKey == "" {
+			return nil, fmt.Errorf("codesender.provider=resend 但未配置 api_key")
+		}
+		if cfg.From == "" {
+			return nil, fmt.Errorf("codesender.provider=resend 但未配置 from（发件地址）")
+		}
+		return NewResendSender(cfg.APIKey, cfg.From, cfg.Subject, logger), nil
 	default:
-		return nil, fmt.Errorf("未支持的验证码下发通道: %q", provider)
+		return nil, fmt.Errorf("未支持的验证码下发通道: %q", cfg.Provider)
 	}
 }
 

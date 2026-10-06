@@ -28,5 +28,7 @@ COPY deploy/nginx/spa.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 
+# 同 apps/web/Dockerfile：localhost 会先解析到 ::1，而 nginx 只听 IPv4，
+# 健康检查会一直失败（服务本身正常）。必须写 127.0.0.1。
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-    CMD wget -qO- http://localhost/ >/dev/null || exit 1
+    CMD wget -qO- http://127.0.0.1/ >/dev/null || exit 1

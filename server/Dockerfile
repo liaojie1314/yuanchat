@@ -26,7 +26,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w -X main.version=${VERSION}" \
     -o /out/server ./cmd/server \
  && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \
-    -o /out/migrate ./cmd/migrate
+    -o /out/migrate ./cmd/migrate \
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \
+    -o /out/bootstrap-admin ./cmd/bootstrapadmin \
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \
+    -o /out/genvapid ./cmd/genvapid
 
 # ---------- runtime ----------
 FROM alpine:3.20
@@ -38,6 +42,10 @@ WORKDIR /app
 
 COPY --from=builder /out/server /app/server
 COPY --from=builder /out/migrate /app/migrate
+# 首次部署建管理员用（管理后台无注册入口，不引导就只能手工改库）
+COPY --from=builder /out/bootstrap-admin /app/bootstrap-admin
+# Web Push 的 VAPID 密钥生成，install.sh 首次部署时调用一次
+COPY --from=builder /out/genvapid /app/genvapid
 # 迁移 SQL 与默认配置随镜像分发（配置可被挂载/环境变量覆盖）
 COPY --from=builder /src/internal/database/migrations /app/internal/database/migrations
 COPY --from=builder /src/config/config.yaml /app/config/config.yaml

@@ -31,30 +31,37 @@
 > 五个域名必须**先解析生效**再执行安装，否则 Let's Encrypt 的 HTTP-01 校验会失败。
 > 验证：`dig +short app.your-domain.com` 应返回你的服务器 IP。
 
-### 在 NameSilo 配置域名解析
+### 在域名注册商配置解析
 
-在 NameSilo 控制台 **Domain Manager → 点域名 → 蓝色地球图标（DNS Records）**，
-把五个子域名各加一条 A 记录指向服务器公网 IP：
+各家注册商的控制台长得不一样，但要做的事完全相同：给五个子域各加一条 **A 记录**指向服务器公网 IP。
 
-| Type | Hostname  | IPV4 Address  | TTL  |
-| ---- | --------- | ------------- | ---- |
-| A    | `app`     | 你的服务器 IP | 3600 |
-| A    | `api`     | 你的服务器 IP | 3600 |
-| A    | `ws`      | 你的服务器 IP | 3600 |
-| A    | `admin`   | 你的服务器 IP | 3600 |
-| A    | `storage` | 你的服务器 IP | 3600 |
+| Type | Hostname（主机记录） | 值            | TTL  |
+| ---- | -------------------- | ------------- | ---- |
+| A    | `app`                | 你的服务器 IP | 3600 |
+| A    | `api`                | 你的服务器 IP | 3600 |
+| A    | `ws`                 | 你的服务器 IP | 3600 |
+| A    | `admin`              | 你的服务器 IP | 3600 |
+| A    | `storage`            | 你的服务器 IP | 3600 |
 
-Hostname 只填**前缀**（`app`，不是 `app.your-domain.com`），NameSilo 会自动补主域名。
-嫌一条条加麻烦也可以加一条 `*` 泛解析，但五条显式记录更可控。
+入口位置的常见叫法：NameSilo 在 _Domain Manager → 域名 → DNS Records_，Cloudflare 在 _DNS → Records_，
+阿里云/腾讯云在「云解析 DNS → 解析设置」，Namecheap 在 _Advanced DNS_。
 
-两个容易踩的点：
+与注册商无关的三个通用坑：
 
-- **NameSilo 默认开着 parking/转发页**。只要域名还指着 NameSilo 的 parking
-  nameserver，A 记录就不生效。确认 NameSilo 面板里 NAMESERVERS 是
-  `ns1.dnsowl.com` / `ns2.dnsowl.com` / `ns3.dnsowl.com`（NameSilo 自家 DNS），
-  若之前改过第三方 DNS，就要去那家改 A 记录而不是在 NameSilo 改。
-- **等解析生效再装**，否则 Let's Encrypt 的 HTTP-01 校验必失败。NameSilo 一般
-  几分钟到半小时，验证：`dig +short app.your-domain.com` 返回你的服务器 IP 才算好。
+- **Hostname 只填前缀**。填 `app`，不要填 `app.your-domain.com` —— 绝大多数面板会自动补主域名，
+  填全名会变成 `app.your-domain.com.your-domain.com`。少数面板（如 Cloudflare）要求填全名，
+  以面板里已有记录的写法为准。
+- **确认域名真的在用这家的 DNS**。很多注册商买来默认指向自己的 parking / 广告页 nameserver，
+  此时在别处加 A 记录不生效；反过来，若你之前把 NS 改到了第三方（Cloudflare、DNSPod 等），
+  就要去那一家加记录，在注册商面板里改没有任何效果。判断方法：`dig +short NS your-domain.com`
+  返回哪家，就去哪家改。
+- **等解析真正生效再执行安装**。Let's Encrypt 的 HTTP-01 校验要能从公网回连到你的 80 端口，
+  解析没生效必然失败，而失败有每周配额（见下文「证书签发失败」）。生效时间从几分钟到半小时不等，
+  用 `dig +short app.your-domain.com` 返回你的服务器 IP 才算好。
+
+> 若要把域名托管在 Cloudflare，记得把这五条记录的代理开关设为 **DNS only（灰云）**。
+> 开着橙云代理时 Cloudflare 会替你终止 TLS，本项目自己签的证书就不再被使用，
+> 而 WebSocket 与对象存储直传都需要额外配置才能穿过代理。
 
 ### 放行端口
 
@@ -162,14 +169,34 @@ coturn 是例外：UDP relay 没法走 nginx 反代，只能自己发布端口�
 ### 可观测（可选）
 
 ```bash
-docker compose -f deploy/docker-compose.prod.yml --profile observability up -d
+./deploy/yuanchat.sh monitor on
+# 等价于 docker compose -f deploy/docker-compose.prod.yml --profile observability up -d
 ```
 
-启用 Prometheus + Grafana + Loki。默认不对外暴露，需要访问时通过 SSH 隧道：
+启用 Prometheus + Grafana + Loki。三者都在 `observability` profile 后面，**默认不启动** ——
+平时不看监控就不必白占内存（Grafana + Prometheus 大约 200-300 MB）。
+
+Prometheus 与 Grafana 的端口**只绑在宿主机回环**（`127.0.0.1:9090` / `127.0.0.1:3000`），
+公网扫不到，访问要走 SSH 隧道：
 
 ```bash
-ssh -L 3000:localhost:3000 user@your-server   # 然后本机访问 localhost:3000
+# 在你自己的机器上执行；本地端口可随意改，冒号右边必须是 3000 / 9090
+ssh -fN -L 3300:localhost:3000 -L 9099:localhost:9090 user@your-server
+# 然后浏览器打开 http://localhost:3300
 ```
+
+Grafana 账号是 `admin`，密码为 `deploy/.env` 里的 `GRAFANA_PASSWORD`（`install.sh` 随机生成）。
+Prometheus 的 Web UI 在 `http://localhost:9099`，数据源已自动置备，不需要手工加。
+
+两个容易卡住的点：
+
+- **本地端口被占时整条 ssh 命令失败**，而不是只跳过那一个转发。`3000` 这种常用端口很可能已被
+  本机的某个 dev server 占着，表现为隧道建不起来；换一个本地端口即可（上例用了 3300 / 9099）。
+- **别用 `pkill -f "ssh -fN -L ..."` 清理旧隧道**。`pkill -f` 匹配完整命令行，会连执行这条命令的
+  shell 自己一起杀掉（它的命令行里也含有该字符串），结果是隧道和你的终端一起没了。
+  改用 `ss -ltn | grep 127.0.0.1:3300` 先判断是否已有隧道。
+
+Loki 不单独开端口，日志在 Grafana 里通过 Loki 数据源查。
 
 ## 四、日常运维
 
@@ -218,18 +245,37 @@ compose 的镜像 tag 是 `yuanchat/server:${APP_VERSION}`，两者脱节时 com
 
 `migrate` 容器会在 `yuanchat-server` 启动前自动跑完 goose 迁移；迁移失败则 server 不会启动（`service_completed_successfully` 依赖）。
 
-### 创建管理员账号
+### 管理员账号
 
-首次部署后数据库无管理员，需手动提升：
+**管理后台没有注册入口**，因此第一个管理员必须在部署时引导出来 —— 否则装完谁都登不进
+`admin` 子域。在 `deploy/.env` 里填好手机号即可，密码留空由 `install.sh` 随机生成：
+
+```bash
+ADMIN_PHONE=13800138000     # 管理后台的登录账号，必须自己填
+ADMIN_PASSWORD=             # 留空则自动生成并写回 .env
+```
+
+`install.sh` 会在服务起好后跑一次 `/app/bootstrap-admin`，建号并打印登录信息。
+这一步**幂等**：库里已存在任一管理员时直接跳过，**不会**把线上密码重置回 `.env` 里的值 ——
+否则每次重跑 `install.sh` 都等于给管理员留一把永久后门（`.env` 常年躺在服务器上）。
+
+手机号已被占用时（常见于先在 Web 端注册了再跑脚本）会**提权该账号而非新建**，密码保持原样 ——
+不这么做会撞 `phone` 唯一索引直接失败。
+
+首次登录后请做两件事：
+
+1. 在应用内改密（改密递增 `token_version`，旧令牌立即失效）
+2. 清空 `.env` 里的 `ADMIN_PASSWORD`
+
+漏填 `ADMIN_PHONE` 时脚本会告警跳过。补救方式是先在 Web 端注册一个账号，再手工提权：
 
 ```bash
 COMPOSE="docker compose -f deploy/docker-compose.prod.yml"
-# 先在 Web 端正常注册一个账号，然后：
 $COMPOSE exec postgres psql -U yuanchat -d yuanchat \
   -c "UPDATE users SET role = 1 WHERE phone = '你的手机号';"
 ```
 
-之后用该账号登录 `https://admin.your-domain.com`。
+填好 `ADMIN_PHONE` 后重跑 `./deploy/install.sh` 也可以，脚本会补上这一步。
 
 ## 五、备份
 

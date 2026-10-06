@@ -81,6 +81,13 @@ services:
       YUANCHAT_SERVER_ENV: production
       YUANCHAT_SERVER_PORT: "8085"
       YUANCHAT_WEBSOCKET_PORT: "8086"
+      # WS Origin 白名单。生产的 app 与 ws 分属不同子域，Origin 永远不等于 Host，
+      # 桌面/移动端 WebView 的 Origin 更是 tauri://localhost 这类非 http(s) 值 ——
+      # 不显式登记就会全部 403（页面能开、登录能过，唯独聊天连不上，极难定位）。
+      # tauri 三种取值对应不同平台：Linux/macOS/iOS 是 tauri://localhost，
+      # Windows WebView2 与 Android 是 http(s)://tauri.localhost。
+      YUANCHAT_WEBSOCKET_ALLOWED_ORIGINS: >-
+        https://${DOMAIN_APP},https://${DOMAIN_ADMIN},tauri://localhost,http://tauri.localhost,https://tauri.localhost
       YUANCHAT_DATABASE_HOST: postgres
       YUANCHAT_DATABASE_PORT: "5432"
       YUANCHAT_DATABASE_USER: ${DB_USER}
@@ -103,6 +110,17 @@ services:
       YUANCHAT_PUSH_VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       YUANCHAT_PUSH_VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       YUANCHAT_PUSH_SUBJECT: mailto:${ADMIN_EMAIL}
+      # 验证码下发通道。留默认的 log 只会把码写进服务端日志（开发用），
+      # 线上保持 log 的后果是「注册/找回密码的验证码永远收不到」，且不报任何错。
+      # 选型与申请步骤见 docs/deploy/sms.md。
+      YUANCHAT_CODESENDER_PROVIDER: ${CODESENDER_PROVIDER:-log}
+      YUANCHAT_CODESENDER_API_KEY: ${CODESENDER_API_KEY:-}
+      YUANCHAT_CODESENDER_FROM: ${CODESENDER_FROM:-}
+      YUANCHAT_CODESENDER_SUBJECT: ${CODESENDER_SUBJECT:-}
+      # 首次部署的管理员引导凭据（install.sh 自动生成并写回 .env）。
+      # 仅 bootstrap-admin 这条一次性命令会读，且库里已有管理员时直接跳过。
+      YUANCHAT_BOOTSTRAP_ADMIN_PHONE: ${ADMIN_PHONE:-}
+      YUANCHAT_BOOTSTRAP_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       # TURN：与 coturn 容器共用同一套取值，任一项不一致都会让通话在 NAT 后打不通。
       # SECRET/REALM 两边同源（install.sh 用同样的 TURN_SECRET / DOMAIN_APP 渲染
       # coturn/turnserver.prod.conf），HOST 必须是客户端可达的公网域名 ——
@@ -200,6 +218,12 @@ services:
     container_name: yuanchat-prometheus
     restart: unless-stopped
     profiles: [observability]
+    ports:
+    # 仅绑回环：监控面板不该暴露到公网（它背后是全部服务的指标与日志）。
+    # 绑 127.0.0.1 之后外网扫不到，但 `ssh -L` 隧道能转发到这里 ——
+    # 不加这段映射的话容器只在 Docker 网络内可达，隧道指向宿主机 localhost 会连不上，
+    # 表现为「隧道建好了但浏览器打不开」，很容易误以为是 Grafana 没起来。
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
       - prom_data:/prometheus
@@ -210,6 +234,9 @@ services:
     container_name: yuanchat-grafana
     restart: unless-stopped
     profiles: [observability]
+    ports:
+      # 同 prometheus：仅回环，配合 ssh -L 隧道访问
+      - "127.0.0.1:3000:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
