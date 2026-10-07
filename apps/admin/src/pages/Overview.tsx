@@ -27,7 +27,7 @@ import {
   type StorageStats,
   type StatsTimeseriesResult,
 } from "../api";
-import { DataTable, Pager, EmptyRow } from "../components/Table";
+import { DataTable, Pager, EmptyRow, SkeletonRows } from "../components/Table";
 import { Sparkline, LineChart, DonutChart, chartColor, CHART_MUTED } from "@yuanchat/ui/charts";
 import type { SparklinePoint, LineSeries, DonutSlice } from "@yuanchat/ui/charts";
 import { cn } from "@yuanchat/shared/utils";
@@ -480,31 +480,25 @@ export function OverviewPage() {
           t("admin.overview.colCreated"),
         ]}
       >
-        {subsLoading && (
-          <tr aria-hidden="true">
-            <td colSpan={3} className="px-4 py-3">
-              <div className="h-6 animate-pulse rounded bg-surface-container" />
+        {/* 订阅列表每页 10 条，骨架也给 10 行；翻页时旧行留在原位不清空 */}
+        {subsLoading && subs.length === 0 && <SkeletonRows cols={3} rows={10} />}
+        {!subsLoading && subs.length === 0 && <EmptyRow colSpan={3} />}
+        {subs.map((s) => (
+          <tr
+            key={s.id}
+            className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low"
+          >
+            <td className="max-w-md truncate px-4 py-3 font-mono text-xs text-on-surface-variant">
+              {s.endpoint}
+            </td>
+            <td className="px-4 py-3 text-body-md text-on-surface">
+              {s.user_nickname ?? t("admin.overview.unknownUser")}
+            </td>
+            <td className="whitespace-nowrap px-4 py-3 text-body-md text-on-surface-variant">
+              {new Date(s.created_at).toLocaleString()}
             </td>
           </tr>
-        )}
-        {!subsLoading && subs.length === 0 && <EmptyRow colSpan={3} />}
-        {!subsLoading &&
-          subs.map((s) => (
-            <tr
-              key={s.id}
-              className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low"
-            >
-              <td className="max-w-md truncate px-4 py-3 font-mono text-xs text-on-surface-variant">
-                {s.endpoint}
-              </td>
-              <td className="px-4 py-3 text-body-md text-on-surface">
-                {s.user_nickname ?? t("admin.overview.unknownUser")}
-              </td>
-              <td className="whitespace-nowrap px-4 py-3 text-body-md text-on-surface-variant">
-                {new Date(s.created_at).toLocaleString()}
-              </td>
-            </tr>
-          ))}
+        ))}
       </DataTable>
       <Pager page={subsPage} totalPages={subsTotalPages} total={subsTotal} onPage={setSubsPage} />
     </div>

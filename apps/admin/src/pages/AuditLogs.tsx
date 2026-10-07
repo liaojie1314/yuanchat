@@ -4,7 +4,7 @@
 import { useTranslation } from "react-i18next";
 import { listAuditLogs, type AuditLog } from "../api";
 import { usePagedQuery } from "../hooks/usePagedQuery";
-import { DataTable, Pager, EmptyRow } from "../components/Table";
+import { DataTable, Pager, EmptyRow, SkeletonRows } from "../components/Table";
 import { cn } from "@yuanchat/shared/utils";
 
 const ACTIONS = ["", "ban_user", "unban_user", "dissolve_conversation", "delete_message"];
@@ -46,6 +46,7 @@ export function AuditLogsPage() {
       </div>
 
       <DataTable headers={headers}>
+        {loading && list.length === 0 && <SkeletonRows cols={headers.length} />}
         {!loading && list.length === 0 && <EmptyRow colSpan={headers.length} />}
         {list.map((log) => (
           <tr
