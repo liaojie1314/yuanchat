@@ -114,9 +114,17 @@ services:
       # 线上保持 log 的后果是「注册/找回密码的验证码永远收不到」，且不报任何错。
       # 选型与申请步骤见 docs/deploy/sms.md。
       YUANCHAT_CODESENDER_PROVIDER: ${CODESENDER_PROVIDER:-log}
-      YUANCHAT_CODESENDER_API_KEY: ${CODESENDER_API_KEY:-}
       YUANCHAT_CODESENDER_FROM: ${CODESENDER_FROM:-}
       YUANCHAT_CODESENDER_SUBJECT: ${CODESENDER_SUBJECT:-}
+      # provider=smtp 用这四项（QQ / 163 / Gmail / 企业邮都走这条）。
+      # PASSWORD 是**授权码**而不是邮箱登录密码；PORT 465 走隐式 TLS、587 走 STARTTLS。
+      # 云厂商普遍封禁出站 25，别填 25。
+      YUANCHAT_CODESENDER_HOST: ${CODESENDER_HOST:-}
+      YUANCHAT_CODESENDER_PORT: ${CODESENDER_PORT:-465}
+      YUANCHAT_CODESENDER_USERNAME: ${CODESENDER_USERNAME:-}
+      YUANCHAT_CODESENDER_PASSWORD: ${CODESENDER_PASSWORD:-}
+      # provider=resend 用这项
+      YUANCHAT_CODESENDER_API_KEY: ${CODESENDER_API_KEY:-}
       # 首次部署的管理员引导凭据（install.sh 自动生成并写回 .env）。
       # 仅 bootstrap-admin 这条一次性命令会读，且库里已有管理员时直接跳过。
       YUANCHAT_BOOTSTRAP_ADMIN_PHONE: ${ADMIN_PHONE:-}

@@ -11,9 +11,10 @@
  *
  * API 调用流程：
  * 1. loginWithPassword() → POST /api/v1/auth/login → 存储 token
- * 2. registerWithPassword() → POST /api/v1/auth/register → 存储 token
- * 3. logout() → POST /api/v1/auth/logout → 清空所有状态
- * 4. sessionFromTokens() → 已签发的令牌对（扫码登录）→ 存储 token 并拉 GET /users/me 补资料
+ * 2. requestRegisterCode() → POST /api/v1/auth/register/otp → 验证码发到邮箱（不动登录态）
+ * 3. registerWithPassword() → POST /api/v1/auth/register → 存储 token
+ * 4. logout() → POST /api/v1/auth/logout → 清空所有状态
+ * 5. sessionFromTokens() → 已签发的令牌对（扫码登录）→ 存储 token 并拉 GET /users/me 补资料
  *
  * @example
  * ```tsx
@@ -26,6 +27,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { apiGet, apiPost, setTokenProvider } from "../api/client";
 import { setRefreshHandler } from "../api/tokenManager";
+import { sendRegisterCode } from "../api/auth";
 import { updateMyProfile } from "../api/users";
 import type { ProfilePatch } from "../api/users";
 
@@ -123,13 +125,15 @@ interface AuthState {
 
   /** 账号（手机号/邮箱/元聊号）+ 密码登录 */
   loginWithPassword: (account: string, password: string) => Promise<void>;
-  /** 密码注册 */
+  /** 下发注册邮箱验证码 */
+  requestRegisterCode: (email: string) => Promise<void>;
+  /** 密码注册（邮箱验证码校验通过即建号） */
   registerWithPassword: (
-    phone: string,
+    email: string,
+    code: string,
     password: string,
-    captchaID: string,
-    captchaAnswer: number,
     nickname: string,
+    phone?: string,
   ) => Promise<void>;
   /** 登出（异步：先调 API 再清本地状态） */
   logout: () => Promise<void>;
@@ -174,22 +178,35 @@ export const useAuthStore = create<AuthState>()(
       },
 
       /**
+       * 下发注册邮箱验证码
+       *
+       * 不触碰任何登录态，只是让注册页不必直接依赖 api 层。
+       * 冷却、格式非法、下发失败都以 `ApiError` 抛出，由页面落地成文案。
+       */
+      requestRegisterCode: async (email: string) => {
+        await sendRegisterCode(email);
+      },
+
+      /**
        * 密码注册
-       * 需要手机号 + 验证码 + 密码 + 昵称
+       *
+       * 需要邮箱 + 邮箱验证码 + 密码 + 昵称；手机号选填（填了后端按 11 位校验）。
+       * 手机号留空时**不发该字段**，而不是发空串 —— 后端 `omitempty` 之外的空串会撞上
+       * 「填了就必须 11 位」的校验。
        */
       registerWithPassword: async (
-        phone: string,
+        email: string,
+        code: string,
         password: string,
-        captchaID: string,
-        captchaAnswer: number,
         nickname: string,
+        phone?: string,
       ) => {
         const data = await apiPost<LoginResponse>("/api/v1/auth/register", {
-          phone,
+          email,
+          code,
           password,
-          captcha_id: captchaID,
-          captcha_answer: captchaAnswer,
           nickname,
+          ...(phone ? { phone } : {}),
         });
         set({
           user: mapUser(data.user),

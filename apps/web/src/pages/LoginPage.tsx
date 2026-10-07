@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Button, Input } from "@yuanchat/ui";
+import { Button, Input, ServerSwitchLink } from "@yuanchat/ui";
 import { useAuthStore } from "@yuanchat/shared";
-import { validatePassword, validateYuanchatId } from "@yuanchat/shared/utils";
+import { validatePassword } from "@yuanchat/shared/utils";
 import { MessageCircle, QrCode } from "lucide-react";
 
 export function LoginPage() {
@@ -34,16 +34,12 @@ export function LoginPage() {
     clearErrors();
     let valid = true;
 
+    // 这里只校验非空。账号可以是手机号 / 邮箱 / 元聊号三种形态，
+    // 再在前端判格式必然误杀 —— 此前用的是元聊号校验（禁 @），
+    // 结果邮箱账号在发出请求之前就被挡掉了。形态由服务端判定。
     if (!yuanchatId.trim()) {
-      setYuanchatIdError(t("auth.yuanchatIdRequired"));
+      setYuanchatIdError(t("auth.accountRequired"));
       valid = false;
-    } else {
-      const idResult = validateYuanchatId(yuanchatId);
-      if (!idResult.valid) {
-        // 校验工具返回 i18n key，落地文案在这里翻译
-        setYuanchatIdError(t(idResult.errors[0]));
-        valid = false;
-      }
     }
     const pwResult = validatePassword(password);
     if (!pwResult.valid) {
@@ -88,7 +84,7 @@ export function LoginPage() {
 
           <div className="space-y-1">
             <Input
-              placeholder={t("auth.yuanchatId")}
+              placeholder={t("auth.accountPlaceholder")}
               type="text"
               value={yuanchatId}
               onChange={(e) => {
@@ -135,6 +131,11 @@ export function LoginPage() {
               {t("auth.registerNow")}
             </Link>
           </p>
+
+          {/* 登录前的服务器切换入口：内置地址连不上时，设置页在登录之后，够不着 */}
+          <div className="mt-3">
+            <ServerSwitchLink />
+          </div>
         </div>
       </div>
     </div>

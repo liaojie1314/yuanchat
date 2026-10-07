@@ -27,10 +27,10 @@ test.describe("Login Flow", () => {
     expect(page.url()).toContain("/chat");
   });
 
-  test("shows error for empty 元聊号", async ({ page }) => {
+  test("shows error for empty 账号", async ({ page }) => {
     await loginPage.passwordInput.fill("Abc1234!");
     await loginPage.loginButton.click();
-    await expect(page.getByText("请输入元聊号")).toBeVisible();
+    await expect(page.getByText("请输入账号")).toBeVisible();
   });
 
   test("shows error for empty password", async ({ page }) => {
@@ -53,9 +53,13 @@ test.describe("Login Flow", () => {
     await expect(page.getByText("账号或密码错误")).toBeVisible();
   });
 
-  test("shows error for short 元聊号", async ({ page }) => {
-    await loginPage.login("ab", "Abc1234!");
-    await expect(page.getByText("元聊号长度至少 3 位")).toBeVisible();
+  // 账号可以是手机号 / 邮箱 / 元聊号三种形态，前端只校验非空。
+  // 此前这里用元聊号规则校验（禁 @），邮箱账号在发出请求之前就被挡掉了，
+  // 而登录接口本来就接受邮箱 —— 所以这条用例守的是「邮箱能走到服务端」。
+  test("邮箱账号不被前端校验拦截", async ({ page }) => {
+    await loginPage.login("user@example.com", "Abc1234!");
+    await page.waitForURL("**/chat");
+    expect(page.url()).toContain("/chat");
   });
 
   test("Enter key triggers login", async ({ page }) => {

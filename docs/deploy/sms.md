@@ -29,41 +29,61 @@
 单价一栏：国内厂商按「验证码类、最小可买档位」的单价计；国际厂商按官方美元价
 标注，括号里的人民币仅按 **1 USD ≈ 7.1 CNY** 粗折（汇率非官方页面数据，自行复核）。
 
-| 方案                          | 单价                                                                                     | 免费额度                                                                  | 个人主体能否用                                                          | 大陆号码可用性                                                                                        | 接入复杂度                                                        |
-| ----------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| **邮箱验证码 + Resend**       | ¥0（免费档内）                                                                           | 3,000 封/月、100 封/日                                                    | ✅ 完全可以                                                             | ✅ 不受运营商管辖                                                                                     | 低（SMTP/HTTP API，一天能通）                                     |
-| **邮箱验证码 + Brevo**        | ¥0（免费档内）                                                                           | 300 封/日 ≈ 9,000 封/月                                                   | ✅ 完全可以                                                             | ✅ 同上                                                                                               | 低                                                                |
-| 腾讯云短信                    | ¥0.047/条（1 万条档 ¥470）                                                               | 首开赠 100 条（个人认证），3 个月有效                                     | ⚠️ **签名拿不到**：个人主体无法运营商实名报备，只能借企业做他用签名     | ✅ 最佳                                                                                               | 中（签名+模板审核 2h，运营商报备 7–10 工作日）                    |
-| 阿里云短信                    | ¥0.05/条（1000 条档 ¥50）；按量 ¥0.045/条                                                | 试用测试包 100 或 200 条                                                  | ⚠️ 同上，且**本项目直接否决**                                           | ❌ **国内短信只能由中国内地 IP 发送**，海外服务器用不了                                               | 中                                                                |
-| 华为云短信                    | **未能从官方文档确认**                                                                   | 未能从官方文档确认                                                        | ❌ 资质申请前提就写明「已注册华为**企业**账号，并完成**企业**实名认证」 | ✅                                                                                                    | 中高（还要法人证件 + 经办人手持身份证）                           |
-| 七牛云短信（转售）            | ¥0.043/条                                                                                | 300 条（100 验证码 + 100 通知 + 100 推广），**需完成企业认证**才享        | ❌ 免费额度明文要求企业认证                                             | ✅                                                                                                    | 中                                                                |
-| Twilio                        | $0.1082/段（≈¥0.77）+ 国际号码 $1.15/月                                                  | 试用赠额**未能从官方页面确认**（见 §3.1 坑位）                            | ✅ 不要求中国主体                                                       | ⚠️ 仅 "Commercially Reasonable Efforts"，**不保证送达**，**正文禁 URL**，不支持 alphanumeric 发送方   | 低（HTTP API）                                                    |
-| AWS End User Messaging / SNS  | **未能从官方文档确认**（官方只说"guidance only, change frequently"，不列中国单价）       | SNS 免费层**不含 SMS**                                                    | ✅ 不要求中国主体                                                       | ❌ 必须先经 **Support 工单报备模板**，否则消息被拦截；China 行 Sender ID=No、International sending=No | 高（走工单，初次响应 24h，还要回填国别表单）                      |
-| Vonage / Bird 等其他国际商    | **未能从官方页面确认**（定价页与支持站对本机 IP 返回 403）                               | 未能从官方页面确认                                                        | ✅                                                                      | 未能从官方页面确认                                                                                    | —                                                                 |
-| Firebase Phone Authentication | 按条计费，**单价未能从官方页面确认**（Identity Platform 定价页为 JS 渲染，抓不到费率表） | **Spark 免费档标注 "Not applicable"——手机验证根本不可用**，必须升级 Blaze | ✅                                                                      | ❌ 强制 reCAPTCHA（Google 域名大陆不可达）+ 新项目 SMS region policy 默认 **allow no regions**        | 高且**架构换轨**（客户端 SDK 直接验证，绕开 `codesender.Sender`） |
+| 方案                           | 单价                                                                                     | 免费额度                                                                  | 个人主体能否用                                                          | 大陆号码可用性                                                                                        | 接入复杂度                                                        |
+| ------------------------------ | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| **邮箱验证码 + 自有邮箱 SMTP** | ¥0                                                                                       | 受服务商日发量限制（QQ 个人约数十封/日）                                  | ✅ 完全可以，**无需域名、无需审核**                                     | ✅ 不受运营商管辖                                                                                     | **最低**（Go 标准库 `net/smtp`，已实现并实测通过）                |
+| **邮箱验证码 + Resend**        | ¥0（免费档内）                                                                           | 3,000 封/月、100 封/日                                                    | ✅ 完全可以                                                             | ✅ 不受运营商管辖                                                                                     | 低（SMTP/HTTP API，一天能通）                                     |
+| **邮箱验证码 + Brevo**         | ¥0（免费档内）                                                                           | 300 封/日 ≈ 9,000 封/月                                                   | ✅ 完全可以                                                             | ✅ 同上                                                                                               | 低                                                                |
+| 腾讯云短信                     | ¥0.047/条（1 万条档 ¥470）                                                               | 首开赠 100 条（个人认证），3 个月有效                                     | ⚠️ **签名拿不到**：个人主体无法运营商实名报备，只能借企业做他用签名     | ✅ 最佳                                                                                               | 中（签名+模板审核 2h，运营商报备 7–10 工作日）                    |
+| 阿里云短信                     | ¥0.05/条（1000 条档 ¥50）；按量 ¥0.045/条                                                | 试用测试包 100 或 200 条                                                  | ⚠️ 同上，且**本项目直接否决**                                           | ❌ **国内短信只能由中国内地 IP 发送**，海外服务器用不了                                               | 中                                                                |
+| 华为云短信                     | **未能从官方文档确认**                                                                   | 未能从官方文档确认                                                        | ❌ 资质申请前提就写明「已注册华为**企业**账号，并完成**企业**实名认证」 | ✅                                                                                                    | 中高（还要法人证件 + 经办人手持身份证）                           |
+| 七牛云短信（转售）             | ¥0.043/条                                                                                | 300 条（100 验证码 + 100 通知 + 100 推广），**需完成企业认证**才享        | ❌ 免费额度明文要求企业认证                                             | ✅                                                                                                    | 中                                                                |
+| Twilio                         | $0.1082/段（≈¥0.77）+ 国际号码 $1.15/月                                                  | 试用赠额**未能从官方页面确认**（见 §3.1 坑位）                            | ✅ 不要求中国主体                                                       | ⚠️ 仅 "Commercially Reasonable Efforts"，**不保证送达**，**正文禁 URL**，不支持 alphanumeric 发送方   | 低（HTTP API）                                                    |
+| AWS End User Messaging / SNS   | **未能从官方文档确认**（官方只说"guidance only, change frequently"，不列中国单价）       | SNS 免费层**不含 SMS**                                                    | ✅ 不要求中国主体                                                       | ❌ 必须先经 **Support 工单报备模板**，否则消息被拦截；China 行 Sender ID=No、International sending=No | 高（走工单，初次响应 24h，还要回填国别表单）                      |
+| Vonage / Bird 等其他国际商     | **未能从官方页面确认**（定价页与支持站对本机 IP 返回 403）                               | 未能从官方页面确认                                                        | ✅                                                                      | 未能从官方页面确认                                                                                    | —                                                                 |
+| Firebase Phone Authentication  | 按条计费，**单价未能从官方页面确认**（Identity Platform 定价页为 JS 渲染，抓不到费率表） | **Spark 免费档标注 "Not applicable"——手机验证根本不可用**，必须升级 Blaze | ✅                                                                      | ❌ 强制 reCAPTCHA（Google 域名大陆不可达）+ 新项目 SMS region policy 默认 **allow no regions**        | 高且**架构换轨**（客户端 SDK 直接验证，绕开 `codesender.Sender`） |
 
 ---
 
 ## 2. 推荐顺序（不是「各有优劣你自己选」）
 
-### 第一选择：把验证码改走邮箱，用 Resend 免费档
+### 第一选择：把验证码改走邮箱 —— 已实现并实测通过
 
-**就做这个。** 理由不是它最好，而是它是**唯一一个以当前身份（个人 + 海外服务器 + 无备案）
-今天就能真正跑通的方案**。其余所有短信方案都卡在同一处：国内短信签名必须挂企业主体。
+**就做这个，而且已经做完了。** 理由不是它最好，而是它是**唯一一个以当前身份
+（个人 + 海外服务器 + 无备案）今天就能真正跑通的方案**。其余所有短信方案都卡在同一处：
+国内短信签名必须挂企业主体。
 
-- 成本：¥0。Resend 免费档 3,000 封/月、100 封/日。按一次找回密码发 1 封算，
-  够 100 个用户/天，对自建 IM 的真实量级绰绰有余。
-- 不需要：企业营业执照、ICP 备案、大陆 IP、运营商报备、等 7–10 个工作日。
+本项目实现了两条邮件通道，**推荐 `smtp`**：
+
+| provider           | 用什么                               | 要准备什么                      | 适用               |
+| ------------------ | ------------------------------------ | ------------------------------- | ------------------ |
+| **`smtp`**（推荐） | 你自己的 QQ / 163 / Gmail / 企业邮箱 | 只要一个**授权码**，30 秒       | 自建、小规模       |
+| `resend`           | Resend 的 HTTP API                   | 一个**自有域名**并完成 DNS 验证 | 量大、要独立发件域 |
+
+选 `smtp` 的理由：**不需要域名、不需要任何审核**，用的是 Go 标准库 `net/smtp`，
+一份实现通吃所有服务商，没有第三方 SDK 依赖。代价是受服务商的日发量限制
+（QQ 个人邮箱大约数十封/日），到了那个量级再换 `resend` 或企业邮。
+
+2026-10-06 实测结论（本机与生产服务器双向验证过）：
+
+- 生产服务器出站 **465 / 587 可达 `smtp.qq.com`，25 被云厂商封禁**（这是常态，别填 25）
+- QQ **没有**因为「海外 IP 登录」拒绝 SMTP 认证 —— 这是上线前最该先验的一条
+- 发往 163 / Gmail / QQ 三个收件箱全部正常到达
+
+- 成本：¥0。
+- 不需要：企业营业执照、ICP 备案、大陆 IP、运营商报备、等 7–10 个工作日，
+  选 `smtp` 时连域名都不需要。
 - 项目已支持邮箱注册，用户侧不是全新概念。
 
 **代价要说清楚**（这是真代价，不是小字）：
 
-1. **只用手机号注册的老用户找回不了密码**。当前 `POST /api/v1/auth/password/otp` 的入参是
-   `{"phone": ...}`，发码目标硬编码为手机号（`server/internal/service/auth_service.go:124`
-   把 `phone` 直接传给 `Sender.Send`）。走邮箱必须先让这条链路接受邮箱作为 target，
-   并在用户没绑邮箱时给出明确引导（「你的账号未绑定邮箱，请用已登录的设备在设置里补绑」）。
-2. **注册验证从「验证手机号归属」降级为「验证邮箱归属」**。手机号仍然可以填、可以作为登录账号，
-   但它不再被证明属于注册者。防刷要靠别的手段（图片验证码已有、加 IP/设备维度限流）。
+1. **只用手机号注册的老用户没有邮箱可收码**。`POST /api/v1/auth/password/otp` 的入参
+   已从 `{"phone": ...}` 改为 `{"account": ...}`，手机号与邮箱都接受（服务端按是否含 `@`
+   路由到 `FindByEmail` / `FindByPhone`），但只绑了手机号的账号在 `smtp` 通道下仍然收不到码 ——
+   这类用户需要先用已登录的设备在设置里补绑邮箱。
+2. **注册验证从「验证手机号归属」改为「验证邮箱归属」**。手机号仍可填、仍可作为登录账号，
+   但它不再被证明属于注册者。注意图形验证码**已连同端点一起删除**（它证明的是「对面是人」，
+   不是「这个邮箱属于他」），防刷现在靠：邮箱维度 60 秒冷却 + IP 维度限流 + 错码 5 次锁 15 分钟。
 3. 邮箱验证码的到达体验不如短信：可能进垃圾箱、企业邮箱可能延迟。需要在 UI 上写
    「没收到？检查垃圾邮件」。
 
@@ -409,7 +429,46 @@ Android 端还涉及 Google Play 服务可达性。文档提到测试号码的�
 
 ## 4. 首选方案的获取步骤
 
-### 4.1 Resend（邮箱验证码，推荐）
+### 4.0 QQ / 163 邮箱授权码（当前实际在用，最快）
+
+要的是**授权码**，不是邮箱登录密码。填错的表现极具误导性：注册页一直转圈，
+前端完全看不出是发信认证失败，服务端只拿到一句 `535 Login Fail`。
+（代码里已把这句提示塞进错误信息：`smtp 认证失败（QQ/163 需使用授权码而非登录密码）`）
+
+**QQ 邮箱**
+
+1. 浏览器打开 mail.qq.com 登录 → 右上 **设置** → **账号**
+2. 找到「POP3/IMAP/SMTP/Exchange/CardDAV/CalDAV服务」
+3. 开启 **IMAP/SMTP 服务**（或 POP3/SMTP），按提示发一条短信验证
+4. 验证通过后页面直接给出一串 16 位小写字母 —— 这就是授权码，**只显示一次**，当场存好
+5. 服务器参数：`smtp.qq.com` / 端口 `465` / 登录名就是你的 QQ 邮箱地址
+
+**163 邮箱**
+
+1. mail.163.com 登录 → **设置** → **POP3/SMTP/IMAP**
+2. 开启 **SMTP 服务** → 新增「客户端授权密码」，扫码或短信验证后得到授权密码
+3. 服务器参数：`smtp.163.com` / 端口 `465` / 登录名就是你的 163 邮箱地址
+
+**Gmail** 需要先开两步验证，再到「应用专用密码」生成 16 位密码；
+服务器 `smtp.gmail.com` / 端口 `587`（STARTTLS）或 `465`（隐式 TLS）。
+
+> 拿到后**先验连通性再上线**，顺序别颠倒 —— 上线后才发现发不出去，
+> 用户那边是「注册页一直转圈」，没有任何错误提示：
+>
+> ```bash
+> # 1. 服务器出站端口是否可达（云厂商基本都封 25，这步失败就别往下走了）
+> timeout 8 bash -c 'exec 3<>/dev/tcp/smtp.qq.com/465' && echo 465 可达
+>
+> # 2. 用真实凭据实发一封（仓库里有现成的测试，不带凭据会自动跳过，不会污染 CI）
+> cd server && SMTP_HOST=smtp.qq.com SMTP_PORT=465 \
+>   SMTP_USER=你的邮箱 SMTP_PASSWORD=授权码 SMTP_TO=收件邮箱 \
+>   go test ./internal/pkg/codesender/ -run TestSMTPLiveSend -v
+> ```
+>
+> 第 1 步在**生产服务器上**跑，不是在本机 —— 本机通不代表服务器通，
+> 而且部分邮件服务商会拒绝来自陌生海外 IP 的 SMTP 登录。
+
+### 4.1 Resend（邮箱验证码，需自有域名）
 
 页面路径按 2026-10-06 的控制台布局描述，改版后以实际为准。
 
@@ -498,115 +557,64 @@ Android 端还涉及 Google Play 服务可达性。文档提到测试号码的�
 
 ---
 
-## 5. 接入本项目（本节只说要做什么，不含实现）
+## 5. 在本项目里怎么配（已实现，照着填即可）
 
-> 本文档是选型调研，**不附带任何代码改动**。以下是实施该功能的 PR 需要动的地方。
+> 调研时这一节写的是「将来要改哪些地方」。现在通道已经实现并实测通过，
+> 本节改成「怎么配」。实现落在 `server/internal/pkg/codesender/`：
+> `codesender.go`（接口 + `New()` 工厂 + 打码）、`smtp.go`、`resend.go`。
 
-### 5.1 实现一个 `codesender.Sender`
-
-`server/internal/pkg/codesender/codesender.go` 已定义：
-
-```go
-type Sender interface {
-    Send(ctx context.Context, target, code string) error
-}
-```
-
-新增文件（如 `resend.go` / `tencent.go`），实现该接口，并在同目录 `New()` 的 switch 里加 case：
-
-```go
-func New(provider string, logger *zap.Logger) (Sender, error) {
-    switch provider {
-    case "log":
-        return NewLogSender(logger), nil
-    // + case "resend": ...
-    // + case "tencent": ...
-    default:
-        return nil, fmt.Errorf("未支持的验证码下发通道: %q", provider)
-    }
-}
-```
-
-实现时必须守住的四件事：
-
-1. **真失败要返回 error，不能吞**。`AuthService.RequestResetCode`
-   （`server/internal/service/auth_service.go:124`）在 `Send` 返回错误时会回滚
-   Redis 里的验证码与冷却键。吞掉错误 = 用户被冷却期锁住却收不到码，
-   这正是 `Sender` 接口注释里写明要避免的情况。
-2. **不要把验证码写进日志**。参照 `LogSender` 用 `maskCode` / `maskTarget` 打码，
-   `codesender_test.go` 里已有针对日志明文的断言，新 provider 应补同类测试。
-3. **`New()` 的签名可能要改**。当前只收 `(provider string, logger *zap.Logger)`，
-   真实 provider 需要 API Key / 签名名 / 模板 ID 等配置。
-   把 `config.CodeSenderConfig` 整个传进来最省事，调用点只有
-   `server/cmd/server/main.go:56` 一处。改签名时记得同步
-   `codesender_test.go` 里的三个 `New(...)` 调用。
-4. **超时要设**。`Send` 拿到的是请求上下文，但第三方 HTTP 调用应另加一个
-   短超时（几秒），否则服务商抖动会把发码接口拖住。
-
-### 5.2 后端配置
-
-`server/internal/config/config.go` 的 `CodeSenderConfig` 目前只有 `Provider` 一个字段，
-需要按所选 provider 扩展。**这里有一个会静默吃掉配置的坑**，文件里已有注释说明过同类问题：
-
-> `AutomaticEnv` 不会把未知 key 登记进 `AllKeys`，而 `Unmarshal` 只遍历 `AllKeys`，
-> 因此必须显式声明默认值让 key 可见，否则环境变量会被静默丢弃。
-
-也就是说，每个新增的 `codesender.*` 配置项都必须在 `Load()` 里加一行
-`v.SetDefault("codesender.xxx", "")`（和现有 `minio.public_endpoint`、
-`turn.static_auth_secret`、`websocket.allowed_origins` 的处理方式一致）。
-漏了这一步的症状是：env 填得好好的，容器里 `env | grep CODESENDER` 也能看到，
-但程序读到空字符串，发码永远失败。
-
-`server/config/config.yaml` 的 `codesender:` 段保持 `provider: log`
-（开发默认），真值只走环境变量，不进仓库。
-
-### 5.3 `deploy/.env` 与 `deploy/.env.prod.example`
-
-在 `.env.prod.example` 的「其他」之前加一节（Resend 为例）：
+### 5.1 填 `deploy/.env`
 
 ```ini
-# ---------- 验证码下发通道 ----------
-# log    = 打码写日志（开发/测试；生产填这个等于验证码永远发不出去）
-# resend = 邮箱验证码（个人主体唯一可行方案，见 docs/deploy/sms.md）
-# 填未知值时后端启动即 FATAL，不会静默退回 log。
-CODESENDER_PROVIDER=log
-CODESENDER_RESEND_API_KEY=
-# 发件地址，必须在 Resend 已验证的域名下
-CODESENDER_FROM=
+CODESENDER_PROVIDER=smtp
+CODESENDER_HOST=smtp.qq.com
+CODESENDER_PORT=465          # 465 隐式 TLS / 587 STARTTLS，**不要填 25**
+CODESENDER_USERNAME=         # 留空则取 FROM（QQ / 163 的登录名就是邮箱地址）
+CODESENDER_PASSWORD=         # 授权码，不是邮箱登录密码
+CODESENDER_FROM=你的邮箱@qq.com
+CODESENDER_SUBJECT=          # 留空取默认「验证码」
 ```
 
-`install.sh` 的必填项校验里要不要加这几项，取决于是否允许「先装完再配通道」。
-建议**不加进必填**，但在 `provider != log` 时校验对应密钥非空，
-并在安装结束的提示里明确写一句「验证码通道当前为 log，忘记密码功能不可用」。
+`deploy/.env.prod.example` 里有完整注释版。改完**必须重建 server 容器**让新环境变量生效：
 
-### 5.4 `deploy/docker-compose.prod.yml`
-
-环境变量加在 `migrate` 服务的 `environment: &server_env` 锚点里即可——
-`yuanchat-server` 用的是 `*server_env`，两个服务共享同一份。
-与现有风格对齐（`${VAR:-}` 表示可空，`${VAR:?msg}` 表示缺失即报错退出）：
-
-```yaml
-YUANCHAT_CODESENDER_PROVIDER: ${CODESENDER_PROVIDER:-log}
-YUANCHAT_CODESENDER_RESEND_API_KEY: ${CODESENDER_RESEND_API_KEY:-}
-YUANCHAT_CODESENDER_FROM: ${CODESENDER_FROM:-}
+```bash
+./deploy/yuanchat.sh restart       # 或 docker compose -f deploy/docker-compose.prod.yml up -d
 ```
 
-`YUANCHAT_` 前缀 + 下划线替换点号是 viper 的 `SetEnvPrefix("YUANCHAT")` +
-`SetEnvKeyReplacer` 决定的，即 `YUANCHAT_CODESENDER_RESEND_API_KEY`
-对应 `codesender.resend_api_key`。
+### 5.2 两个会让你白排查半天的点
 
-### 5.5 走邮箱还需要改的业务链路
+1. **`provider` 填未知值时进程启动即失败**，这是故意的 —— 静默退回 `log` 等于验证码
+   永远发不出去，而且不会有人发现。所以**升级顺序不能颠倒**：必须先部署支持该 provider
+   的新镜像，再改 `.env` 开启。拿旧镜像配 `smtp`，结果是后端直接起不来。
+2. **选了真实通道却缺凭据，同样启动即失败**（缺 `host` / `from` / `password` 任一项）。
+   带着空凭据启动的话，要等第一个用户来发码才暴露，而那时他已经被 60 秒冷却锁住了 ——
+   「收不到码且不能重发」比「服务起不来」难查得多。
 
-这部分不是通道的事，但不改就只是「换了个通道的半成品」：
+### 5.3 已经改完的业务链路
 
-- `POST /api/v1/auth/password/otp` 当前入参是 `{"phone": ...}`，
-  `AuthService.RequestResetCode` 直接把 phone 作为 `Send` 的 target。
-  走邮箱需要让它接受邮箱、或接受「手机号 / 邮箱」二选一，
-  并相应调整 Redis key（`otpKey(target)`）与审计行的 `Target` 字段。
-- 用户未绑定邮箱时的引导文案（前端）。
-- 文案全部走 i18n，四种语言（`zh-CN` / `en-US` / `ja-JP` / `ko-KR`）同步补齐。
-- 对应的 MSW mock 要覆盖正常/空/错误/加载四态。
-- 单元测试：新 provider 的 `Send` 成功与失败分支、失败时 Redis 回滚是否发生。
+- **注册改邮箱验证码**：`POST /api/v1/auth/register/otp`（body `{"email"}`）发码，
+  `POST /api/v1/auth/register` 的 `captcha_id` / `captcha_answer` 换成 `code`。
+  **图形验证码连 `GET /api/v1/captcha` 端点一起删除了。**
+  注册发码对「邮箱是否已注册」一律照发、响应完全一致 —— 反过来按存在性区别对待，
+  接口就变成账号枚举器（收到码说明未注册，没收到说明已注册）。真正的拦截在注册时回 409。
+- **找回密码支持邮箱**：`/auth/password/otp` 与 `/auth/password/verify` 的入参
+  从 `phone` 改为 `account`，手机号与邮箱都接受（服务端按是否含 `@` 路由）。
+  为兼容已发布的旧客户端，服务端仍然接受 `phone` 字段。
+- **验证码不进日志**：`maskCode` / `maskTarget` 打码，`codesender_test.go` 有针对明文的断言。
+- **下发失败回滚**：`Send` 返回错误时把 Redis 里的验证码与冷却键一并删除。
+- **防刷**：邮箱维度 60 秒冷却 + IP 维度限流（发码 3/5）+ 错码 5 次锁 15 分钟。
+- 文案四语（`zh-CN` / `en-US` / `ja-JP` / `ko-KR`）同步，MSW mock 覆盖四态。
+
+### 5.4 环境变量命名规则
+
+`YUANCHAT_` 前缀 + 下划线替换点号，由 viper 的 `SetEnvPrefix("YUANCHAT")` +
+`SetEnvKeyReplacer` 决定，即 `YUANCHAT_CODESENDER_API_KEY` ↔ `codesender.api_key`。
+
+**每个 `codesender.*` 配置项都必须在 `Load()` 里有一行 `v.SetDefault`**。
+`AutomaticEnv` 不会把未知 key 登记进 `AllKeys`，而 `Unmarshal` 只遍历 `AllKeys` ——
+漏登记的症状是：env 填得好好的，容器里 `env | grep CODESENDER` 也看得到，
+但程序读到空串，发码永远失败。`config_env_test.go` 专门盯着这件事，删掉任一
+`SetDefault` 都会让它失败。
 
 ---
 

@@ -36,84 +36,6 @@ const MOCK_USER: MockUser = {
 };
 
 // ========================================
-// Captcha SVG 生成
-// ========================================
-
-/** 生成随机验证码文本（4 位字母数字混合，排除易混淆字符） */
-function randomCode(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
-  let code = "";
-  for (let i = 0; i < 4; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return code;
-}
-
-/** 随机 hsl 颜色（指定色相范围和饱和度/亮度） */
-function randomColor(hRange: [number, number] = [200, 260], s = 50, l = 45): string {
-  const h = hRange[0] + Math.random() * (hRange[1] - hRange[0]);
-  return `hsl(${h}, ${s}%, ${l}%)`;
-}
-
-/**
- * 生成美观的验证码 SVG
- *
- * 每次调用生成不同的随机验证码，
- * 包含背景噪点、干扰线、旋转字符，模拟真实验证码的视觉风格。
- */
-function generateCaptchaSvg(): string {
-  const W = 140;
-  const H = 48;
-  const code = randomCode();
-  const charWidth = W / (code.length + 1); // 字符间距
-  const fontSize = 22;
-
-  // 噪点（背景小圆点）
-  let noiseDots = "";
-  for (let i = 0; i < 18; i++) {
-    const cx = Math.random() * W;
-    const cy = Math.random() * H;
-    const r = 0.6 + Math.random() * 1.2;
-    noiseDots += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${randomColor([200, 260], 40, 60)}" opacity="${0.15 + Math.random() * 0.2}"/>`;
-  }
-
-  // 干扰线
-  let noiseLines = "";
-  for (let i = 0; i < 3; i++) {
-    const x1 = Math.random() * W * 0.5;
-    const y1 = 6 + Math.random() * (H - 12);
-    const x2 = W * 0.4 + Math.random() * W * 0.6;
-    const y2 = 6 + Math.random() * (H - 12);
-    noiseLines += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${randomColor([200, 240], 35, 55)}" stroke-width="${0.8 + Math.random() * 1.2}" opacity="0.35"/>`;
-  }
-
-  // 字符（每个字符独立旋转 + 轻微垂直偏移）
-  let chars = "";
-  for (let i = 0; i < code.length; i++) {
-    const x = charWidth * 0.6 + i * charWidth;
-    const y = 32 + (Math.random() - 0.5) * 6; // 垂直随机偏移 ±3px
-    const rotate = (Math.random() - 0.5) * 24; // 旋转 ±12°
-    const col = randomColor([210, 250], 45, 35);
-    chars += `<text x="${x}" y="${y}" font-size="${fontSize}" font-family="Georgia, 'Times New Roman', serif" font-weight="bold" fill="${col}" transform="rotate(${rotate}, ${x}, ${y})">${code[i]}</text>`;
-  }
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#f8fafc"/>
-      <stop offset="100%" stop-color="#f1f5f9"/>
-    </linearGradient>
-  </defs>
-  <rect width="${W}" height="${H}" fill="url(#bg)" rx="10"/>
-  <rect width="${W}" height="${H}" fill="none" stroke="#e2e8f0" stroke-width="1" rx="10"/>
-  ${noiseDots}
-  ${noiseLines}
-  ${chars}
-  <line x1="8" y1="10" x2="${W - 8}" y2="${H - 10}" stroke="${randomColor([200, 250], 30, 65)}" stroke-width="0.7" opacity="0.25"/>
-</svg>`;
-}
-
-// ========================================
 // A8 认证补全链路的 Mock 常量与可变状态
 // ========================================
 
@@ -121,6 +43,10 @@ function generateCaptchaSvg(): string {
 const MOCK_OTP_CODE = "123456";
 /** 该手机号用于演示 60 秒冷却分支 */
 const MOCK_COOLDOWN_PHONE = "13800138001";
+/** 该邮箱用于演示注册发码的 60 秒冷却分支 */
+const MOCK_COOLDOWN_EMAIL = "cooldown@yuanchat.com";
+/** 该邮箱用于演示「邮箱已被注册」分支 */
+const MOCK_TAKEN_EMAIL = "taken@yuanchat.com";
 const MOCK_RESET_TICKET = "mock-reset-ticket";
 const MOCK_QR_TOKEN = "mock-qr-token";
 /** 轮询密钥：只在建会话响应里给出，不进二维码内容 */
@@ -849,31 +775,60 @@ export const handlers = [
   }),
 
   // --------------------------------------------------
+  // 认证 — 注册发码
+  // POST /api/v1/auth/register/otp
+  // 正常 → 204 空体；空/非法邮箱 → 400；冷却邮箱 → 429；delay 给加载态
+  // --------------------------------------------------
+  http.post("http://localhost:8085/api/v1/auth/register/otp", async ({ request }) => {
+    await delay(300);
+    const body = (await request.json()) as { email?: string };
+
+    if (!body.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) {
+      return apiError(400, "auth.emailInvalid");
+    }
+    // 同邮箱 60 秒冷却：真实后端按 Redis 键判，mock 用固定邮箱演示该分支
+    if (body.email === MOCK_COOLDOWN_EMAIL) {
+      return HttpResponse.json({ code: 429, message: "auth.otpCooldown" }, { status: 429 });
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // --------------------------------------------------
   // 认证 — 注册
   // POST /api/v1/auth/register
+  // 邮箱 + 6 位验证码 + 密码 + 昵称必填，手机号选填；
+  // 码错 → 400 auth.otpWrong，邮箱已占用 → 409 auth.accountTaken
   // --------------------------------------------------
   http.post("http://localhost:8085/api/v1/auth/register", async ({ request }) => {
     await delay(800);
     const body = (await request.json()) as {
-      phone?: string;
+      email?: string;
+      code?: string;
       password?: string;
-      captcha_id?: string;
-      captcha_answer?: number;
       nickname?: string;
+      phone?: string;
     };
 
-    if (!body.phone || !body.password || !body.nickname) {
-      return apiError(40003, "手机号、密码、昵称不能为空");
+    if (!body.email || !body.password || !body.nickname) {
+      return apiError(400, "auth.registerFailed");
     }
-    if (!body.captcha_answer) {
-      return apiError(40004, "验证码不能为空");
+    if (!body.code) {
+      return apiError(400, "auth.otpRequired");
+    }
+    if (body.code !== MOCK_OTP_CODE) {
+      return apiError(400, "auth.otpWrong");
+    }
+    if (body.email === MOCK_TAKEN_EMAIL) {
+      return HttpResponse.json({ code: 409, message: "auth.accountTaken" }, { status: 409 });
     }
 
     return apiOk({
       user: {
         ...MOCK_USER,
         id: "user_" + Date.now(),
-        phone: body.phone,
+        email: body.email,
+        // 手机号选填：没填就沿用演示账号自带的那个，不要吐空串
+        phone: body.phone || MOCK_USER.phone,
         nickname: body.nickname,
       },
       access_token: "mock_access_token_" + Date.now(),
@@ -889,23 +844,6 @@ export const handlers = [
   http.post("http://localhost:8085/api/v1/auth/logout", async () => {
     await delay(300);
     return apiOk({ message: "logged out" });
-  }),
-
-  // --------------------------------------------------
-  // 验证码 — 获取
-  // GET /api/v1/captcha
-  // --------------------------------------------------
-  http.get("http://localhost:8085/api/v1/captcha", async () => {
-    await delay(300);
-
-    const svg = generateCaptchaSvg();
-
-    return new HttpResponse(svg, {
-      headers: {
-        "Content-Type": "image/svg+xml",
-        "X-Captcha-ID": "mock_captcha_" + Date.now(),
-      },
-    });
   }),
 
   // --------------------------------------------------
@@ -1293,15 +1231,17 @@ export const handlers = [
   // --------------------------------------------------
   // 改密第 1 步 — 下发验证码
   // POST /api/v1/auth/password/otp
-  // 未注册手机号与已注册的响应完全一致（同 204、同空体），避免暴露注册状态
+  // 未注册账号与已注册的响应完全一致（同 204、同空体），避免暴露注册状态
+  // 取值顺序与服务端一致：先 account（手机号或邮箱），为空再回落旧字段 phone
   // --------------------------------------------------
   http.post("http://localhost:8085/api/v1/auth/password/otp", async ({ request }) => {
     await delay(300);
-    const body = (await request.json()) as { phone?: string };
-    if (!body.phone) {
+    const body = (await request.json()) as { account?: string; phone?: string };
+    const account = body.account || body.phone;
+    if (!account) {
       return apiError(400, "auth.otpRequired");
     }
-    if (body.phone === MOCK_COOLDOWN_PHONE) {
+    if (account === MOCK_COOLDOWN_PHONE || account === MOCK_COOLDOWN_EMAIL) {
       return HttpResponse.json({ code: 429, message: "auth.sendFailed" }, { status: 429 });
     }
     return new HttpResponse(null, { status: 204 });
@@ -1314,8 +1254,8 @@ export const handlers = [
   // --------------------------------------------------
   http.post("http://localhost:8085/api/v1/auth/password/verify", async ({ request }) => {
     await delay(300);
-    const body = (await request.json()) as { phone?: string; code?: string };
-    if (!body.phone || !body.code) {
+    const body = (await request.json()) as { account?: string; phone?: string; code?: string };
+    if (!(body.account || body.phone) || !body.code) {
       return apiError(400, "auth.otpRequired");
     }
     if (body.code !== MOCK_OTP_CODE) {

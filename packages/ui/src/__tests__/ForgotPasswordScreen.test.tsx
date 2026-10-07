@@ -21,6 +21,8 @@ import { ForgotPasswordScreen } from "../auth/ForgotPasswordScreen";
 const OTP = "/api/v1/auth/password/otp";
 const VERIFY = "/api/v1/auth/password/verify";
 const RESET = "/api/v1/auth/password/reset";
+/** 第 1 步账号输入框的 placeholder（`auth.accountPlaceholder` 的 en-US 值） */
+const ACCOUNT = "Phone / email / YuanChat ID";
 
 /** 一次登记的响应；204 走空体分支 */
 interface Reply {
@@ -89,8 +91,8 @@ async function tick(seconds: number) {
   }
 }
 
-async function gotoStep2(phone = "13800138000") {
-  fireEvent.change(screen.getByPlaceholderText("Phone"), { target: { value: phone } });
+async function gotoStep2(account = "13800138000") {
+  fireEvent.change(screen.getByPlaceholderText(ACCOUNT), { target: { value: account } });
   fireEvent.click(screen.getByRole("button", { name: "Send Code" }));
   await flush();
   expect(screen.getByPlaceholderText("6-digit code")).toBeInTheDocument();
@@ -142,6 +144,48 @@ describe("ForgotPasswordScreen", () => {
     await gotoStep2();
     expect(countCalls(OTP)).toBe(1);
     expect(screen.getByText("Code sent to 13800138000")).toBeInTheDocument();
+  });
+
+  it("邮箱账号同样能走完发码→校验→改密整条路，请求体发的是 account 字段", async () => {
+    const email = "alice@example.com";
+    renderScreen();
+    await gotoStep2(email);
+    expect(screen.getByText("Code sent to " + email)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("6-digit code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await flush();
+    expect(screen.getByPlaceholderText("New password")).toBeInTheDocument();
+    const sent = (path: string): unknown => {
+      const call = vi.mocked(globalThis.fetch).mock.calls.find((c) => String(c[0]).endsWith(path));
+      return JSON.parse(String((call?.[1] as RequestInit).body)) as unknown;
+    };
+    // 字段名必须是 account：后端虽仍兼容 phone，但邮箱走 phone 字段语义错位
+    expect(sent(OTP)).toEqual({ account: email });
+    expect(sent(VERIFY)).toEqual({ account: email, code: "123456" });
+
+    await submitNewPassword("Abcdef12");
+    await flush();
+    expect(screen.getByText("Password reset")).toBeInTheDocument();
+  });
+
+  it("账号既不是手机号也不是邮箱时被前端挡住，不发请求", async () => {
+    renderScreen();
+    // 含 @ 但格式不对 → 邮箱文案
+    fireEvent.change(screen.getByPlaceholderText(ACCOUNT), { target: { value: "alice@" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send Code" }));
+    await flush();
+    expect(screen.getByText("Invalid email address")).toBeInTheDocument();
+    expect(countCalls(OTP)).toBe(0);
+
+    // 不含 @ 且不是 11 位手机号 → 手机号文案
+    fireEvent.change(screen.getByPlaceholderText(ACCOUNT), { target: { value: "12345" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send Code" }));
+    await flush();
+    expect(screen.getByText("Invalid phone number")).toBeInTheDocument();
+    expect(countCalls(OTP)).toBe(0);
+    // 仍停在第 1 步
+    expect(screen.queryByPlaceholderText("6-digit code")).toBeNull();
   });
 
   it("未注册手机号与已注册的渲染结果完全一致，且不额外探测手机号是否存在", async () => {
@@ -260,7 +304,7 @@ describe("ForgotPasswordScreen", () => {
   it("IP 限流的 429 显示通用限流文案，绝不把后端裸英文上屏", async () => {
     reply(OTP, envelope(429, "rate limit exceeded, please try again later"));
     renderScreen();
-    fireEvent.change(screen.getByPlaceholderText("Phone"), { target: { value: "13800138000" } });
+    fireEvent.change(screen.getByPlaceholderText(ACCOUNT), { target: { value: "13800138000" } });
     fireEvent.click(screen.getByRole("button", { name: "Send Code" }));
 
     await flush();
@@ -291,7 +335,7 @@ describe("ForgotPasswordScreen", () => {
 
     await flush();
     expect(screen.getByText("Session expired, request a new code")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Phone")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(ACCOUNT)).toBeInTheDocument();
     expect(screen.queryByPlaceholderText("New password")).toBeNull();
   });
 

@@ -83,6 +83,7 @@ export {
   validatePassword,
   validateYuanchatId,
   validatePhone,
+  validateEmail,
   validateNickname,
 } from "./validation";
 export type { ValidationResult } from "./validation";

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Button, Input } from "@yuanchat/ui";
+import { Button, Input, ServerSwitchLink } from "@yuanchat/ui";
 import { useAuthStore, useIsDesktop } from "@yuanchat/shared";
 import { validatePassword } from "@yuanchat/shared/utils";
 import { useOpenAuthWindow } from "../hooks/useTauriAuth";
@@ -70,7 +70,7 @@ export function LoginPage() {
     let valid = true;
 
     if (!yuanchatId.trim()) {
-      setYuanchatIdError(t("auth.yuanchatIdRequired"));
+      setYuanchatIdError(t("auth.accountRequired"));
       valid = false;
     }
     const pwResult = validatePassword(password);
@@ -117,7 +117,7 @@ export function LoginPage() {
 
           <div className="space-y-1">
             <Input
-              placeholder={t("auth.yuanchatId")}
+              placeholder={t("auth.accountPlaceholder")}
               type="text"
               value={yuanchatId}
               onChange={(e) => {
@@ -174,6 +174,11 @@ export function LoginPage() {
               {t("auth.registerNow")}
             </button>
           </p>
+
+          {/* 登录前的服务器切换入口：内置地址连不上时，设置页在登录之后，够不着 */}
+          <div className="mt-3">
+            <ServerSwitchLink />
+          </div>
         </div>
       </div>
     </div>

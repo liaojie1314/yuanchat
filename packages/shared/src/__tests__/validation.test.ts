@@ -3,6 +3,7 @@ import {
   validatePassword,
   validateYuanchatId,
   validatePhone,
+  validateEmail,
   validateNickname,
 } from "../utils/validation";
 
@@ -152,6 +153,50 @@ describe("validatePhone", () => {
   it("rejects phone starting with invalid prefix", () => {
     const r = validatePhone("23812345678");
     expect(r.valid).toBe(false);
+  });
+});
+
+describe("validateEmail", () => {
+  it("accepts a normal email", () => {
+    expect(validateEmail("user@yuanchat.com").valid).toBe(true);
+  });
+
+  it("accepts dots, plus tags and subdomains in the local part / domain", () => {
+    expect(validateEmail("first.last+tag@mail.yuanchat.co.jp").valid).toBe(true);
+  });
+
+  it("ignores surrounding whitespace", () => {
+    expect(validateEmail("  user@yuanchat.com  ").valid).toBe(true);
+  });
+
+  it("rejects empty email", () => {
+    const r = validateEmail("");
+    expect(r.valid).toBe(false);
+    expect(r.errors).toContain("auth.emailRequired");
+  });
+
+  it("rejects whitespace-only email as empty rather than malformed", () => {
+    expect(validateEmail("   ").errors).toEqual(["auth.emailRequired"]);
+  });
+
+  it("rejects an email without @", () => {
+    const r = validateEmail("user.yuanchat.com");
+    expect(r.valid).toBe(false);
+    expect(r.errors).toContain("auth.emailInvalid");
+  });
+
+  it("rejects an email whose domain has no dot", () => {
+    expect(validateEmail("user@localhost").errors).toContain("auth.emailInvalid");
+  });
+
+  it("rejects a missing local part or missing domain", () => {
+    expect(validateEmail("@yuanchat.com").valid).toBe(false);
+    expect(validateEmail("user@").valid).toBe(false);
+  });
+
+  it("rejects a second @ and inner whitespace", () => {
+    expect(validateEmail("a@b@yuanchat.com").valid).toBe(false);
+    expect(validateEmail("us er@yuanchat.com").valid).toBe(false);
   });
 });
 

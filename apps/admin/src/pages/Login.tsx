@@ -4,12 +4,12 @@
  * role 不在登录响应里（shared User 无该字段），用一次最小 admin API
  * 调用探测：403 → 非管理员，立即登出并提示。
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button, Input } from "@yuanchat/ui";
 import { useAuthStore, ApiError } from "@yuanchat/shared";
-import { listUsers } from "../api";
+import { listUsers, takeSessionExpired } from "../api";
 
 export function LoginPage() {
   const { t } = useTranslation();
@@ -18,6 +18,13 @@ export function LoginPage() {
   const [pwd, setPwd] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // 被 401 弹回登录页时补一句过期提示，否则用户只看到自己莫名回到了登录页。
+  // 标记读一次即消费，所以放 effect 而不是 useState 初值里 ——
+  // StrictMode 会把初始化函数调两次，第一次就把标记吃掉、第二次拿到空值
+  useEffect(() => {
+    if (takeSessionExpired()) setError(t("admin.login.expired"));
+  }, [t]);
   const loginWithPassword = useAuthStore((s) => s.loginWithPassword);
   const logout = useAuthStore((s) => s.logout);
 
@@ -57,7 +64,7 @@ export function LoginPage() {
         </div>
         <div className="space-y-2">
           <Input
-            placeholder={t("auth.phoneOrEmail")}
+            placeholder={t("auth.accountPlaceholder")}
             value={account}
             onChange={(e) => setAccount(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleLogin()}

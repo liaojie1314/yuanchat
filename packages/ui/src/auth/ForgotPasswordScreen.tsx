@@ -2,12 +2,12 @@
  * ForgotPasswordScreen — 忘记密码三段式改密屏
  *
  * @description
- * 手机号 → 验证码 → 新密码三步走，三步分别打后端
+ * 账号（手机号或邮箱）→ 验证码 → 新密码三步走，三步分别打后端
  * `/auth/password/otp`、`/auth/password/verify`、`/auth/password/reset`。
  * web 与桌面共用这一份实现，两端页面只做路由与端差异注入。
  *
  * 三条与后端契约绑死的交互：
- * 1. 发码成功是 204，且**手机号未注册时响应完全相同** —— 因此这里没有、也不能有
+ * 1. 发码成功是 204，且**账号未注册时响应完全相同** —— 因此这里没有、也不能有
  *    任何「该号未注册」的分支，否则等于把用户枚举做成了功能。
  * 2. 验证码错误时后端不消耗验证码 —— 报错后停在第 2 步让用户原地重输，不重新发码。
  * 3. 改密成功后该用户所有设备的令牌立即失效 —— 成功即清本地登录态并回登录页。
@@ -38,6 +38,26 @@ type Step = 1 | 2 | 3;
 const RESEND_COOLDOWN_SECONDS = 60;
 /** 验证码位数，与后端下发的 6 位数字对齐 */
 const OTP_LENGTH = 6;
+/**
+ * 邮箱形态的最小判定：本地部分 @ 域名 . 后缀，三段都不含空白与 @。
+ * 刻意不复用 `validation.ts` 的工具（那里没有邮箱校验），也刻意不追求 RFC 5322 完备 ——
+ * 真正的归属判定在后端，这里只拦明显打错的输入。
+ */
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * 账号校验：含 `@` 按邮箱判，否则按手机号判
+ *
+ * @returns 失败原因的 i18n key；空串表示通过
+ */
+function validateAccount(account: string): string {
+  const value = account.trim();
+  if (value.includes("@")) {
+    return EMAIL_PATTERN.test(value) ? "" : "auth.emailInvalid";
+  }
+  const result = validatePhone(value);
+  return result.valid ? "" : result.errors[0];
+}
 
 export interface ForgotPasswordScreenProps {
   /** 窗口顶栏插槽（桌面端注入自绘标题栏；web 端不传） */
@@ -68,14 +88,14 @@ export function ForgotPasswordScreen({ topSlot, onDone }: ForgotPasswordScreenPr
   const { t } = useTranslation();
   const isMobile = useBreakpoint() === "mobile";
   const [step, setStep] = useState<Step>(1);
-  const [phone, setPhone] = useState("");
+  const [account, setAccount] = useState("");
   const [otp, setOtp] = useState("");
   const [ticket, setTicket] = useState("");
   /** 票据剩余秒数；null 表示当前没有票据 */
   const [ticketSeconds, setTicketSeconds] = useState<number | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [phoneError, setPhoneError] = useState("");
+  const [accountError, setAccountError] = useState("");
   const [otpError, setOtpError] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [confirmError, setConfirmError] = useState("");
@@ -103,7 +123,7 @@ export function ForgotPasswordScreen({ topSlot, onDone }: ForgotPasswordScreenPr
       setPasswordError("");
       setConfirmError("");
       setStep(1);
-      setPhoneError(t("auth.resetTicketExpired"));
+      setAccountError(t("auth.resetTicketExpired"));
       return;
     }
     const timer = setTimeout(() => setTicketSeconds((s) => (s === null ? null : s - 1)), 1000);
@@ -112,16 +132,16 @@ export function ForgotPasswordScreen({ topSlot, onDone }: ForgotPasswordScreenPr
 
   /** 第 1 步发码，也是第 2 步「重发」的处理器（重发同样走真实发码端点） */
   const handleSendOtp = async () => {
-    const result = validatePhone(phone);
-    if (!result.valid) {
+    const errorKey = validateAccount(account);
+    if (errorKey) {
       // 校验工具返回 i18n key，落地文案在这里翻译
-      setPhoneError(t(result.errors[0]));
+      setAccountError(t(errorKey));
       return;
     }
-    setPhoneError("");
+    setAccountError("");
     setLoading(true);
     try {
-      await sendResetCode(phone);
+      await sendResetCode(account.trim());
       setCountdown(RESEND_COOLDOWN_SECONDS);
       // 重发后服务端换了新码，旧输入作废
       setOtp("");
@@ -130,7 +150,7 @@ export function ForgotPasswordScreen({ topSlot, onDone }: ForgotPasswordScreenPr
     } catch (e) {
       const message = t(mapAuthError(e, "auth.sendFailed"));
       if (step === 2) setOtpError(message);
-      else setPhoneError(message);
+      else setAccountError(message);
     } finally {
       setLoading(false);
     }
@@ -144,7 +164,7 @@ export function ForgotPasswordScreen({ topSlot, onDone }: ForgotPasswordScreenPr
     setOtpError("");
     setLoading(true);
     try {
-      const verified = await verifyResetCode(phone, otp);
+      const verified = await verifyResetCode(account.trim(), otp);
       setTicket(verified.resetTicket);
       setTicketSeconds(verified.expiresIn);
       setStep(3);
@@ -184,7 +204,7 @@ export function ForgotPasswordScreen({ topSlot, onDone }: ForgotPasswordScreenPr
   };
 
   const steps: Step[] = [1, 2, 3];
-  const stepLabels = [t("auth.phone"), t("auth.verificationCode"), t("auth.newPassword")];
+  const stepLabels = [t("auth.account"), t("auth.verificationCode"), t("auth.newPassword")];
 
   return (
     <div className="surface-gradient app-screen relative flex flex-col overflow-hidden">
@@ -278,22 +298,22 @@ export function ForgotPasswordScreen({ topSlot, onDone }: ForgotPasswordScreenPr
                   ))}
                 </div>
 
-                {/* 第 1 步：手机号 */}
+                {/* 第 1 步：账号（手机号或邮箱） */}
                 {step === 1 && (
                   <div className="space-y-1">
                     <p className="text-on-surface-variant mb-4 text-center text-sm">
-                      {t("auth.resetStepPhoneHint")}
+                      {t("auth.resetStepAccountHint")}
                     </p>
                     <Input
-                      placeholder={t("auth.phone")}
-                      type="tel"
-                      value={phone}
+                      placeholder={t("auth.accountPlaceholder")}
+                      type="text"
+                      value={account}
                       onChange={(e) => {
-                        setPhone(e.target.value);
-                        if (phoneError) setPhoneError("");
+                        setAccount(e.target.value);
+                        if (accountError) setAccountError("");
                       }}
                       onKeyDown={(e) => e.key === "Enter" && handleSendOtp()}
-                      error={phoneError}
+                      error={accountError}
                     />
                     <Button className="mt-1 w-full" onClick={handleSendOtp} disabled={loading}>
                       {loading ? t("auth.sending") : t("auth.sendCode")}
@@ -305,7 +325,7 @@ export function ForgotPasswordScreen({ topSlot, onDone }: ForgotPasswordScreenPr
                 {step === 2 && (
                   <div className="space-y-1">
                     <p className="text-on-surface-variant mb-4 text-center text-sm">
-                      {t("auth.otpSentTo", { phone })}
+                      {t("auth.otpSentTo", { target: account.trim() })}
                     </p>
                     <Input
                       placeholder={t("auth.otpPlaceholder")}
