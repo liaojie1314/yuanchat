@@ -109,6 +109,11 @@ export { MomentActivitiesView } from "./moments/MomentActivitiesView";
 export { SettingsScreen } from "./settings/SettingsScreen";
 export { ProfileEditView } from "./settings/ProfileEditView";
 export { UserStatusEditor } from "./settings/UserStatusEditor";
+export {
+  ServerEndpointEditor,
+  ServerEndpointDialog,
+  ServerSwitchLink,
+} from "./settings/ServerEndpointEditor";
 
 // 布局组件
 export { MainLayout } from "./layout/MainLayout";

@@ -10,6 +10,7 @@ export * from "./store/toastStore";
 export * from "./store/resetStores";
 export * from "./store/callStore";
 export { useMomentsStore } from "./store/momentsStore";
+export * from "./config/serverEndpoint";
 export * from "./api/client";
 export * from "./api/auth";
 export * from "./api/chat";

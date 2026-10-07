@@ -7,6 +7,7 @@
  * - AppearanceSection：主题双卡片可视化选择 + 语言分段控件（Segmented）
  * - FavoritesSection：收藏列表套上本页统一的标题块与卡片外框
  * - AboutSection：品牌 hero + 版本 + 内部链接（相关信息列表）
+ * - ServerSection：服务器地址查看与运行时切换（正式服 ↔ 本地开发）
  */
 import { useState, type ReactNode } from "react";
 import {
@@ -20,15 +21,22 @@ import {
   Mail,
   Moon,
   Phone,
+  Radio,
   Sun,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useBreakpoint, useThemeStore } from "@yuanchat/shared";
+import {
+  getServerEndpoint,
+  getServerEndpointOverride,
+  useBreakpoint,
+  useThemeStore,
+} from "@yuanchat/shared";
 import { SUPPORTED_LOCALES } from "@yuanchat/design-system/i18n";
 import { cn } from "@yuanchat/shared/utils";
 import { copyText } from "../util/copyText";
 import { E2EESection } from "../e2ee/E2EESection";
 import { FavoritesView } from "../favorites/FavoritesView";
+import { ServerEndpointEditor } from "./ServerEndpointEditor";
 import { APP_VERSION, maskPhone } from "./settingsUtils";
 
 /** 分组标题 + 副标（页面级） */
@@ -358,6 +366,41 @@ export function AboutSection({ extra }: { extra?: ReactNode } = {}) {
           value={t("settings.licenseValue")}
         />
       </InfoCard>
+    </div>
+  );
+}
+
+/**
+ * 服务器地址设置（设置页内嵌版）
+ *
+ * @description
+ * 表单本体在 {@link ServerEndpointEditor}，与登录页弹窗共用 —— 登录前那个入口才是关键：
+ * 内置地址连不上时根本进不到这个页面。这里只补一层当前状态展示。
+ */
+export function ServerSection() {
+  const { t } = useTranslation();
+  const current = getServerEndpoint();
+  const isOverridden = getServerEndpointOverride() !== null;
+
+  return (
+    <div>
+      <SectionHeader title={t("settings.server")} desc={t("settings.serverDesc")} />
+
+      <InfoCard>
+        <InfoRow icon={Globe} label={t("settings.serverApi")} value={current.apiBaseUrl} copyable />
+        <InfoRow icon={Radio} label={t("settings.serverWs")} value={current.wsUrl} copyable />
+        <InfoRow
+          icon={Info}
+          label={t("settings.serverSource")}
+          value={
+            isOverridden ? t("settings.serverSourceCustom") : t("settings.serverSourceBuiltin")
+          }
+        />
+      </InfoCard>
+
+      <div className="mt-6">
+        <ServerEndpointEditor />
+      </div>
     </div>
   );
 }
