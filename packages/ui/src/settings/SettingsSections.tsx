@@ -36,6 +36,7 @@ import { copyText } from "../util/copyText";
 import { E2EESection } from "../e2ee/E2EESection";
 import { FavoritesView } from "../favorites/FavoritesView";
 import { ServerEndpointEditor } from "./ServerEndpointEditor";
+import { BrandMark } from "../primitives/BrandMark";
 import { APP_VERSION } from "./settingsUtils";
 
 /** 分组标题 + 副标（页面级） */
@@ -323,8 +324,8 @@ export function AboutSection({ extra }: { extra?: ReactNode } = {}) {
 
       {/* 品牌 hero */}
       <div className="mb-6 flex flex-col items-center gap-3 py-6">
-        <div className="brand-gradient shadow-elevation-2 text-headline-md flex h-20 w-20 items-center justify-center rounded-lg font-bold text-white">
-          元
+        <div className="brand-gradient shadow-elevation-2 flex h-20 w-20 items-center justify-center rounded-lg text-white">
+          <BrandMark size={44} />
         </div>
         <p className="text-title-lg text-on-surface font-semibold">YuanChat</p>
         <p className="text-body-sm text-on-surface-variant">

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!--
+    Android 自适应图标的**前景层**：只画白色气泡，「元」字留成透明孔，
+    让背景层（品牌渐变）透出来 —— 效果与单张图一致，但交给系统遮罩裁切才不会变形。
+    整体缩到画布 62%：自适应图标只保证中心 72/108 ≈ 66% 这一圈不被裁掉。
+  -->
+  <mask id="bubble">
+    <rect width="1024" height="1024" fill="black"/>
+    <rect x="160" y="196" width="704" height="528" rx="172" fill="white"/>
+    <path d="M388 676 L344 828 L512 700 Z"
+          fill="white" stroke="white" stroke-width="48" stroke-linejoin="round" stroke-linecap="round"/>
+    <g fill="none" stroke="black" stroke-width="54" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M414 348 H628"/>
+      <path d="M336 448 H688"/>
+      <path d="M458 448 C458 546 430 606 392 644"/>
+      <path d="M578 448 V566 C578 610 606 630 668 624"/>
+    </g>
+  </mask>
+  <!-- 气泡 bbox 约 (160,196)-(864,852)，中心 (512,524)；按 0.90 缩放后落进 62% 安全区 -->
+  <g transform="translate(512 512) scale(0.902) translate(-512 -524)">
+    <rect width="1024" height="1024" fill="#ffffff" mask="url(#bubble)"/>
+  </g>
+</svg>

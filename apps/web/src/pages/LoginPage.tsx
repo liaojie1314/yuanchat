@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Button, Input, ServerSwitchLink } from "@yuanchat/ui";
+import { BrandMark, Button, Input, ServerSwitchLink } from "@yuanchat/ui";
 import { useAuthStore } from "@yuanchat/shared";
 import { validatePassword } from "@yuanchat/shared/utils";
-import { MessageCircle, QrCode } from "lucide-react";
+import { QrCode } from "lucide-react";
 
 export function LoginPage() {
   const { t } = useTranslation();
@@ -76,7 +76,7 @@ export function LoginPage() {
           {/* Logo */}
           <div className="mb-8 text-center">
             <div className="brand-gradient glow-brand mb-4 inline-flex h-16 w-16 items-center justify-center rounded-lg text-white shadow-lg">
-              <MessageCircle size={30} />
+              <BrandMark size={34} />
             </div>
             <h1 className="text-2xl font-bold text-on-surface">{t("auth.brandName")}</h1>
             <p className="mt-1 text-sm text-on-surface-variant">{t("auth.brandTagline")}</p>
