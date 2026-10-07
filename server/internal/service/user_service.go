@@ -139,8 +139,10 @@ func NewUserService(repo *repository.UserRepository, jwtGen *jwt.Generator, sidG
 }
 
 // RegisterRequest 是注册新账号的入参。
+//
+// 没有手机号：注册只认邮箱（验证码走 SMTP）。users.phone 列与按手机号
+// 登录都保留，仅供老账号使用，新账号的 phone 一律为 NULL。
 type RegisterRequest struct {
-	Phone    string `json:"phone"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
 	Nickname string `json:"nickname"`
@@ -175,7 +177,8 @@ func (s *UserService) Register(ctx context.Context, req RegisterRequest) (*AuthR
 	}
 
 	// 查重
-	exists, err := s.repo.ExistsByPhoneOrEmail(ctx, req.Phone, req.Email)
+	// 注册不收手机号，手机号位传空串：phone 是 NULL 或真实号码，匹配不到空串
+	exists, err := s.repo.ExistsByPhoneOrEmail(ctx, "", req.Email)
 	if err != nil {
 		return nil, fmt.Errorf("check duplicate: %w", err)
 	}
@@ -192,7 +195,6 @@ func (s *UserService) Register(ctx context.Context, req RegisterRequest) (*AuthR
 	user := &model.User{
 		ID:           uuid.New(),
 		ShortID:      shortID,
-		Phone:        strPtr(req.Phone),
 		Email:        strPtr(req.Email),
 		PasswordHash: hash,
 		Nickname:     req.Nickname,

@@ -15,7 +15,6 @@ export class RegisterPage {
   readonly codeInput: Locator;
   readonly sendCodeButton: Locator;
   readonly passwordInput: Locator;
-  readonly phoneInput: Locator;
   readonly registerButton: Locator;
   readonly loginLink: Locator;
 
@@ -26,7 +25,6 @@ export class RegisterPage {
     this.emailInput = page.getByPlaceholder("邮箱（用于接收验证码）");
     this.codeInput = page.getByPlaceholder("6 位验证码");
     this.passwordInput = page.getByPlaceholder("密码（至少 8 位）");
-    this.phoneInput = page.getByPlaceholder("手机号（选填）");
     // 同一个按钮在三种态下换文案：未发送 / 冷却中 / 冷却结束
     this.sendCodeButton = page.getByRole("button", {
       name: /^(发送验证码|发送中…|重新发送(（\d+s）)?)$/,
@@ -47,7 +45,7 @@ export class RegisterPage {
     await this.sendCodeButton.click();
   }
 
-  /** 填写必填字段并提交（手机号选填，不在这里填） */
+  /** 填写全部字段并提交（注册只有这四项） */
   async register(nickname: string, email: string, code: string, password: string): Promise<void> {
     await this.nicknameInput.fill(nickname);
     await this.emailInput.fill(email);

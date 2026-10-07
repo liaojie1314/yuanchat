@@ -31,13 +31,12 @@
 `/auth/qr` 对齐；旧的 `/users/register`、`/users/login` 已移除，不做兼容）。
 
 ```json
-// POST /auth/register 请求。email 与 code 必填，phone 选填（填了必须 11 位）
+// POST /auth/register 请求。四项全必填，没有手机号字段（验证码走 SMTP，手机号收不到码）
 {
   "email": "someone@example.com",
   "code": "123456",
   "password": "pass1234",
-  "nickname": "小元",
-  "phone": "13800138000"
+  "nickname": "小元"
 }
 
 // POST /auth/login 请求。account 可以是手机号 / 邮箱 / 元聊号三种形态
@@ -45,7 +44,7 @@
 ```
 
 注册错误：400 `auth.otpWrong`（码错或过期）、429 `auth.accountLocked`（错 5 次锁 15 分钟）、
-409 `auth.accountTaken`（邮箱或手机号已注册）。
+409 `auth.accountTaken`（邮箱已注册）。
 
 > **注册必须验证邮箱归属。** 此前这里是一道 SVG 算术验证码，它证明的是「对面是人」，
 > 不是「这个邮箱属于他」—— 任何人都能拿别人的邮箱注册。图形验证码连

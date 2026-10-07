@@ -3,7 +3,7 @@
  *
  * @description
  * 覆盖：三步走通到成功页、验证码错误后原地重输（不退回第 1 步）、
- * 未注册手机号与已注册不可区分（同样进入第 2 步）。
+ * 未注册邮箱与已注册不可区分（同样进入第 2 步）。
  * 使用 MSW mock API（VITE_ENABLE_MOCK=true），无需真实后端。
  *
  * MSW 侧约定：唯一被接受的验证码是 123456，其余一律回 auth.otpWrong 且不消耗验证码。
@@ -24,7 +24,7 @@ test.describe("忘记密码", () => {
   });
 
   test("三步走通后显示重置成功", async ({ page }) => {
-    await page.getByPlaceholder("手机号").fill("13800000001");
+    await page.getByPlaceholder("邮箱").fill("alice@yuanchat.com");
     await page.getByRole("button", { name: "发送验证码" }).click();
 
     await page.getByPlaceholder("6 位验证码").fill(VALID_CODE);
@@ -38,7 +38,7 @@ test.describe("忘记密码", () => {
   });
 
   test("验证码错误后留在第 2 步且验证码输入框仍可用", async ({ page }) => {
-    await page.getByPlaceholder("手机号").fill("13800000001");
+    await page.getByPlaceholder("邮箱").fill("alice@yuanchat.com");
     await page.getByRole("button", { name: "发送验证码" }).click();
 
     const codeInput = page.getByPlaceholder("6 位验证码");
@@ -56,10 +56,10 @@ test.describe("忘记密码", () => {
     await expect(page.getByPlaceholder("确认新密码")).toBeVisible();
   });
 
-  test("未注册手机号与已注册的表现完全一致", async ({ page }) => {
-    // 服务端对未注册号同样返回 204 空体，前端不得据此提示「该号未注册」，
+  test("未注册邮箱与已注册的表现完全一致", async ({ page }) => {
+    // 服务端对未注册邮箱同样返回 204 空体，前端不得据此提示「该邮箱未注册」，
     // 否则等于提供用户枚举接口
-    await page.getByPlaceholder("手机号").fill("19900000000");
+    await page.getByPlaceholder("邮箱").fill("nobody@yuanchat.com");
     await page.getByRole("button", { name: "发送验证码" }).click();
 
     await expect(page.getByPlaceholder("6 位验证码")).toBeVisible();

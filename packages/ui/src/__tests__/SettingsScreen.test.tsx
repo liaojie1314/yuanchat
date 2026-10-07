@@ -34,7 +34,7 @@ function LocationProbe() {
 describe("SettingsScreen", () => {
   beforeEach(() => {
     useAuthStore.setState({
-      user: { id: "u1", nickname: "Alice", shortId: 10001, phone: "13800000001" },
+      user: { id: "u1", nickname: "Alice", shortId: 10001, email: "alice@yuanchat.com" },
       isAuthenticated: true,
     });
   });
@@ -50,14 +50,16 @@ describe("SettingsScreen", () => {
     expect(screen.getByText("Appearance")).toBeInTheDocument();
   });
 
-  it("账号页手机号脱敏", () => {
+  it("账号页列出邮箱与元聊号（手机号已不再是账号字段）", () => {
     render(
       <MemoryRouter>
         <SettingsScreen />
       </MemoryRouter>,
     );
     fireEvent.click(screen.getByText("Account & Security"));
-    expect(screen.getByText("138****0001")).toBeInTheDocument();
+    expect(screen.getByText("alice@yuanchat.com")).toBeInTheDocument();
+    expect(screen.getByText("10001")).toBeInTheDocument();
+    expect(screen.queryByText("Phone")).toBeNull();
   });
 
   it("桌面端不渲染退出登录（登出唯一入口在左侧导航栏）", () => {

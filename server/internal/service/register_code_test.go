@@ -54,11 +54,36 @@ func TestSendRegisterCodeSendsToExistingEmail(t *testing.T) {
 // 手机号走注册发码必须直接拒绝：码是发到邮箱里的，手机号无从验证。
 func TestSendRegisterCodeRejectsNonEmail(t *testing.T) {
 	f := newAuthFixture(t)
-	if err := f.svc.SendRegisterCode(context.Background(), "13800138000"); !errors.Is(err, ErrCodeInvalid) {
-		t.Fatalf("err = %v，期望 ErrCodeInvalid", err)
+	if err := f.svc.SendRegisterCode(context.Background(), "13800138000"); !errors.Is(err, ErrTargetNotEmail) {
+		t.Fatalf("err = %v，期望 ErrTargetNotEmail", err)
 	}
 	if f.sender.count() != 0 {
 		t.Fatal("非邮箱不应触发下发")
+	}
+}
+
+// 手机号走改密发码也必须在入口就被拒。
+//
+// 这不只是「发不出去」：放手机号进来的话，已注册的手机号会一路走到 Send 才失败并返回
+// 500，而未注册的手机号在查库那步静默返回 204 —— 两种响应不同，接口就成了
+// 「这个手机号是否注册」的探测器。所以必须在查库**之前**按同一个错误拒掉，
+// 本用例特意用一个**已注册**的手机号，确保拒绝发生在查库之前。
+func TestSendResetCodeRejectsPhone(t *testing.T) {
+	f := newAuthFixture(t)
+	ctx := context.Background()
+	// 用一个**已注册**的手机号：拒绝必须发生在查库之前，否则就有响应差异
+	user, _ := f.seedResetUser(t, "手机号用户")
+	phone := *user.Phone
+
+	if err := f.svc.SendResetCode(ctx, phone); !errors.Is(err, ErrTargetNotEmail) {
+		t.Fatalf("err = %v，期望 ErrTargetNotEmail", err)
+	}
+	if f.sender.count() != 0 {
+		t.Fatal("非邮箱不应触发下发")
+	}
+	// 冷却键也不能留下：否则用户换成邮箱重试还要白等 60 秒
+	if f.exists(t, "auth:pwd:otp:cd:"+phone) {
+		t.Error("入口拒绝不应写冷却键")
 	}
 }
 

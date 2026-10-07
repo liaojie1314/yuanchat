@@ -27,8 +27,10 @@ func NewAuthHandler(svc *service.AuthService, logger *zap.Logger) *AuthHandler {
 
 // SendResetCodeRequest 是发送改密验证码的请求体。
 //
-// Account 为手机号或邮箱。保留 Phone 只为兼容已发布的旧客户端 ——
-// 登录早就支持邮箱，找回密码却只认手机号，邮箱注册的用户会彻底锁死在门外。
+// Account 只能是邮箱 —— 验证码通道是 SMTP，手机号收不到码。
+// 字段名仍叫 account 而不是 email：登录那侧的账号形态确实有三种，
+// 这里保持同名便于客户端复用同一个输入框状态。
+// 保留 Phone 只为兼容已发布的旧客户端（旧版把邮箱也塞在 phone 里发）。
 type SendResetCodeRequest struct {
 	Account string `json:"account"`
 	Phone   string `json:"phone"`
@@ -68,15 +70,16 @@ type ResetPasswordRequest struct {
 	NewPassword string `json:"new_password" binding:"required"`
 }
 
-// SendResetCode 向手机号或邮箱下发 6 位改密验证码。
+// SendResetCode 向邮箱下发 6 位改密验证码。
 //
+// 只接受邮箱：验证码通道是 SMTP，手机号收不到码（详见 service.SendResetCode 的说明）。
 // 账号未注册时同样返回 204：响应体、状态码都与已注册时一致，
 // 否则接口会退化成账号枚举工具。
 //
 //	@Summary		发送改密验证码
 //	@Tags			auth
 //	@Accept			json
-//	@Param			body	body	SendResetCodeRequest	true	"手机号或邮箱"
+//	@Param			body	body	SendResetCodeRequest	true	"邮箱"
 //	@Success		204
 //	@Failure		400	{object}	Response
 //	@Failure		429	{object}	Response
@@ -91,6 +94,12 @@ func (h *AuthHandler) SendResetCode(c *gin.Context) {
 	if err := h.svc.SendResetCode(c.Request.Context(), req.Target()); err != nil {
 		if errors.Is(err, service.ErrCodeCooldown) {
 			Error(c, http.StatusTooManyRequests, 429, "auth.sendFailed")
+			return
+		}
+		// 非邮箱是客户端输入问题，回 400；注意这条分支与账号是否存在无关，
+		// 任何非邮箱输入都走到这里，不泄露账号信息
+		if errors.Is(err, service.ErrTargetNotEmail) {
+			BadRequest(c, "auth.emailInvalid")
 			return
 		}
 		h.logger.Error("下发改密验证码失败", zap.Error(err))

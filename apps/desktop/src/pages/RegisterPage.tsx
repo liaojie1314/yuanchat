@@ -3,7 +3,7 @@
  *
  * @description
  * 邮箱验证码注册：邮箱 → 获取验证码（60 秒冷却）→ 填码 + 密码 + 昵称 → 建号即登录。
- * 手机号选填，留空就不发该字段（后端「填了必须 11 位」的校验会拦下空串）。
+ * 注册只收邮箱 —— 验证码通道是 SMTP，手机号拿不到码，填了也无从验证归属。
  * 交互与 Web 端注册页保持一致，这里只多出自绘标题栏与窗口级返回。
  *
  * 「获取验证码」按钮在倒计时与非倒计时两种态下宽度固定，避免文案长短不一导致布局抖动。
@@ -13,12 +13,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Trans, useTranslation } from "react-i18next";
 import { Button, Input } from "@yuanchat/ui";
 import { useAuthStore, useIsDesktop, ApiError } from "@yuanchat/shared";
-import {
-  validatePassword,
-  validatePhone,
-  validateNickname,
-  validateEmail,
-} from "@yuanchat/shared/utils";
+import { cn, validatePassword, validateNickname, validateEmail } from "@yuanchat/shared/utils";
 import { useCloseAuthWindow } from "../hooks/useTauriAuth";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { TitleBar } from "../components/TitleBar";
@@ -87,7 +82,6 @@ export function RegisterPage() {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
-  const [phone, setPhone] = useState("");
   /** 已发码的目标邮箱；非空即表示发过码，按钮从「发送」切到「重新发送」 */
   const [sentTo, setSentTo] = useState("");
   const [countdown, setCountdown] = useState(0);
@@ -95,7 +89,6 @@ export function RegisterPage() {
   const [emailError, setEmailError] = useState("");
   const [otpError, setOtpError] = useState("");
   const [passwordError, setPasswordError] = useState("");
-  const [phoneError, setPhoneError] = useState("");
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -111,7 +104,6 @@ export function RegisterPage() {
     setEmailError("");
     setOtpError("");
     setPasswordError("");
-    setPhoneError("");
   };
 
   /** 发码，也是倒计时结束后「重新发送」的处理器 */
@@ -162,25 +154,11 @@ export function RegisterPage() {
       valid = false;
     }
 
-    // 手机号选填：只有填了才校验格式
-    if (phone.trim()) {
-      const phResult = validatePhone(phone);
-      if (!phResult.valid) {
-        setPhoneError(t(phResult.errors[0]));
-        valid = false;
-      }
-    }
     if (!valid) return;
 
     setLoading(true);
     try {
-      await registerWithPassword(
-        email.trim(),
-        code.trim(),
-        password,
-        nickname,
-        phone.trim() || undefined,
-      );
+      await registerWithPassword(email.trim(), code.trim(), password, nickname);
       if (isDesktop) {
         await closeAuthWindow();
       } else {
@@ -224,7 +202,9 @@ export function RegisterPage() {
       )}
 
       <div className="relative flex flex-1 flex-col overflow-y-auto">
-        <div className="relative m-auto w-full max-w-md px-8 py-10">
+        <div
+          className={cn("relative m-auto w-full max-w-md", isMobile ? "px-6 py-8" : "px-8 py-10")}
+        >
           <div className="mb-7 text-center">
             <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-lg text-white">
               <UserPlus size={30} />
@@ -268,12 +248,12 @@ export function RegisterPage() {
                   error={emailError}
                 />
               </div>
-              {/* 宽度钉死 120px：两种态文案长短不同，不固定宽度就是在引入 CLS */}
+              {/* 宽度钉死 104px：两种态文案长短不同，不固定宽度就是在引入 CLS */}
               <button
                 type="button"
                 onClick={handleSendCode}
                 disabled={sending || countdown > 0}
-                className="mt-[1px] h-12 w-[120px] shrink-0 rounded-lg border border-outline-variant bg-surface-container-low px-1 text-xs font-medium text-primary transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:text-on-surface-variant disabled:opacity-60"
+                className="mt-[1px] h-12 w-[104px] shrink-0 rounded-lg border border-outline-variant bg-surface-container-low px-0.5 text-sm font-medium text-primary transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:text-on-surface-variant disabled:opacity-60"
               >
                 {sending
                   ? t("auth.sending")
@@ -310,20 +290,8 @@ export function RegisterPage() {
                 setPassword(e.target.value);
                 if (passwordError) setPasswordError("");
               }}
-              error={passwordError}
-            />
-            <Input
-              placeholder={t("auth.phoneOptional")}
-              /* 同邮箱：占位符带「选填」说明，读屏另给一个简名 */
-              aria-label={t("auth.phone")}
-              type="tel"
-              value={phone}
-              onChange={(e) => {
-                setPhone(e.target.value);
-                if (phoneError) setPhoneError("");
-              }}
               onKeyDown={(e) => e.key === "Enter" && handleRegister()}
-              error={phoneError}
+              error={passwordError}
             />
 
             <Button className="mt-1 w-full" onClick={handleRegister} disabled={loading}>

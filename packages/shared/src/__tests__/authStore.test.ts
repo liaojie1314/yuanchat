@@ -294,7 +294,7 @@ describe("authStore", () => {
       expect(state.accessToken).toBe("token_access_new");
     });
 
-    it("请求体是 email/code/password/nickname，且不含 captcha 字段", async () => {
+    it("请求体只有 email/code/password/nickname，不含 captcha 与 phone 字段", async () => {
       let sent: Record<string, unknown> = {};
       server.use(
         http.post("http://localhost:8085/api/v1/auth/register", async ({ request }) => {
@@ -327,7 +327,7 @@ describe("authStore", () => {
       expect(sent).not.toHaveProperty("captcha_answer");
     });
 
-    it("手机号选填：填了就带上，留空则整个字段不出现（空串会撞后端 11 位校验）", async () => {
+    it("注册契约里没有 phone：多传一个手机号实参也不会进请求体", async () => {
       let sent: Record<string, unknown> = {};
       server.use(
         http.post("http://localhost:8085/api/v1/auth/register", async ({ request }) => {
@@ -345,14 +345,13 @@ describe("authStore", () => {
         }),
       );
 
-      await useAuthStore
-        .getState()
-        .registerWithPassword("new@yuanchat.com", "123456", "Abc1234!", "新用户", "13800138000");
-      expect(sent.phone).toBe("13800138000");
+      // 故意绕过类型签名多传一个手机号：只有实现真的把 phone 透传出去才会失败，
+      // 这样一旦有人把旧的「手机号选填」实现改回来，这条用例立刻红。
+      const register = useAuthStore.getState().registerWithPassword as unknown as (
+        ...args: unknown[]
+      ) => Promise<void>;
+      await register("new@yuanchat.com", "123456", "Abc1234!", "新用户", "13800138000");
 
-      await useAuthStore
-        .getState()
-        .registerWithPassword("new@yuanchat.com", "123456", "Abc1234!", "新用户", "");
       expect(sent).not.toHaveProperty("phone");
     });
 

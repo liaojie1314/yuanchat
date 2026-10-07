@@ -33,10 +33,12 @@ const (
 
 // AuthService 可能返回的错误。
 var (
-	ErrCodeCooldown  = errors.New("verification code cooldown")
-	ErrCodeInvalid   = errors.New("invalid verification code")
-	ErrTooManyTries  = errors.New("too many verification attempts")
-	ErrTicketInvalid = errors.New("invalid reset ticket")
+	ErrCodeCooldown = errors.New("verification code cooldown")
+	ErrCodeInvalid  = errors.New("invalid verification code")
+	// ErrTargetNotEmail 表示发码目标不是邮箱。验证码通道是 SMTP，只能发邮件。
+	ErrTargetNotEmail = errors.New("verification target must be an email")
+	ErrTooManyTries   = errors.New("too many verification attempts")
+	ErrTicketInvalid  = errors.New("invalid reset ticket")
 )
 
 // AuthService 编排忘记密码的三段式流程、账号级登录防护与扫码登录状态机。
@@ -91,13 +93,20 @@ func (s *AuthService) findByAccount(ctx context.Context, target string) (*model.
 
 // SendResetCode 生成 6 位验证码并通过下发通道送出。
 //
-// target 可以是手机号或邮箱 —— 登录支持两种账号，找回密码就必须同样支持，
-// 否则邮箱注册的用户永远找不回密码。
+// target 只接受**邮箱**。下发通道是 SMTP，验证码只能发到邮箱里去；
+// 放手机号进来不只是「发不出去」那么轻 —— 已注册的手机号会一路走到 Send 才失败，
+// 返回 500，而未注册的手机号在下面静默返回 204，两种响应不同，接口就退化成
+// 「这个手机号是否注册」的探测器。统一在入口按同一个错误拒掉，所有非邮箱输入
+// 得到完全一致的响应。
 //
 // 账号未注册时直接返回 nil 且不下发：端点对「已注册」与「未注册」给出完全一样的结果，
 // 否则接口会退化成账号枚举工具。
 // 下发通道报错时把验证码与冷却键一并回滚，否则用户被冷却期锁住却收不到码。
 func (s *AuthService) SendResetCode(ctx context.Context, target string) error {
+	if !strings.Contains(target, "@") {
+		return ErrTargetNotEmail
+	}
+
 	cooling, err := s.rdb.Exists(ctx, otpCooldownKey(target)).Result()
 	if err != nil {
 		return fmt.Errorf("check cooldown: %w", err)
@@ -331,7 +340,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID, oldPassword, n
 // 某个邮箱是不是本站用户。已注册的邮箱即使拿到码也走不下去，Register 会在查重时 409。
 func (s *AuthService) SendRegisterCode(ctx context.Context, email string) error {
 	if !strings.Contains(email, "@") {
-		return ErrCodeInvalid
+		return ErrTargetNotEmail
 	}
 
 	cooling, err := s.rdb.Exists(ctx, regCooldownKey(email)).Result()

@@ -21,8 +21,8 @@ import { ForgotPasswordScreen } from "../auth/ForgotPasswordScreen";
 const OTP = "/api/v1/auth/password/otp";
 const VERIFY = "/api/v1/auth/password/verify";
 const RESET = "/api/v1/auth/password/reset";
-/** 第 1 步账号输入框的 placeholder（`auth.accountPlaceholder` 的 en-US 值） */
-const ACCOUNT = "Phone / email / YuanChat ID";
+/** 第 1 步邮箱输入框的 placeholder（`auth.emailPlaceholder` 的 en-US 值） */
+const EMAIL = "Email (for verification code)";
 
 /** 一次登记的响应；204 走空体分支 */
 interface Reply {
@@ -91,8 +91,8 @@ async function tick(seconds: number) {
   }
 }
 
-async function gotoStep2(account = "13800138000") {
-  fireEvent.change(screen.getByPlaceholderText(ACCOUNT), { target: { value: account } });
+async function gotoStep2(account = "alice@example.com") {
+  fireEvent.change(screen.getByPlaceholderText(EMAIL), { target: { value: account } });
   fireEvent.click(screen.getByRole("button", { name: "Send Code" }));
   await flush();
   expect(screen.getByPlaceholderText("6-digit code")).toBeInTheDocument();
@@ -139,15 +139,15 @@ describe("ForgotPasswordScreen", () => {
     vi.unstubAllGlobals();
   });
 
-  it("第 1 步提交手机号真的打发码端点并进入第 2 步", async () => {
+  it("第 1 步提交邮箱真的打发码端点并进入第 2 步", async () => {
     renderScreen();
     await gotoStep2();
     expect(countCalls(OTP)).toBe(1);
-    expect(screen.getByText("Code sent to 13800138000")).toBeInTheDocument();
+    expect(screen.getByText("Code sent to alice@example.com")).toBeInTheDocument();
   });
 
-  it("邮箱账号同样能走完发码→校验→改密整条路，请求体发的是 account 字段", async () => {
-    const email = "alice@example.com";
+  it("走完发码→校验→改密整条路，请求体发的是 account 字段", async () => {
+    const email = "bob@example.com";
     renderScreen();
     await gotoStep2(email);
     expect(screen.getByText("Code sent to " + email)).toBeInTheDocument();
@@ -160,7 +160,7 @@ describe("ForgotPasswordScreen", () => {
       const call = vi.mocked(globalThis.fetch).mock.calls.find((c) => String(c[0]).endsWith(path));
       return JSON.parse(String((call?.[1] as RequestInit).body)) as unknown;
     };
-    // 字段名必须是 account：后端虽仍兼容 phone，但邮箱走 phone 字段语义错位
+    // 字段名必须是 account：后端契约用的是这个名字，改成 email/phone 都会被 400
     expect(sent(OTP)).toEqual({ account: email });
     expect(sent(VERIFY)).toEqual({ account: email, code: "123456" });
 
@@ -169,40 +169,40 @@ describe("ForgotPasswordScreen", () => {
     expect(screen.getByText("Password reset")).toBeInTheDocument();
   });
 
-  it("账号既不是手机号也不是邮箱时被前端挡住，不发请求", async () => {
+  it("填手机号被前端挡住，不发请求（验证码只走 SMTP，手机号永远收不到）", async () => {
     renderScreen();
-    // 含 @ 但格式不对 → 邮箱文案
-    fireEvent.change(screen.getByPlaceholderText(ACCOUNT), { target: { value: "alice@" } });
+    // 本次要防的回归：注册已不收手机号，这里填手机号只会让用户等一封不会到的邮件
+    fireEvent.change(screen.getByPlaceholderText(EMAIL), { target: { value: "13800138000" } });
     fireEvent.click(screen.getByRole("button", { name: "Send Code" }));
     await flush();
     expect(screen.getByText("Invalid email address")).toBeInTheDocument();
     expect(countCalls(OTP)).toBe(0);
 
-    // 不含 @ 且不是 11 位手机号 → 手机号文案
-    fireEvent.change(screen.getByPlaceholderText(ACCOUNT), { target: { value: "12345" } });
+    // 带 @ 但缺域名后缀同样不放行
+    fireEvent.change(screen.getByPlaceholderText(EMAIL), { target: { value: "alice@" } });
     fireEvent.click(screen.getByRole("button", { name: "Send Code" }));
     await flush();
-    expect(screen.getByText("Invalid phone number")).toBeInTheDocument();
+    expect(screen.getByText("Invalid email address")).toBeInTheDocument();
     expect(countCalls(OTP)).toBe(0);
     // 仍停在第 1 步
     expect(screen.queryByPlaceholderText("6-digit code")).toBeNull();
   });
 
-  it("未注册手机号与已注册的渲染结果完全一致，且不额外探测手机号是否存在", async () => {
-    // 后端对两种手机号都回 204 空体，前端无从区分，也绝不能造出可区分的表现
+  it("未注册邮箱与已注册的渲染结果完全一致，且不额外探测邮箱是否存在", async () => {
+    // 后端对两种邮箱都回 204 空体，前端无从区分，也绝不能造出可区分的表现
     const { container: first } = renderScreen();
-    await gotoStep2("13800138000");
+    await gotoStep2("alice@example.com");
     // split/join 而不是 replaceAll：本包的 tsconfig 钉在 ES2019（对齐 build.target），
     // replaceAll 是 ES2021 的方法，用它会连带把 lib 抬高、让源码里的兼容问题失去门禁
-    const registered = first.innerHTML.split("13800138000").join("PHONE");
+    const registered = first.innerHTML.split("alice@example.com").join("ACCOUNT");
     expect(countCalls(OTP)).toBe(1);
     expect(calls).toEqual([OTP]);
     cleanup();
 
     calls = [];
     const { container: second } = renderScreen();
-    await gotoStep2("13900139000");
-    const unregistered = second.innerHTML.split("13900139000").join("PHONE");
+    await gotoStep2("nobody@example.com");
+    const unregistered = second.innerHTML.split("nobody@example.com").join("ACCOUNT");
 
     expect(unregistered).toBe(registered);
     expect(calls).toEqual([OTP]);
@@ -304,7 +304,9 @@ describe("ForgotPasswordScreen", () => {
   it("IP 限流的 429 显示通用限流文案，绝不把后端裸英文上屏", async () => {
     reply(OTP, envelope(429, "rate limit exceeded, please try again later"));
     renderScreen();
-    fireEvent.change(screen.getByPlaceholderText(ACCOUNT), { target: { value: "13800138000" } });
+    fireEvent.change(screen.getByPlaceholderText(EMAIL), {
+      target: { value: "alice@example.com" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Send Code" }));
 
     await flush();
@@ -335,7 +337,7 @@ describe("ForgotPasswordScreen", () => {
 
     await flush();
     expect(screen.getByText("Session expired, request a new code")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(ACCOUNT)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(EMAIL)).toBeInTheDocument();
     expect(screen.queryByPlaceholderText("New password")).toBeNull();
   });
 

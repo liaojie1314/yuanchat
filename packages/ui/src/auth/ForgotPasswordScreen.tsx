@@ -2,9 +2,13 @@
  * ForgotPasswordScreen — 忘记密码三段式改密屏
  *
  * @description
- * 账号（手机号或邮箱）→ 验证码 → 新密码三步走，三步分别打后端
+ * 邮箱 → 验证码 → 新密码三步走，三步分别打后端
  * `/auth/password/otp`、`/auth/password/verify`、`/auth/password/reset`。
  * web 与桌面共用这一份实现，两端页面只做路由与端差异注入。
+ *
+ * **只收邮箱**：验证码通道是 SMTP，手机号与元聊号都收不到码。登录可以用三种
+ * 账号形态，但那是因为登录只查库不发信；这里让用户填手机号等于让他等一封永远
+ * 不会到的邮件。请求体字段仍叫 `account`（与后端契约一致）。
  *
  * 三条与后端契约绑死的交互：
  * 1. 发码成功是 204，且**账号未注册时响应完全相同** —— 因此这里没有、也不能有
@@ -26,7 +30,7 @@ import {
   useAuthStore,
   useBreakpoint,
 } from "@yuanchat/shared";
-import { validatePassword, validatePhone } from "@yuanchat/shared/utils";
+import { validatePassword } from "@yuanchat/shared/utils";
 import { cn } from "@yuanchat/shared/utils";
 import { Button } from "../primitives/Button";
 import { Input } from "../primitives/Input";
@@ -46,17 +50,14 @@ const OTP_LENGTH = 6;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * 账号校验：含 `@` 按邮箱判，否则按手机号判
+ * 邮箱校验
  *
  * @returns 失败原因的 i18n key；空串表示通过
  */
-function validateAccount(account: string): string {
+function validateEmailAccount(account: string): string {
   const value = account.trim();
-  if (value.includes("@")) {
-    return EMAIL_PATTERN.test(value) ? "" : "auth.emailInvalid";
-  }
-  const result = validatePhone(value);
-  return result.valid ? "" : result.errors[0];
+  if (!value) return "auth.emailRequired";
+  return EMAIL_PATTERN.test(value) ? "" : "auth.emailInvalid";
 }
 
 export interface ForgotPasswordScreenProps {
@@ -132,7 +133,7 @@ export function ForgotPasswordScreen({ topSlot, onDone }: ForgotPasswordScreenPr
 
   /** 第 1 步发码，也是第 2 步「重发」的处理器（重发同样走真实发码端点） */
   const handleSendOtp = async () => {
-    const errorKey = validateAccount(account);
+    const errorKey = validateEmailAccount(account);
     if (errorKey) {
       // 校验工具返回 i18n key，落地文案在这里翻译
       setAccountError(t(errorKey));
@@ -204,7 +205,7 @@ export function ForgotPasswordScreen({ topSlot, onDone }: ForgotPasswordScreenPr
   };
 
   const steps: Step[] = [1, 2, 3];
-  const stepLabels = [t("auth.account"), t("auth.verificationCode"), t("auth.newPassword")];
+  const stepLabels = [t("auth.email"), t("auth.verificationCode"), t("auth.newPassword")];
 
   return (
     <div className="surface-gradient app-screen relative flex flex-col overflow-hidden">
@@ -298,15 +299,18 @@ export function ForgotPasswordScreen({ topSlot, onDone }: ForgotPasswordScreenPr
                   ))}
                 </div>
 
-                {/* 第 1 步：账号（手机号或邮箱） */}
+                {/* 第 1 步：邮箱 */}
                 {step === 1 && (
                   <div className="space-y-1">
                     <p className="text-on-surface-variant mb-4 text-center text-sm">
                       {t("auth.resetStepAccountHint")}
                     </p>
                     <Input
-                      placeholder={t("auth.accountPlaceholder")}
-                      type="text"
+                      placeholder={t("auth.emailPlaceholder")}
+                      /* 占位符里带括号说明，读屏念出来啰嗦，另给一个简名 */
+                      aria-label={t("auth.email")}
+                      type="email"
+                      autoComplete="email"
                       value={account}
                       onChange={(e) => {
                         setAccount(e.target.value);

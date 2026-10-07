@@ -2,7 +2,7 @@
  * 注册流程 E2E 测试
  *
  * @description
- * 覆盖：成功注册、表单校验错误（昵称/邮箱/验证码/密码/选填手机号）、
+ * 覆盖：成功注册、表单校验错误（昵称/邮箱/验证码/密码）、
  * 发码后的 60 秒冷却与按钮禁用、Enter 快捷键。
  * 使用 MSW mock API，mock 只接受验证码 123456。
  */
@@ -61,14 +61,10 @@ test.describe("Register Flow", () => {
     await expect(page.getByText("密码长度至少 8 位")).toBeVisible();
   });
 
-  test("optional phone is only validated when filled", async ({ page }) => {
-    await registerPage.nicknameInput.fill("新用户");
-    await registerPage.emailInput.fill("new@yuanchat.com");
-    await registerPage.codeInput.fill(OTP);
-    await registerPage.passwordInput.fill("Abc1234!");
-    await registerPage.phoneInput.fill("12345");
-    await registerPage.registerButton.click();
-    await expect(page.getByText("手机号格式不正确")).toBeVisible();
+  test("no phone field on the form at all", async ({ page }) => {
+    // 注册只收邮箱：手机号输入框整条移除，留着 placeholder 残留就是契约漂了
+    await expect(page.getByPlaceholder(/手机号/)).toHaveCount(0);
+    await expect(page.locator('input[type="tel"]')).toHaveCount(0);
   });
 
   test("send code requires a valid email first", async ({ page }) => {

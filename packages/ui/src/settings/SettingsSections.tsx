@@ -20,7 +20,6 @@ import {
   Key,
   Mail,
   Moon,
-  Phone,
   Radio,
   Sun,
 } from "lucide-react";
@@ -37,7 +36,7 @@ import { copyText } from "../util/copyText";
 import { E2EESection } from "../e2ee/E2EESection";
 import { FavoritesView } from "../favorites/FavoritesView";
 import { ServerEndpointEditor } from "./ServerEndpointEditor";
-import { APP_VERSION, maskPhone } from "./settingsUtils";
+import { APP_VERSION } from "./settingsUtils";
 
 /** 分组标题 + 副标（页面级） */
 /**
@@ -74,7 +73,7 @@ function InfoRow({
   copyable,
   action,
 }: {
-  icon: typeof Phone;
+  icon: typeof Mail;
   label: string;
   value: string;
   copyable?: boolean;
@@ -115,12 +114,10 @@ function InfoRow({
 
 /** 账号与安全：信息卡片 + 修改密码占位入口 */
 export function AccountSection({
-  phone,
   email,
   shortId,
   onChangePassword,
 }: {
-  phone?: string;
   email?: string;
   shortId?: number;
   /** 进入改密链路；不传则该入口保持禁用（宿主未提供实现时不该给出死按钮） */
@@ -133,11 +130,6 @@ export function AccountSection({
       {/* 端到端加密：开关 + PIN 备份/恢复 */}
       <E2EESection />
       <InfoCard>
-        <InfoRow
-          icon={Phone}
-          label={t("settings.phone")}
-          value={phone ? maskPhone(phone) : t("settings.notBound")}
-        />
         <InfoRow icon={Mail} label={t("settings.email")} value={email || t("settings.notBound")} />
         {shortId !== undefined && (
           <InfoRow

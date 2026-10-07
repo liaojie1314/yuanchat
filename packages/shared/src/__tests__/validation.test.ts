@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   validatePassword,
   validateYuanchatId,
-  validatePhone,
   validateEmail,
   validateNickname,
 } from "../utils/validation";
@@ -124,34 +123,6 @@ describe("validateYuanchatId", () => {
 
   it("rejects empty id", () => {
     const r = validateYuanchatId("   ");
-    expect(r.valid).toBe(false);
-  });
-});
-
-describe("validatePhone", () => {
-  it("accepts a valid phone number", () => {
-    expect(validatePhone("13812345678").valid).toBe(true);
-  });
-
-  it("accepts phone numbers starting with different prefixes", () => {
-    expect(validatePhone("15912345678").valid).toBe(true);
-    expect(validatePhone("18812345678").valid).toBe(true);
-  });
-
-  it("rejects empty phone", () => {
-    const r = validatePhone("");
-    expect(r.valid).toBe(false);
-    expect(r.errors).toContain("validation.phoneRequired");
-  });
-
-  it("rejects phone with wrong length", () => {
-    const r = validatePhone("1381234567");
-    expect(r.valid).toBe(false);
-    expect(r.errors).toContain("validation.phoneFormat");
-  });
-
-  it("rejects phone starting with invalid prefix", () => {
-    const r = validatePhone("23812345678");
     expect(r.valid).toBe(false);
   });
 });

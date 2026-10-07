@@ -82,7 +82,6 @@ export function truncate(text: string, maxLength: number): string {
 export {
   validatePassword,
   validateYuanchatId,
-  validatePhone,
   validateEmail,
   validateNickname,
 } from "./validation";

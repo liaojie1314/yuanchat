@@ -796,7 +796,7 @@ export const handlers = [
   // --------------------------------------------------
   // 认证 — 注册
   // POST /api/v1/auth/register
-  // 邮箱 + 6 位验证码 + 密码 + 昵称必填，手机号选填；
+  // 邮箱 + 6 位验证码 + 密码 + 昵称必填，没有手机号字段；
   // 码错 → 400 auth.otpWrong，邮箱已占用 → 409 auth.accountTaken
   // --------------------------------------------------
   http.post("http://localhost:8085/api/v1/auth/register", async ({ request }) => {
@@ -806,7 +806,6 @@ export const handlers = [
       code?: string;
       password?: string;
       nickname?: string;
-      phone?: string;
     };
 
     if (!body.email || !body.password || !body.nickname) {
@@ -827,8 +826,6 @@ export const handlers = [
         ...MOCK_USER,
         id: "user_" + Date.now(),
         email: body.email,
-        // 手机号选填：没填就沿用演示账号自带的那个，不要吐空串
-        phone: body.phone || MOCK_USER.phone,
         nickname: body.nickname,
       },
       access_token: "mock_access_token_" + Date.now(),

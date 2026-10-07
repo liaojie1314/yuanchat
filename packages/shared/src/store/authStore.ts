@@ -133,7 +133,6 @@ interface AuthState {
     code: string,
     password: string,
     nickname: string,
-    phone?: string,
   ) => Promise<void>;
   /** 登出（异步：先调 API 再清本地状态） */
   logout: () => Promise<void>;
@@ -190,23 +189,19 @@ export const useAuthStore = create<AuthState>()(
       /**
        * 密码注册
        *
-       * 需要邮箱 + 邮箱验证码 + 密码 + 昵称；手机号选填（填了后端按 11 位校验）。
-       * 手机号留空时**不发该字段**，而不是发空串 —— 后端 `omitempty` 之外的空串会撞上
-       * 「填了就必须 11 位」的校验。
+       * 需要邮箱 + 邮箱验证码 + 密码 + 昵称，没有别的字段 —— 注册只认邮箱。
        */
       registerWithPassword: async (
         email: string,
         code: string,
         password: string,
         nickname: string,
-        phone?: string,
       ) => {
         const data = await apiPost<LoginResponse>("/api/v1/auth/register", {
           email,
           code,
           password,
           nickname,
-          ...(phone ? { phone } : {}),
         });
         set({
           user: mapUser(data.user),

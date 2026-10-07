@@ -78,25 +78,6 @@ export function validateYuanchatId(id: string): ValidationResult {
 }
 
 /**
- * 手机号格式校验
- *
- * 要求：中国大陆手机号 11 位，以 1 开头
- *
- * @returns 校验结果，errors 为 i18n key 列表
- */
-export function validatePhone(phone: string): ValidationResult {
-  const errors: string[] = [];
-
-  if (!phone.trim()) {
-    errors.push("validation.phoneRequired");
-  } else if (!/^1[3-9]\d{9}$/.test(phone.trim())) {
-    errors.push("validation.phoneFormat");
-  }
-
-  return { valid: errors.length === 0, errors };
-}
-
-/**
  * 邮箱格式校验
  *
  * 要求：非空，且形如 `local@domain.tld`（本地部分与域名都不含空白与第二个 @，域名带点）

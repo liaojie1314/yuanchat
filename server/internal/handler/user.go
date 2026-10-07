@@ -50,7 +50,6 @@ func (h *UserHandler) Register(c *gin.Context) {
 	}
 
 	result, err := h.svc.Register(c.Request.Context(), service.RegisterRequest{
-		Phone:    req.Phone,
 		Email:    req.Email,
 		Password: req.Password,
 		Nickname: req.Nickname,
@@ -281,12 +280,12 @@ func (h *UserHandler) GetPublicProfile(c *gin.Context) {
 
 // RegisterRequest 是注册请求体。
 //
-// Email 必填且必须通过 Code 验证 —— 验证码是发到邮箱里的，
-// 没有邮箱就无从验证归属。Phone 保持可选，便于用户顺带补上。
+// 只收邮箱：Email 必填且必须通过 Code 验证 —— 验证码是发到邮箱里的，
+// 没有邮箱就无从验证归属；手机号拿不到码，所以注册链路不收它。
+// 老账号库里仍有 phone 列与按手机号登录，那是登录的事，与注册无关。
 type RegisterRequest struct {
 	Email    string `json:"email" binding:"required,email"`
 	Code     string `json:"code" binding:"required,len=6"`
-	Phone    string `json:"phone" binding:"omitempty,len=11"`
 	Password string `json:"password" binding:"required,min=8,max=64"`
 	Nickname string `json:"nickname" binding:"required,min=1,max=50"`
 }

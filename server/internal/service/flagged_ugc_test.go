@@ -58,7 +58,7 @@ func TestRegisterFlagsSensitiveNickname(t *testing.T) {
 	)
 	svc.SetUGCModeration(newUGCModeration(), repository.NewFlaggedUGCRepository(db))
 	badReq := RegisterRequest{
-		Phone:    "19800001111",
+		Email:    "ugc-bad@example.com",
 		Password: "Passw0rdX",
 		Nickname: testBadWord + "昵称",
 	}
@@ -81,7 +81,7 @@ func TestRegisterFlagsSensitiveNickname(t *testing.T) {
 	}
 
 	cleanReq := badReq
-	cleanReq.Phone = "19800002222"
+	cleanReq.Email = "ugc-clean@example.com"
 	cleanReq.Nickname = "干净的昵称"
 	if _, err := svc.Register(ctx, cleanReq); err != nil {
 		t.Fatalf("register with clean nickname: %v", err)
