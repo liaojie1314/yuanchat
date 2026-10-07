@@ -9,18 +9,78 @@
 - **WebSocket**：浏览器 WS API 无法携带 Header，改用 query 参数：
   `ws://<host>:8081/ws?token=<access_token>`。token 无效返回 HTTP 401，不升级连接。
 
-### POST /api/v1/auth/register / POST /api/v1/auth/login
+### POST /api/v1/auth/register/otp
 
-注册与登录（账号 = 手机号 / 邮箱 + 密码），统一收敛在 `/auth` 前缀下
-（与 `/auth/refresh`、`/auth/password`、`/auth/qr` 对齐；旧的
-`/users/register`、`/users/login` 已移除，不做兼容）。
+注册前先向邮箱下发 6 位验证码。成功返回 **204 无响应体**。
 
 ```json
-// POST /auth/register 请求
-{ "account": "13800138000", "password": "pass1234", "captcha_id": "...", "captcha_code": "abcd" }
+{ "email": "someone@example.com" }
 ```
 
-响应与 `POST /auth/refresh` 一致（登录响应额外含 `user` 字段）。
+**邮箱是否已注册，响应完全一致**（都是 204）。按存在性区别对待的话这个端点就是
+账号枚举器：收到码说明未注册、没收到说明已注册。真正的拦截在 `/auth/register` 查重回 409。
+
+> 这一点与 `/auth/password/otp` **相反** —— 后者对未注册账号静默不发码。
+> 两条链路的枚举面方向不同，不能照搬。
+
+限流：邮箱维度 60 秒冷却（429 `auth.otpCooldown`）+ IP 维度 3/5。
+
+### POST /api/v1/auth/register / POST /api/v1/auth/login
+
+注册与登录统一收敛在 `/auth` 前缀下（与 `/auth/refresh`、`/auth/password`、
+`/auth/qr` 对齐；旧的 `/users/register`、`/users/login` 已移除，不做兼容）。
+
+```json
+// POST /auth/register 请求。email 与 code 必填，phone 选填（填了必须 11 位）
+{
+  "email": "someone@example.com",
+  "code": "123456",
+  "password": "pass1234",
+  "nickname": "小元",
+  "phone": "13800138000"
+}
+
+// POST /auth/login 请求。account 可以是手机号 / 邮箱 / 元聊号三种形态
+{ "account": "someone@example.com", "password": "pass1234" }
+```
+
+注册错误：400 `auth.otpWrong`（码错或过期）、429 `auth.accountLocked`（错 5 次锁 15 分钟）、
+409 `auth.accountTaken`（邮箱或手机号已注册）。
+
+> **注册必须验证邮箱归属。** 此前这里是一道 SVG 算术验证码，它证明的是「对面是人」，
+> 不是「这个邮箱属于他」—— 任何人都能拿别人的邮箱注册。图形验证码连
+> `GET /api/v1/captcha` 端点一起删除了，不做兼容。
+>
+> 验证码**校验通过不立即作废**，只有建号成功才清：否则昵称或密码不合规时，
+> 用户每修一次表单就得重新收一封邮件。代价由 5 分钟 TTL 与错码 5 次锁定兜住。
+
+响应与 `POST /auth/refresh` 一致（登录与注册响应额外含 `user` 字段）。
+
+### POST /api/v1/auth/password/otp · /verify · /reset（忘记密码三段式）
+
+```json
+// 1. 发码 → 204。account 可以是手机号**或邮箱**
+//    服务端按是否含 @ 路由到 FindByEmail / FindByPhone
+{ "account": "someone@example.com" }
+
+// 2. 校验 → 200，换一张一次性改密票据（5 分钟）
+{ "account": "someone@example.com", "code": "123456" }
+// 响应 data: { "reset_ticket": "...", "expires_in": 300 }
+
+// 3. 改密 → 204。票据存的是 user_id，期间改号也不会改错账号
+{ "reset_ticket": "...", "new_password": "NewPass1234" }
+```
+
+**账号未注册时第 1 步同样返回 204 且不下发**，响应与已注册完全一致 ——
+否则这个端点退化成「这个号注册过没有」的枚举器。
+
+> 入参原先叫 `phone`，只认手机号，于是邮箱注册的用户彻底锁死在门外（登录早就认邮箱）。
+> 现已改为 `account`；为兼容已发布的旧客户端，服务端**仍然接受 `phone` 字段**，
+> 取值顺序是 `account` 优先、为空回落 `phone`。
+
+校验步骤是唯一的爆破入口：IP 限流 10/20 之外，还有账号维度的失败计数
+（错 5 次锁 15 分钟，429 `auth.accountLocked`）。锁定判断排在比对之前 ——
+达到上限后即使输对也不放行。
 
 ### POST /api/v1/auth/refresh（无需 Authorization）
 
