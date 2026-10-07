@@ -14,7 +14,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps"
+          "unit": "reqps",
+          "decimals": 3
         },
         "overrides": []
       },
@@ -27,7 +28,16 @@
       "id": 1,
       "options": {
         "tooltip": {
-          "mode": "single"
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": ["lastNotNull", "max"],
+          "sortBy": "Max",
+          "sortDesc": true
         }
       },
       "targets": [
