@@ -1,21 +1,35 @@
 {
-  "__inputs": [],
-  "__requires": [],
-  "annotations": { "list": [] },
-  "description": "YuanChat Server Metrics",
+  "annotations": {
+    "list": []
+  },
+  "description": "元聊 YuanChat 服务总览。标题刻意不叫 YuanChat —— 与 dashboard.yml 的 folder 同名时 Grafana 会以「Dashboard name cannot be the same as folder」拒绝置备，且只写进容器日志，界面上是一片空白。 数据源直接写死 uid=yuanchat-prom：从 UI 导出的 JSON 会带 ${DS_PROMETHEUS} 占位符与 __inputs，文件置备不做替换，面板会因解析不到数据源而整块不渲染。",
   "editable": true,
   "graphTooltip": 1,
   "id": null,
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "yuanchat-prom"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "reqps" },
+        "defaults": {
+          "unit": "reqps"
+        },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
       "id": 1,
-      "options": { "tooltip": { "mode": "single" } },
+      "options": {
+        "tooltip": {
+          "mode": "single"
+        }
+      },
       "targets": [
         {
           "expr": "sum(rate(yuanchat_http_requests_total[1m])) by (method, path)",
@@ -26,14 +40,28 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "yuanchat-prom"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "s" },
+        "defaults": {
+          "unit": "s"
+        },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
       "id": 2,
-      "options": { "tooltip": { "mode": "multi" } },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
         {
           "expr": "histogram_quantile(0.50, sum(rate(yuanchat_http_request_duration_seconds_bucket[5m])) by (le))",
@@ -52,15 +80,27 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "yuanchat-prom"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "short" },
+        "defaults": {
+          "unit": "short"
+        },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
       "id": 3,
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        },
         "orientation": "auto",
         "textMode": "auto",
         "colorMode": "value"
@@ -75,36 +115,64 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "yuanchat-prom"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "reqps" },
+        "defaults": {
+          "unit": "reqps"
+        },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
       "id": 4,
-      "options": { "tooltip": { "mode": "single" } },
+      "options": {
+        "tooltip": {
+          "mode": "single"
+        }
+      },
       "targets": [
         {
-          "expr": "sum(rate(yuanchat_ws_messages_total[1m])) by (type)",
+          "expr": "sum(rate(yuanchat_ws_dispatch_published_total[1m]))",
           "legendFormat": "{{type}}"
         }
       ],
-      "title": "WS Messages/sec",
+      "title": "WS 分发消息/秒",
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "yuanchat-prom"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "percentunit" },
+        "defaults": {
+          "unit": "percentunit"
+        },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
       "id": 5,
-      "options": { "tooltip": { "mode": "single" } },
+      "options": {
+        "tooltip": {
+          "mode": "single"
+        }
+      },
       "targets": [
         {
-          "expr": "sum(rate(yuanchat_http_requests_total{status=~\"5..\"}[5m])) / sum(rate(yuanchat_http_requests_total[5m]))",
-          "legendFormat": "5xx rate"
+          "expr": "(sum(rate(yuanchat_http_requests_total{status=~\"5..\"}[5m])) or vector(0)) / sum(rate(yuanchat_http_requests_total[5m]))",
+          "legendFormat": "5xx 占比"
         }
       ],
       "title": "HTTP Error Rate (5xx)",
@@ -114,9 +182,12 @@
   "refresh": "30s",
   "schemaVersion": 39,
   "tags": ["yuanchat"],
-  "time": { "from": "now-1h", "to": "now" },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "timepicker": {},
-  "title": "YuanChat",
+  "title": "服务总览",
   "uid": "yuanchat-main",
   "version": 1,
   "templating": {
