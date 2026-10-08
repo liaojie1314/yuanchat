@@ -12,11 +12,15 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import "@yuanchat/design-system/i18n";
 import "@yuanchat/design-system/global.css";
-import { useThemeStore, initSentry } from "@yuanchat/shared";
+import { useThemeStore, initSentry, restoreSafeAreaTop } from "@yuanchat/shared";
 import App from "./App";
 
 // 初始化 M3 主题（在 React 渲染前，避免首屏闪烁）
 useThemeStore.getState().applyTheme();
+
+// 安卓顶部安全区：整页跳转会把原生下发的 --safe-area-top 一起带走，
+// 这里在首帧前补回来，否则浮层会压住系统状态栏
+restoreSafeAreaTop();
 
 // Sentry 错误监控初始化（无 DSN 时静默跳过，适用于开发/未配置环境）
 initSentry({
