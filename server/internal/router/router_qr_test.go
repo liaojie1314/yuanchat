@@ -105,7 +105,7 @@ func getPoll(r *gin.Engine, qrToken, pollSecret string) *httptest.ResponseRecord
 // scanning / confirmed 两个状态是无路径可达的死代码。
 func TestQRLoginFlowLogsInScannedUser(t *testing.T) {
 	env := newQREnv(t)
-	user := newResetUser(t, env.db, "Qrpass123")
+	user, _ := newResetUser(t, env.db, "Qrpass123")
 	bearer := env.bearerFor(t, user)
 
 	qrToken, pollSecret := env.newQRSession(t, "desktop")
@@ -199,7 +199,7 @@ func TestQRLoginFlowLogsInScannedUser(t *testing.T) {
 // 他手上只有 qr_token，没有建会话时才回给发起端的密钥。
 func TestQRPollRequiresPollSecret(t *testing.T) {
 	env := newQREnv(t)
-	user := newResetUser(t, env.db, "Qrpass123")
+	user, _ := newResetUser(t, env.db, "Qrpass123")
 	bearer := env.bearerFor(t, user)
 	qrToken, pollSecret := env.newQRSession(t, "web")
 
@@ -263,7 +263,7 @@ func TestQRScanRequiresAuth(t *testing.T) {
 // TestQRConfirmWithoutScanReturns409 跳过 scanned 直接确认是 409。
 func TestQRConfirmWithoutScanReturns409(t *testing.T) {
 	env := newQREnv(t)
-	user := newResetUser(t, env.db, "Qrpass123")
+	user, _ := newResetUser(t, env.db, "Qrpass123")
 	qrToken, _ := env.newQRSession(t, "web")
 
 	w := postAuthed(env.r, env.bearerFor(t, user), "/api/v1/auth/qr/"+qrToken+"/confirm")
@@ -278,8 +278,8 @@ func TestQRConfirmWithoutScanReturns409(t *testing.T) {
 // TestQRConfirmByAnotherUserReturns403 A 扫码、B 确认是 403。
 func TestQRConfirmByAnotherUserReturns403(t *testing.T) {
 	env := newQREnv(t)
-	scanner := newResetUser(t, env.db, "Qrpass123")
-	attacker := newResetUser(t, env.db, "Qrpass456")
+	scanner, _ := newResetUser(t, env.db, "Qrpass123")
+	attacker, _ := newResetUser(t, env.db, "Qrpass456")
 	qrToken, _ := env.newQRSession(t, "web")
 
 	if w := postAuthed(env.r, env.bearerFor(t, scanner),
@@ -315,7 +315,7 @@ func TestQRBannedScannerReturns403(t *testing.T) {
 // TestQRCancelStopsFlowForScanner 扫码端取消后，被扫端轮询到 canceled，且授权再也换不出令牌。
 func TestQRCancelStopsFlowForScanner(t *testing.T) {
 	env := newQREnv(t)
-	user := newResetUser(t, env.db, "Qrpass123")
+	user, _ := newResetUser(t, env.db, "Qrpass123")
 	bearer := env.bearerFor(t, user)
 	qrToken, pollSecret := env.newQRSession(t, "web")
 
@@ -354,8 +354,8 @@ func TestQRCancelStopsFlowForScanner(t *testing.T) {
 // 少了这两道校验，任何拿到二维码的人都能把别人正在进行的登录会话废掉。
 func TestQRCancelRequiresScannerIdentity(t *testing.T) {
 	env := newQREnv(t)
-	scanner := newResetUser(t, env.db, "Qrpass123")
-	attacker := newResetUser(t, env.db, "Qrpass456")
+	scanner, _ := newResetUser(t, env.db, "Qrpass123")
+	attacker, _ := newResetUser(t, env.db, "Qrpass456")
 	qrToken, pollSecret := env.newQRSession(t, "web")
 
 	if w := postAuthed(env.r, "", "/api/v1/auth/qr/"+qrToken+"/cancel"); w.Code != http.StatusUnauthorized {
