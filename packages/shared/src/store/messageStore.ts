@@ -25,6 +25,7 @@ import {
 } from "../api/chat";
 import { compressImage, extractVideoMeta, getUploadUrl, uploadToTicket } from "../api/files";
 import type { VideoMeta } from "../api/files";
+import { ApiError } from "../api/client";
 import { asServerMessageId, chatSocket } from "../ws/chatSocket";
 import type { ClientFrames } from "../ws/chatSocket";
 import { encryptFor } from "../crypto/e2eeManager";
@@ -1097,12 +1098,14 @@ async function dispatchImageSend(
     const ticket = await getUploadUrl(filenameForBlob(blob), blob.type, blob.size);
     await uploadToTicket(ticket, blob, blob.type);
     key = ticket.objectKey;
-  } catch {
+  } catch (e) {
     // 消息可能在上传期间被重试重置为 sending：仅当仍是该乐观条目时翻 failed
     const pending = (get().messagesByConv[conversationId] ?? []).find(
       (m) => m.clientMsgId === clientMsgId,
     );
     if (pending) get().setStatus(conversationId, pending.id, "failed");
+    // 必须给原因：只翻红不说话，用户无从判断是网络问题还是图片本身的问题
+    showToast("error", i18n.t(uploadErrorKey(e)));
     return;
   }
 
@@ -1176,8 +1179,27 @@ function writeBackImageKey(conversationId: string, clientMsgId: string, key: str
 }
 
 /**
+ * 把上传失败的原因映射成提示文案 key。
+ *
+ * @remarks
+ * 图片 / 文件 / 语音共用「申请票据 → 直传对象存储」这一条链路，任一步都可能失败。
+ * 原先文件把整个 catch 一律报成「不支持的文件类型」，图片与语音则连 toast 都没有 ——
+ * 于是预签名 403、断网、CORS 被拦这些真故障全被说成「格式不对」，排查方向直接跑偏
+ * （2026-10-09 生产上就是这样：签名 host 错导致全量 403，用户看到的却是「不支持 pdf」）。
+ *
+ * 只有服务端明确回 4001 / 4002 时才敢说类型或体积有问题，其余一律归到「上传失败」。
+ */
+function uploadErrorKey(e: unknown): string {
+  if (e instanceof ApiError) {
+    if (e.code === 4001) return "chat.file.unsupported";
+    if (e.code === 4002) return "chat.file.tooLarge";
+  }
+  return "chat.media.uploadFailed";
+}
+
+/**
  * 文件发送：申请上传 URL → 直传对象存储 → 发 WS file 帧（含对象 key + 原始文件名）。
- * 后端按扩展名白名单校验（4001 不支持类型），失败置 failed 并 toast。
+ * 失败置 failed 并按真实原因 toast（见 {@link uploadErrorKey}）。
  */
 async function dispatchFileSend(
   conversationId: string,
@@ -1192,12 +1214,12 @@ async function dispatchFileSend(
     const ticket = await getUploadUrl(name, contentType, file.size);
     await uploadToTicket(ticket, file, contentType);
     key = ticket.objectKey;
-  } catch {
+  } catch (e) {
     const pending = (get().messagesByConv[conversationId] ?? []).find(
       (m) => m.clientMsgId === clientMsgId,
     );
     if (pending) get().setStatus(conversationId, pending.id, "failed");
-    showToast("error", i18n.t("chat.file.unsupported"));
+    showToast("error", i18n.t(uploadErrorKey(e)));
     return;
   }
 
@@ -1235,11 +1257,12 @@ async function dispatchVoiceSend(
     const ticket = await getUploadUrl("voice.webm", "audio/webm", blob.size);
     await uploadToTicket(ticket, blob, "audio/webm");
     key = ticket.objectKey;
-  } catch {
+  } catch (e) {
     const pending = (get().messagesByConv[conversationId] ?? []).find(
       (m) => m.clientMsgId === clientMsgId,
     );
     if (pending) get().setStatus(conversationId, pending.id, "failed");
+    showToast("error", i18n.t(uploadErrorKey(e)));
     return;
   }
 
