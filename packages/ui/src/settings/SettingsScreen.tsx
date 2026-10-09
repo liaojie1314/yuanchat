@@ -23,7 +23,6 @@ import {
   ArrowLeft,
   Sticker,
   Star,
-  Server,
   Smile,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -37,7 +36,6 @@ import {
   AppearanceSection,
   FavoritesSection,
   AboutSection,
-  ServerSection,
 } from "./SettingsSections";
 import { APP_VERSION } from "./settingsUtils";
 import { ConfirmDialog } from "../primitives/ConfirmDialog";
@@ -45,14 +43,7 @@ import { ChangePasswordDialog } from "../auth/ChangePasswordDialog";
 import { UserStatusEditor } from "./UserStatusEditor";
 
 /** 设置内容区视图 */
-type SettingsView =
-  | "index"
-  | "profile"
-  | "account"
-  | "appearance"
-  | "favorites"
-  | "server"
-  | "about";
+type SettingsView = "index" | "profile" | "account" | "appearance" | "favorites" | "about";
 
 /** 设置页分组项：view 为设置页内部视图切换，route 为跳走的独立页面。 */
 type SettingsNavItem =
@@ -104,13 +95,6 @@ const SETTINGS_NAV: SettingsNavItem[] = [
     icon: Star,
     labelKey: "favorites.title",
     descKey: "settings.favoritesDesc",
-  },
-  {
-    kind: "view",
-    view: "server",
-    icon: Server,
-    labelKey: "settings.server",
-    descKey: "settings.serverDesc",
   },
   {
     kind: "view",
@@ -202,12 +186,6 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
         return (
           <MobileHeader show={isMobile} title={t("favorites.title")} onBack={onBack}>
             <FavoritesSection />
-          </MobileHeader>
-        );
-      case "server":
-        return (
-          <MobileHeader show={isMobile} title={t("settings.server")} onBack={onBack}>
-            <ServerSection />
           </MobileHeader>
         );
       case "about":
