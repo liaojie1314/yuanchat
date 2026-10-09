@@ -420,7 +420,7 @@
   "chat.menu.unmute": "알림 켜기",
   "chat.group.namePlaceholder": "그룹 이름 (선택)",
   "chat.group.selectMembers": "멤버 선택",
-  "chat.group.minMembers": "최소 {{min}}명",
+  "chat.group.minMembers": "최소 %{min}명",
   "chat.group.create": "만들기",
   "chat.group.noFriends": "친구가 없습니다",
   "chat.group.removeMember": "제거",

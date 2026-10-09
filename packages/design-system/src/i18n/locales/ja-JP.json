@@ -420,7 +420,7 @@
   "chat.menu.unmute": "ミュート解除",
   "chat.group.namePlaceholder": "グループ名（任意）",
   "chat.group.selectMembers": "メンバーを選択",
-  "chat.group.minMembers": "{{min}} 人以上",
+  "chat.group.minMembers": "%{min} 人以上",
   "chat.group.create": "作成",
   "chat.group.noFriends": "友達がいません",
   "chat.group.removeMember": "削除",

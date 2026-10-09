@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -146,12 +147,59 @@ func (s *Storage) PresignPut(ctx context.Context, objectKey, contentType string,
 }
 
 // PresignGet 生成有时效的预签名下载 URL，用于私有对象（如图片消息）的受控读取。
+//
+// 不带 Content-Disposition：图片/视频等要在页面里内联渲染，加了附件头就下成文件了。
+// 「点下载按钮」那条路径请用 PresignGetAttachment。
 func (s *Storage) PresignGet(ctx context.Context, objectKey string, expires time.Duration) (string, error) {
 	u, err := s.presignClient.PresignedGetObject(ctx, s.bucket, objectKey, expires, url.Values{})
 	if err != nil {
 		return "", fmt.Errorf("failed to presign get %q: %w", objectKey, err)
 	}
 	return u.String(), nil
+}
+
+// PresignGetAttachment 同 PresignGet，但要求对象存储在响应里带
+// `Content-Disposition: attachment; filename=...`。
+//
+// 为什么必须有这个：不带附件头时浏览器按 Content-Type 决定行为，PDF、图片、纯文本
+// 一律**内联渲染** —— 桌面端点「下载」只是把浏览器打开看了一眼，什么都没存下来
+// （2026-10-09 实测）。就算用户手动另存，文件名也是对象键里的那串 uuid，
+// 用户当初发的 `学术报告单.docx` 早就丢了。
+//
+// filename 为空时退化为 PresignGet 的行为（只是不带名字，仍强制附件）。
+func (s *Storage) PresignGetAttachment(ctx context.Context, objectKey, filename string, expires time.Duration) (string, error) {
+	q := url.Values{}
+	q.Set("response-content-disposition", contentDisposition(filename))
+	u, err := s.presignClient.PresignedGetObject(ctx, s.bucket, objectKey, expires, q)
+	if err != nil {
+		return "", fmt.Errorf("failed to presign attachment get %q: %w", objectKey, err)
+	}
+	return u.String(), nil
+}
+
+// contentDisposition 按 RFC 6266 / RFC 5987 拼附件头。
+//
+// 中文文件名必须走 filename*=UTF-8''<pct-encoded>：裸 filename="学术报告单.docx"
+// 不是合法的 HTTP 头取值（非 ASCII），不同浏览器的猜测各不相同，常见结果是一串乱码。
+// 同时保留一个 ASCII 兜底 filename 供只认老语法的客户端使用。
+func contentDisposition(filename string) string {
+	if filename == "" {
+		return "attachment"
+	}
+	// 兜底名只留 ASCII 可见字符，且去掉引号与路径分隔符（防头注入与目录穿越写法）
+	var ascii strings.Builder
+	for _, r := range filename {
+		if r >= 0x20 && r < 0x7f && r != '"' && r != '\\' && r != '/' {
+			ascii.WriteRune(r)
+		}
+	}
+	fallback := ascii.String()
+	if fallback == "" {
+		fallback = "download"
+	}
+	// url.PathEscape 不转义 '+' 等少数字符，但对 RFC 5987 的取值集合足够安全
+	return fmt.Sprintf("attachment; filename=%q; filename*=UTF-8''%s",
+		fallback, url.PathEscape(filename))
 }
 
 // PutObject 服务端直接写入对象（供内部工具如 seed 使用；

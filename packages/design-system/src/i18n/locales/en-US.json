@@ -420,7 +420,7 @@
   "chat.menu.unmute": "Unmute",
   "chat.group.namePlaceholder": "Group name (optional)",
   "chat.group.selectMembers": "Select members",
-  "chat.group.minMembers": "Pick at least {{min}}",
+  "chat.group.minMembers": "Pick at least %{min}",
   "chat.group.create": "Create",
   "chat.group.noFriends": "No friends yet",
   "chat.group.removeMember": "Remove",

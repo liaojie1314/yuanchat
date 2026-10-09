@@ -30,6 +30,7 @@
 import {
   Check,
   CheckCheck,
+  CircleAlert,
   Copy,
   Download,
   Flag,
@@ -54,9 +55,11 @@ import { useTranslation } from "react-i18next";
 import {
   canEdit,
   getDownloadUrl,
+  isPermanentFailure,
   openExternal,
   resolveObjectUrl,
   showToast,
+  splitFileName,
 } from "@yuanchat/shared";
 import type { ChatMessage } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
@@ -439,6 +442,9 @@ export function MessageBubble({
             data-self={msg.isSelf ? "true" : "false"}
             className={cn(
               "relative w-fit max-w-full break-words select-text",
+              // 文件气泡额外加 overflow-hidden：里面是一行定宽图标 + 可伸缩文字，
+              // 任何一处算错宽度都会溢出到屏幕外（长文件名实测过），由气泡兜住
+              msg.kind === "file" && "overflow-hidden",
               msg.kind === "sticker"
                 ? "" // 贴纸：无背景、无圆角、无内边距
                 : cn(
@@ -488,7 +494,12 @@ export function MessageBubble({
             {msg.kind === "video" && msg.video && <MessageVideo video={msg.video} />}
 
             {msg.kind === "file" && msg.file && (
-              <div className="flex min-w-[220px] items-center gap-2.5">
+              // 不要再加 min-w：曾经是 min-w-[220px]，两头都坏 ——
+              // 短名（problem.txt）被撑成一条宽条、图标和文字之间一大片空隙；
+              // 长名又因为没有上限把气泡顶穿屏幕（气泡 w-fit 的可用宽度来自外层 70%，
+              // 但 min-width 会无视它）。w-full + min-w-0 让这一行正好等于气泡宽度，
+              // 名字再长也由 truncate 收掉。
+              <div className="flex w-full min-w-0 items-center gap-2.5">
                 {(() => {
                   const { Icon, bg } = fileIconOf(msg.file.ext);
                   return (
@@ -503,7 +514,18 @@ export function MessageBubble({
                   );
                 })()}
                 <div className="min-w-0 flex-1">
-                  <div className="text-body-md truncate font-semibold">{msg.file.name}</div>
+                  {/* 主干截断、后缀常驻 = 中间截断：直接 truncate 整个名字会把 .pdf 吃掉 */}
+                  <div className="text-body-md flex min-w-0 font-semibold">
+                    {(() => {
+                      const { stem, suffix } = splitFileName(msg.file.name);
+                      return (
+                        <>
+                          <span className="truncate">{stem}</span>
+                          <span className="shrink-0">{suffix}</span>
+                        </>
+                      );
+                    })()}
+                  </div>
                   <div className="text-label-sm mt-0.5 opacity-80">
                     {msg.file.size} · {msg.file.ext}
                   </div>
@@ -513,7 +535,10 @@ export function MessageBubble({
                   onClick={() => {
                     const key = msg.file?.key;
                     if (!key) return;
-                    void getDownloadUrl(key)
+                    // 带上原始文件名：服务端据此签出带 Content-Disposition: attachment
+                    // 的 URL。不带的话浏览器按 Content-Type 内联渲染（PDF 直接打开
+                    // 预览，什么都没存下来），存下来的名字也是对象键里的那串 uuid
+                    void getDownloadUrl(key, msg.file?.name)
                       // 走 openExternal 而非 window.open：Tauri WebView 里 window.open
                       // 是哑的（安卓上点了毫无反应），需交给原生 shell 打开
                       .then((url) => openExternal(url))
@@ -752,17 +777,27 @@ export function MessageBubble({
           )}
         >
           {isSelf && msg.status === "failed" ? (
-            // 失败重试做在 meta 行里：以前在气泡与头像之间插一个「!」按钮，
-            // 会把这一行撑开、把气泡和头像顶得老远
-            <button
-              type="button"
-              onClick={onRetry}
-              className="text-error hover:bg-error/10 -mx-1 flex items-center gap-1 rounded px-1 transition-colors"
-            >
-              <RotateCcw size={11} aria-hidden />
-              <span>{t("chat.status.failed")}</span>
-              <span className="underline">{t("common.retry")}</span>
-            </button>
+            isPermanentFailure(msg.failReason) ? (
+              // 永久失败（类型不支持 / 超大 / 本地副本已失效）不给重试入口：
+              // 那种失败点一万次也不会成功，给按钮只会让用户一直试（线上实测反馈）。
+              // 只陈述原因，让用户去换一个文件。
+              <span className="text-error flex items-center gap-1">
+                <CircleAlert size={11} aria-hidden />
+                {t(msg.failReason!)}
+              </span>
+            ) : (
+              // 失败重试做在 meta 行里：以前在气泡与头像之间插一个「!」按钮，
+              // 会把这一行撑开、把气泡和头像顶得老远
+              <button
+                type="button"
+                onClick={onRetry}
+                className="text-error hover:bg-error/10 -mx-1 flex items-center gap-1 rounded px-1 transition-colors"
+              >
+                <RotateCcw size={11} aria-hidden />
+                <span>{t("chat.status.failed")}</span>
+                <span className="underline">{t("common.retry")}</span>
+              </button>
+            )
           ) : (
             <>
               <span className="tabular-nums">{msg.time}</span>

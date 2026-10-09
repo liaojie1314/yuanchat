@@ -29,11 +29,11 @@ var ErrInvalidAnnouncement = errors.New("announcement too long")
 
 // ConversationDTO 会话列表条目（REST 响应结构）。
 type ConversationDTO struct {
-	ID            uuid.UUID  `json:"id"`
-	Type          int16      `json:"type"`
-	Name          string     `json:"name"`
-	AvatarURL     *string    `json:"avatar_url,omitempty"`
-	MemberCount   int64      `json:"member_count"`
+	ID          uuid.UUID `json:"id"`
+	Type        int16     `json:"type"`
+	Name        string    `json:"name"`
+	AvatarURL   *string   `json:"avatar_url,omitempty"`
+	MemberCount int64     `json:"member_count"`
 	// MemberAvatars 群成员头像，最多 9 个（九宫格上限），顺序与成员列表一致。
 	// 仅群聊有值，供客户端拼合群头像；没有设置头像的成员占一个空串，
 	// 不跳过——跳过会让格子错位，且客户端拿不到该位置去做昵称首字兜底。
@@ -41,14 +41,19 @@ type ConversationDTO struct {
 	MemberAvatars []string `json:"member_avatars,omitempty"`
 	// MemberNames 与 MemberAvatars 同序等长的成员昵称，用于头像缺失那一格
 	// 显示昵称首字并据此取稳定配色。两个数组出自同一条查询，次序天然对齐。
-	MemberNames []string `json:"member_names,omitempty"`
+	MemberNames   []string   `json:"member_names,omitempty"`
 	UnreadCount   int64      `json:"unread_count"`
 	IsMuted       bool       `json:"is_muted"`
 	IsPinned      bool       `json:"is_pinned"`
 	PinnedAt      *time.Time `json:"pinned_at,omitempty"`
 	LastSeq       int64      `json:"last_seq"`
 	MyLastReadSeq int64      `json:"my_last_read_seq"`
-	MentionUnread bool       `json:"mention_unread"`
+	// OthersMinReadSeq 除本人外所有成员里最落后的已读水位。
+	// 客户端据此判断自己发出去的消息是「已送达」还是真的「已读」——
+	// 在此之前历史消息一律当已读（api/chat.ts 的 `status: isSelf ? "read"`），
+	// 结果是刷新一次就全变双勾，和对方看没看毫无关系。
+	OthersMinReadSeq int64 `json:"others_min_read_seq"`
+	MentionUnread    bool  `json:"mention_unread"`
 	// Announcement 群公告正文（无公告时不出现在 JSON 中）。
 	Announcement *string `json:"announcement,omitempty"`
 	// AnnouncementUpdatedAt 公告最近变更时间（前端判断「新公告」提示）。
@@ -157,15 +162,16 @@ func (s *ConversationService) List(ctx context.Context, userID uuid.UUID) ([]Con
 	dtos := make([]ConversationDTO, 0, len(items))
 	for _, item := range items {
 		dto := ConversationDTO{
-			ID:                    item.ID,
-			Type:                  item.Type,
-			MemberCount:           item.MemberCount,
-			IsMuted:               item.IsMuted,
-			IsPinned:              item.IsPinned,
-			PinnedAt:              item.PinnedAt,
-			MentionUnread:         item.MentionUnread,
-			LastSeq:               item.LastSeq,
-			MyLastReadSeq:         item.LastReadSeq,
+			ID:               item.ID,
+			Type:             item.Type,
+			MemberCount:      item.MemberCount,
+			IsMuted:          item.IsMuted,
+			IsPinned:         item.IsPinned,
+			PinnedAt:         item.PinnedAt,
+			MentionUnread:    item.MentionUnread,
+			LastSeq:          item.LastSeq,
+			MyLastReadSeq:    item.LastReadSeq,
+			OthersMinReadSeq: item.OthersMinReadSeq,
 			// 减掉本人发出的那部分：seq 是全会话共享的，自己发的消息也占号，
 			// 不减就会出现「手机上发完，电脑上看见一条自己的未读」。见 OwnUnread。
 			UnreadCount:           max(item.LastSeq-item.LastReadSeq-item.OwnUnread, 0),
@@ -422,6 +428,8 @@ func (s *ConversationService) CreateGroup(
 		UnreadCount:   0,
 		LastSeq:       sysMsg.Seq,
 		MyLastReadSeq: sysMsg.Seq,
+		// 刚建完群，其他成员一条都没读 —— 不要伪造成已读
+		OthersMinReadSeq: 0,
 		LastMessage: &LastMessageDTO{
 			Preview:        systemText,
 			SenderNickname: creator.Nickname,

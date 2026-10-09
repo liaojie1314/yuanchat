@@ -1070,7 +1070,10 @@ export const handlers = [
 
   // --------------------------------------------------
   // 文件 — 换取下载 URL（mock 模式无 MinIO，直接给 data URL）
-  // GET /api/v1/files/download-url?key=...
+  // GET /api/v1/files/download-url?key=...[&name=...]
+  //
+  // name 是「按附件下载」的原始文件名。mock 下 data URL 带不了
+  // Content-Disposition，照样只回 URL —— 这里存在只为让带 name 的请求不报 400。
   // --------------------------------------------------
   http.get("http://localhost:8085/api/v1/files/download-url", ({ request }) => {
     const key = new URL(request.url).searchParams.get("key") ?? "";

@@ -420,7 +420,7 @@
   "chat.menu.unmute": "取消免打扰",
   "chat.group.namePlaceholder": "群聊名称（可选）",
   "chat.group.selectMembers": "选择成员",
-  "chat.group.minMembers": "至少选 {{min}} 人",
+  "chat.group.minMembers": "至少选 %{min} 人",
   "chat.group.create": "创建",
   "chat.group.noFriends": "暂无好友",
   "chat.group.removeMember": "移除",

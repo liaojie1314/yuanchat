@@ -1,12 +1,12 @@
 import { lazy, Suspense, useEffect } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
 import {
   isPermissionGranted,
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
-import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { MainLayout, AppErrorBoundary } from "@yuanchat/ui";
 import {
   setNotifier,
@@ -71,12 +71,13 @@ const CallWindowPage = lazy(() =>
   import("./pages/CallWindowPage").then((m) => ({ default: m.CallWindowPage })),
 );
 
-// 模块级一次性注册：把 Tauri 原生 shell 注入 shared 的外链抽象。
+// 模块级一次性注册：把原生「用系统应用打开」注入 shared 的外链抽象。
 // WebView 里 window.open 是哑的（安卓上点「下载」毫无反应），必须交给系统浏览器。
-// 权限由 capabilities 的 shell:default 给出（已含 http(s) 的 allow-open）。
+// 走自定义命令 open_external 而不是 plugin-shell 的 JS open：后者在安卓上
+// 根本不经过原生 Intent，必然失败（原因见 src-tauri/src/lib.rs 的 open_external）。
 // 非 Tauri 环境（浏览器里跑本 bundle 做 dev）不注册，shared 自会回落 window.open。
 if ("__TAURI_INTERNALS__" in window) {
-  setUrlOpener((url) => openUrl(url));
+  setUrlOpener((url) => invoke("open_external", { url }));
 }
 
 // 模块级一次性注册：权限就绪后把 Tauri 通知注入 shared 抽象

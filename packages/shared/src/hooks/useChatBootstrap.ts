@@ -40,7 +40,7 @@ import { setE2EEContext, setMessageMockMode, useMessageStore } from "../store/me
 import { decryptFrom } from "../crypto/e2eeManager";
 import { captureException } from "../observability/sentry";
 import { usePresenceStore } from "../store/presenceStore";
-import { resetChatStores, revokeAllLocalPreviews } from "../store/resetStores";
+import { keepOnlyUnconfirmed, resetChatStores, revokeAllLocalPreviews } from "../store/resetStores";
 import { startLocalStore, reconcileOnForeground } from "../store/localStoreLifecycle";
 import { showToast } from "../store/toastStore";
 import { previewBodyOf } from "../utils/messagePreview";
@@ -429,7 +429,7 @@ function wireSocket() {
   });
 
   chatSocket.onReconnect = () => {
-    // 掉线期间可能漏消息：重拉会话列表，清空消息缓存让会话重新按需加载。
+    // 掉线期间可能漏消息：重拉会话列表，清掉能从服务端拉回来的消息缓存让会话按需重载。
     // 快照串在列表加载之后（applyPresenceSnapshot 按 peerId 匹配，须先有列表）
     void useConversationStore
       .getState()
@@ -440,8 +440,13 @@ function wireSocket() {
         usePresenceStore.getState().applySnapshot(ids);
       })
       .catch(() => {});
-    revokeAllLocalPreviews();
-    useMessageStore.setState({ messagesByConv: {}, hasMoreByConv: {} });
+    // 两处都必须跳过「未确认」消息（sending / failed）：它们只存在于内存，
+    // 服务端没有、拉不回来，blob 也是重发唯一的字节来源。
+    // 以前这里是 revokeAllLocalPreviews() + messagesByConv: {} ——
+    // 断网时发失败的消息一来网就凭空消失，侥幸没消失的也因为 blob 被 revoke
+    // 而「点重试毫无反应」。断网恰恰是最需要重试的场景，等于把这功能废掉了。
+    revokeAllLocalPreviews(true);
+    keepOnlyUnconfirmed();
     const activeId = useConversationStore.getState().activeId;
     if (activeId) useMessageStore.getState().loadHistory(activeId);
     // 掉线期间可能漏好友申请/同意推送

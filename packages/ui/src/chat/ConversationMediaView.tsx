@@ -193,7 +193,8 @@ function MediaFileRow({ item }: { item: MediaItem }) {
   const { Icon, bg } = fileIconOf(meta.ext);
 
   const handleDownload = () => {
-    void getDownloadUrl(item.key)
+    // 第二个参数让服务端签出附件头 + 原始文件名，详见 MessageBubble 的下载按钮
+    void getDownloadUrl(item.key, name || undefined)
       // 同 MessageBubble：Tauri WebView 不支持 window.open，交给原生 shell
       .then((url) => openExternal(url))
       .catch(() => showToast("error", t("chat.file.downloadFailed")));
