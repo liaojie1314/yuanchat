@@ -279,6 +279,20 @@ function wireSocket() {
       }
       // 对方读了：把自己已送达的消息翻成已读
       useMessageStore.getState().applyRead(p.conversation_id, p.seq);
+      // 同时推进会话上的「别人最落后已读水位」，否则下次重进会话、重拉历史时
+      // mapMessage 会按旧水位把这些气泡又算回「已送达」，双勾当场退回单勾。
+      //
+      // 只对单聊做：这一帧带的是某**一个**成员的水位，单聊里「别人」只有对方一人，
+      // 他的水位就是最小值。群聊里拿一个人的水位当全群最小值会偏乐观
+      // （还有人没读也显示已读），故留给会话列表接口按 min() 如实算。
+      const conv = useConversationStore
+        .getState()
+        .conversations.find((c) => c.id === p.conversation_id);
+      if (conv?.type === "private" && p.seq > (conv.othersMinReadSeq ?? 0)) {
+        useConversationStore.getState().updateConversation(p.conversation_id, {
+          othersMinReadSeq: p.seq,
+        });
+      }
     },
 
     "message.recalled": (p) => {
