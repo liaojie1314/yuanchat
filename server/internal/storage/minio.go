@@ -17,14 +17,30 @@ import (
 //
 // endpoint / useSSL 是服务端建连用的地址；publicEndpoint / publicUseSSL 是下发给
 // 客户端的对外地址。生产环境两者必然不同（前者是 compose 内网主机名），故分开保存。
+//
+// 两个 client 不可合并：
+//   - client 走内网地址，负责服务端自己的读写（建桶、直接 PutObject、删对象）。
+//   - presignClient 绑定**对外**地址，只用来签 URL。SigV4 把 host 头纳入签名，
+//     而客户端是向对外域名发请求、nginx 又透传 $host，所以签名必须在对外 host 上算。
+//     早先的做法是用内网 client 签完再替换 URL 里的 host 字符串，签名随即失效 ——
+//     生产上表现为所有媒体上传一律 403 SignatureDoesNotMatch。
 type Storage struct {
 	client         *minio.Client
+	presignClient  *minio.Client
 	bucket         string
 	endpoint       string
 	useSSL         bool
 	publicEndpoint string
 	publicUseSSL   bool
 }
+
+// presignRegion 预签名固定使用的区域。
+//
+// 必须显式指定：minio-go 在 region 为空时会先发一次 GetBucketLocation 去问服务端，
+// 而 presignClient 指向的是对外域名 —— 容器内未必解析得到（经常没有 hairpin NAT），
+// 那一次查询会拖慢甚至失败。MinIO 默认区域就是 us-east-1。
+// 若将来换成真正的 AWS S3 且桶不在该区域，这里要跟着改。
+const presignRegion = "us-east-1"
 
 // New 建立 MinIO 连接，确保默认桶存在，并为匿名公共读前缀开放访问。
 // 头像与表情包封面通过 PublicURL 直接暴露，无需预签名；其余对象（图片消息等）走预签名。
@@ -37,8 +53,22 @@ func New(cfg config.MinIOConfig) (*Storage, error) {
 		return nil, fmt.Errorf("failed to init minio client: %w", err)
 	}
 
+	// 未配对外端点（dev：两者同一个地址）时直接复用内网 client，行为不变
+	presignClient := client
+	if cfg.PublicEndpoint != "" {
+		presignClient, err = minio.New(cfg.PublicEndpoint, &minio.Options{
+			Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
+			Secure: cfg.PublicUseSSL,
+			Region: presignRegion,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to init minio presign client: %w", err)
+		}
+	}
+
 	s := &Storage{
 		client:         client,
+		presignClient:  presignClient,
 		bucket:         cfg.Bucket,
 		endpoint:       cfg.Endpoint,
 		useSSL:         cfg.UseSSL,
@@ -102,45 +132,26 @@ func (s *Storage) applyPublicReadPolicy(ctx context.Context) error {
 	return nil
 }
 
-// rewriteHost 把 URL 的 scheme 与 host 换成对外端点，其余（路径、查询串）原样保留。
-//
-// 未配置对外端点时原样返回。注意：预签名 URL 的 SigV4 签名覆盖 Host 头，
-// 因此对外域名必须由 nginx 反代到 MinIO 并透传 Host（proxy_set_header Host $host），
-// 且 MINIO_SERVER_URL 要与对外域名一致 —— 否则签名校验失败（不是静默降级）。
-func (s *Storage) rewriteHost(rawURL string) string {
-	if s.publicEndpoint == "" {
-		return rawURL
-	}
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return rawURL
-	}
-	u.Host = s.publicEndpoint
-	if s.publicUseSSL {
-		u.Scheme = "https"
-	} else {
-		u.Scheme = "http"
-	}
-	return u.String()
-}
-
 // PresignPut 生成有时效的预签名上传 URL，客户端可用 HTTP PUT 直传，无需服务端中转。
 // contentType 目前仅作调用方语义占位，MinIO PresignedPutObject 不绑定 Content-Type。
+//
+// 走 presignClient（绑定对外端点）而非内网 client：签名覆盖 host 头，必须在
+// 客户端真正会请求的那个 host 上算，详见 Storage 的说明。
 func (s *Storage) PresignPut(ctx context.Context, objectKey, contentType string, expires time.Duration) (string, error) {
-	u, err := s.client.PresignedPutObject(ctx, s.bucket, objectKey, expires)
+	u, err := s.presignClient.PresignedPutObject(ctx, s.bucket, objectKey, expires)
 	if err != nil {
 		return "", fmt.Errorf("failed to presign put %q: %w", objectKey, err)
 	}
-	return s.rewriteHost(u.String()), nil
+	return u.String(), nil
 }
 
 // PresignGet 生成有时效的预签名下载 URL，用于私有对象（如图片消息）的受控读取。
 func (s *Storage) PresignGet(ctx context.Context, objectKey string, expires time.Duration) (string, error) {
-	u, err := s.client.PresignedGetObject(ctx, s.bucket, objectKey, expires, url.Values{})
+	u, err := s.presignClient.PresignedGetObject(ctx, s.bucket, objectKey, expires, url.Values{})
 	if err != nil {
 		return "", fmt.Errorf("failed to presign get %q: %w", objectKey, err)
 	}
-	return s.rewriteHost(u.String()), nil
+	return u.String(), nil
 }
 
 // PutObject 服务端直接写入对象（供内部工具如 seed 使用；
