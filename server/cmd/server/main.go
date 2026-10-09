@@ -30,6 +30,10 @@ import (
 // @BasePath        /api/v1
 // @schemes         http https
 
+// version 由构建期 ldflag 注入（`-X main.version=...`，见 server/Dockerfile）。
+// 不注入时留 dev，便于在日志里区分本地直跑与镜像。
+var version = "dev"
+
 func main() {
 	// 1. 加载配置
 	cfg, err := config.Load("config/config.yaml")
@@ -46,7 +50,7 @@ func main() {
 
 	zapLogger.Info("Starting YuanChat Server...",
 		zap.String("env", cfg.Server.Env),
-		zap.String("version", "1.0.0"),
+		zap.String("version", version),
 	)
 
 	// 2.1 构造验证码下发通道：provider 为未知值时启动即失败。
