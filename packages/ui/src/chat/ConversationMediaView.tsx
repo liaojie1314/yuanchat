@@ -30,6 +30,7 @@ import {
   formatListTime,
   formatMediaDuration,
   getDownloadUrl,
+  openExternal,
   registerBackInterceptor,
   showToast,
 } from "@yuanchat/shared";
@@ -193,7 +194,8 @@ function MediaFileRow({ item }: { item: MediaItem }) {
 
   const handleDownload = () => {
     void getDownloadUrl(item.key)
-      .then((url) => window.open(url, "_blank"))
+      // 同 MessageBubble：Tauri WebView 不支持 window.open，交给原生 shell
+      .then((url) => openExternal(url))
       .catch(() => showToast("error", t("chat.file.downloadFailed")));
   };
 
@@ -369,6 +371,10 @@ export function ConversationMediaView({
   // 认得当前最上层是谁。若放在 useEffect 里，「大图层 DOM 已提交」与「副作用冲洗完成」
   // 之间存在一个窗口，窗口内按返回会命中旧闭包（lightbox 仍为 null）而关错层 ——
   // 关掉的是整个相册，大图层反而留着。layout effect 在提交阶段同步跑完，没有这个窗口。
+  //
+  // 下面的 lightbox 分支看着与 ImageLightbox 自带的拦截器重复，**不要删**：
+  // 那个是 passive effect，正好落在上述窗口之外，窗口之内只有这一层顶着。
+  // 删掉就把上面那个竞态放回来了。两者行为一致，重复是有意的。
   useLayoutEffect(() => {
     return registerBackInterceptor(() => {
       if (lightbox !== null) {

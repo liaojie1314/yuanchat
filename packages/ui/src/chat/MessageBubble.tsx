@@ -51,7 +51,13 @@ import {
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { canEdit, getDownloadUrl, resolveObjectUrl, showToast } from "@yuanchat/shared";
+import {
+  canEdit,
+  getDownloadUrl,
+  openExternal,
+  resolveObjectUrl,
+  showToast,
+} from "@yuanchat/shared";
 import type { ChatMessage } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "../primitives/Avatar";
@@ -508,7 +514,9 @@ export function MessageBubble({
                     const key = msg.file?.key;
                     if (!key) return;
                     void getDownloadUrl(key)
-                      .then((url) => window.open(url, "_blank"))
+                      // 走 openExternal 而非 window.open：Tauri WebView 里 window.open
+                      // 是哑的（安卓上点了毫无反应），需交给原生 shell 打开
+                      .then((url) => openExternal(url))
                       .catch(() => showToast("error", t("chat.file.downloadFailed")));
                   }}
                   className={cn(

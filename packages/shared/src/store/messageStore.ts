@@ -670,7 +670,11 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     // 图片：从本地 blob URL 重新取回压缩后的字节，整条流程（上传+发送）重跑
     if (msg.kind === "image") {
       const localUrl = msg.image?.localUrl;
-      if (!localUrl) return; // 无本地副本（如重进会话后的历史消息）无法重传
+      // 无本地副本（如重进会话后的历史消息、整页跳转后 blob 失效）无法重传
+      if (!localUrl) {
+        reportRetryUnavailable();
+        return;
+      }
       get().setStatus(conversationId, messageId, "sending");
       if (mockMode) {
         setTimeout(() => get().setStatus(conversationId, messageId, "sent"), 700);
@@ -690,7 +694,10 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     if (msg.kind === "file") {
       const localUrl = msg.file?.localUrl;
       const fileName = msg.file?.name;
-      if (!localUrl || !fileName) return;
+      if (!localUrl || !fileName) {
+        reportRetryUnavailable();
+        return;
+      }
       get().setStatus(conversationId, messageId, "sending");
       if (mockMode) {
         setTimeout(() => get().setStatus(conversationId, messageId, "sent"), 700);
@@ -715,7 +722,10 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     if (msg.kind === "voice") {
       const localUrl = msg.voice?.localUrl;
       const duration = msg.voice?.seconds;
-      if (!localUrl || !duration) return;
+      if (!localUrl || !duration) {
+        reportRetryUnavailable();
+        return;
+      }
       get().setStatus(conversationId, messageId, "sending");
       if (mockMode) {
         setTimeout(() => get().setStatus(conversationId, messageId, "sent"), 700);
@@ -733,7 +743,10 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     if (msg.kind === "video") {
       const localUrl = msg.video?.localUrl;
       const name = msg.video?.name;
-      if (!localUrl || !name) return;
+      if (!localUrl || !name) {
+        reportRetryUnavailable();
+        return;
+      }
       get().setStatus(conversationId, messageId, "sending");
       if (mockMode) {
         setTimeout(() => get().setStatus(conversationId, messageId, "sent"), 700);
@@ -1176,6 +1189,19 @@ function writeBackImageKey(conversationId: string, clientMsgId: string, key: str
       ),
     },
   }));
+}
+
+/**
+ * 重试时本地副本已丢失：告知用户，而不是让按钮变成死点击。
+ *
+ * @remarks
+ * 媒体重试要从 blob URL 取回原始字节，而 blob URL 随文档销毁一起失效 ——
+ * 安卓上整页跳转、应用被系统回收重进、或只是重进会话拉的历史消息，localUrl 就没了。
+ * 原先这几处都是裸 `return`：点一下毫无反应，用户只能反复点（线上就是这么报上来的
+ * 「文件上传失败点重试不生效」）。真重试不了就说清楚，让用户重新选文件。
+ */
+function reportRetryUnavailable(): void {
+  showToast("error", i18n.t("chat.media.retryUnavailable"));
 }
 
 /**

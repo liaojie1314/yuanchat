@@ -7,7 +7,7 @@
  * - 可选群名输入（maxLength 100，留空由后端按成员昵称拼默认名）
  * - 顶部已选头像横排（点击移除）
  * - 好友字母分组多选列表（复用 groupFriends），行内 checkbox 选中态高亮
- * - 「创建」按钮：≥1 人可点，busy 防重入；成功后 setActive(新群) + onClose
+ * - 「创建」按钮：≥2 人可点（群至少 3 人，见 MIN_MEMBERS），busy 防重入；成功后 setActive(新群) + onClose
  *
  * 进入 /chat 后好友列表可能尚未拉取，open 时按需 loadFriends（mock 模式已注入，跳过）。
  */
@@ -33,6 +33,14 @@ interface CreateGroupModalProps {
 
 /** 群名长度上限（与后端约束一致） */
 const NAME_MAX = 100;
+
+/**
+ * 除自己之外最少要选的成员数（即群至少 3 人）。
+ *
+ * 与后端 CreateGroupBody 的 `min=2` 对齐。两个人该用单聊，建群只是多一套
+ * 群主/公告/踢人语义，和二人间已有的单聊会话重复。
+ */
+const MIN_MEMBERS = 2;
 
 export function CreateGroupModal({ open, onClose }: CreateGroupModalProps) {
   const { t } = useTranslation();
@@ -75,7 +83,7 @@ export function CreateGroupModal({ open, onClose }: CreateGroupModalProps) {
   };
 
   const handleCreate = async () => {
-    if (selected.length === 0 || busy) return;
+    if (selected.length < MIN_MEMBERS || busy) return;
     setBusy(true);
     try {
       const conv = await createGroup(name.trim() || undefined, selected);
@@ -133,9 +141,13 @@ export function CreateGroupModal({ open, onClose }: CreateGroupModalProps) {
             className="bg-surface-container-high text-body-md text-on-surface placeholder:text-on-surface-variant/70 focus:ring-primary/40 mb-3 w-full shrink-0 rounded-lg px-3 py-2.5 transition-shadow focus:ring-2 focus:outline-none"
           />
 
-          {/* 已选头像横排 */}
+          {/*
+            已选头像横排。纵向留白不能省：overflow-x-auto 一旦生效，CSS 会把另一轴的
+            visible 也提升成 auto（规范如此），于是头像右上角那枚负偏移的删除徽标被裁掉
+            上半截。给滚动容器本身加 py-1 把徽标圈回内容盒里，比给每个 chip 留边距更省。
+          */}
           {selectedFriends.length > 0 && (
-            <div className="scrollbar-none mb-3 flex shrink-0 gap-2 overflow-x-auto pb-1">
+            <div className="scrollbar-none mb-3 flex shrink-0 gap-2 overflow-x-auto py-1">
               {selectedFriends.map((f) => (
                 <button
                   key={f.id}
@@ -153,8 +165,12 @@ export function CreateGroupModal({ open, onClose }: CreateGroupModalProps) {
           )}
 
           {/* 好友多选列表 */}
-          <div className="text-label-md text-on-surface-variant mb-1 shrink-0 font-medium">
-            {t("chat.group.selectMembers")}
+          <div className="text-label-md text-on-surface-variant mb-1 flex shrink-0 items-baseline justify-between gap-2 font-medium">
+            <span>{t("chat.group.selectMembers")}</span>
+            {/* 插值变量刻意不叫 count：那是 i18next 的复数保留键，会改走 _one/_other 查找 */}
+            <span className="text-label-sm opacity-70">
+              {t("chat.group.minMembers", { min: MIN_MEMBERS })}
+            </span>
           </div>
           <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1">
             {groups.length === 0 ? (
@@ -205,7 +221,7 @@ export function CreateGroupModal({ open, onClose }: CreateGroupModalProps) {
           <Button
             variant="primary"
             className="mt-4 w-full shrink-0"
-            disabled={selected.length === 0 || busy}
+            disabled={selected.length < MIN_MEMBERS || busy}
             onClick={() => void handleCreate()}
           >
             {t("chat.group.create")}

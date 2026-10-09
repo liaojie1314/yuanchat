@@ -22,6 +22,13 @@ type ConversationListItem struct {
 	// ClearedBeforeSeq 本人的清空水位（列表预览据此过滤已清空的旧消息）。
 	ClearedBeforeSeq int64 `json:"cleared_before_seq"`
 	MemberCount      int64 `json:"member_count"`
+	// OwnUnread 已读水位之后由本人发出的消息条数。
+	//
+	// 未读数算的是 last_seq - last_read_seq，而 seq 是全会话共享的自增序号，
+	// 本人发的消息同样占号 —— 不减掉它，用手机发完消息，自己在电脑上就会看到
+	// 一条「未读」。转发（一次最多 9 个会话）尤其明显：那些会话压根没人说话。
+	// 不加 deleted_at 过滤是故意的：消息被删，号也已经占掉，照样要减。
+	OwnUnread int64 `json:"own_unread"`
 }
 
 // ConversationRepository 处理 conversations / conversation_members 表。
@@ -45,7 +52,10 @@ func (r *ConversationRepository) ListByUserID(ctx context.Context, userID uuid.U
 		Table("conversations c").
 		Select(`c.*, cm.role, cm.last_read_seq, cm.is_muted, cm.mention_unread,
 			cm.is_pinned, cm.pinned_at, cm.cleared_before_seq,
-			(SELECT count(*) FROM conversation_members m2 WHERE m2.conversation_id = c.id) AS member_count`).
+			(SELECT count(*) FROM conversation_members m2 WHERE m2.conversation_id = c.id) AS member_count,
+			(SELECT count(*) FROM messages m3
+			   WHERE m3.conversation_id = c.id AND m3.sender_id = cm.user_id
+			     AND m3.seq > cm.last_read_seq) AS own_unread`).
 		Joins("JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = ?", userID).
 		Where("c.deleted_at IS NULL").
 		Order("c.updated_at DESC").

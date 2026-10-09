@@ -38,6 +38,7 @@ export * from "./crypto/e2eeManager";
 export * from "./crypto/keyBackup";
 export * from "./api/e2ee";
 export { setNotifier, notifyIncoming, __resetNotifier } from "./notify";
+export { setUrlOpener, openExternal, __resetUrlOpener } from "./openExternal";
 export { applyConversationSetting } from "./conversationSettings";
 export {
   setRefreshHandler,

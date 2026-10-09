@@ -166,7 +166,9 @@ func (s *ConversationService) List(ctx context.Context, userID uuid.UUID) ([]Con
 			MentionUnread:         item.MentionUnread,
 			LastSeq:               item.LastSeq,
 			MyLastReadSeq:         item.LastReadSeq,
-			UnreadCount:           max(item.LastSeq-item.LastReadSeq, 0),
+			// 减掉本人发出的那部分：seq 是全会话共享的，自己发的消息也占号，
+			// 不减就会出现「手机上发完，电脑上看见一条自己的未读」。见 OwnUnread。
+			UnreadCount:           max(item.LastSeq-item.LastReadSeq-item.OwnUnread, 0),
 			AvatarURL:             item.AvatarURL,
 			Announcement:          item.Announcement,
 			AnnouncementUpdatedAt: item.AnnouncementUpdatedAt,
