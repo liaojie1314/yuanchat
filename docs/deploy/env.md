@@ -8,11 +8,35 @@
 
 ### 服务
 
-| 变量                      | 默认值        | 说明                                                                                              |
-| ------------------------- | ------------- | ------------------------------------------------------------------------------------------------- |
-| `YUANCHAT_SERVER_ENV`     | `development` | `development` / `staging` / `production`；production 下 gin 走 release 模式且 WS 校验 Origin 同源 |
-| `YUANCHAT_SERVER_PORT`    | `8085`        | REST 端口                                                                                         |
-| `YUANCHAT_WEBSOCKET_PORT` | `8086`        | WebSocket 端口（独立监听）                                                                        |
+| 变量                                   | 默认值        | 说明                                                                                                  |
+| -------------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------- |
+| `YUANCHAT_SERVER_ENV`                  | `development` | `development` / `staging` / `production`；production 下 gin 走 release 模式，且下面两个白名单开始生效 |
+| `YUANCHAT_SERVER_PORT`                 | `8085`        | REST 端口                                                                                             |
+| `YUANCHAT_WEBSOCKET_PORT`              | `8086`        | WebSocket 端口（独立监听）                                                                            |
+| `YUANCHAT_SERVER_CORS_ALLOWED_ORIGINS` | 空            | REST 的 CORS 白名单，逗号分隔。**生产必填**，见下方说明                                               |
+| `YUANCHAT_WEBSOCKET_ALLOWED_ORIGINS`   | 空            | WS 握手的 Origin 白名单，逗号分隔。**生产必填**，取值与上一行一致                                     |
+
+两份 Origin 白名单（REST 的 CORS 与 WS 握手）语义完全一致，分开只因为走的是两个端口两套握手，
+配置时**必须同时改、取值保持一致**。三档行为：
+
+- 开发环境：放行全部 Origin（本地端口多变，收紧只会把自己挡在门外）
+- 生产 + 配了白名单：命中才放行；REST 回显该 Origin 并带 `Vary: Origin`（不回 `*`）
+- 生产 + 留空：退回**仅同源** —— `api.example.com` 与 `chat.example.com` 不同源，
+  等于把 Web 端整个挡死（页面能开、登录能过，唯独 API 与 WS 全被浏览器拦下，极难定位）
+
+生产典型取值（`deploy/docker-compose.prod.yml` 已按 `DOMAIN_CHAT` / `DOMAIN_ADMIN` 自动拼好，
+无需在 `.env` 里重复）：
+
+```
+https://chat.example.com,https://admin.example.com,tauri://localhost,http://tauri.localhost,https://tauri.localhost
+```
+
+后三项是桌面/移动端 WebView 的 Origin，按平台分化：Linux/macOS/iOS 是 `tauri://localhost`，
+Windows WebView2 与 Android 是 `http(s)://tauri.localhost`。漏登记会让对应平台静默连不上。
+
+REST 侧刻意不发 `Access-Control-Allow-Origin: *`：`*` 配上「鉴权走 Authorization 头」虽然挡住了
+跨站读取已登录数据，但**免鉴权端点**仍然敞着 —— 任意网站都能借访客的浏览器与 IP 去打 `/auth/login`
+**并读到响应**，于是撞库可行且按 IP 的限流被摊薄到成千上万个访客 IP 上。
 
 ### 数据库
 

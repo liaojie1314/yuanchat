@@ -44,7 +44,10 @@ func Setup(
 	r.Use(middleware.RequestID())
 	r.Use(middleware.Logger(logger))
 	r.Use(middleware.Recovery(logger))
-	r.Use(middleware.CORS())
+	r.Use(middleware.CORS(middleware.CORSOptions{
+		AllowedOrigins: cfg.Server.CORSAllowedOrigins,
+		IsProd:         cfg.Server.IsProduction(),
+	}))
 	r.Use(middleware.Prometheus())
 
 	// --- 依赖接线 ---

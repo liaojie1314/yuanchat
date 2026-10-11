@@ -35,6 +35,12 @@ type ServerConfig struct {
 	ReadTimeout     time.Duration `mapstructure:"read_timeout"`
 	WriteTimeout    time.Duration `mapstructure:"write_timeout"`
 	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"`
+	// CORSAllowedOrigins 是生产环境允许**读取 REST 响应**的 Origin 白名单
+	// （逗号分隔的环境变量）。语义与 WebSocket.AllowedOrigins 一致，
+	// 取值通常也该一致 —— 两者都是「哪些前端可以用这个后端」。
+	// 留空则退回同源，仅适用于 app 与 api 同域的部署。
+	// 为什么需要白名单而不是 `*`：见 middleware.CORS 的说明。
+	CORSAllowedOrigins []string `mapstructure:"cors_allowed_origins"`
 }
 
 type WebSocketConfig struct {
@@ -241,6 +247,12 @@ func Load(configPath string) (*Config, error) {
 	// 不登记默认值的话 AutomaticEnv 看不见这个 key，生产会静默退回同源校验，
 	// 表现为「页面能开、登录能过，但聊天永远连不上」。
 	v.SetDefault("websocket.allowed_origins", []string{})
+
+	// REST 的 CORS 白名单同理，只由环境变量下发（逗号分隔）。
+	// 不登记默认值的话 AutomaticEnv 看不见这个 key，生产会静默退回同源，
+	// 表现为「Web 端每个接口都被浏览器拦掉」—— 而桌面端（Origin 是
+	// tauri://localhost）照样能用，容易误判成「只是 Web 端的问题」。
+	v.SetDefault("server.cors_allowed_origins", []string{})
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)

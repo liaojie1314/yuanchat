@@ -8,6 +8,10 @@ server:
   read_timeout: 30s
   write_timeout: 30s
   shutdown_timeout: 10s
+  # REST 的 CORS 白名单（允许读取响应的 Origin）。开发环境放行全部，此处留空即可；
+  # 生产留空会退回「仅同源」—— api 与 web 分属不同子域时等于把 Web 端挡死，
+  # 故生产必须经 YUANCHAT_SERVER_CORS_ALLOWED_ORIGINS 显式登记（见 deploy/docker-compose.prod.yml）
+  cors_allowed_origins: []
 
 websocket:
   port: 8086

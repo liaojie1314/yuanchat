@@ -88,6 +88,11 @@ services:
       # Windows WebView2 与 Android 是 http(s)://tauri.localhost。
       YUANCHAT_WEBSOCKET_ALLOWED_ORIGINS: >-
         https://${DOMAIN_CHAT},https://${DOMAIN_ADMIN},tauri://localhost,http://tauri.localhost,https://tauri.localhost
+      # REST 的 CORS 白名单。与上面的 WS 白名单取值一致、语义一致（见 middleware/cors.go），
+      # 两处分开是因为走的是两个端口两套握手。不配这个值生产会退回「仅同源」，
+      # 而 api 与 chat 分属不同子域，等于把 Web 端整个挡死
+      YUANCHAT_SERVER_CORS_ALLOWED_ORIGINS: >-
+        https://${DOMAIN_CHAT},https://${DOMAIN_ADMIN},tauri://localhost,http://tauri.localhost,https://tauri.localhost
       YUANCHAT_DATABASE_HOST: postgres
       YUANCHAT_DATABASE_PORT: "5432"
       YUANCHAT_DATABASE_USER: ${DB_USER}
@@ -227,10 +232,10 @@ services:
     restart: unless-stopped
     profiles: [observability]
     ports:
-    # 仅绑回环：监控面板不该暴露到公网（它背后是全部服务的指标与日志）。
-    # 绑 127.0.0.1 之后外网扫不到，但 `ssh -L` 隧道能转发到这里 ——
-    # 不加这段映射的话容器只在 Docker 网络内可达，隧道指向宿主机 localhost 会连不上，
-    # 表现为「隧道建好了但浏览器打不开」，很容易误以为是 Grafana 没起来。
+      # 仅绑回环：监控面板不该暴露到公网（它背后是全部服务的指标与日志）。
+      # 绑 127.0.0.1 之后外网扫不到，但 `ssh -L` 隧道能转发到这里 ——
+      # 不加这段映射的话容器只在 Docker 网络内可达，隧道指向宿主机 localhost 会连不上，
+      # 表现为「隧道建好了但浏览器打不开」，很容易误以为是 Grafana 没起来。
       - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
