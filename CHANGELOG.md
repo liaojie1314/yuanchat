@@ -1,5 +1,36 @@
 # 更新日志
 
+# [0.6.0](https://github.com/liaojie1314/yuanchat/compare/v0.5.0...v0.6.0) (2026-10-11)
+
+### Bug Fixes
+
+- **admin:** 表格补骨架屏并让 401 统一弹回登录页 ([26fdccc](https://github.com/liaojie1314/yuanchat/commit/26fdcccc6489171315b81d797607cf912d5710d8))
+- **brand:** 修复 Android 启动器图标被裁切 ([2394f61](https://github.com/liaojie1314/yuanchat/commit/2394f610d28610846c20f5f5ebfe284251cc1270))
+- **chat:** 对方已读后同步会话已读水位，避免重进会话双勾退回单勾 ([47fdd23](https://github.com/liaojie1314/yuanchat/commit/47fdd232d08d733ffcfd06c81b9cea41dc8e85db))
+- **chat:** 媒体发送失败如实报因，图片与语音补上提示 ([ae5ba6e](https://github.com/liaojie1314/yuanchat/commit/ae5ba6e65d1060a2cf240f516d8e1f2ef557f9fd))
+- **chat:** 气泡宽度收到 60% 并补 min-w-0，修长文件名顶穿屏幕 ([63ec57e](https://github.com/liaojie1314/yuanchat/commit/63ec57e24e82d9d8f13c67ed2929ef474db834af))
+- **chat:** 修媒体重试死点击、文件下载无反应与自发消息计入未读 ([18bb2e7](https://github.com/liaojie1314/yuanchat/commit/18bb2e72b8b1ada6d7f14f99d4e9e68e0c020c63))
+- **chat:** 修气泡宽度被内容顶穿与图片视频溢出气泡 ([44c0c5f](https://github.com/liaojie1314/yuanchat/commit/44c0c5fbbb7e5206283a9fa6fa01974933c59c19))
+- **chat:** 修手机端下载失败、断网重连丢未发消息与已读误判 ([027346b](https://github.com/liaojie1314/yuanchat/commit/027346b507a71d35b560abc7fbee4539debbd9b4))
+- **deploy:** 打通生产部署并把发码通道做成可配置 ([46ec738](https://github.com/liaojie1314/yuanchat/commit/46ec738942bbfce375d8b85a5c83d1e5ddb9ba89))
+- **deploy:** 修复 Grafana 仪表盘完全不置备的四个问题 ([fe20f72](https://github.com/liaojie1314/yuanchat/commit/fe20f723baf9919e589ee6a8689301a00b15aac8))
+- **deploy:** Grafana QPS 面板读不出低频请求 ([8d31952](https://github.com/liaojie1314/yuanchat/commit/8d31952b5aee8d2545b0f0f82d64249f1d9184f9))
+- **mobile:** 修复软键盘弹起时页面明显抖动 ([5aa47a5](https://github.com/liaojie1314/yuanchat/commit/5aa47a54a3a5fc43b7eea5e9809f184d31e73f63))
+- **mobile:** 整页跳转后浮层压住状态栏 ([daa2323](https://github.com/liaojie1314/yuanchat/commit/daa232328560165495d879381148c5f784b70140))
+- **server:** 补上 version 变量，让 Dockerfile 的 ldflag 真正生效 ([02f1e5e](https://github.com/liaojie1314/yuanchat/commit/02f1e5ea6c64b8e92f51dc99bff407a2d93d4f8f))
+- **server:** CORS 改 Origin 白名单回显，不再无条件回通配 ([549080d](https://github.com/liaojie1314/yuanchat/commit/549080d9b9fe17846eb9b8341b03eda669254bbb))
+- **storage:** 预签名改在对外 host 上计算，修复媒体上传全量 403 ([901eaad](https://github.com/liaojie1314/yuanchat/commit/901eaadd643d0d6e9d45e86ff8e545074796f86f))
+- **ui:** 相册返回键拦截器改在 layout effect 注册，修远程 CI 用例 flaky ([323c1a6](https://github.com/liaojie1314/yuanchat/commit/323c1a69f910f06de42ceec985ece697ae772ab9))
+- **ui:** 修复扫码登录页布局 ([7d34675](https://github.com/liaojie1314/yuanchat/commit/7d3467558c3fc9159d71e119589a3469c2f343e7))
+
+### Features
+
+- **auth:** 注册改邮箱验证码，找回密码与登录统一支持手机号或邮箱 ([672b059](https://github.com/liaojie1314/yuanchat/commit/672b0590d85a1356d2f4548800084dedfa595b59))
+- **auth:** 注册与找回密码只用邮箱，移除手机号 ([fee246f](https://github.com/liaojie1314/yuanchat/commit/fee246fc1c81df44beda909791d40047c57a2be0))
+- **brand:** 应用图标改为「元」字气泡，三端与应用内统一 ([85d68bd](https://github.com/liaojie1314/yuanchat/commit/85d68bdb075ec99de44a6d89bced13a907ca43e0))
+- **deploy:** 运维入口脚本与自托管部署实战补充 ([fd9a789](https://github.com/liaojie1314/yuanchat/commit/fd9a789f190a06785ad95f3af0aa806ccd5c977d))
+- **shared:** 支持运行时切换服务端地址 ([c1451b9](https://github.com/liaojie1314/yuanchat/commit/c1451b992a3dc6b8ae1577a797d5c35b6ed5a352))
+
 # [0.5.0](https://github.com/liaojie1314/yuanchat/compare/v0.4.0...v0.5.0) (2026-10-04)
 
 ### Bug Fixes
