@@ -425,24 +425,24 @@ export function MessageBubble({
         <Avatar name={avatarName} size="md" />
       )}
 
-      {/* 气泡列宽上限 60%：再宽就压到对侧、读起来也累。
+      {/* 气泡列宽上限 75%：再宽就压到对侧、读起来也累。
           min-w-0 不可省 —— 本列是消息行的 flex item，flex item 的 min-width 默认是
           auto（= 内容最小宽度），而文件名那行带 white-space:nowrap，它的最小宽度
-          就是整条文件名的长度。min-width 赢过 max-width，于是 60% 形同不存在，
+          就是整条文件名的长度。min-width 赢过 max-width，于是上限形同不存在，
           长文件名气泡直接顶穿屏幕（实测截图里气泡左半边在屏幕外）。 */}
-      <div className={cn("flex max-w-[60%] min-w-0 flex-col", isSelf && "items-end")}>
+      <div className={cn("flex max-w-[75%] min-w-0 flex-col", isSelf && "items-end")}>
         {/* 群聊接收方显示发送者昵称（合并态省略） */}
         {!compact && !isSelf && msg.senderName && (
           <span className="text-label-sm text-primary mx-1 mb-1 font-medium">{msg.senderName}</span>
         )}
 
-        {/* w-full 是 60% 上限真正生效的关键：这一行不写宽度时是 auto，
+        {/* w-full 是宽度上限真正生效的关键：这一行不写宽度时是 auto，
             于是尺寸由内容「倒推」—— flex 的 fit-content 定义就是 max(min-content, …)，
-            min-content 是地板，外层 max-w-[60%] 和这里的 min-w-0 都压不下去
+            min-content 是地板，外层 max-w-[75%] 和这里的 min-w-0 都压不下去
             （min-width:0 只解除本元素的最小尺寸，不改变子孙向上贡献的 min-content，
             而里面那行 truncate 文件名 nowrap，min-content 就是整条文件名的宽度）。
-            改成 w-full 后宽度由父列「正推」为定值，气泡与文件名才会在 60% 内截断。
-            窄视口才暴露：桌面 1920px 下 60% ≈ 1150px 远大于内容 min-content，永远碰不到 */}
+            改成 w-full 后宽度由父列「正推」为定值，气泡与文件名才会在上限内截断。
+            窄视口才暴露：桌面 1920px 下 75% 远大于内容 min-content，永远碰不到 */}
         <div
           className={cn("flex w-full min-w-0 items-center gap-1.5", isSelf && "flex-row-reverse")}
         >
@@ -542,9 +542,7 @@ export function MessageBubble({
                       );
                     })()}
                   </div>
-                  <div className="text-label-sm mt-0.5 opacity-80">
-                    {msg.file.size} · {msg.file.ext}
-                  </div>
+                  <div className="text-label-xs mt-0.5 opacity-80">{msg.file.size}</div>
                 </div>
                 <button
                   aria-label={t("file.download")}
