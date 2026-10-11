@@ -13,7 +13,7 @@ upstream yuanchat_s3   { server minio:9000; }
 # ---------- HTTP：ACME 校验 + 全站跳 HTTPS ----------
 server {
     listen 80;
-    server_name ${DOMAIN_APP} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN} ${DOMAIN_STORAGE};
+    server_name ${DOMAIN_CHAT} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN} ${DOMAIN_STORAGE};
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -27,10 +27,10 @@ server {
 server {
     listen 443 ssl;
     http2 on;
-    server_name ${DOMAIN_APP};
+    server_name ${DOMAIN_CHAT};
 
-    ssl_certificate     /etc/letsencrypt/live/${DOMAIN_APP}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_APP}/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN_CHAT}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_CHAT}/privkey.pem;
     include /etc/nginx/ssl-params.conf;
 
     location / {
@@ -117,9 +117,12 @@ server {
 
     location / {
         proxy_pass http://yuanchat_s3;
+        # Host 由 proxy-params.conf 统一设成 $host —— 这里**绝对不能**再写一遍
+        # proxy_set_header Host：nginx 对同名 proxy_set_header 不去重，会真的发出两个
+        # Host 头，而 MinIO 的 Go net/http 在进到 MinIO 自己的 handler 之前就以
+        # 「too many Host headers」回 15 字节纯文本 400。表现极具误导性：所有路径
+        # （连 /minio/health/live）全是 400，MinIO 日志里一条都没有，容器内直连却正常。
+        # 改通用参数时若要去掉那边的 Host，请改 proxy-params.conf，不要在此补一行。
         include /etc/nginx/proxy-params.conf;
-        # proxy-params.conf 已设 Host $host；此处显式重申以标明它对签名是必需的，
-        # 将来改动通用参数时不要把它一并去掉
-        proxy_set_header Host $host;
     }
 }

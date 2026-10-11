@@ -30,7 +30,6 @@
     "core:event:allow-listen",
     "dialog:default",
     "fs:default",
-    "notification:default",
-    "shell:default"
+    "notification:default"
   ]
 }

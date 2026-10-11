@@ -102,9 +102,12 @@ describe("MessageImage", () => {
         <MessageImage image={{ width: 800, height: 400, key: "images/skel.png" }} />,
       );
       const boxEl = container.firstElementChild as HTMLElement;
-      // 骨架盒与最终图片同尺寸（280×140），布局不因加载而跳动
+      // 骨架盒与最终图片同尺寸（280 宽 + 2:1 比例 = 140 高），布局不因加载而跳动。
+      // 高度不写死 px：窄屏下 maxWidth 会把宽度压到气泡内（否则定宽图戳出气泡），
+      // 高度必须跟着比例缩，故改用 padding-top 百分比（相对宽度解析，等比且零 CLS）
       expect(boxEl.style.width).toBe("280px");
-      expect(boxEl.style.height).toBe("140px");
+      expect(boxEl.style.maxWidth).toBe("100%");
+      expect(boxEl.style.paddingTop).toBe("50%");
     });
 
     it("localUrl (optimistic send) renders immediately without waiting for viewport", () => {

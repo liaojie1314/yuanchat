@@ -86,6 +86,11 @@ class MainActivity : TauriActivity() {
    * 因此这里要等到真实文档就位（协议不是 about: 且已过 loading 阶段）才算写成功，
    * 否则每 250ms 重试，最多 ~5 秒。写成功后不再重试；旋转屏幕、显示切换会再次触发
    * inset 回调，届时重新写入。
+   *
+   * 顺手把值存进 localStorage：同样的「换文档就丢」也发生在页面加载之后 ——
+   * 注册/忘记密码（移动端没有多窗口，退化成整页跳转）、切换服务器地址、错误边界重载
+   * 都会换掉 document，而那时不会再有 inset 回调来补发。前端 restoreSafeAreaTop()
+   * 在首帧前从 localStorage 取回来。
    */
   private fun pushSafeAreaTop(retries: Int = 20) {
     val target = webView ?: return
@@ -94,6 +99,7 @@ class MainActivity : TauriActivity() {
       "(function(){" +
         "if(location.protocol==='about:'||document.readyState==='loading')return 'retry';" +
         "document.documentElement.style.setProperty('--safe-area-top','${value}px');" +
+        "try{localStorage.setItem('yuanchat.safeAreaTop','${value}')}catch(e){}" +
         "return 'ok'})()",
     ) { result ->
       if (result != "\"ok\"" && retries > 0) {

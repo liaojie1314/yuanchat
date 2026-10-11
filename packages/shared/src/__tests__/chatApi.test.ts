@@ -268,10 +268,19 @@ describe("mapMessage", () => {
     expect(msg.status).toBeUndefined();
   });
 
-  it("maps own message with read status (history convention)", () => {
-    const msg = mapMessage({ ...dto, sender_id: "u1" }, "u1");
+  // 自己发的消息按「别人最落后的已读水位」判定，而不是一律 read。
+  // 从前这里写死 read，于是刷新一次所有自己的消息就都变双勾 ——
+  // 和对方到底看没看毫无关系，这个指示器等于在撒谎。
+  it("自己的消息：对方已读水位 >= seq 才算已读", () => {
+    const msg = mapMessage({ ...dto, sender_id: "u1" }, "u1", 5);
     expect(msg.isSelf).toBe(true);
     expect(msg.status).toBe("read");
+  });
+
+  it("自己的消息：对方已读水位落后于 seq 时只算已送达", () => {
+    expect(mapMessage({ ...dto, sender_id: "u1" }, "u1", 4).status).toBe("sent");
+    // 缺省水位 0（会话 DTO 没带这个字段的老服务端）→ 一律当未读，不伪造已读
+    expect(mapMessage({ ...dto, sender_id: "u1" }, "u1").status).toBe("sent");
   });
 
   it("marks recalled message (status=2) and drops its text", () => {

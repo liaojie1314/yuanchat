@@ -7,21 +7,13 @@
  * - AppearanceSection：主题双卡片可视化选择 + 语言分段控件（Segmented）
  * - FavoritesSection：收藏列表套上本页统一的标题块与卡片外框
  * - AboutSection：品牌 hero + 版本 + 内部链接（相关信息列表）
+ *
+ * 曾有过 ServerSection（设置页内查看/切换服务器地址），已删：登录后才够得着的入口
+ * 解决不了任何问题 —— 内置地址连不上时根本进不到设置页。真正起作用的入口是登录页上的
+ * {@link ServerEndpointEditor} 弹窗，那个保留。
  */
 import { useState, type ReactNode } from "react";
-import {
-  BadgeCheck,
-  Check,
-  Copy,
-  Github,
-  Globe,
-  Info,
-  Key,
-  Mail,
-  Moon,
-  Phone,
-  Sun,
-} from "lucide-react";
+import { BadgeCheck, Check, Copy, Github, Globe, Info, Key, Mail, Moon, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useBreakpoint, useThemeStore } from "@yuanchat/shared";
 import { SUPPORTED_LOCALES } from "@yuanchat/design-system/i18n";
@@ -29,7 +21,9 @@ import { cn } from "@yuanchat/shared/utils";
 import { copyText } from "../util/copyText";
 import { E2EESection } from "../e2ee/E2EESection";
 import { FavoritesView } from "../favorites/FavoritesView";
-import { APP_VERSION, maskPhone } from "./settingsUtils";
+import { ServerEndpointEditor } from "./ServerEndpointEditor";
+import { BrandMark } from "../primitives/BrandMark";
+import { APP_VERSION } from "./settingsUtils";
 
 /** 分组标题 + 副标（页面级） */
 /**
@@ -66,7 +60,7 @@ function InfoRow({
   copyable,
   action,
 }: {
-  icon: typeof Phone;
+  icon: typeof Mail;
   label: string;
   value: string;
   copyable?: boolean;
@@ -107,12 +101,10 @@ function InfoRow({
 
 /** 账号与安全：信息卡片 + 修改密码占位入口 */
 export function AccountSection({
-  phone,
   email,
   shortId,
   onChangePassword,
 }: {
-  phone?: string;
   email?: string;
   shortId?: number;
   /** 进入改密链路；不传则该入口保持禁用（宿主未提供实现时不该给出死按钮） */
@@ -125,11 +117,6 @@ export function AccountSection({
       {/* 端到端加密：开关 + PIN 备份/恢复 */}
       <E2EESection />
       <InfoCard>
-        <InfoRow
-          icon={Phone}
-          label={t("settings.phone")}
-          value={phone ? maskPhone(phone) : t("settings.notBound")}
-        />
         <InfoRow icon={Mail} label={t("settings.email")} value={email || t("settings.notBound")} />
         {shortId !== undefined && (
           <InfoRow
@@ -323,8 +310,8 @@ export function AboutSection({ extra }: { extra?: ReactNode } = {}) {
 
       {/* 品牌 hero */}
       <div className="mb-6 flex flex-col items-center gap-3 py-6">
-        <div className="brand-gradient shadow-elevation-2 text-headline-md flex h-20 w-20 items-center justify-center rounded-lg font-bold text-white">
-          元
+        <div className="brand-gradient shadow-elevation-2 flex h-20 w-20 items-center justify-center rounded-lg text-white">
+          <BrandMark size={44} />
         </div>
         <p className="text-title-lg text-on-surface font-semibold">YuanChat</p>
         <p className="text-body-sm text-on-surface-variant">

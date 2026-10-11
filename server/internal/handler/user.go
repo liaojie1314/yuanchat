@@ -14,17 +14,21 @@ import (
 )
 
 // UserHandler 负责用户认证与个人资料相关端点。
+//
+// authSvc 只用来校验注册邮箱验证码。注册必须验证邮箱归属 ——
+// 此前这里只有一道图形算术验证码，它证明的是「对面是人」，
+// 而不是「这个邮箱属于他」，任何人都能拿别人的邮箱注册。
 type UserHandler struct {
 	svc     *service.UserService
-	captcha *CaptchaHandler
+	authSvc *service.AuthService
 	logger  *zap.Logger
 }
 
-func NewUserHandler(svc *service.UserService, captcha *CaptchaHandler, logger *zap.Logger) *UserHandler {
-	return &UserHandler{svc: svc, captcha: captcha, logger: logger}
+func NewUserHandler(svc *service.UserService, authSvc *service.AuthService, logger *zap.Logger) *UserHandler {
+	return &UserHandler{svc: svc, authSvc: authSvc, logger: logger}
 }
 
-// Register 校验图形验证码后创建新账号。
+// Register 校验邮箱验证码后创建新账号。
 func (h *UserHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -32,13 +36,20 @@ func (h *UserHandler) Register(c *gin.Context) {
 		return
 	}
 
-	if !h.captcha.Validate(c.Request.Context(), req.CaptchaID, req.CaptchaAnswer) {
-		BadRequest(c, "invalid captcha")
+	if err := h.authSvc.ConsumeRegisterCode(c.Request.Context(), req.Email, req.Code); err != nil {
+		switch {
+		case errors.Is(err, service.ErrTooManyTries):
+			Error(c, http.StatusTooManyRequests, 429, "auth.accountLocked")
+		case errors.Is(err, service.ErrCodeInvalid):
+			BadRequest(c, "auth.otpWrong")
+		default:
+			h.logger.Error("校验注册验证码失败", zap.Error(err))
+			InternalError(c, "auth.otpWrong")
+		}
 		return
 	}
 
 	result, err := h.svc.Register(c.Request.Context(), service.RegisterRequest{
-		Phone:    req.Phone,
 		Email:    req.Email,
 		Password: req.Password,
 		Nickname: req.Nickname,
@@ -51,13 +62,17 @@ func (h *UserHandler) Register(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, service.ErrDuplicateUser) {
-			Error(c, http.StatusConflict, 409, "phone or email already registered")
+			Error(c, http.StatusConflict, 409, "auth.accountTaken")
 			return
 		}
 		h.logger.Error("register failed", zap.Error(err))
-		InternalError(c, "registration failed")
+		InternalError(c, "auth.registerFailed")
 		return
 	}
+
+	// 只有真的建成账号才作废验证码：码对了但昵称/密码不合规时让用户直接重填，
+	// 不必从「重新收一封邮件」开始
+	h.authSvc.ClearRegisterCode(c.Request.Context(), req.Email)
 
 	Created(c, gin.H{
 		"user":          result.User,
@@ -263,13 +278,16 @@ func (h *UserHandler) GetPublicProfile(c *gin.Context) {
 
 // --- 请求 / 响应结构 ---
 
+// RegisterRequest 是注册请求体。
+//
+// 只收邮箱：Email 必填且必须通过 Code 验证 —— 验证码是发到邮箱里的，
+// 没有邮箱就无从验证归属；手机号拿不到码，所以注册链路不收它。
+// 老账号库里仍有 phone 列与按手机号登录，那是登录的事，与注册无关。
 type RegisterRequest struct {
-	Phone         string `json:"phone" binding:"omitempty,len=11"`
-	Email         string `json:"email" binding:"omitempty,email"`
-	Password      string `json:"password" binding:"required,min=8,max=64"`
-	Nickname      string `json:"nickname" binding:"required,min=1,max=50"`
-	CaptchaID     string `json:"captcha_id" binding:"required"`
-	CaptchaAnswer int    `json:"captcha_answer" binding:"required"`
+	Email    string `json:"email" binding:"required,email"`
+	Code     string `json:"code" binding:"required,len=6"`
+	Password string `json:"password" binding:"required,min=8,max=64"`
+	Nickname string `json:"nickname" binding:"required,min=1,max=50"`
 }
 
 type LoginRequest struct {

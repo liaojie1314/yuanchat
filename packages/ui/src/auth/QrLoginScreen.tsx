@@ -161,56 +161,56 @@ export function QrLoginScreen({ topSlot, onLoggedIn }: QrLoginScreenProps) {
       {topSlot}
 
       <div className="relative flex flex-1 flex-col overflow-y-auto">
-        <div className="relative m-auto w-full max-w-md px-5 py-8">
-          {/* 磨砂玻璃卡片 */}
-          <div className="dark:bg-surface-container/70 rounded-lg border border-white/60 bg-white/70 px-10 py-12 text-center shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-2xl dark:border-white/10">
-            {/* 标题 */}
-            <div className="mb-8">
-              <div className="brand-gradient glow-brand mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-lg text-white shadow-lg">
-                <Smartphone size={28} />
-              </div>
-              <h1 className="text-on-surface text-2xl font-bold">{t("auth.qrLogin")}</h1>
-              <p className="text-on-surface-variant mt-1 text-sm">{t("auth.qrSubtitle")}</p>
+        {/* 不套磨砂卡片：扫码页只有「图 + 一行提示 + 一个链接」，
+            再加一层白底边框只是把内容挤窄、把页面撑高。桌面端登录窗口只有
+            ~670px 高，带卡片时整页都要滚 */}
+        <div className="relative m-auto w-full max-w-md px-6 py-6 text-center">
+          {/* 标题 */}
+          <div className="mb-5">
+            <div className="brand-gradient glow-brand mx-auto mb-3 inline-flex h-14 w-14 items-center justify-center rounded-lg text-white shadow-lg">
+              <Smartphone size={26} />
+            </div>
+            <h1 className="text-on-surface text-2xl font-bold">{t("auth.qrLogin")}</h1>
+            <p className="text-on-surface-variant mt-1 text-sm">{t("auth.qrSubtitle")}</p>
+          </div>
+
+          {/* 二维码区域。w-fit + mx-auto 而非 inline-block：后者会让紧跟其后的
+              inline-flex「刷新二维码」按钮排到同一行右侧去（真机上就是这个现象） */}
+          <div className="relative mx-auto mb-4 w-fit rounded-lg bg-white p-3 shadow-[0_4px_24px_rgba(0,0,0,0.10)]">
+            <div
+              data-testid="qr-code"
+              data-qr-value={session ? session.qrPayload : ""}
+              // 用类名而不是内联 style 表达暗化：内联的 `opacity: dimmed ? 0.2 : 1`
+              // 压缩后是 `m?.2:1`，虽然按标准会被解析成三元（`?.` 后跟数字不是可选链），
+              // 但会让「产物里不许出现 ?.」的兼容性审计 grep 报假命中。
+              // flex 顺带消掉 svg 作为行内元素带来的基线空隙
+              className={["flex", stopped ? "opacity-20" : "opacity-100"].join(" ")}
+            >
+              {/* 内容必须是服务端下发的 qr_payload 原文 */}
+              <QRCodeSVG value={session ? session.qrPayload : ""} size={QR_SIZE} />
             </div>
 
-            {/* 二维码区域 */}
-            <div className="relative mx-auto mb-5 inline-block rounded-lg bg-white p-3 shadow-[0_4px_24px_rgba(0,0,0,0.10)]">
-              <div
-                data-testid="qr-code"
-                data-qr-value={session ? session.qrPayload : ""}
-                // 用类名而不是内联 style 表达暗化：内联的 `opacity: dimmed ? 0.2 : 1`
-                // 压缩后是 `m?.2:1`，虽然按标准会被解析成三元（`?.` 后跟数字不是可选链），
-                // 但会让「产物里不许出现 ?.」的兼容性审计 grep 报假命中。
-                // flex 顺带消掉 svg 作为行内元素带来的基线空隙
-                className={["flex", stopped ? "opacity-20" : "opacity-100"].join(" ")}
-              >
-                {/* 内容必须是服务端下发的 qr_payload 原文 */}
-                <QRCodeSVG value={session ? session.qrPayload : ""} size={QR_SIZE} />
-              </div>
-
-              {stopped && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center rounded-lg bg-black/40 px-2">
-                  <Clock size={28} className="mb-2 text-white" />
-                  <p className="text-sm font-medium text-white">
-                    {stopReason || t("auth.qrExpired")}
-                  </p>
-                </div>
-              )}
-
-              {phase === "scanned" && (
-                <div className="bg-primary/85 absolute inset-0 flex flex-col items-center justify-center rounded-lg">
-                  <CheckCircle size={36} className="mb-2 text-white" />
-                  <p className="text-sm font-medium text-white">{t("auth.qrScanned")}</p>
-                  <p className="mt-0.5 text-xs text-white/80">{t("auth.qrConfirmOnPhone")}</p>
-                </div>
-              )}
-            </div>
-
-            {/* 状态提示 */}
-            {(phase === "loading" || phase === "pending" || phase === "confirmed") && (
-              <p className="text-on-surface-variant text-sm">{t("auth.qrHint")}</p>
-            )}
             {stopped && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center rounded-lg bg-black/40 px-2">
+                <Clock size={26} className="mb-1.5 text-white" />
+                <p className="text-sm font-medium text-white">
+                  {stopReason || t("auth.qrExpired")}
+                </p>
+              </div>
+            )}
+
+            {phase === "scanned" && (
+              <div className="bg-primary/85 absolute inset-0 flex flex-col items-center justify-center rounded-lg">
+                <CheckCircle size={34} className="mb-1.5 text-white" />
+                <p className="text-sm font-medium text-white">{t("auth.qrScanned")}</p>
+                <p className="mt-0.5 text-xs text-white/80">{t("auth.qrConfirmOnPhone")}</p>
+              </div>
+            )}
+          </div>
+
+          {/* 状态行固定一行高：提示文案与刷新按钮互换时不改变页面高度（CLS 为零） */}
+          <div className="flex h-6 items-center justify-center">
+            {stopped ? (
               <button
                 type="button"
                 onClick={() => void start()}
@@ -219,18 +219,20 @@ export function QrLoginScreen({ topSlot, onLoggedIn }: QrLoginScreenProps) {
                 <RefreshCw size={14} />
                 {t("auth.qrRefresh")}
               </button>
+            ) : (
+              <p className="text-on-surface-variant text-sm">{t("auth.qrHint")}</p>
             )}
+          </div>
 
-            {/* 返回密码登录 */}
-            <div className="mt-8">
-              <Link
-                to="/login"
-                replace
-                className="text-on-surface-variant hover:text-primary text-sm hover:opacity-80"
-              >
-                {t("auth.backToPasswordLogin")}
-              </Link>
-            </div>
+          {/* 返回密码登录 */}
+          <div className="mt-5">
+            <Link
+              to="/login"
+              replace
+              className="text-on-surface-variant hover:text-primary text-sm hover:opacity-80"
+            >
+              {t("auth.backToPasswordLogin")}
+            </Link>
           </div>
         </div>
       </div>

@@ -1,11 +1,75 @@
 /**
  * Admin REST API — /api/v1/admin/* 端点封装
  *
- * 写操作复用 shared 的 apiPost/apiDelete（自动带 token、统一信封解析）。
- * 分页列表用本地 pagedGet：后端 Paginated 把 total/page/size 放信封顶层，
- * shared apiGet 只返回 data 字段会丢分页信息。
+ * 全部请求只有三个出口：adminPost / adminDelete（写，转发 shared 的
+ * apiPost / apiDelete）与 envelopeGet（读，自带 fetch）。三者都接在
+ * onUnauthorized 上，HTTP 401 一律清本地登录态回登录页 —— 只补一处的话，
+ * 表现就是「某些页面会跳、某些不会」。
+ *
+ * 读操作不用 shared 的 apiGet：后端 Paginated 把 total/page/size 放信封顶层，
+ * apiGet 只返回 data 字段会丢分页信息。
  */
-import { apiPost, apiDelete, API_BASE, getAccessToken, ApiError } from "@yuanchat/shared";
+import {
+  apiPost,
+  apiDelete,
+  API_BASE,
+  getAccessToken,
+  ApiError,
+  useAuthStore,
+  ensureFreshToken,
+  forceRefresh,
+} from "@yuanchat/shared";
+
+/**
+ * 上一次离开管理端是因为登录态失效（而非主动登出）。
+ * 登录页读它决定要不要提示「会话已过期」—— 不给提示，用户只会看到
+ * 自己莫名其妙被弹回登录页。
+ */
+let sessionExpired = false;
+
+/** 取出并清掉「会话已过期」标记（读一次即消费，刷新页面不再重复提示）。 */
+export function takeSessionExpired(): boolean {
+  const was = sessionExpired;
+  sessionExpired = false;
+  return was;
+}
+
+/**
+ * 登录态失效（HTTP 401）的统一处置。
+ *
+ * 只需清掉本地登录态：App 的 RequireAuth 订阅了 isAuthenticated，
+ * 置 false 的那一刻就渲染 `<Navigate to="/login" replace />`。
+ *
+ * 清而不吞 —— 错误照旧抛回调用方，该报的错还是会报，不会留下一个
+ * 「空列表 + 没有任何提示」的页面。
+ *
+ * 登录接口不走本模块（authStore 直接调 shared 的 apiPost），
+ * 所以密码输错拿到的 401 不会把人踢走，错误提示照常显示。
+ */
+function onUnauthorized(): void {
+  sessionExpired = true;
+  useAuthStore.getState().clearSession();
+}
+
+/** 把 401 接到 onUnauthorized 上，其余错误原样抛出。 */
+async function guard<T>(call: Promise<T>): Promise<T> {
+  try {
+    return await call;
+  } catch (err) {
+    if (err instanceof ApiError && err.code === 401) onUnauthorized();
+    throw err;
+  }
+}
+
+/** 写操作出口：shared apiPost + 401 处置。 */
+function adminPost<T>(path: string, body: unknown): Promise<T> {
+  return guard(apiPost<T>(path, body));
+}
+
+/** 写操作出口：shared apiDelete + 401 处置。 */
+function adminDelete<T>(path: string): Promise<T> {
+  return guard(apiDelete<T>(path));
+}
 
 export interface AdminUser {
   id: string;
@@ -64,25 +128,58 @@ const qs = (params: Record<string, string | number | undefined>) => {
   return s ? `?${s}` : "";
 };
 
-/** 分页 GET：解析完整信封（data + total 顶层平级）。 */
-async function pagedGet<T>(path: string): Promise<Page<T>> {
-  const token = getAccessToken();
+/** 后端响应信封：data 与 total 顶层平级（total 只有分页端点才有）。 */
+interface Envelope<T> {
+  code: number;
+  message: string;
+  data: T | null;
+  total?: number;
+}
+
+/** 发一次请求并原样取回信封（不判 code，交给 envelopeGet 统一处置）。 */
+async function fetchEnvelope<T>(path: string, token: string | null): Promise<Envelope<T>> {
   const res = await fetch(API_BASE + path, {
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
-  const json = (await res.json()) as {
-    code: number;
-    message: string;
-    data: T[] | null;
-    total: number;
-  };
+  return (await res.json()) as Envelope<T>;
+}
+
+/**
+ * 读操作出口：取回完整信封（含 total），并复刻 shared request 的令牌纪律 ——
+ * 发请求前先补刷新，拿到 401 再强制刷一次重试一遍，仍是 401 才算登录态真没了。
+ *
+ * 少了刷新这步，access token 只是到期（refresh 还有效）也会被当成掉线踢回
+ * 登录页，等于把 15 分钟的 access 寿命变成了会话寿命。
+ */
+async function envelopeGet<T>(path: string): Promise<Envelope<T>> {
+  const fresh = await ensureFreshToken();
+  const token = fresh ?? getAccessToken();
+
+  let json = await fetchEnvelope<T>(path, token);
+  if (json.code === 401 && token) {
+    const renewed = await forceRefresh();
+    if (renewed) json = await fetchEnvelope<T>(path, renewed);
+  }
+  if (json.code === 401) onUnauthorized();
   if (json.code !== 0) {
     throw new ApiError(json.code, json.message || "Request failed");
   }
-  return { list: json.data ?? [], total: json.total };
+  return json;
+}
+
+/** 分页 GET：信封 data 为数组，total 为总数。 */
+async function pagedGet<T>(path: string): Promise<Page<T>> {
+  const json = await envelopeGet<T[]>(path);
+  return { list: json.data ?? [], total: json.total ?? 0 };
+}
+
+/** 单对象 GET：信封 data 为对象而非数组。 */
+async function pagedGetSingle<T>(path: string): Promise<T> {
+  const json = await envelopeGet<T>(path);
+  return json.data as T;
 }
 
 export function listUsers(q: string, page: number, size = 20) {
@@ -90,19 +187,19 @@ export function listUsers(q: string, page: number, size = 20) {
 }
 
 export function banUser(id: string) {
-  return apiPost<{ banned: boolean; kicked_connections: number }>(
+  return adminPost<{ banned: boolean; kicked_connections: number }>(
     `/api/v1/admin/users/${id}/ban`,
     {},
   );
 }
 
 export function unbanUser(id: string) {
-  return apiDelete<{ banned: boolean }>(`/api/v1/admin/users/${id}/ban`);
+  return adminDelete<{ banned: boolean }>(`/api/v1/admin/users/${id}/ban`);
 }
 
 /** 重置用户头像（avatar_url 置空，恢复默认头像；旧对象由 GC 通道回收） */
 export function resetUserAvatar(id: string) {
-  return apiPost<{ reset: boolean }>(`/api/v1/admin/users/${id}/reset-avatar`, {});
+  return adminPost<{ reset: boolean }>(`/api/v1/admin/users/${id}/reset-avatar`, {});
 }
 
 export function listConversations(q: string, type: number, page: number, size = 20) {
@@ -112,7 +209,7 @@ export function listConversations(q: string, type: number, page: number, size = 
 }
 
 export function dissolveConversation(id: string) {
-  return apiPost<{ dissolved: boolean; notified_members: number }>(
+  return adminPost<{ dissolved: boolean; notified_members: number }>(
     `/api/v1/admin/conversations/${id}/dissolve`,
     {},
   );
@@ -127,11 +224,11 @@ export function listFlaggedMessages(page: number, size = 20) {
 }
 
 export function deleteMessage(id: string) {
-  return apiDelete<{ deleted: boolean }>(`/api/v1/admin/messages/${id}`);
+  return adminDelete<{ deleted: boolean }>(`/api/v1/admin/messages/${id}`);
 }
 
 export function clearMessageFlag(id: string) {
-  return apiDelete<{ flagged: boolean }>(`/api/v1/admin/messages/${id}/flag`);
+  return adminDelete<{ flagged: boolean }>(`/api/v1/admin/messages/${id}/flag`);
 }
 
 export interface AdminStickerPack {
@@ -158,23 +255,23 @@ export function listStickerPacks(q: string, page: number, size = 20) {
 }
 
 export function takedownPack(id: string) {
-  return apiPost<{ taken_down: boolean }>(`/api/v1/admin/sticker-packs/${id}/takedown`, {});
+  return adminPost<{ taken_down: boolean }>(`/api/v1/admin/sticker-packs/${id}/takedown`, {});
 }
 
 /** 恢复表情包上架（清 taken_down，商城重新展示） */
 export function untakedownPack(id: string) {
-  return apiPost<{ taken_down: boolean }>(`/api/v1/admin/sticker-packs/${id}/untakedown`, {});
+  return adminPost<{ taken_down: boolean }>(`/api/v1/admin/sticker-packs/${id}/untakedown`, {});
 }
 
 /** 切换表情包官方标识（显式目标布尔，避免并发下 toggle 歧义） */
 export function setPackOfficial(id: string, isOfficial: boolean) {
-  return apiPost<{ is_official: boolean }>(`/api/v1/admin/sticker-packs/${id}/official`, {
+  return adminPost<{ is_official: boolean }>(`/api/v1/admin/sticker-packs/${id}/official`, {
     is_official: isOfficial,
   });
 }
 
 export function clearPackFlag(id: string) {
-  return apiDelete<{ flagged: boolean }>(`/api/v1/admin/sticker-packs/${id}/flag`);
+  return adminDelete<{ flagged: boolean }>(`/api/v1/admin/sticker-packs/${id}/flag`);
 }
 
 export interface AdminReport {
@@ -193,7 +290,7 @@ export function listReports(status: number, page: number, size = 20) {
 }
 
 export function handleReport(id: string, action: "keep" | "delete") {
-  return apiPost<{ handled: boolean }>(`/api/v1/admin/reports/${id}/handle`, { action });
+  return adminPost<{ handled: boolean }>(`/api/v1/admin/reports/${id}/handle`, { action });
 }
 
 export function listAuditLogs(action: string, page: number, size = 20) {
@@ -220,22 +317,6 @@ export function getMessageMedia(id: string) {
   return pagedGetSingle<MessageMedia>(`/api/v1/admin/messages/${id}/media`);
 }
 
-/** 单对象 GET：解析完整信封（data 为对象而非数组）。 */
-async function pagedGetSingle<T>(path: string): Promise<T> {
-  const token = getAccessToken();
-  const res = await fetch(API_BASE + path, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-  const json = (await res.json()) as { code: number; message: string; data: T | null };
-  if (json.code !== 0) {
-    throw new ApiError(json.code, json.message || "Request failed");
-  }
-  return json.data as T;
-}
-
 /** UGC 敏感词命中记录（昵称 / bio / 群名 / 群公告 / 朋友圈动态与评论审核队列） */
 export interface FlaggedUGC {
   id: string;
@@ -257,12 +338,12 @@ export function listFlaggedUGC(handled: "false" | "true" | "all", page: number, 
 
 /** 强制重置命中的 UGC：昵称重置为默认昵称，bio / 群名 / 公告清空 */
 export function resetFlaggedUGC(id: string) {
-  return apiPost<{ reset: boolean }>(`/api/v1/admin/flagged-ugc/${id}/reset`, {});
+  return adminPost<{ reset: boolean }>(`/api/v1/admin/flagged-ugc/${id}/reset`, {});
 }
 
 /** 放行命中的 UGC（内容维持原样，记录关闭） */
 export function dismissFlaggedUGC(id: string) {
-  return apiDelete<{ dismissed: boolean }>(`/api/v1/admin/flagged-ugc/${id}`);
+  return adminDelete<{ dismissed: boolean }>(`/api/v1/admin/flagged-ugc/${id}`);
 }
 
 /** 概览用户维度计数 */

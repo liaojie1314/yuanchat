@@ -9,9 +9,9 @@
  *   {@link VideoPlaybackOverlay} 全屏播放
  *
  * 尺寸：按元数据 width/height 等比缩进 {@link MAX_DISPLAY_EDGE} 盒内，元数据缺失
- * （乐观阶段）回退 16:9 占位框。显式内联 width/height 而不用 `aspect-video`：
- * 后者依赖 aspect-ratio（Chrome 88+），旧 WebView 上会塌成 0 高，且 global.css
- * 只给 `aspect-square` 备了兜底。
+ * （乐观阶段）回退 16:9 占位框。盒宽可随气泡收缩、高度用 padding-top 百分比按比例跟随，
+ * 不用 `aspect-video`：后者依赖 aspect-ratio（Chrome 88+），旧 WebView 上会塌成 0 高，
+ * 且 global.css 只给 `aspect-square` 备了兜底。
  *
  * @param video - 视频载荷（时长/尺寸/对象 key/缩略图 key/本地 blob URL）
  */
@@ -32,7 +32,8 @@ const FALLBACK_BOX = { width: 224, height: 126 };
 function displayBox(w: number, h: number): { width: number; height: number } {
   if (!w || !h) return FALLBACK_BOX;
   const scale = Math.min(1, MAX_DISPLAY_EDGE / Math.max(w, h));
-  return { width: Math.round(w * scale), height: Math.round(h * scale) };
+  // 下限 1px：极端长条视频缩放后四舍五入会得 0，宽 0 会让比例计算除零
+  return { width: Math.max(1, Math.round(w * scale)), height: Math.max(1, Math.round(h * scale)) };
 }
 
 export function MessageVideo({ video }: { video: VideoPayload }) {
@@ -77,8 +78,18 @@ export function MessageVideo({ video }: { video: VideoPayload }) {
   };
 
   return (
-    <div className="overflow-hidden rounded-lg" style={box}>
-      <div className="bg-surface-container-high relative h-full w-full">
+    <div
+      // 同 MessageImage：宽度跟随气泡收缩，高度由 padding-top 百分比按比例撑开。
+      // 封面层改成 absolute inset-0 —— 外层内容高度是 0（高度全在 padding 里），
+      // 静态流里的 h-full 会塌成 0
+      style={{
+        width: box.width,
+        maxWidth: "100%",
+        paddingTop: `${(box.height / box.width) * 100}%`,
+      }}
+      className="relative overflow-hidden rounded-lg"
+    >
+      <div className="bg-surface-container-high absolute inset-0">
         {thumbUrl ? (
           <img src={thumbUrl} alt="" className="h-full w-full object-cover" />
         ) : (

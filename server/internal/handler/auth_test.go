@@ -47,12 +47,13 @@ func newPasswordResetEngine(t *testing.T) (*gin.Engine, *redis.Client) {
 // TestPasswordOtpCooldownReturns429 冷却期内重发映射为 429。
 func TestPasswordOtpCooldownReturns429(t *testing.T) {
 	r, rdb := newPasswordResetEngine(t)
-	if err := rdb.Set(t.Context(), "auth:pwd:otp:cd:13800138000", "1", 0).Err(); err != nil {
+	const account = "cooldown@example.com"
+	if err := rdb.Set(t.Context(), "auth:pwd:otp:cd:"+account, "1", 0).Err(); err != nil {
 		t.Fatalf("预置冷却键: %v", err)
 	}
 
 	w, resp := doJSON(t, r, http.MethodPost, "/api/v1/auth/password/otp",
-		map[string]string{"phone": "13800138000"})
+		map[string]string{"account": account})
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("status = %d, want 429, body=%s", w.Code, w.Body.String())
 	}
@@ -61,8 +62,8 @@ func TestPasswordOtpCooldownReturns429(t *testing.T) {
 	}
 }
 
-// TestPasswordOtpRequiresPhone 缺手机号是 400，不能落到 500。
-func TestPasswordOtpRequiresPhone(t *testing.T) {
+// TestPasswordOtpRequiresAccount 缺账号是 400，不能落到 500。
+func TestPasswordOtpRequiresAccount(t *testing.T) {
 	r, _ := newPasswordResetEngine(t)
 
 	w, _ := doJSON(t, r, http.MethodPost, "/api/v1/auth/password/otp", map[string]string{})
@@ -71,12 +72,30 @@ func TestPasswordOtpRequiresPhone(t *testing.T) {
 	}
 }
 
+// TestPasswordOtpRejectsPhoneWith400 手机号必须是 400 而不是 500。
+//
+// 验证码通道是 SMTP，手机号收不到码。更要紧的是：若不在入口拒掉，已注册的手机号会
+// 一路走到发信才失败并回 500，而未注册的手机号静默回 204 —— 两种响应不同，接口就成了
+// 「这个手机号是否注册」的探测器。这里连带钉住错误码必须是客户端错误。
+func TestPasswordOtpRejectsPhoneWith400(t *testing.T) {
+	r, _ := newPasswordResetEngine(t)
+
+	w, resp := doJSON(t, r, http.MethodPost, "/api/v1/auth/password/otp",
+		map[string]string{"account": "13800138000"})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", w.Code, w.Body.String())
+	}
+	if resp.Message != "auth.emailInvalid" {
+		t.Fatalf("message = %q, want auth.emailInvalid", resp.Message)
+	}
+}
+
 // TestPasswordVerifyWrongCodeReturns400 码不存在或不匹配映射为 400 + auth.otpWrong。
 func TestPasswordVerifyWrongCodeReturns400(t *testing.T) {
 	r, _ := newPasswordResetEngine(t)
 
 	w, resp := doJSON(t, r, http.MethodPost, "/api/v1/auth/password/verify",
-		map[string]string{"phone": "13800138000", "code": "000000"})
+		map[string]string{"account": "wrong@example.com", "code": "000000"})
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400, body=%s", w.Code, w.Body.String())
 	}
@@ -88,12 +107,12 @@ func TestPasswordVerifyWrongCodeReturns400(t *testing.T) {
 // TestPasswordVerifyTooManyTriesReturns429 失败计数达上限映射为 429 + auth.accountLocked。
 func TestPasswordVerifyTooManyTriesReturns429(t *testing.T) {
 	r, rdb := newPasswordResetEngine(t)
-	if err := rdb.Set(t.Context(), "auth:pwd:otp:fail:13800138000", "5", 0).Err(); err != nil {
+	if err := rdb.Set(t.Context(), "auth:pwd:otp:fail:wrong@example.com", "5", 0).Err(); err != nil {
 		t.Fatalf("预置失败计数: %v", err)
 	}
 
 	w, resp := doJSON(t, r, http.MethodPost, "/api/v1/auth/password/verify",
-		map[string]string{"phone": "13800138000", "code": "000000"})
+		map[string]string{"account": "wrong@example.com", "code": "000000"})
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("status = %d, want 429, body=%s", w.Code, w.Body.String())
 	}

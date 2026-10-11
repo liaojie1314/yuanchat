@@ -30,6 +30,10 @@ import (
 // @BasePath        /api/v1
 // @schemes         http https
 
+// version 由构建期 ldflag 注入（`-X main.version=...`，见 server/Dockerfile）。
+// 不注入时留 dev，便于在日志里区分本地直跑与镜像。
+var version = "dev"
+
 func main() {
 	// 1. 加载配置
 	cfg, err := config.Load("config/config.yaml")
@@ -46,14 +50,14 @@ func main() {
 
 	zapLogger.Info("Starting YuanChat Server...",
 		zap.String("env", cfg.Server.Env),
-		zap.String("version", "1.0.0"),
+		zap.String("version", version),
 	)
 
 	// 2.1 构造验证码下发通道：provider 为未知值时启动即失败。
 	// 绝不静默退回日志通道——生产环境那样等于验证码永远发不出去，而且不会有人发现。
 	// 构造放在 main 而非 router.Setup 里，是因为 Setup 不返回 error，
 	// 在里面构造只能 panic，拿不到这里的启动期 Fatal。
-	sender, err := codesender.New(cfg.CodeSender.Provider, zapLogger)
+	sender, err := codesender.New(cfg.CodeSender, zapLogger)
 	if err != nil {
 		zapLogger.Fatal("Invalid codesender provider", zap.Error(err))
 	}

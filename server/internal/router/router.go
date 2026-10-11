@@ -44,7 +44,10 @@ func Setup(
 	r.Use(middleware.RequestID())
 	r.Use(middleware.Logger(logger))
 	r.Use(middleware.Recovery(logger))
-	r.Use(middleware.CORS())
+	r.Use(middleware.CORS(middleware.CORSOptions{
+		AllowedOrigins: cfg.Server.CORSAllowedOrigins,
+		IsProd:         cfg.Server.IsProduction(),
+	}))
 	r.Use(middleware.Prometheus())
 
 	// --- 依赖接线 ---
@@ -79,8 +82,7 @@ func Setup(
 	stickerH := handler.NewStickerHandler(stickerSvc, logger)
 
 	healthH := handler.NewHealthHandler()
-	captchaH := handler.NewCaptchaHandler(rdb)
-	userH := handler.NewUserHandler(userSvc, captchaH, logger)
+	userH := handler.NewUserHandler(userSvc, authSvc, logger)
 	authH := handler.NewAuthHandler(authSvc, logger)
 
 	hub := ws.NewHub(cfg.WebSocket.MaxConnectionsPerUser, logger)
@@ -305,19 +307,21 @@ func Setup(
 	// --- 路由 ---
 	api := r.Group("/api/v1")
 	api.GET("/health", healthH.Check)
-	api.GET("/captcha", captchaH.Generate)
 	// VAPID 公钥：前端 pushManager.subscribe 前拉取，无需鉴权
 	api.GET("/push/public-key", pushH.PublicKey)
 	api.POST("/auth/refresh", middleware.LimitByIP(20, 40), userH.Refresh)
 	// 登出只需鉴权（前端 authStore 一直在调，此前 404 被 try/catch 吞掉）
 	api.POST("/auth/logout", middleware.AuthRequired(cfg.JWT), userH.Logout)
 
+	// 注册发码：邮箱维度另有 60s 冷却，这里的 IP 额度只防跨邮箱刷发信额度
+	api.POST("/auth/register/otp", middleware.LimitByIP(3, 5), authH.SendRegisterCode)
+
 	// 忘记密码三段式：三个端点各有各的滥用面，限流额度分别给，不共用一条
 	password := api.Group("/auth/password")
 	{
 		// 发码要过短信/网关成本，额度压到最低
 		password.POST("/otp", middleware.LimitByIP(3, 5), authH.SendResetCode)
-		// 校验是唯一的爆破入口，IP 限流之外还有手机号维度的失败计数兜底
+		// 校验是唯一的爆破入口，IP 限流之外还有账号维度的失败计数兜底
 		password.POST("/verify", middleware.LimitByIP(10, 20), authH.VerifyResetCode)
 		password.POST("/reset", middleware.LimitByIP(5, 10), authH.ResetPassword)
 		// 登录态改密：凭当前密码而非短信验证码，因此只需鉴权 + 与 reset 同档的限流

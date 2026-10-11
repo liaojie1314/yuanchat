@@ -25,10 +25,12 @@ import {
 } from "../api/chat";
 import { compressImage, extractVideoMeta, getUploadUrl, uploadToTicket } from "../api/files";
 import type { VideoMeta } from "../api/files";
+import { ApiError } from "../api/client";
 import { asServerMessageId, chatSocket } from "../ws/chatSocket";
 import type { ClientFrames } from "../ws/chatSocket";
 import { encryptFor } from "../crypto/e2eeManager";
 import { useAuthStore } from "./authStore";
+import { useConversationStore } from "./conversationStore";
 import {
   persistMessages,
   hydrateMessages,
@@ -165,6 +167,15 @@ export interface ChatMessage {
   /** 本地日期键（YYYY-MM-DD），用于消息按日分组与日期分隔线 */
   dateKey?: string;
   status?: ChatMessageStatus;
+  /**
+   * 发送失败的原因（i18n key），仅 status 为 failed 时有值。
+   *
+   * @remarks
+   * 没有它的时候，气泡只能一律显示「发送失败，点按重试」—— 可「文件类型不支持」
+   * 这类失败重试一万次也不会成功，用户就会一直点下去（线上实测反馈）。
+   * 有了原因才能把永久失败和可重试失败区分开，见 {@link isPermanentFailure}。
+   */
+  failReason?: string;
   edited?: boolean;
   /** 累计编辑次数：>0 时「已编辑」角标可点开历史 */
   editCount?: number;
@@ -269,7 +280,13 @@ interface MessageState {
   /** typing 帧：显示"正在输入"，4 秒无后续自动清除 */
   setTyping: (convId: string, name: string) => void;
   /** 更新消息状态（重试 / 回执） */
-  setStatus: (conversationId: string, messageId: string, status: ChatMessageStatus) => void;
+  setStatus: (
+    conversationId: string,
+    messageId: string,
+    status: ChatMessageStatus,
+    /** 仅 status 为 failed 时有意义：失败原因的 i18n key，见 ChatMessage.failReason */
+    failReason?: string,
+  ) => void;
   /**
    * WS error 帧（如 BLOCKED）按 clientMsgId 定位乐观消息并翻 failed。
    * 找不到目标（如重连后 store 已清）静默忽略。
@@ -336,6 +353,19 @@ function selfUserId(): string {
   return user ? user.id : "";
 }
 
+/**
+ * 取该会话「除自己外最落后的已读水位」。
+ *
+ * 拉历史时用它如实判定自己发的消息读没读 —— 以前历史一律标成已读，
+ * 刷新一次全变双勾，和对方看没看无关。
+ */
+function othersReadSeqOf(conversationId: string): number {
+  return (
+    useConversationStore.getState().conversations.find((c) => c.id === conversationId)
+      ?.othersMinReadSeq ?? 0
+  );
+}
+
 export const useMessageStore = create<MessageState>()((set, get) => ({
   messagesByConv: {},
   hasMoreByConv: {},
@@ -359,7 +389,13 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     const found = existing.some((m) => m.id === msgId);
     if (!found) {
       try {
-        const { messages, hasMore } = await fetchMessages(convId, seq + 1, PAGE_SIZE, selfUserId());
+        const { messages, hasMore } = await fetchMessages(
+          convId,
+          seq + 1,
+          PAGE_SIZE,
+          selfUserId(),
+          othersReadSeqOf(convId),
+        );
         set((s) => ({
           messagesByConv: { ...s.messagesByConv, [convId]: messages },
           hasMoreByConv: { ...s.hasMoreByConv, [convId]: hasMore },
@@ -394,7 +430,13 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     }
     if (hadConfirmed) return;
     try {
-      const { messages, hasMore } = await fetchMessages(conversationId, 0, PAGE_SIZE, selfUserId());
+      const { messages, hasMore } = await fetchMessages(
+        conversationId,
+        0,
+        PAGE_SIZE,
+        selfUserId(),
+        othersReadSeqOf(conversationId),
+      );
       set((s) => ({
         // 未确认条目（sending / failed）接在服务端历史之后：它们不在服务端，
         // 整列表替换会把用户「没发出去」的那条悄悄抹掉
@@ -418,6 +460,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
         oldest.seq,
         PAGE_SIZE,
         selfUserId(),
+        othersReadSeqOf(conversationId),
       );
       set((s) => ({
         messagesByConv: {
@@ -669,7 +712,11 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     // 图片：从本地 blob URL 重新取回压缩后的字节，整条流程（上传+发送）重跑
     if (msg.kind === "image") {
       const localUrl = msg.image?.localUrl;
-      if (!localUrl) return; // 无本地副本（如重进会话后的历史消息）无法重传
+      // 无本地副本（如重进会话后的历史消息、整页跳转后 blob 失效）无法重传
+      if (!localUrl) {
+        reportRetryUnavailable(conversationId, messageId, get);
+        return;
+      }
       get().setStatus(conversationId, messageId, "sending");
       if (mockMode) {
         setTimeout(() => get().setStatus(conversationId, messageId, "sent"), 700);
@@ -681,7 +728,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       void fetch(localUrl)
         .then((r) => r.blob())
         .then((blob) => dispatchImageSend(conversationId, blob, w, h, clientMsgId, get))
-        .catch(() => get().setStatus(conversationId, messageId, "failed"));
+        .catch(() => reportRetryUnavailable(conversationId, messageId, get));
       return;
     }
 
@@ -689,7 +736,10 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     if (msg.kind === "file") {
       const localUrl = msg.file?.localUrl;
       const fileName = msg.file?.name;
-      if (!localUrl || !fileName) return;
+      if (!localUrl || !fileName) {
+        reportRetryUnavailable(conversationId, messageId, get);
+        return;
+      }
       get().setStatus(conversationId, messageId, "sending");
       if (mockMode) {
         setTimeout(() => get().setStatus(conversationId, messageId, "sent"), 700);
@@ -706,7 +756,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
             get,
           ),
         )
-        .catch(() => get().setStatus(conversationId, messageId, "failed"));
+        .catch(() => reportRetryUnavailable(conversationId, messageId, get));
       return;
     }
 
@@ -714,7 +764,10 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     if (msg.kind === "voice") {
       const localUrl = msg.voice?.localUrl;
       const duration = msg.voice?.seconds;
-      if (!localUrl || !duration) return;
+      if (!localUrl || !duration) {
+        reportRetryUnavailable(conversationId, messageId, get);
+        return;
+      }
       get().setStatus(conversationId, messageId, "sending");
       if (mockMode) {
         setTimeout(() => get().setStatus(conversationId, messageId, "sent"), 700);
@@ -724,7 +777,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       void fetch(localUrl)
         .then((r) => r.blob())
         .then((blob) => dispatchVoiceSend(conversationId, blob, duration, clientMsgId, get))
-        .catch(() => get().setStatus(conversationId, messageId, "failed"));
+        .catch(() => reportRetryUnavailable(conversationId, messageId, get));
       return;
     }
 
@@ -732,7 +785,10 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     if (msg.kind === "video") {
       const localUrl = msg.video?.localUrl;
       const name = msg.video?.name;
-      if (!localUrl || !name) return;
+      if (!localUrl || !name) {
+        reportRetryUnavailable(conversationId, messageId, get);
+        return;
+      }
       get().setStatus(conversationId, messageId, "sending");
       if (mockMode) {
         setTimeout(() => get().setStatus(conversationId, messageId, "sent"), 700);
@@ -749,7 +805,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
             get,
           ),
         )
-        .catch(() => get().setStatus(conversationId, messageId, "failed"));
+        .catch(() => reportRetryUnavailable(conversationId, messageId, get));
       return;
     }
 
@@ -946,12 +1002,16 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     set((s) => ({ typingByConv: { ...s.typingByConv, [convId]: name } }));
   },
 
-  setStatus: (conversationId, messageId, status) =>
+  setStatus: (conversationId, messageId, status, failReason) =>
     set((s) => ({
       messagesByConv: {
         ...s.messagesByConv,
         [conversationId]: (s.messagesByConv[conversationId] ?? []).map((m) =>
-          m.id === messageId ? { ...m, status } : m,
+          // 翻回非 failed 态（如重试时的 sending）要把上一次的原因清掉，
+          // 否则重试成功后气泡上还挂着旧的「不支持的文件类型」
+          m.id === messageId
+            ? { ...m, status, failReason: status === "failed" ? failReason : undefined }
+            : m,
         ),
       },
     })),
@@ -1097,12 +1157,16 @@ async function dispatchImageSend(
     const ticket = await getUploadUrl(filenameForBlob(blob), blob.type, blob.size);
     await uploadToTicket(ticket, blob, blob.type);
     key = ticket.objectKey;
-  } catch {
+  } catch (e) {
     // 消息可能在上传期间被重试重置为 sending：仅当仍是该乐观条目时翻 failed
     const pending = (get().messagesByConv[conversationId] ?? []).find(
       (m) => m.clientMsgId === clientMsgId,
     );
-    if (pending) get().setStatus(conversationId, pending.id, "failed");
+    // 必须给原因：只翻红不说话，用户无从判断是网络问题还是图片本身的问题；
+    // 原因同时钉在气泡上，否则 toast 过去后只剩一个按不动的「重试」
+    const reason = uploadErrorKey(e);
+    if (pending) get().setStatus(conversationId, pending.id, "failed", reason);
+    showToast("error", i18n.t(reason));
     return;
   }
 
@@ -1176,8 +1240,67 @@ function writeBackImageKey(conversationId: string, clientMsgId: string, key: str
 }
 
 /**
+ * 重试时本地副本已丢失：告知用户，而不是让按钮变成死点击。
+ *
+ * @remarks
+ * 媒体重试要从 blob URL 取回原始字节，而 blob URL 随文档销毁一起失效 ——
+ * 安卓上整页跳转、应用被系统回收重进、或只是重进会话拉的历史消息，localUrl 就没了。
+ * 原先这几处都是裸 `return`：点一下毫无反应，用户只能反复点（线上就是这么报上来的
+ * 「文件上传失败点重试不生效」）。真重试不了就说清楚，让用户重新选文件。
+ */
+function reportRetryUnavailable(
+  conversationId: string,
+  messageId: string,
+  get: () => MessageState,
+): void {
+  showToast("error", i18n.t(RETRY_UNAVAILABLE_KEY));
+  // 同时钉在气泡上：toast 一闪而过，用户再看到的仍只是「点按重试」
+  get().setStatus(conversationId, messageId, "failed", RETRY_UNAVAILABLE_KEY);
+}
+
+/** 本地副本失效的文案 key，同时是「不可重试」判据之一 */
+const RETRY_UNAVAILABLE_KEY = "chat.media.retryUnavailable";
+
+/**
+ * 这些失败重试多少次都不会变：类型不被接受、体积超限、本地副本已没了。
+ *
+ * @remarks
+ * 气泡据此隐藏「重试」入口、只陈述原因。给一个按一万次也不会成功的按钮比不给更糟 ——
+ * 线上反馈正是「上传不支持的文件没有提示，用户一直尝试」。
+ */
+const PERMANENT_FAIL_KEYS: readonly string[] = [
+  "chat.file.unsupported",
+  "chat.file.tooLarge",
+  RETRY_UNAVAILABLE_KEY,
+];
+
+/** 该失败是否不可重试（供气泡决定要不要给重试入口） */
+export function isPermanentFailure(failReason?: string): boolean {
+  return !!failReason && PERMANENT_FAIL_KEYS.includes(failReason);
+}
+
+/**
+ * 把上传失败的原因映射成提示文案 key。
+ *
+ * @remarks
+ * 图片 / 文件 / 语音共用「申请票据 → 直传对象存储」这一条链路，任一步都可能失败。
+ * 原先文件把整个 catch 一律报成「不支持的文件类型」，图片与语音则连 toast 都没有 ——
+ * 于是预签名 403、断网、CORS 被拦这些真故障全被说成「格式不对」，排查方向直接跑偏
+ * （2026-10-09 生产上就是这样：签名 host 错导致全量 403，用户看到的却是「不支持 pdf」）。
+ *
+ * 只有服务端明确回 4001 / 4002 时才敢说类型或体积有问题，其余一律归到「上传失败」。
+ */
+function uploadErrorKey(e: unknown): string {
+  if (e instanceof ApiError) {
+    if (e.code === 4001) return "chat.file.unsupported";
+    if (e.code === 4002) return "chat.file.tooLarge";
+  }
+  return "chat.media.uploadFailed";
+}
+
+/**
  * 文件发送：申请上传 URL → 直传对象存储 → 发 WS file 帧（含对象 key + 原始文件名）。
- * 后端按扩展名白名单校验（4001 不支持类型），失败置 failed 并 toast。
+ * 失败置 failed 并按真实原因 toast（见 {@link uploadErrorKey}）。
  */
 async function dispatchFileSend(
   conversationId: string,
@@ -1192,12 +1315,15 @@ async function dispatchFileSend(
     const ticket = await getUploadUrl(name, contentType, file.size);
     await uploadToTicket(ticket, file, contentType);
     key = ticket.objectKey;
-  } catch {
+  } catch (e) {
     const pending = (get().messagesByConv[conversationId] ?? []).find(
       (m) => m.clientMsgId === clientMsgId,
     );
-    if (pending) get().setStatus(conversationId, pending.id, "failed");
-    showToast("error", i18n.t("chat.file.unsupported"));
+    // 原因一并钉在气泡上：toast 几秒就没了，而「类型不支持」这种失败
+    // 重试多少次都一样，气泡必须说清楚并收起重试入口
+    const reason = uploadErrorKey(e);
+    if (pending) get().setStatus(conversationId, pending.id, "failed", reason);
+    showToast("error", i18n.t(reason));
     return;
   }
 
@@ -1235,11 +1361,15 @@ async function dispatchVoiceSend(
     const ticket = await getUploadUrl("voice.webm", "audio/webm", blob.size);
     await uploadToTicket(ticket, blob, "audio/webm");
     key = ticket.objectKey;
-  } catch {
+  } catch (e) {
     const pending = (get().messagesByConv[conversationId] ?? []).find(
       (m) => m.clientMsgId === clientMsgId,
     );
-    if (pending) get().setStatus(conversationId, pending.id, "failed");
+    // 原因一并钉在气泡上：toast 几秒就没了，而「类型不支持」这种失败
+    // 重试多少次都一样，气泡必须说清楚并收起重试入口
+    const reason = uploadErrorKey(e);
+    if (pending) get().setStatus(conversationId, pending.id, "failed", reason);
+    showToast("error", i18n.t(reason));
     return;
   }
 
@@ -1286,7 +1416,7 @@ async function dispatchVideoSend(
     const pending = (get().messagesByConv[conversationId] ?? []).find(
       (m) => m.clientMsgId === clientMsgId,
     );
-    if (pending) get().setStatus(conversationId, pending.id, "failed");
+    if (pending) get().setStatus(conversationId, pending.id, "failed", messageKey);
     showToast("error", i18n.t(messageKey));
   };
 

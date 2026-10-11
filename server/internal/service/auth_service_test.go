@@ -69,19 +69,26 @@ func newAuthFixture(t *testing.T) *authFixture {
 	return &authFixture{svc: svc, rdb: rdb, mr: mr, db: db, sender: sender}
 }
 
-// seedResetUser 建一个可用于改密的用户，并清理其审计行。
+// seedResetUser 建一个可用于改密的用户并绑定邮箱，返回该邮箱，同时清理其审计行。
+//
+// 返回邮箱而不是手机号：改密发码只走 SMTP，手机号在入口就被 ErrTargetNotEmail 拒掉
+// （见 SendResetCode），拿手机号当 target 的用例测不到后面任何一步。
 func (f *authFixture) seedResetUser(t *testing.T, nick string) (*model.User, string) {
 	t.Helper()
 	user := newTestUser(t, f.db, nick)
-	phone := *user.Phone
-	t.Cleanup(func() { f.db.Exec(`DELETE FROM verification_codes WHERE target = ?`, phone) })
-	return user, phone
+	email := "reset-" + user.ID.String() + "@example.com"
+	user.Email = &email
+	if err := f.db.Save(user).Error; err != nil {
+		t.Fatalf("写入邮箱失败: %v", err)
+	}
+	t.Cleanup(func() { f.db.Exec(`DELETE FROM verification_codes WHERE target = ?`, email) })
+	return user, email
 }
 
 // currentOTP 直接从 redis 读出待校验的验证码，避免在测试里猜随机值。
-func (f *authFixture) currentOTP(t *testing.T, phone string) string {
+func (f *authFixture) currentOTP(t *testing.T, target string) string {
 	t.Helper()
-	code, err := f.rdb.Get(context.Background(), "auth:pwd:otp:"+phone).Result()
+	code, err := f.rdb.Get(context.Background(), "auth:pwd:otp:"+target).Result()
 	if err != nil {
 		t.Fatalf("读取 otp 失败: %v", err)
 	}
@@ -97,33 +104,34 @@ func (f *authFixture) exists(t *testing.T, key string) bool {
 	return n == 1
 }
 
-// TestSendResetCodeUnknownPhoneIsSilentSuccess 未注册手机号必须静默成功，
-// 否则该端点退化为「这个号注册过没有」的枚举器。
-func TestSendResetCodeUnknownPhoneIsSilentSuccess(t *testing.T) {
+// TestSendResetCodeUnknownEmailIsSilentSuccess 未注册邮箱必须静默成功，
+// 否则该端点退化为「这个邮箱注册过没有」的枚举器。
+func TestSendResetCodeUnknownEmailIsSilentSuccess(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
+	unknown := "nobody-here@example.com"
 
-	if err := f.svc.SendResetCode(ctx, "13900000000"); err != nil {
-		t.Fatalf("未注册手机号必须静默成功: %v", err)
+	if err := f.svc.SendResetCode(ctx, unknown); err != nil {
+		t.Fatalf("未注册邮箱必须静默成功: %v", err)
 	}
 	if f.sender.count() != 0 {
-		t.Fatal("未注册手机号不应真的下发验证码")
+		t.Fatal("未注册邮箱不应真的下发验证码")
 	}
-	if f.exists(t, "auth:pwd:otp:13900000000") {
-		t.Fatal("未注册手机号不应写入 otp 键")
+	if f.exists(t, "auth:pwd:otp:"+unknown) {
+		t.Fatal("未注册邮箱不应写入 otp 键")
 	}
 }
 
 // TestSendResetCodeRespectsCooldown 60 秒内重发被拒。
 func TestSendResetCodeRespectsCooldown(t *testing.T) {
 	f := newAuthFixture(t)
-	_, phone := f.seedResetUser(t, "otp-cooldown")
+	_, email := f.seedResetUser(t, "otp-cooldown")
 	ctx := context.Background()
 
-	if err := f.svc.SendResetCode(ctx, phone); err != nil {
+	if err := f.svc.SendResetCode(ctx, email); err != nil {
 		t.Fatalf("首次发码: %v", err)
 	}
-	if err := f.svc.SendResetCode(ctx, phone); !errors.Is(err, ErrCodeCooldown) {
+	if err := f.svc.SendResetCode(ctx, email); !errors.Is(err, ErrCodeCooldown) {
 		t.Fatalf("err = %v, want ErrCodeCooldown", err)
 	}
 	if f.sender.count() != 1 {
@@ -132,7 +140,7 @@ func TestSendResetCodeRespectsCooldown(t *testing.T) {
 
 	// 冷却到期后可再次发码
 	f.mr.FastForward(61 * time.Second)
-	if err := f.svc.SendResetCode(ctx, phone); err != nil {
+	if err := f.svc.SendResetCode(ctx, email); err != nil {
 		t.Fatalf("冷却到期后应可重发: %v", err)
 	}
 }
@@ -140,14 +148,14 @@ func TestSendResetCodeRespectsCooldown(t *testing.T) {
 // TestSendResetCodeWritesAuditRow 每次发码在 verification_codes 留一行审计。
 func TestSendResetCodeWritesAuditRow(t *testing.T) {
 	f := newAuthFixture(t)
-	_, phone := f.seedResetUser(t, "otp-audit")
+	_, email := f.seedResetUser(t, "otp-audit")
 
-	if err := f.svc.SendResetCode(context.Background(), phone); err != nil {
+	if err := f.svc.SendResetCode(context.Background(), email); err != nil {
 		t.Fatalf("发码: %v", err)
 	}
 
 	var row model.VerificationCode
-	if err := f.db.Where("target = ?", phone).First(&row).Error; err != nil {
+	if err := f.db.Where("target = ?", email).First(&row).Error; err != nil {
 		t.Fatalf("审计行未写入: %v", err)
 	}
 	if row.Type != model.VerificationTypePasswordReset {
@@ -156,7 +164,7 @@ func TestSendResetCodeWritesAuditRow(t *testing.T) {
 	if row.Used {
 		t.Fatal("刚发出的码不应标记为已使用")
 	}
-	if row.Code != f.currentOTP(t, phone) {
+	if row.Code != f.currentOTP(t, email) {
 		t.Fatal("审计行的码与 redis 中待校验的码不一致")
 	}
 }
@@ -165,16 +173,16 @@ func TestSendResetCodeWritesAuditRow(t *testing.T) {
 // 否则用户被冷却期锁住却永远收不到码。
 func TestSendResetCodeRollsBackWhenSenderFails(t *testing.T) {
 	f := newAuthFixture(t)
-	_, phone := f.seedResetUser(t, "otp-rollback")
+	_, email := f.seedResetUser(t, "otp-rollback")
 	f.sender.err = errors.New("下发通道故障")
 
-	if err := f.svc.SendResetCode(context.Background(), phone); err == nil {
+	if err := f.svc.SendResetCode(context.Background(), email); err == nil {
 		t.Fatal("下发失败必须返回错误")
 	}
-	if f.exists(t, "auth:pwd:otp:"+phone) {
+	if f.exists(t, "auth:pwd:otp:"+email) {
 		t.Fatal("下发失败后 otp 键未回滚")
 	}
-	if f.exists(t, "auth:pwd:otp:cd:"+phone) {
+	if f.exists(t, "auth:pwd:otp:cd:"+email) {
 		t.Fatal("下发失败后冷却键未回滚，用户会被锁在冷却里")
 	}
 }
@@ -184,25 +192,25 @@ func TestSendResetCodeRollsBackWhenSenderFails(t *testing.T) {
 // 与 handler/captcha.go 的「先删再比」相反：那种写法下用户手滑一次就得重新发码。
 func TestVerifyResetCodeWrongCodeKeepsCodeAlive(t *testing.T) {
 	f := newAuthFixture(t)
-	_, phone := f.seedResetUser(t, "otp-keepalive")
+	_, email := f.seedResetUser(t, "otp-keepalive")
 	ctx := context.Background()
-	if err := f.svc.SendResetCode(ctx, phone); err != nil {
+	if err := f.svc.SendResetCode(ctx, email); err != nil {
 		t.Fatalf("发码: %v", err)
 	}
-	want := f.currentOTP(t, phone)
+	want := f.currentOTP(t, email)
 
-	if _, _, err := f.svc.VerifyResetCode(ctx, phone, "000000"); !errors.Is(err, ErrCodeInvalid) {
+	if _, _, err := f.svc.VerifyResetCode(ctx, email, "000000"); !errors.Is(err, ErrCodeInvalid) {
 		t.Fatalf("err = %v, want ErrCodeInvalid", err)
 	}
-	if got := f.currentOTP(t, phone); got != want {
+	if got := f.currentOTP(t, email); got != want {
 		t.Fatalf("输错验证码后码被改动或删除: got %q want %q", got, want)
 	}
-	if n, _ := f.rdb.Get(ctx, "auth:pwd:otp:fail:"+phone).Int(); n != 1 {
+	if n, _ := f.rdb.Get(ctx, "auth:pwd:otp:fail:"+email).Int(); n != 1 {
 		t.Fatalf("失败计数 = %d, want 1", n)
 	}
 
 	// 重输正确仍可通过（spec 验收项）
-	if _, _, err := f.svc.VerifyResetCode(ctx, phone, want); err != nil {
+	if _, _, err := f.svc.VerifyResetCode(ctx, email, want); err != nil {
 		t.Fatalf("输错后重输正确应通过: %v", err)
 	}
 }
@@ -210,20 +218,20 @@ func TestVerifyResetCodeWrongCodeKeepsCodeAlive(t *testing.T) {
 // TestVerifyResetCodeLocksAfterFiveFailures 连错 5 次后第 6 次锁定。
 func TestVerifyResetCodeLocksAfterFiveFailures(t *testing.T) {
 	f := newAuthFixture(t)
-	_, phone := f.seedResetUser(t, "otp-lock")
+	_, email := f.seedResetUser(t, "otp-lock")
 	ctx := context.Background()
-	if err := f.svc.SendResetCode(ctx, phone); err != nil {
+	if err := f.svc.SendResetCode(ctx, email); err != nil {
 		t.Fatalf("发码: %v", err)
 	}
-	want := f.currentOTP(t, phone)
+	want := f.currentOTP(t, email)
 
 	for i := 0; i < 5; i++ {
-		if _, _, err := f.svc.VerifyResetCode(ctx, phone, "000000"); !errors.Is(err, ErrCodeInvalid) {
+		if _, _, err := f.svc.VerifyResetCode(ctx, email, "000000"); !errors.Is(err, ErrCodeInvalid) {
 			t.Fatalf("第 %d 次 err = %v, want ErrCodeInvalid", i+1, err)
 		}
 	}
 	// 锁定后即使输对也必须被拒
-	if _, _, err := f.svc.VerifyResetCode(ctx, phone, want); !errors.Is(err, ErrTooManyTries) {
+	if _, _, err := f.svc.VerifyResetCode(ctx, email, want); !errors.Is(err, ErrTooManyTries) {
 		t.Fatalf("err = %v, want ErrTooManyTries", err)
 	}
 }
@@ -231,14 +239,14 @@ func TestVerifyResetCodeLocksAfterFiveFailures(t *testing.T) {
 // TestVerifyResetCodeSuccessConsumesOTP 校验通过后换发票据，并消费掉验证码。
 func TestVerifyResetCodeSuccessConsumesOTP(t *testing.T) {
 	f := newAuthFixture(t)
-	user, phone := f.seedResetUser(t, "otp-consume")
+	user, email := f.seedResetUser(t, "otp-consume")
 	ctx := context.Background()
-	if err := f.svc.SendResetCode(ctx, phone); err != nil {
+	if err := f.svc.SendResetCode(ctx, email); err != nil {
 		t.Fatalf("发码: %v", err)
 	}
-	_, _, _ = f.svc.VerifyResetCode(ctx, phone, "000000") // 先留一个失败计数
+	_, _, _ = f.svc.VerifyResetCode(ctx, email, "000000") // 先留一个失败计数
 
-	ticket, expiresIn, err := f.svc.VerifyResetCode(ctx, phone, f.currentOTP(t, phone))
+	ticket, expiresIn, err := f.svc.VerifyResetCode(ctx, email, f.currentOTP(t, email))
 	if err != nil {
 		t.Fatalf("校验正确的码: %v", err)
 	}
@@ -248,10 +256,10 @@ func TestVerifyResetCodeSuccessConsumesOTP(t *testing.T) {
 	if expiresIn != 300 {
 		t.Fatalf("expires_in = %d, want 300", expiresIn)
 	}
-	if f.exists(t, "auth:pwd:otp:"+phone) {
+	if f.exists(t, "auth:pwd:otp:"+email) {
 		t.Fatal("校验通过后 otp 键必须被删除")
 	}
-	if f.exists(t, "auth:pwd:otp:fail:"+phone) {
+	if f.exists(t, "auth:pwd:otp:fail:"+email) {
 		t.Fatal("校验通过后失败计数必须清零")
 	}
 	// 票据里存的是 user_id
@@ -260,7 +268,7 @@ func TestVerifyResetCodeSuccessConsumesOTP(t *testing.T) {
 	}
 	// 审计行标记为已使用
 	var row model.VerificationCode
-	if err := f.db.Where("target = ?", phone).First(&row).Error; err != nil {
+	if err := f.db.Where("target = ?", email).First(&row).Error; err != nil {
 		t.Fatalf("查审计行: %v", err)
 	}
 	if !row.Used {
@@ -271,28 +279,28 @@ func TestVerifyResetCodeSuccessConsumesOTP(t *testing.T) {
 // TestVerifyResetCodeRejectsExpiredOTP 验证码超过 5 分钟后失效。
 func TestVerifyResetCodeRejectsExpiredOTP(t *testing.T) {
 	f := newAuthFixture(t)
-	_, phone := f.seedResetUser(t, "otp-expire")
+	_, email := f.seedResetUser(t, "otp-expire")
 	ctx := context.Background()
-	if err := f.svc.SendResetCode(ctx, phone); err != nil {
+	if err := f.svc.SendResetCode(ctx, email); err != nil {
 		t.Fatalf("发码: %v", err)
 	}
-	code := f.currentOTP(t, phone)
+	code := f.currentOTP(t, email)
 
 	f.mr.FastForward(5*time.Minute + time.Second)
 
-	if _, _, err := f.svc.VerifyResetCode(ctx, phone, code); !errors.Is(err, ErrCodeInvalid) {
+	if _, _, err := f.svc.VerifyResetCode(ctx, email, code); !errors.Is(err, ErrCodeInvalid) {
 		t.Fatalf("err = %v, want ErrCodeInvalid（码已过期）", err)
 	}
 }
 
 // newTicket 走完发码 + 校验，返回可用于改密的一次性票据。
-func (f *authFixture) newTicket(t *testing.T, phone string) string {
+func (f *authFixture) newTicket(t *testing.T, email string) string {
 	t.Helper()
 	ctx := context.Background()
-	if err := f.svc.SendResetCode(ctx, phone); err != nil {
+	if err := f.svc.SendResetCode(ctx, email); err != nil {
 		t.Fatalf("发码: %v", err)
 	}
-	ticket, _, err := f.svc.VerifyResetCode(ctx, phone, f.currentOTP(t, phone))
+	ticket, _, err := f.svc.VerifyResetCode(ctx, email, f.currentOTP(t, email))
 	if err != nil {
 		t.Fatalf("校验: %v", err)
 	}
@@ -302,8 +310,8 @@ func (f *authFixture) newTicket(t *testing.T, phone string) string {
 // TestResetPasswordConsumesTicketOnce 票据单次消费，且改密递增 token_version。
 func TestResetPasswordConsumesTicketOnce(t *testing.T) {
 	f := newAuthFixture(t)
-	user, phone := f.seedResetUser(t, "reset-once")
-	ticket := f.newTicket(t, phone)
+	user, email := f.seedResetUser(t, "reset-once")
+	ticket := f.newTicket(t, email)
 	ctx := context.Background()
 
 	if err := f.svc.ResetPassword(ctx, ticket, "Abcdef12"); err != nil {
@@ -333,8 +341,8 @@ func TestResetPasswordConsumesTicketOnce(t *testing.T) {
 // 校验顺序必须是「先查复杂度、后 GETDEL」，否则用户第一次填了弱密码就得重新走发码。
 func TestResetPasswordRejectsWeakPasswordWithoutConsumingTicket(t *testing.T) {
 	f := newAuthFixture(t)
-	_, phone := f.seedResetUser(t, "reset-weak")
-	ticket := f.newTicket(t, phone)
+	_, email := f.seedResetUser(t, "reset-weak")
+	ticket := f.newTicket(t, email)
 	ctx := context.Background()
 
 	if err := f.svc.ResetPassword(ctx, ticket, "12345678"); !errors.Is(err, ErrWeakPassword) {
@@ -351,8 +359,8 @@ func TestResetPasswordRejectsWeakPasswordWithoutConsumingTicket(t *testing.T) {
 // TestResetPasswordRejectsExpiredTicket 票据超过 5 分钟后失效。
 func TestResetPasswordRejectsExpiredTicket(t *testing.T) {
 	f := newAuthFixture(t)
-	_, phone := f.seedResetUser(t, "reset-expire")
-	ticket := f.newTicket(t, phone)
+	_, email := f.seedResetUser(t, "reset-expire")
+	ticket := f.newTicket(t, email)
 
 	f.mr.FastForward(5*time.Minute + time.Second)
 
@@ -366,7 +374,7 @@ func TestResetPasswordRejectsExpiredTicket(t *testing.T) {
 // 这是 token_version 吊销机制的端到端证明：只断言列值 +1 不足以说明续期真的被拦。
 func TestResetPasswordRevokesExistingRefreshToken(t *testing.T) {
 	f := newAuthFixture(t)
-	user, phone := f.seedResetUser(t, "reset-revoke")
+	user, email := f.seedResetUser(t, "reset-revoke")
 	userSvc, gen := authSvc(t, f.db)
 	ctx := context.Background()
 
@@ -378,7 +386,7 @@ func TestResetPasswordRevokesExistingRefreshToken(t *testing.T) {
 		t.Fatalf("改密前旧令牌应可续期: %v", err)
 	}
 
-	if err := f.svc.ResetPassword(ctx, f.newTicket(t, phone), "Abcdef12"); err != nil {
+	if err := f.svc.ResetPassword(ctx, f.newTicket(t, email), "Abcdef12"); err != nil {
 		t.Fatalf("改密: %v", err)
 	}
 

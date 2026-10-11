@@ -35,6 +35,12 @@ type ServerConfig struct {
 	ReadTimeout     time.Duration `mapstructure:"read_timeout"`
 	WriteTimeout    time.Duration `mapstructure:"write_timeout"`
 	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"`
+	// CORSAllowedOrigins 是生产环境允许**读取 REST 响应**的 Origin 白名单
+	// （逗号分隔的环境变量）。语义与 WebSocket.AllowedOrigins 一致，
+	// 取值通常也该一致 —— 两者都是「哪些前端可以用这个后端」。
+	// 留空则退回同源，仅适用于 app 与 api 同域的部署。
+	// 为什么需要白名单而不是 `*`：见 middleware.CORS 的说明。
+	CORSAllowedOrigins []string `mapstructure:"cors_allowed_origins"`
 }
 
 type WebSocketConfig struct {
@@ -45,6 +51,9 @@ type WebSocketConfig struct {
 	PongTimeout           time.Duration `mapstructure:"pong_timeout"`
 	MaxMessageSize        int64         `mapstructure:"max_message_size"`
 	MaxConnectionsPerUser int           `mapstructure:"max_connections_per_user"`
+	// AllowedOrigins 是生产环境允许建立 WS 连接的 Origin 白名单（逗号分隔的环境变量）。
+	// 留空则退回「Origin 必须与 Host 同源」的旧行为，仅适用于 app 与 ws 同域的部署。
+	AllowedOrigins []string `mapstructure:"allowed_origins"`
 }
 
 type DatabaseConfig struct {
@@ -120,7 +129,24 @@ type PushConfig struct {
 //
 // provider 为未知值时进程启动即失败：静默退回日志通道等于验证码永远发不出去。
 type CodeSenderConfig struct {
-	Provider string `mapstructure:"provider"` // log（写日志，开发/测试用）| 后续接入服务商时扩展
+	Provider string `mapstructure:"provider"` // log（写日志，开发/测试用）| smtp（任意邮箱服务商）| resend（邮件 API）
+	// APIKey 为服务商密钥；Resend 的形如 re_xxx。只由环境变量下发，不进配置文件。
+	APIKey string `mapstructure:"api_key"`
+	// From 是发件地址。resend 要求域名已验证；smtp 填自己的邮箱地址即可。
+	From string `mapstructure:"from"`
+	// Subject 是验证码邮件标题，留空取默认值。
+	Subject string `mapstructure:"subject"`
+
+	// 以下仅 smtp 通道使用。
+	// Host 是服务商的 SMTP 主机，如 smtp.qq.com、smtp.163.com。
+	Host string `mapstructure:"host"`
+	// Port 决定握手方式：465 为隐式 TLS，587 为 STARTTLS。
+	// 云厂商普遍封禁出站 25，别填 25。
+	Port int `mapstructure:"port"`
+	// Username 为登录名，留空取 From（QQ / 163 的登录名就是邮箱地址）。
+	Username string `mapstructure:"username"`
+	// Password 为 SMTP 口令。QQ / 163 必须用**授权码**，不是邮箱登录密码。
+	Password string `mapstructure:"password"`
 }
 
 // PresenceConfig 在线状态后端配置。
@@ -204,6 +230,29 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("turn.static_auth_secret", "")
 	v.SetDefault("turn.host", "localhost")
 	v.SetDefault("turn.realm", "yuanchat")
+
+	// 验证码下发通道的密钥与发件人同理：只由环境变量下发。
+	// 这三项**必须**登记默认值 —— AutomaticEnv 不会把未知 key 放进 AllKeys，
+	// 而 Unmarshal 只遍历 AllKeys，漏登记的后果是环境变量填了却读到空串，
+	// 表现为「配了 Resend 但发信一直报密钥为空」。
+	v.SetDefault("codesender.api_key", "")
+	v.SetDefault("codesender.from", "")
+	v.SetDefault("codesender.subject", "")
+	v.SetDefault("codesender.host", "")
+	v.SetDefault("codesender.port", 465)
+	v.SetDefault("codesender.username", "")
+	v.SetDefault("codesender.password", "")
+
+	// WS Origin 白名单同理，只由环境变量下发（逗号分隔）。
+	// 不登记默认值的话 AutomaticEnv 看不见这个 key，生产会静默退回同源校验，
+	// 表现为「页面能开、登录能过，但聊天永远连不上」。
+	v.SetDefault("websocket.allowed_origins", []string{})
+
+	// REST 的 CORS 白名单同理，只由环境变量下发（逗号分隔）。
+	// 不登记默认值的话 AutomaticEnv 看不见这个 key，生产会静默退回同源，
+	// 表现为「Web 端每个接口都被浏览器拦掉」—— 而桌面端（Origin 是
+	// tauri://localhost）照样能用，容易误判成「只是 Web 端的问题」。
+	v.SetDefault("server.cors_allowed_origins", []string{})
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)

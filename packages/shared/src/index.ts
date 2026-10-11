@@ -10,6 +10,8 @@ export * from "./store/toastStore";
 export * from "./store/resetStores";
 export * from "./store/callStore";
 export { useMomentsStore } from "./store/momentsStore";
+export * from "./config/serverEndpoint";
+export * from "./config/safeArea";
 export * from "./api/client";
 export * from "./api/auth";
 export * from "./api/chat";
@@ -36,6 +38,7 @@ export * from "./crypto/e2eeManager";
 export * from "./crypto/keyBackup";
 export * from "./api/e2ee";
 export { setNotifier, notifyIncoming, __resetNotifier } from "./notify";
+export { setUrlOpener, openExternal, __resetUrlOpener } from "./openExternal";
 export { applyConversationSetting } from "./conversationSettings";
 export {
   setRefreshHandler,

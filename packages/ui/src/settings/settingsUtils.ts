@@ -19,11 +19,6 @@ declare const __APP_VERSION__: string | undefined;
 /** 应用版本号，由构建期注入 */
 export const APP_VERSION: string = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
 
-/** 手机号脱敏：138****0001 */
-export function maskPhone(phone: string): string {
-  return phone.replace(/^(\d{3})\d{4}(\d{4})$/, "$1****$2");
-}
-
 /**
  * 个人状态「今天」档的剩余秒数：按用户本地时区算到当日 23:59:59。
  *

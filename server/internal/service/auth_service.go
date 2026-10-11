@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,10 +33,12 @@ const (
 
 // AuthService 可能返回的错误。
 var (
-	ErrCodeCooldown  = errors.New("verification code cooldown")
-	ErrCodeInvalid   = errors.New("invalid verification code")
-	ErrTooManyTries  = errors.New("too many verification attempts")
-	ErrTicketInvalid = errors.New("invalid reset ticket")
+	ErrCodeCooldown = errors.New("verification code cooldown")
+	ErrCodeInvalid  = errors.New("invalid verification code")
+	// ErrTargetNotEmail 表示发码目标不是邮箱。验证码通道是 SMTP，只能发邮件。
+	ErrTargetNotEmail = errors.New("verification target must be an email")
+	ErrTooManyTries   = errors.New("too many verification attempts")
+	ErrTicketInvalid  = errors.New("invalid reset ticket")
 )
 
 // AuthService 编排忘记密码的三段式流程、账号级登录防护与扫码登录状态机。
@@ -66,19 +69,45 @@ func NewAuthService(
 	return &AuthService{repo: repo, codes: codes, rdb: rdb, sender: sender, jwtGen: jwtGen, logger: logger}
 }
 
-// Redis 键一律带 auth:pwd: 命名空间，避免与既有 captcha 的裸键混在一起。
-func otpKey(phone string) string          { return "auth:pwd:otp:" + phone }
-func otpCooldownKey(phone string) string  { return "auth:pwd:otp:cd:" + phone }
-func otpFailKey(phone string) string      { return "auth:pwd:otp:fail:" + phone }
+// Redis 键一律带 auth: 命名空间，避免与裸键混在一起。
+//
+// target 是手机号或邮箱：两种账号共用同一组键，键里带的就是用户输入的原值，
+// 不会互相覆盖（手机号与邮箱不可能是同一个字符串）。
+func otpKey(target string) string         { return "auth:pwd:otp:" + target }
+func otpCooldownKey(target string) string { return "auth:pwd:otp:cd:" + target }
+func otpFailKey(target string) string     { return "auth:pwd:otp:fail:" + target }
 func resetTicketKey(ticket string) string { return "auth:pwd:ticket:" + ticket }
+func regOtpKey(email string) string       { return "auth:reg:otp:" + email }
+func regCooldownKey(email string) string  { return "auth:reg:otp:cd:" + email }
+func regFailKey(email string) string      { return "auth:reg:otp:fail:" + email }
+
+// findByAccount 按 target 的形态选择查询方式：含 @ 查邮箱，否则查手机号。
+//
+// 两个 repo 方法对未命中都返回 (nil, nil)，调用方据此判断账号不存在。
+func (s *AuthService) findByAccount(ctx context.Context, target string) (*model.User, error) {
+	if strings.Contains(target, "@") {
+		return s.repo.FindByEmail(ctx, target)
+	}
+	return s.repo.FindByPhone(ctx, target)
+}
 
 // SendResetCode 生成 6 位验证码并通过下发通道送出。
 //
-// 手机号未注册时直接返回 nil 且不下发：端点对「已注册」与「未注册」给出完全一样的结果，
+// target 只接受**邮箱**。下发通道是 SMTP，验证码只能发到邮箱里去；
+// 放手机号进来不只是「发不出去」那么轻 —— 已注册的手机号会一路走到 Send 才失败，
+// 返回 500，而未注册的手机号在下面静默返回 204，两种响应不同，接口就退化成
+// 「这个手机号是否注册」的探测器。统一在入口按同一个错误拒掉，所有非邮箱输入
+// 得到完全一致的响应。
+//
+// 账号未注册时直接返回 nil 且不下发：端点对「已注册」与「未注册」给出完全一样的结果，
 // 否则接口会退化成账号枚举工具。
 // 下发通道报错时把验证码与冷却键一并回滚，否则用户被冷却期锁住却收不到码。
-func (s *AuthService) SendResetCode(ctx context.Context, phone string) error {
-	cooling, err := s.rdb.Exists(ctx, otpCooldownKey(phone)).Result()
+func (s *AuthService) SendResetCode(ctx context.Context, target string) error {
+	if !strings.Contains(target, "@") {
+		return ErrTargetNotEmail
+	}
+
+	cooling, err := s.rdb.Exists(ctx, otpCooldownKey(target)).Result()
 	if err != nil {
 		return fmt.Errorf("check cooldown: %w", err)
 	}
@@ -86,13 +115,13 @@ func (s *AuthService) SendResetCode(ctx context.Context, phone string) error {
 		return ErrCodeCooldown
 	}
 
-	user, err := s.repo.FindByPhone(ctx, phone)
+	user, err := s.findByAccount(ctx, target)
 	if err != nil {
 		return fmt.Errorf("find user: %w", err)
 	}
-	// FindByPhone 对未命中返回 (nil, nil)，不是 ErrRecordNotFound
+	// 两个 finder 对未命中都返回 (nil, nil)，不是 ErrRecordNotFound
 	if user == nil {
-		s.logger.Info("忘记密码：手机号未注册，静默返回")
+		s.logger.Info("忘记密码：账号未注册，静默返回")
 		return nil
 	}
 
@@ -102,10 +131,10 @@ func (s *AuthService) SendResetCode(ctx context.Context, phone string) error {
 	}
 
 	pipe := s.rdb.TxPipeline()
-	pipe.Set(ctx, otpKey(phone), code, otpTTL)
-	pipe.Set(ctx, otpCooldownKey(phone), "1", otpCooldownTTL)
+	pipe.Set(ctx, otpKey(target), code, otpTTL)
+	pipe.Set(ctx, otpCooldownKey(target), "1", otpCooldownTTL)
 	// 重新发码即重置失败计数，否则上一轮的失败会把新码直接判死
-	pipe.Del(ctx, otpFailKey(phone))
+	pipe.Del(ctx, otpFailKey(target))
 	if _, err := pipe.Exec(ctx); err != nil {
 		return fmt.Errorf("store code: %w", err)
 	}
@@ -113,7 +142,7 @@ func (s *AuthService) SendResetCode(ctx context.Context, phone string) error {
 	// 审计只写不读，写失败不阻断发码
 	if err := s.codes.Create(ctx, &model.VerificationCode{
 		ID:        uuid.New(),
-		Target:    phone,
+		Target:    target,
 		Code:      code,
 		Type:      model.VerificationTypePasswordReset,
 		ExpiresAt: time.Now().Add(otpTTL),
@@ -121,8 +150,8 @@ func (s *AuthService) SendResetCode(ctx context.Context, phone string) error {
 		s.logger.Warn("写入验证码审计行失败", zap.Error(err))
 	}
 
-	if err := s.sender.Send(ctx, phone, code); err != nil {
-		if delErr := s.rdb.Del(ctx, otpKey(phone), otpCooldownKey(phone)).Err(); delErr != nil {
+	if err := s.sender.Send(ctx, target, code); err != nil {
+		if delErr := s.rdb.Del(ctx, otpKey(target), otpCooldownKey(target)).Err(); delErr != nil {
 			s.logger.Error("下发失败后回滚验证码失败", zap.Error(delErr))
 		}
 		return fmt.Errorf("send code: %w", err)
@@ -134,9 +163,9 @@ func (s *AuthService) SendResetCode(ctx context.Context, phone string) error {
 //
 // 先比较、比对成功才删除——与 handler/captcha.go 的「先删再比」相反，
 // 避免用户手滑输错一位就得重新发码。输错只递增失败计数。
-func (s *AuthService) VerifyResetCode(ctx context.Context, phone, code string) (string, int, error) {
+func (s *AuthService) VerifyResetCode(ctx context.Context, target, code string) (string, int, error) {
 	// 锁定判断放在比较之前：达到上限后即使输对也不放行
-	fails, err := s.rdb.Get(ctx, otpFailKey(phone)).Int()
+	fails, err := s.rdb.Get(ctx, otpFailKey(target)).Int()
 	if err != nil && !errors.Is(err, redis.Nil) {
 		return "", 0, fmt.Errorf("read fail counter: %w", err)
 	}
@@ -144,7 +173,7 @@ func (s *AuthService) VerifyResetCode(ctx context.Context, phone, code string) (
 		return "", 0, ErrTooManyTries
 	}
 
-	want, err := s.rdb.Get(ctx, otpKey(phone)).Result()
+	want, err := s.rdb.Get(ctx, otpKey(target)).Result()
 	if errors.Is(err, redis.Nil) {
 		// 不存在与已过期返回同一个错误，避免探测码是否曾下发
 		return "", 0, ErrCodeInvalid
@@ -154,13 +183,13 @@ func (s *AuthService) VerifyResetCode(ctx context.Context, phone, code string) (
 	}
 	// 定长比较，避免按字节短路带来的时序差异
 	if subtle.ConstantTimeCompare([]byte(want), []byte(code)) != 1 {
-		if _, err := incrWithTTL(ctx, s.rdb, otpFailKey(phone), otpFailTTL); err != nil {
+		if _, err := incrWithTTL(ctx, s.rdb, otpFailKey(target), otpFailTTL); err != nil {
 			s.logger.Warn("递增验证码失败计数失败", zap.Error(err))
 		}
 		return "", 0, ErrCodeInvalid
 	}
 
-	user, err := s.repo.FindByPhone(ctx, phone)
+	user, err := s.findByAccount(ctx, target)
 	if err != nil {
 		return "", 0, fmt.Errorf("find user: %w", err)
 	}
@@ -174,14 +203,14 @@ func (s *AuthService) VerifyResetCode(ctx context.Context, phone, code string) (
 		return "", 0, fmt.Errorf("generate ticket: %w", err)
 	}
 	pipe := s.rdb.TxPipeline()
-	// 票据存 user_id：改密时无需再查手机号，也不会因期间改号而改错账号
+	// 票据存 user_id：改密时无需再查账号，也不会因期间改号而改错账号
 	pipe.Set(ctx, resetTicketKey(ticket), user.ID.String(), resetTicketTTL)
-	pipe.Del(ctx, otpKey(phone), otpFailKey(phone))
+	pipe.Del(ctx, otpKey(target), otpFailKey(target))
 	if _, err := pipe.Exec(ctx); err != nil {
 		return "", 0, fmt.Errorf("store ticket: %w", err)
 	}
 
-	if err := s.codes.MarkUsed(ctx, phone, want); err != nil {
+	if err := s.codes.MarkUsed(ctx, target, want); err != nil {
 		s.logger.Warn("标记验证码审计行已使用失败", zap.Error(err))
 	}
 	return ticket, int(resetTicketTTL.Seconds()), nil
@@ -302,4 +331,99 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID, oldPassword, n
 
 	s.logger.Info("密码已修改，该用户旧令牌全部失效", zap.String("user_id", userID))
 	return nil
+}
+
+// SendRegisterCode 向邮箱下发 6 位注册验证码。
+//
+// 与 SendResetCode 的关键差别：这里**不查**邮箱是否已注册，无论是否已存在都照发。
+// 原因是反过来会把接口变成账号枚举工具 —— 「发了」与「没发」两种响应就能探出
+// 某个邮箱是不是本站用户。已注册的邮箱即使拿到码也走不下去，Register 会在查重时 409。
+func (s *AuthService) SendRegisterCode(ctx context.Context, email string) error {
+	if !strings.Contains(email, "@") {
+		return ErrTargetNotEmail
+	}
+
+	cooling, err := s.rdb.Exists(ctx, regCooldownKey(email)).Result()
+	if err != nil {
+		return fmt.Errorf("check cooldown: %w", err)
+	}
+	if cooling > 0 {
+		return ErrCodeCooldown
+	}
+
+	code, err := randomDigits(6)
+	if err != nil {
+		return fmt.Errorf("generate code: %w", err)
+	}
+
+	pipe := s.rdb.TxPipeline()
+	pipe.Set(ctx, regOtpKey(email), code, otpTTL)
+	pipe.Set(ctx, regCooldownKey(email), "1", otpCooldownTTL)
+	// 重新发码即重置失败计数，否则上一轮的失败会把新码直接判死
+	pipe.Del(ctx, regFailKey(email))
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("store code: %w", err)
+	}
+
+	// 审计只写不读，写失败不阻断发码
+	if err := s.codes.Create(ctx, &model.VerificationCode{
+		ID:        uuid.New(),
+		Target:    email,
+		Code:      code,
+		Type:      model.VerificationTypeRegister,
+		ExpiresAt: time.Now().Add(otpTTL),
+	}); err != nil {
+		s.logger.Warn("写入验证码审计行失败", zap.Error(err))
+	}
+
+	if err := s.sender.Send(ctx, email, code); err != nil {
+		if delErr := s.rdb.Del(ctx, regOtpKey(email), regCooldownKey(email)).Err(); delErr != nil {
+			s.logger.Error("下发失败后回滚验证码失败", zap.Error(delErr))
+		}
+		return fmt.Errorf("send code: %w", err)
+	}
+	return nil
+}
+
+// ConsumeRegisterCode 校验注册验证码；校验通过即删除，保证一个码只能注册一次。
+//
+// 这里必须「校验通过才删」而不是「取出即删」：注册还可能因为昵称、密码强度、
+// 邮箱已占用等原因失败，取出即删会让用户每修一次表单就得重新收一封邮件。
+// 代价是码在成功注册前一直可用，由 5 分钟 TTL 与 5 次失败锁定兜住。
+func (s *AuthService) ConsumeRegisterCode(ctx context.Context, email, code string) error {
+	// 锁定判断放在比较之前：达到上限后即使输对也不放行
+	fails, err := s.rdb.Get(ctx, regFailKey(email)).Int()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return fmt.Errorf("read fail counter: %w", err)
+	}
+	if fails >= otpMaxFails {
+		return ErrTooManyTries
+	}
+
+	want, err := s.rdb.Get(ctx, regOtpKey(email)).Result()
+	if errors.Is(err, redis.Nil) {
+		// 不存在与已过期返回同一个错误，避免探测码是否曾下发
+		return ErrCodeInvalid
+	}
+	if err != nil {
+		return fmt.Errorf("read code: %w", err)
+	}
+	// 定长比较，避免按字节短路带来的时序差异
+	if subtle.ConstantTimeCompare([]byte(want), []byte(code)) != 1 {
+		if _, err := incrWithTTL(ctx, s.rdb, regFailKey(email), otpFailTTL); err != nil {
+			s.logger.Warn("递增验证码失败计数失败", zap.Error(err))
+		}
+		return ErrCodeInvalid
+	}
+	return nil
+}
+
+// ClearRegisterCode 在账号创建成功后作废该邮箱的注册码。
+//
+// 与 ConsumeRegisterCode 分开调用，是为了让「码对了但注册失败」的用户
+// 不必重新收码；只有真的建成账号才让码失效。
+func (s *AuthService) ClearRegisterCode(ctx context.Context, email string) {
+	if err := s.rdb.Del(ctx, regOtpKey(email), regFailKey(email)).Err(); err != nil {
+		s.logger.Warn("清除注册验证码失败", zap.Error(err))
+	}
 }

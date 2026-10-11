@@ -32,6 +32,7 @@ export { Button } from "./primitives/Button";
 export type { ButtonVariant } from "./primitives/Button";
 export { Input } from "./primitives/Input";
 export { Avatar } from "./primitives/Avatar";
+export { BrandMark } from "./primitives/BrandMark";
 export { GroupAvatar } from "./primitives/GroupAvatar";
 export { ResizeHandle } from "./primitives/ResizeHandle";
 export { ToastHost } from "./primitives/Toast";
@@ -109,6 +110,11 @@ export { MomentActivitiesView } from "./moments/MomentActivitiesView";
 export { SettingsScreen } from "./settings/SettingsScreen";
 export { ProfileEditView } from "./settings/ProfileEditView";
 export { UserStatusEditor } from "./settings/UserStatusEditor";
+export {
+  ServerEndpointEditor,
+  ServerEndpointDialog,
+  ServerSwitchLink,
+} from "./settings/ServerEndpointEditor";
 
 // 布局组件
 export { MainLayout } from "./layout/MainLayout";

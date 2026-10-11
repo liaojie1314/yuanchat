@@ -44,6 +44,7 @@ export function useKeyboardAwareViewport(): void {
 
     const root = document.documentElement;
     let raf = 0;
+    let centerTimer = 0;
 
     /** 将当前可见视口高度与键盘高度写入 CSS 变量 */
     const apply = () => {
@@ -53,28 +54,57 @@ export function useKeyboardAwareViewport(): void {
       root.style.setProperty("--keyboard-inset", `${inset}px`);
     };
 
-    /** 视口尺寸变化（键盘弹/收）：用 rAF 合并抖动，并把聚焦输入框滚入可见区 */
+    /**
+     * 判断元素是否已完整落在可见视口内。
+     *
+     * getBoundingClientRect 以布局视口为基准，而可见区是
+     * [offsetTop, offsetTop + height] 这一段 —— 键盘弹起时后者变短。
+     * 留 8px 余量，避免贴边时因亚像素误差来回判定。
+     */
+    const isFullyVisible = (el: HTMLElement) => {
+      const r = el.getBoundingClientRect();
+      const top = vv.offsetTop;
+      return r.top >= top - 8 && r.bottom <= top + vv.height + 8;
+    };
+
+    /**
+     * 把聚焦的输入框滚进可见区 —— 防抖，且只在它真被挡住时才滚。
+     *
+     * 两处都是必要的，少一个就会闪：
+     * 1. 键盘弹起动画期间 visualViewport 会连续触发十几次 resize，每次都滚一下的话
+     *    内容被反复重新居中，就是肉眼看到的抖动。防抖成「等视口稳定后只滚一次」。
+     * 2. 无条件 scrollIntoView 会在输入框本来就完整可见时也拽一下布局 —— 登录/注册
+     *    这类居中表单靠 --app-height 收缩后输入框早已可见，那一下纯属多余的跳动。
+     */
+    const scheduleCenter = (el: HTMLElement) => {
+      if (centerTimer) clearTimeout(centerTimer);
+      centerTimer = window.setTimeout(() => {
+        centerTimer = 0;
+        // 期间可能已经失焦或切到别的输入框，再确认一次
+        if (document.activeElement !== el) return;
+        if (isFullyVisible(el)) return;
+        el.scrollIntoView({ block: "center" });
+      }, 160);
+    };
+
+    /** 视口尺寸变化（键盘弹/收）：用 rAF 合并抖动 */
     const onResize = () => {
       if (raf) cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         apply();
         const active = document.activeElement;
-        if (isEditable(active)) {
-          (active as HTMLElement).scrollIntoView({ block: "center" });
-        }
+        if (isEditable(active)) scheduleCenter(active as HTMLElement);
       });
     };
 
     /**
      * 聚焦兜底：部分机型聚焦输入框不会触发 visualViewport resize，
-     * 这里延迟到键盘动画结束后主动把输入框滚到中央。
+     * 这里同样走防抖队列，与 resize 路径共用一个定时器，不会重复滚动。
      */
     const onFocusIn = (e: FocusEvent) => {
       const target = e.target as Element | null;
       if (!isEditable(target)) return;
-      window.setTimeout(() => {
-        (target as HTMLElement).scrollIntoView({ block: "center" });
-      }, 300);
+      scheduleCenter(target as HTMLElement);
     };
 
     apply();
@@ -84,6 +114,7 @@ export function useKeyboardAwareViewport(): void {
 
     return () => {
       if (raf) cancelAnimationFrame(raf);
+      if (centerTimer) clearTimeout(centerTimer);
       vv.removeEventListener("resize", onResize);
       vv.removeEventListener("scroll", apply);
       document.removeEventListener("focusin", onFocusIn);

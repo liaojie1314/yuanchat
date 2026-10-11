@@ -103,12 +103,27 @@ func NewHandler(
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,
 		// 浏览器 WS 无法自定义 Header，开发环境放行全部 Origin；
-		// 生产环境要求 Origin 与 Host 同源。
+		// 生产环境按白名单校验，未配白名单时退回同源。
 		CheckOrigin: func(r *http.Request) bool {
 			if !h.isProd {
 				return true
 			}
-			return r.Header.Get("Origin") == "https://"+r.Host || r.Header.Get("Origin") == "http://"+r.Host
+			origin := r.Header.Get("Origin")
+			// 同源校验只在「app 与 ws 同域」时成立。真实部署里 Web 端在
+			// chat.example.com 而 WS 在 ws.example.com，Origin 永远不等于 Host；
+			// 桌面/移动端 WebView 的 Origin 更是 tauri://localhost 这类非 http(s) 值。
+			// 因此一旦配了白名单就以白名单为准，不再回落同源 ——
+			// 回落会让「漏配一个 Origin」表现成全部客户端 403，而页面和登录都正常，
+			// 极难定位。
+			if len(h.cfg.AllowedOrigins) > 0 {
+				for _, allowed := range h.cfg.AllowedOrigins {
+					if origin == allowed {
+						return true
+					}
+				}
+				return false
+			}
+			return origin == "https://"+r.Host || origin == "http://"+r.Host
 		},
 	}
 	return h

@@ -86,6 +86,10 @@ export const yuanchatPreset: Partial<Config> = {
         "label-lg": "calc(0.875rem * var(--font-scale, 1))",
         "label-md": "calc(0.75rem * var(--font-scale, 1))",
         "label-sm": "calc(0.688rem * var(--font-scale, 1))",
+        // 比 label-sm 再小一档，给气泡里的次要元信息（如文件大小）用。
+        // 走 token 而不写 text-[10px] 这类字面值：字面值不吃 --font-scale，
+        // 用户在设置页调大字体时这一行会纹丝不动
+        "label-xs": "calc(0.625rem * var(--font-scale, 1))",
       },
       fontFamily: {
         sans: ['"Inter"', '"Noto Sans SC"', "system-ui", "sans-serif"],
