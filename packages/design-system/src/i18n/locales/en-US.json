@@ -306,7 +306,7 @@
   "chat.file.unsupported": "Unsupported file type",
   "chat.file.tooLarge": "File exceeds the size limit",
   "chat.media.uploadFailed": "Upload failed. Check your connection and try again",
-  "chat.media.retryUnavailable": "The local copy is gone — please pick the file again.",
+  "chat.media.retryUnavailable": "Local file is gone",
   "chat.file.downloadFailed": "Download failed, please retry",
   "chat.voice.recording": "Recording",
   "chat.voice.paused": "Paused",

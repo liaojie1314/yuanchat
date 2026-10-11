@@ -306,7 +306,7 @@
   "chat.file.unsupported": "サポートされていないファイル形式",
   "chat.file.tooLarge": "ファイルサイズの上限を超えています",
   "chat.media.uploadFailed": "アップロードに失敗しました。通信状況を確認して再試行してください",
-  "chat.media.retryUnavailable": "ローカルのファイルが失われました。もう一度選択してください。",
+  "chat.media.retryUnavailable": "ローカルファイルが無効",
   "chat.file.downloadFailed": "ダウンロードに失敗しました。再試行してください",
   "chat.voice.recording": "録音中",
   "chat.voice.paused": "一時停止中",

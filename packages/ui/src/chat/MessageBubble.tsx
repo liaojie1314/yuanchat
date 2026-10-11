@@ -425,13 +425,18 @@ export function MessageBubble({
         <Avatar name={avatarName} size="md" />
       )}
 
-      <div className={cn("flex max-w-[70%] flex-col", isSelf && "items-end")}>
+      {/* 气泡列宽上限 60%：再宽就压到对侧、读起来也累。
+          min-w-0 不可省 —— 本列是消息行的 flex item，flex item 的 min-width 默认是
+          auto（= 内容最小宽度），而文件名那行带 white-space:nowrap，它的最小宽度
+          就是整条文件名的长度。min-width 赢过 max-width，于是 60% 形同不存在，
+          长文件名气泡直接顶穿屏幕（实测截图里气泡左半边在屏幕外）。 */}
+      <div className={cn("flex max-w-[60%] min-w-0 flex-col", isSelf && "items-end")}>
         {/* 群聊接收方显示发送者昵称（合并态省略） */}
         {!compact && !isSelf && msg.senderName && (
           <span className="text-label-sm text-primary mx-1 mb-1 font-medium">{msg.senderName}</span>
         )}
 
-        <div className={cn("flex items-center gap-1.5", isSelf && "flex-row-reverse")}>
+        <div className={cn("flex min-w-0 items-center gap-1.5", isSelf && "flex-row-reverse")}>
           <div
             ref={bubbleRef}
             // data-kind 挂在气泡本体（右键菜单的宿主元素）上：E2E 既能按形态计数，
@@ -441,7 +446,9 @@ export function MessageBubble({
             // 精确选中「自己发的文本消息」（编辑入口只对这一类出现）
             data-self={msg.isSelf ? "true" : "false"}
             className={cn(
-              "relative w-fit max-w-full break-words select-text",
+              // min-w-0 与外层两级同理：不写的话气泡自己的 min-width:auto 会按
+              // 内容最小宽度撑开，max-w-full 彻底失效
+              "relative w-fit max-w-full min-w-0 break-words select-text",
               // 文件气泡额外加 overflow-hidden：里面是一行定宽图标 + 可伸缩文字，
               // 任何一处算错宽度都会溢出到屏幕外（长文件名实测过），由气泡兜住
               msg.kind === "file" && "overflow-hidden",
@@ -781,9 +788,12 @@ export function MessageBubble({
               // 永久失败（类型不支持 / 超大 / 本地副本已失效）不给重试入口：
               // 那种失败点一万次也不会成功，给按钮只会让用户一直试（线上实测反馈）。
               // 只陈述原因，让用户去换一个文件。
-              <span className="text-error flex items-center gap-1">
-                <CircleAlert size={11} aria-hidden />
-                {t(msg.failReason!)}
+              //
+              // items-start + shrink-0：meta 行只有 60% 宽，原因一旦折行，
+              // items-center 会把 11px 的图标吊在两行中间、看着像错位（实测截图）。
+              <span className="text-error flex min-w-0 items-start gap-1">
+                <CircleAlert size={11} className="mt-[0.35em] shrink-0" aria-hidden />
+                <span>{t(msg.failReason!)}</span>
               </span>
             ) : (
               // 失败重试做在 meta 行里：以前在气泡与头像之间插一个「!」按钮，

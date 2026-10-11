@@ -267,3 +267,70 @@ describe("voice playback rate", () => {
     expect(screen.getAllByTestId("voice-rate")).toHaveLength(1);
   });
 });
+
+describe("文件气泡宽度与失败原因", () => {
+  /** 自己发出、带超长文件名的文件消息 */
+  function fileMsg(overrides: Partial<ChatMessage> = {}): ChatMessage {
+    return {
+      id: "mf1",
+      conversationId: "c1",
+      kind: "file",
+      isSelf: true,
+      file: {
+        key: "files/2026/10/a.pdf",
+        name: "图论与网络流理论(高随祥)(Z-Library).pdf",
+        size: "1.7 MB",
+        ext: "PDF",
+      },
+      time: "20:27",
+      seq: 9,
+      status: "sent",
+      ...overrides,
+    };
+  }
+
+  /**
+   * 气泡列与气泡本体都必须带 min-w-0。
+   *
+   * @remarks flex item 的 `min-width` 默认是 `auto`（内容最小宽度），而文件名那行
+   *   带 `white-space: nowrap`，最小宽度就是整条文件名的长度 —— 它赢过 max-width，
+   *   于是 60% 上限形同不存在，长文件名气泡直接顶穿屏幕。这个 bug 修过两次，
+   *   两次都是因为只改了 max-w 没管 min-w，故在此钉死。
+   */
+  it("长文件名：60% 上限与 min-w-0 同时在位（少一个都会溢出屏幕）", () => {
+    const { container } = render(<MessageBubble msg={fileMsg()} />);
+
+    const column = container.querySelector(".max-w-\\[60\\%\\]");
+    expect(column).toBeTruthy();
+    expect(column!.className).toContain("min-w-0");
+
+    const bubble = container.querySelector('[data-kind="file"]')!;
+    expect(bubble.className).toContain("max-w-full");
+    expect(bubble.className).toContain("min-w-0");
+  });
+
+  it("后缀不被省略号吃掉：主干与 .pdf 分成两段渲染", () => {
+    render(<MessageBubble msg={fileMsg()} />);
+    // 主干可截断，后缀 shrink-0 常驻
+    expect(screen.getByText("图论与网络流理论(高随祥)(Z-Library)").className).toContain("truncate");
+    expect(screen.getByText(".pdf").className).toContain("shrink-0");
+  });
+
+  it("永久失败只陈述原因、不给重试按钮（点一万次也不会成功）", () => {
+    render(
+      <MessageBubble
+        msg={fileMsg({ status: "failed", failReason: "chat.media.retryUnavailable" })}
+        onRetry={() => expect.fail("永久失败不该出现可点的重试入口")}
+      />,
+    );
+    expect(screen.getByText(label("chat.media.retryUnavailable"))).toBeInTheDocument();
+    expect(screen.queryByText(label("common.retry"))).not.toBeInTheDocument();
+  });
+
+  it("可重试的失败仍给重试按钮", () => {
+    const onRetry = vi.fn();
+    render(<MessageBubble msg={fileMsg({ status: "failed" })} onRetry={onRetry} />);
+    fireEvent.click(screen.getByText(label("common.retry")));
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+});

@@ -306,7 +306,7 @@
   "chat.file.unsupported": "지원되지 않는 파일 형식",
   "chat.file.tooLarge": "파일 크기 제한을 초과했습니다",
   "chat.media.uploadFailed": "업로드에 실패했습니다. 네트워크를 확인한 후 다시 시도하세요",
-  "chat.media.retryUnavailable": "로컬 파일이 사라졌습니다. 다시 선택해 주세요.",
+  "chat.media.retryUnavailable": "로컬 파일이 사라졌습니다",
   "chat.file.downloadFailed": "다운로드에 실패했습니다. 다시 시도해 주세요",
   "chat.voice.recording": "녹음 중",
   "chat.voice.paused": "일시정지",
