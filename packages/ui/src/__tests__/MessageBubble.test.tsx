@@ -290,14 +290,20 @@ describe("文件气泡宽度与失败原因", () => {
   }
 
   /**
-   * 气泡列与气泡本体都必须带 min-w-0。
+   * 气泡列、气泡行与气泡本体的宽度约束都必须在位。
    *
-   * @remarks flex item 的 `min-width` 默认是 `auto`（内容最小宽度），而文件名那行
-   *   带 `white-space: nowrap`，最小宽度就是整条文件名的长度 —— 它赢过 max-width，
-   *   于是 60% 上限形同不存在，长文件名气泡直接顶穿屏幕。这个 bug 修过两次，
-   *   两次都是因为只改了 max-w 没管 min-w，故在此钉死。
+   * @remarks 这个 bug 修过三次。前两次只盯着 `max-w` / `min-w-0`，都没修好：
+   *   `min-width: 0` 只解除**本元素**的最小尺寸，并不改变子孙向上贡献的 min-content，
+   *   而气泡行不写宽度时是 `auto`，flex 的 fit-content 定义就是 `max(min-content, …)` ——
+   *   min-content 是地板，外层的 60% 上限根本压不下去（里面那行 truncate 文件名
+   *   `nowrap`，min-content 就是整条文件名的宽度）。第三次才找对：气泡行加 `w-full`，
+   *   宽度由父列正推为定值。
+   *
+   *   这里只钉「约束类名在不在」—— JSDOM 不做布局，量不出溢出（前两次就是单测全绿
+   *   而真机照穿）。真实排版的回归门禁在 `apps/web/e2e/bubble-width.spec.ts`：
+   *   412px 手机视口下量真实 `getBoundingClientRect()`，三条用例各自对应一个修复点。
    */
-  it("长文件名：60% 上限与 min-w-0 同时在位（少一个都会溢出屏幕）", () => {
+  it("长文件名：60% 上限、气泡行 w-full 与 min-w-0 同时在位", () => {
     const { container } = render(<MessageBubble msg={fileMsg()} />);
 
     const column = container.querySelector(".max-w-\\[60\\%\\]");
@@ -307,6 +313,11 @@ describe("文件气泡宽度与失败原因", () => {
     const bubble = container.querySelector('[data-kind="file"]')!;
     expect(bubble.className).toContain("max-w-full");
     expect(bubble.className).toContain("min-w-0");
+
+    // 气泡行：w-full 是 60% 真正生效的关键，宽度必须由父列正推而非内容倒推
+    const row = bubble.parentElement!;
+    expect(row.className).toContain("w-full");
+    expect(row.className).toContain("min-w-0");
   });
 
   it("后缀不被省略号吃掉：主干与 .pdf 分成两段渲染", () => {

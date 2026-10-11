@@ -436,7 +436,16 @@ export function MessageBubble({
           <span className="text-label-sm text-primary mx-1 mb-1 font-medium">{msg.senderName}</span>
         )}
 
-        <div className={cn("flex min-w-0 items-center gap-1.5", isSelf && "flex-row-reverse")}>
+        {/* w-full 是 60% 上限真正生效的关键：这一行不写宽度时是 auto，
+            于是尺寸由内容「倒推」—— flex 的 fit-content 定义就是 max(min-content, …)，
+            min-content 是地板，外层 max-w-[60%] 和这里的 min-w-0 都压不下去
+            （min-width:0 只解除本元素的最小尺寸，不改变子孙向上贡献的 min-content，
+            而里面那行 truncate 文件名 nowrap，min-content 就是整条文件名的宽度）。
+            改成 w-full 后宽度由父列「正推」为定值，气泡与文件名才会在 60% 内截断。
+            窄视口才暴露：桌面 1920px 下 60% ≈ 1150px 远大于内容 min-content，永远碰不到 */}
+        <div
+          className={cn("flex w-full min-w-0 items-center gap-1.5", isSelf && "flex-row-reverse")}
+        >
           <div
             ref={bubbleRef}
             // data-kind 挂在气泡本体（右键菜单的宿主元素）上：E2E 既能按形态计数，
