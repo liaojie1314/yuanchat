@@ -170,7 +170,6 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
         return (
           <MobileHeader show={isMobile} title={t("settings.account")} onBack={onBack}>
             <AccountSection
-              phone={user?.phone}
               email={user?.email}
               shortId={user?.shortId}
               onChangePassword={() => setChangePwdOpen(true)}

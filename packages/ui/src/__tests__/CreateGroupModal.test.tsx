@@ -82,6 +82,7 @@ describe("CreateGroupModal", () => {
     render(<CreateGroupModal open onClose={() => {}} />);
 
     fireEvent.click(screen.getByText("Alice"));
+    fireEvent.click(screen.getByText("Bob"));
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
     await waitFor(() => expect(useConversationStore.getState().activeId).toBe("g-new"));
@@ -91,8 +92,16 @@ describe("CreateGroupModal", () => {
     expect(convs[0].unreadCount).toBe(0);
   });
 
-  it("未选好友时创建按钮禁用", () => {
+  it("少于 2 位好友时创建按钮禁用（群至少 3 人）", () => {
     render(<CreateGroupModal open onClose={() => {}} />);
-    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    const create = () => screen.getByRole("button", { name: "Create" });
+    expect(create()).toBeDisabled();
+
+    // 只选 1 人 = 二人群，等价于单聊，必须挡住
+    fireEvent.click(screen.getByText("Alice"));
+    expect(create()).toBeDisabled();
+
+    fireEvent.click(screen.getByText("Bob"));
+    expect(create()).toBeEnabled();
   });
 });

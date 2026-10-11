@@ -12,15 +12,14 @@
 4. **UI 独立性**：不要照搬 QQ/微信/钉钉/Telegram 的 UI 设计。追求北欧简约风格 — 干净线条、充足留白、柔和阴影。
 5. **跨平台思维**：代码设计需考虑 Web/Desktop/Mobile 三端复用。
 6. **文档同步**：所有文档统一放在 `docs/` 目录下。架构变更、API 变更、重要设计决策需同步更新对应文档。启动/打包命令变更必须同步更新 `docs/DEVELOPMENT.md`。
-7. **问题记录**：遇到困难问题、好的设计点、关键功能实现后，需在博客项目中添加对应文章。
-8. **测试门禁**：每个功能必须先通过测试（单元/集成/E2E）才能标记完成。测试未通过 = 功能未完成。不允许在未通过测试时开始下一个功能。
-9. **前端 Mock**：所有前端 API 调用必须有 MSW Mock 覆盖正常/空/错误/加载四种状态。
-10. **骨架屏**：所有图片必须用 Skeleton 占位（固定宽高），列表加载必须有骨架屏，CLS 必须为零。
-11. **JSDoc/注释**：所有导出函数/组件/Store/Hook 必须写 JSDoc。Go 所有导出函数/包必须写 godoc。关键并发/事务/错误分支必须注释。先写注释再写代码。
-12. **浏览器/WebView 兼容适配**：前端代码必须兼容低版本 WebView。`vite.config.ts` 的 `build.target` 须为 `es2019`（转译 `?.`/`??` 等 ES2020+ 语法），不得使用 `chrome105`/`es2020`，否则旧 Android System WebView（如 Chrome 74）解析期 SyntaxError → 白屏。新增 JS 语法/Web API 前须确认目标 WebView 支持，或确保已被转译/polyfill。详见 `docs/DEVELOPMENT.md`、`docs/TROUBLESHOOTING.md`。
-13. **i18n 国际化适配**：所有用户可见文案**禁止硬编码**，必须通过 `react-i18next`（`useTranslation` / `t()`）引用，并在 `packages/design-system/src/i18n/locales/`（`zh-CN`、`en-US`、`ja-JP`、`ko-KR`）补齐对应 key。新增/修改 UI 文案时必须同步维护四种语言的翻译条目，`node scripts/check-i18n.mjs`（CI 门禁）会挡下漏翻、写错 key 与死键。
-14. **推送前本地 CI 门禁**：推送到远程 `dev` 之前，必须先在本地跑通 CI 的全部检查并全绿，禁止「先推上去让 CI 跑」。CI 实际执行的是 `node scripts/check-i18n.mjs`、`pnpm test`、`apps/web` 与 `apps/desktop` 各自的 `npx tsc --noEmit`、`pnpm --filter @yuanchat/web test:e2e`（Playwright chromium），以及 `server/` 下的 `go vet ./...`、`go test ./...`、`go test -race ./internal/ws/`。本地跑前端测试必须把语言环境对齐 runner（`LANG=C.UTF-8 pnpm test`，runner 没有中文 locale）—— Node 21 起 `navigator.language` 取自宿主 ICU 语言环境，中文机器上报 `zh-CN`、runner 上报 `en-US`，依赖它的用例会「本地全绿、远程报错」。理由：CI 失败要等远程跑完才知道，而失败的 commit 已经落在共享分支上，别人拉下来就是坏的。
-15. **发版前本地打包门禁**：打 tag / 触发 release 之前，必须先在本地完整打包一遍并成功 —— `pnpm build:pkg`（web + tsc + tauri build）与 Android aarch64 APK 构建。理由：release 流水线跨 macOS/Windows/Linux/Android 多个 runner，任一平台失败整条发版作废，还可能留下半个 GitHub Release。
+7. **测试门禁**：每个功能必须先通过测试（单元/集成/E2E）才能标记完成。测试未通过 = 功能未完成。不允许在未通过测试时开始下一个功能。
+8. **前端 Mock**：所有前端 API 调用必须有 MSW Mock 覆盖正常/空/错误/加载四种状态。
+9. **骨架屏**：所有图片必须用 Skeleton 占位（固定宽高），列表加载必须有骨架屏，CLS 必须为零。
+10. **JSDoc/注释**：所有导出函数/组件/Store/Hook 必须写 JSDoc。Go 所有导出函数/包必须写 godoc。关键并发/事务/错误分支必须注释。先写注释再写代码。
+11. **浏览器/WebView 兼容适配**：前端代码必须兼容低版本 WebView。`vite.config.ts` 的 `build.target` 须为 `es2019`（转译 `?.`/`??` 等 ES2020+ 语法），不得使用 `chrome105`/`es2020`，否则旧 Android System WebView（如 Chrome 74）解析期 SyntaxError → 白屏。新增 JS 语法/Web API 前须确认目标 WebView 支持，或确保已被转译/polyfill。详见 `docs/DEVELOPMENT.md`、`docs/TROUBLESHOOTING.md`。
+12. **i18n 国际化适配**：所有用户可见文案**禁止硬编码**，必须通过 `react-i18next`（`useTranslation` / `t()`）引用，并在 `packages/design-system/src/i18n/locales/`（`zh-CN`、`en-US`、`ja-JP`、`ko-KR`）补齐对应 key。新增/修改 UI 文案时必须同步维护四种语言的翻译条目，`node scripts/check-i18n.mjs`（CI 门禁）会挡下漏翻、写错 key 与死键。
+13. **推送前本地 CI 门禁**：推送到远程 `dev` 之前，必须先在本地跑通 CI 的全部检查并全绿，禁止「先推上去让 CI 跑」。CI 实际执行的是 `node scripts/check-i18n.mjs`、`pnpm test`、`apps/web` 与 `apps/desktop` 各自的 `npx tsc --noEmit`、`pnpm --filter @yuanchat/web test:e2e`（Playwright chromium），以及 `server/` 下的 `go vet ./...`、`go test ./...`、`go test -race ./internal/ws/`。本地跑前端测试必须把语言环境对齐 runner（`LANG=C.UTF-8 pnpm test`，runner 没有中文 locale）—— Node 21 起 `navigator.language` 取自宿主 ICU 语言环境，中文机器上报 `zh-CN`、runner 上报 `en-US`，依赖它的用例会「本地全绿、远程报错」。理由：CI 失败要等远程跑完才知道，而失败的 commit 已经落在共享分支上，别人拉下来就是坏的。
+14. **发版前本地打包门禁**：打 tag / 触发 release 之前，必须先在本地完整打包一遍并成功 —— `pnpm build:pkg`（web + tsc + tauri build）与 Android aarch64 APK 构建。理由：release 流水线跨 macOS/Windows/Linux/Android 多个 runner，任一平台失败整条发版作废，还可能留下半个 GitHub Release。
 
 ## 技术栈速查
 

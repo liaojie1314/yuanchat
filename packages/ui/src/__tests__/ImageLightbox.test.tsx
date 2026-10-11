@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { runBackInterceptors } from "@yuanchat/shared";
 import { ImageLightbox } from "../chat/ImageLightbox";
 
 // jsdom 默认 locale en-US，aria-label 文案断言用英文
@@ -85,5 +86,27 @@ describe("ImageLightbox", () => {
   it("index 越界时退到第一张", () => {
     render(<ImageLightbox urls={["blob:a", "blob:b"]} index={9} onClose={() => {}} />);
     expect(screen.getByRole("img", { name: "Image" }).getAttribute("src")).toBe("blob:a");
+  });
+
+  // 安卓返回键：不拦就一路冒到聊天页，表现为「看个图退出整个会话」
+  it("系统返回键只关预览，并消费掉这次返回", () => {
+    const onClose = vi.fn();
+    const { unmount } = render(<ImageLightbox urls={["blob:x"]} onClose={onClose} />);
+
+    expect(runBackInterceptors()).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    // 卸载后必须注销，否则已关闭的预览会继续吞返回键
+    unmount();
+    expect(runBackInterceptors()).toBe(false);
+  });
+
+  it("关闭按钮与页码避开状态栏（留出 --safe-area-top）", () => {
+    render(<ImageLightbox urls={["blob:a", "blob:b"]} onClose={() => {}} />);
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(close.getAttribute("style") ?? "").toContain("--safe-area-top");
+    expect(screen.getByTestId("lightbox-counter").getAttribute("style") ?? "").toContain(
+      "--safe-area-top",
+    );
   });
 });

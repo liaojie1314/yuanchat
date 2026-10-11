@@ -25,11 +25,47 @@ const server = setupServer(
     });
   }),
 
-  http.post("http://localhost:8085/api/v1/auth/register", async ({ request }) => {
-    const body = (await request.json()) as { phone?: string; password?: string; nickname?: string };
-    if (!body.phone) {
+  http.post("http://localhost:8085/api/v1/auth/register/otp", async ({ request }) => {
+    const body = (await request.json()) as { email?: string };
+    if (!body.email) {
       return HttpResponse.json(
-        { code: 40003, message: "手机号不能为空", data: null },
+        { code: 400, message: "auth.emailInvalid", data: null },
+        {
+          status: 400,
+        },
+      );
+    }
+    // 同邮箱 60 秒冷却
+    if (body.email === "cooldown@yuanchat.com") {
+      return HttpResponse.json(
+        { code: 429, message: "auth.otpCooldown", data: null },
+        {
+          status: 429,
+        },
+      );
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.post("http://localhost:8085/api/v1/auth/register", async ({ request }) => {
+    const body = (await request.json()) as {
+      email?: string;
+      code?: string;
+      password?: string;
+      nickname?: string;
+      phone?: string;
+    };
+    if (!body.email) {
+      return HttpResponse.json(
+        { code: 400, message: "auth.emailInvalid", data: null },
+        {
+          status: 400,
+        },
+      );
+    }
+    if (body.code !== "123456") {
+      return HttpResponse.json(
+        { code: 400, message: "auth.otpWrong", data: null },
         { status: 400 },
       );
     }
@@ -37,7 +73,12 @@ const server = setupServer(
       code: 0,
       message: "ok",
       data: {
-        user: { id: "new_user", nickname: body.nickname || "new", phone: body.phone },
+        user: {
+          id: "new_user",
+          nickname: body.nickname || "new",
+          email: body.email,
+          phone: body.phone ?? null,
+        },
         access_token: "token_access_new",
         refresh_token: "token_refresh_new",
         expires_in: 900,
@@ -209,23 +250,125 @@ describe("authStore", () => {
     });
   });
 
+  describe("requestRegisterCode", () => {
+    it("发码成功（204 空体）即正常返回，且不改动登录态", async () => {
+      await expect(
+        useAuthStore.getState().requestRegisterCode("new@yuanchat.com"),
+      ).resolves.toBeUndefined();
+
+      expect(useAuthStore.getState().isAuthenticated).toBe(false);
+      expect(useAuthStore.getState().accessToken).toBeNull();
+    });
+
+    it("只发 email 一个字段", async () => {
+      let sent: unknown = null;
+      server.use(
+        http.post("http://localhost:8085/api/v1/auth/register/otp", async ({ request }) => {
+          sent = await request.json();
+          return new HttpResponse(null, { status: 204 });
+        }),
+      );
+
+      await useAuthStore.getState().requestRegisterCode("new@yuanchat.com");
+
+      expect(sent).toEqual({ email: "new@yuanchat.com" });
+    });
+
+    it("60 秒冷却内重发抛 429 auth.otpCooldown", async () => {
+      await expect(
+        useAuthStore.getState().requestRegisterCode("cooldown@yuanchat.com"),
+      ).rejects.toMatchObject({ code: 429, message: "auth.otpCooldown" });
+    });
+  });
+
   describe("registerWithPassword", () => {
     it("sets auth state on successful registration", async () => {
       await useAuthStore
         .getState()
-        .registerWithPassword("13800138000", "Abc1234!", "captcha_id", 1234, "新用户");
+        .registerWithPassword("new@yuanchat.com", "123456", "Abc1234!", "新用户");
 
       const state = useAuthStore.getState();
       expect(state.isAuthenticated).toBe(true);
       expect(state.user?.nickname).toBe("新用户");
-      expect(state.user?.phone).toBe("13800138000");
+      expect(state.user?.email).toBe("new@yuanchat.com");
       expect(state.accessToken).toBe("token_access_new");
     });
 
-    it("throws on missing phone", async () => {
+    it("请求体只有 email/code/password/nickname，不含 captcha 与 phone 字段", async () => {
+      let sent: Record<string, unknown> = {};
+      server.use(
+        http.post("http://localhost:8085/api/v1/auth/register", async ({ request }) => {
+          sent = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json({
+            code: 0,
+            message: "ok",
+            data: {
+              user: { id: "new_user", nickname: "新用户" },
+              access_token: "token_access_new",
+              refresh_token: "token_refresh_new",
+              expires_in: 900,
+            },
+          });
+        }),
+      );
+
+      await useAuthStore
+        .getState()
+        .registerWithPassword("new@yuanchat.com", "123456", "Abc1234!", "新用户");
+
+      expect(sent).toEqual({
+        email: "new@yuanchat.com",
+        code: "123456",
+        password: "Abc1234!",
+        nickname: "新用户",
+      });
+      // 图形验证码两个字段已从契约里删除，残留会被后端忽略并掩盖前端写错
+      expect(sent).not.toHaveProperty("captcha_id");
+      expect(sent).not.toHaveProperty("captcha_answer");
+    });
+
+    it("注册契约里没有 phone：多传一个手机号实参也不会进请求体", async () => {
+      let sent: Record<string, unknown> = {};
+      server.use(
+        http.post("http://localhost:8085/api/v1/auth/register", async ({ request }) => {
+          sent = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json({
+            code: 0,
+            message: "ok",
+            data: {
+              user: { id: "new_user", nickname: "新用户" },
+              access_token: "token_access_new",
+              refresh_token: "token_refresh_new",
+              expires_in: 900,
+            },
+          });
+        }),
+      );
+
+      // 故意绕过类型签名多传一个手机号：只有实现真的把 phone 透传出去才会失败，
+      // 这样一旦有人把旧的「手机号选填」实现改回来，这条用例立刻红。
+      const register = useAuthStore.getState().registerWithPassword as unknown as (
+        ...args: unknown[]
+      ) => Promise<void>;
+      await register("new@yuanchat.com", "123456", "Abc1234!", "新用户", "13800138000");
+
+      expect(sent).not.toHaveProperty("phone");
+    });
+
+    it("验证码错误时抛 400 auth.otpWrong，且不建立登录态", async () => {
       await expect(
-        useAuthStore.getState().registerWithPassword("", "Abc1234!", "id", 1234, "user"),
-      ).rejects.toThrow("手机号不能为空");
+        useAuthStore
+          .getState()
+          .registerWithPassword("new@yuanchat.com", "000000", "Abc1234!", "新用户"),
+      ).rejects.toMatchObject({ code: 400, message: "auth.otpWrong" });
+
+      expect(useAuthStore.getState().isAuthenticated).toBe(false);
+    });
+
+    it("throws on missing email", async () => {
+      await expect(
+        useAuthStore.getState().registerWithPassword("", "123456", "Abc1234!", "user"),
+      ).rejects.toThrow("auth.emailInvalid");
 
       expect(useAuthStore.getState().isAuthenticated).toBe(false);
     });

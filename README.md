@@ -4,6 +4,23 @@
 
 **当前状态**：v0.4.0（Web + Desktop 三平台 + Android APK 由 GitHub Actions 自动打包）。
 
+## 在线体验
+
+官方实例已部署，可直接注册使用（手机号或邮箱 + 密码 + 图形验证码）：
+
+| 入口        | 地址                                                     | 说明                                                |
+| ----------- | -------------------------------------------------------- | --------------------------------------------------- |
+| **Web 端**  | **<https://chat.yuanyuan.blog>**                         | 支持 PWA 安装到桌面/手机                            |
+| 管理后台    | <https://admin.yuanyuan.blog>                            | 需 `role=admin` 账号                                |
+| REST API    | <https://api.yuanyuan.blog>（健康检查 `/api/v1/health`） | 桌面端/安卓端在登录页填这个地址                     |
+| WebSocket   | `wss://ws.yuanyuan.blog`                                 | 消息实时收发与通话信令                              |
+| 对象存储    | `https://storage.yuanyuan.blog`                          | 图片/文件/语音/视频/头像，预签名读写                |
+| TURN / STUN | `turn:chat.yuanyuan.blog:3478`                           | 通话穿透，HMAC 临时凭据由 `/calls/ice-servers` 下发 |
+
+> 这是单实例部署（消息分发走进程内 Hub），仅供体验与验证，不承诺可用性与数据留存。
+> 自建部署见 [`docs/deploy/self-hosted.md`](docs/deploy/self-hosted.md)，
+> 域名与环境变量清单见 [`docs/deploy/env.md`](docs/deploy/env.md)。
+
 ## 平台支持（Tauri 2 统一桌面 + 移动端）
 
 | 平台            | 技术                                | 状态                                      |

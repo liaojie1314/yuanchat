@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -17,14 +18,30 @@ import (
 //
 // endpoint / useSSL 是服务端建连用的地址；publicEndpoint / publicUseSSL 是下发给
 // 客户端的对外地址。生产环境两者必然不同（前者是 compose 内网主机名），故分开保存。
+//
+// 两个 client 不可合并：
+//   - client 走内网地址，负责服务端自己的读写（建桶、直接 PutObject、删对象）。
+//   - presignClient 绑定**对外**地址，只用来签 URL。SigV4 把 host 头纳入签名，
+//     而客户端是向对外域名发请求、nginx 又透传 $host，所以签名必须在对外 host 上算。
+//     早先的做法是用内网 client 签完再替换 URL 里的 host 字符串，签名随即失效 ——
+//     生产上表现为所有媒体上传一律 403 SignatureDoesNotMatch。
 type Storage struct {
 	client         *minio.Client
+	presignClient  *minio.Client
 	bucket         string
 	endpoint       string
 	useSSL         bool
 	publicEndpoint string
 	publicUseSSL   bool
 }
+
+// presignRegion 预签名固定使用的区域。
+//
+// 必须显式指定：minio-go 在 region 为空时会先发一次 GetBucketLocation 去问服务端，
+// 而 presignClient 指向的是对外域名 —— 容器内未必解析得到（经常没有 hairpin NAT），
+// 那一次查询会拖慢甚至失败。MinIO 默认区域就是 us-east-1。
+// 若将来换成真正的 AWS S3 且桶不在该区域，这里要跟着改。
+const presignRegion = "us-east-1"
 
 // New 建立 MinIO 连接，确保默认桶存在，并为匿名公共读前缀开放访问。
 // 头像与表情包封面通过 PublicURL 直接暴露，无需预签名；其余对象（图片消息等）走预签名。
@@ -37,8 +54,22 @@ func New(cfg config.MinIOConfig) (*Storage, error) {
 		return nil, fmt.Errorf("failed to init minio client: %w", err)
 	}
 
+	// 未配对外端点（dev：两者同一个地址）时直接复用内网 client，行为不变
+	presignClient := client
+	if cfg.PublicEndpoint != "" {
+		presignClient, err = minio.New(cfg.PublicEndpoint, &minio.Options{
+			Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
+			Secure: cfg.PublicUseSSL,
+			Region: presignRegion,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to init minio presign client: %w", err)
+		}
+	}
+
 	s := &Storage{
 		client:         client,
+		presignClient:  presignClient,
 		bucket:         cfg.Bucket,
 		endpoint:       cfg.Endpoint,
 		useSSL:         cfg.UseSSL,
@@ -102,45 +133,73 @@ func (s *Storage) applyPublicReadPolicy(ctx context.Context) error {
 	return nil
 }
 
-// rewriteHost 把 URL 的 scheme 与 host 换成对外端点，其余（路径、查询串）原样保留。
-//
-// 未配置对外端点时原样返回。注意：预签名 URL 的 SigV4 签名覆盖 Host 头，
-// 因此对外域名必须由 nginx 反代到 MinIO 并透传 Host（proxy_set_header Host $host），
-// 且 MINIO_SERVER_URL 要与对外域名一致 —— 否则签名校验失败（不是静默降级）。
-func (s *Storage) rewriteHost(rawURL string) string {
-	if s.publicEndpoint == "" {
-		return rawURL
-	}
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return rawURL
-	}
-	u.Host = s.publicEndpoint
-	if s.publicUseSSL {
-		u.Scheme = "https"
-	} else {
-		u.Scheme = "http"
-	}
-	return u.String()
-}
-
 // PresignPut 生成有时效的预签名上传 URL，客户端可用 HTTP PUT 直传，无需服务端中转。
 // contentType 目前仅作调用方语义占位，MinIO PresignedPutObject 不绑定 Content-Type。
+//
+// 走 presignClient（绑定对外端点）而非内网 client：签名覆盖 host 头，必须在
+// 客户端真正会请求的那个 host 上算，详见 Storage 的说明。
 func (s *Storage) PresignPut(ctx context.Context, objectKey, contentType string, expires time.Duration) (string, error) {
-	u, err := s.client.PresignedPutObject(ctx, s.bucket, objectKey, expires)
+	u, err := s.presignClient.PresignedPutObject(ctx, s.bucket, objectKey, expires)
 	if err != nil {
 		return "", fmt.Errorf("failed to presign put %q: %w", objectKey, err)
 	}
-	return s.rewriteHost(u.String()), nil
+	return u.String(), nil
 }
 
 // PresignGet 生成有时效的预签名下载 URL，用于私有对象（如图片消息）的受控读取。
+//
+// 不带 Content-Disposition：图片/视频等要在页面里内联渲染，加了附件头就下成文件了。
+// 「点下载按钮」那条路径请用 PresignGetAttachment。
 func (s *Storage) PresignGet(ctx context.Context, objectKey string, expires time.Duration) (string, error) {
-	u, err := s.client.PresignedGetObject(ctx, s.bucket, objectKey, expires, url.Values{})
+	u, err := s.presignClient.PresignedGetObject(ctx, s.bucket, objectKey, expires, url.Values{})
 	if err != nil {
 		return "", fmt.Errorf("failed to presign get %q: %w", objectKey, err)
 	}
-	return s.rewriteHost(u.String()), nil
+	return u.String(), nil
+}
+
+// PresignGetAttachment 同 PresignGet，但要求对象存储在响应里带
+// `Content-Disposition: attachment; filename=...`。
+//
+// 为什么必须有这个：不带附件头时浏览器按 Content-Type 决定行为，PDF、图片、纯文本
+// 一律**内联渲染** —— 桌面端点「下载」只是把浏览器打开看了一眼，什么都没存下来
+// （2026-10-09 实测）。就算用户手动另存，文件名也是对象键里的那串 uuid，
+// 用户当初发的 `学术报告单.docx` 早就丢了。
+//
+// filename 为空时退化为 PresignGet 的行为（只是不带名字，仍强制附件）。
+func (s *Storage) PresignGetAttachment(ctx context.Context, objectKey, filename string, expires time.Duration) (string, error) {
+	q := url.Values{}
+	q.Set("response-content-disposition", contentDisposition(filename))
+	u, err := s.presignClient.PresignedGetObject(ctx, s.bucket, objectKey, expires, q)
+	if err != nil {
+		return "", fmt.Errorf("failed to presign attachment get %q: %w", objectKey, err)
+	}
+	return u.String(), nil
+}
+
+// contentDisposition 按 RFC 6266 / RFC 5987 拼附件头。
+//
+// 中文文件名必须走 filename*=UTF-8''<pct-encoded>：裸 filename="学术报告单.docx"
+// 不是合法的 HTTP 头取值（非 ASCII），不同浏览器的猜测各不相同，常见结果是一串乱码。
+// 同时保留一个 ASCII 兜底 filename 供只认老语法的客户端使用。
+func contentDisposition(filename string) string {
+	if filename == "" {
+		return "attachment"
+	}
+	// 兜底名只留 ASCII 可见字符，且去掉引号与路径分隔符（防头注入与目录穿越写法）
+	var ascii strings.Builder
+	for _, r := range filename {
+		if r >= 0x20 && r < 0x7f && r != '"' && r != '\\' && r != '/' {
+			ascii.WriteRune(r)
+		}
+	}
+	fallback := ascii.String()
+	if fallback == "" {
+		fallback = "download"
+	}
+	// url.PathEscape 不转义 '+' 等少数字符，但对 RFC 5987 的取值集合足够安全
+	return fmt.Sprintf("attachment; filename=%q; filename*=UTF-8''%s",
+		fallback, url.PathEscape(filename))
 }
 
 // PutObject 服务端直接写入对象（供内部工具如 seed 使用；

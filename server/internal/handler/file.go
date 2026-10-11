@@ -157,7 +157,8 @@ func (h *FileHandler) UploadURL(c *gin.Context) {
 //	@Summary		签发预签名下载 URL
 //	@Tags			files
 //	@Security		BearerAuth
-//	@Param			key	query	string	true	"对象键，须匹配 {category}/{yyyy}/{mm}/{uuid}.{ext}"
+//	@Param			key		query	string	true	"对象键，须匹配 {category}/{yyyy}/{mm}/{uuid}.{ext}"
+//	@Param			name	query	string	false	"原始文件名；给出则强制按附件下载并用它命名"
 //	@Success		200	{object}	Response
 //	@Failure		400	{object}	Response	"对象键格式非法"
 //	@Failure		403	{object}	Response	"无权读取该对象"
@@ -202,7 +203,9 @@ func (h *FileHandler) DownloadURL(c *gin.Context) {
 		}
 	}
 
-	downloadURL, err := h.st.PresignGet(c.Request.Context(), key, downloadURLTTL)
+	// name 必须保持可选：图片/视频/语音都用同一个端点取 URL 去**内联**播放或渲染，
+	// 一律加附件头会让 <img src> 变成下载。只有「点下载按钮」那条路径传 name。
+	downloadURL, err := h.presignDownload(c, key, truncateRunes(c.Query("name"), maxAttachmentNameRunes))
 	if err != nil {
 		h.logger.Error("presign get failed", zap.String("object_key", key), zap.Error(err))
 		InternalError(c, "failed to sign download url")
@@ -213,6 +216,26 @@ func (h *FileHandler) DownloadURL(c *gin.Context) {
 		"url":        downloadURL,
 		"expires_in": int(downloadURLTTL.Seconds()),
 	})
+}
+
+// maxAttachmentNameRunes 附件名长度上限。
+// 文件名进的是 HTTP 响应头，不设上限等于让客户端决定头部大小（MinIO 侧也有限制）。
+const maxAttachmentNameRunes = 200
+
+// presignDownload 按 name 是否为空选择内联或附件下载。
+func (h *FileHandler) presignDownload(c *gin.Context, key, name string) (string, error) {
+	if name == "" {
+		return h.st.PresignGet(c.Request.Context(), key, downloadURLTTL)
+	}
+	return h.st.PresignGetAttachment(c.Request.Context(), key, name, downloadURLTTL)
+}
+
+// truncateRunes 按 rune 截断，避免把多字节字符切成半个。
+func truncateRunes(s string, limit int) string {
+	if r := []rune(s); len(r) > limit {
+		return string(r[:limit])
+	}
+	return s
 }
 
 // resolveCategory 决定对象存储的一级前缀（类别）。

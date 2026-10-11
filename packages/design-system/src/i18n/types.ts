@@ -55,9 +55,7 @@ export interface TranslationKeys {
   // ========== 认证 ==========
   "auth.login": string;
   "auth.register": string;
-  "auth.account": string;
   "auth.password": string;
-  "auth.phoneOrEmail": string;
   "auth.yuanchatId": string;
   "auth.verificationCode": string;
   "auth.sendCode": string;

@@ -23,7 +23,7 @@ import {
   type FlaggedUGC,
 } from "../api";
 import { usePagedQuery } from "../hooks/usePagedQuery";
-import { DataTable, Pager, EmptyRow } from "../components/Table";
+import { DataTable, Pager, EmptyRow, SkeletonRows } from "../components/Table";
 import { cn } from "@yuanchat/shared/utils";
 
 function contentText(raw: string): string {
@@ -51,6 +51,7 @@ function FlaggedTab() {
   return (
     <>
       <DataTable headers={headers}>
+        {loading && list.length === 0 && <SkeletonRows cols={headers.length} />}
         {!loading && list.length === 0 && <EmptyRow colSpan={headers.length} />}
         {list.map((m) => (
           <tr
@@ -104,6 +105,7 @@ function FlaggedPacksTab() {
   return (
     <>
       <DataTable headers={headers}>
+        {loading && list.length === 0 && <SkeletonRows cols={headers.length} />}
         {!loading && list.length === 0 && <EmptyRow colSpan={headers.length} />}
         {list.map((p) => (
           <tr
@@ -197,6 +199,7 @@ function ReportsTab() {
       </div>
 
       <DataTable headers={headers}>
+        {loading && list.length === 0 && <SkeletonRows cols={headers.length} />}
         {!loading && list.length === 0 && <EmptyRow colSpan={headers.length} />}
         {list.map((r) => (
           <tr
@@ -361,6 +364,7 @@ function FlaggedUGCTab() {
       </div>
 
       <DataTable headers={headers}>
+        {loading && list.length === 0 && <SkeletonRows cols={headers.length} />}
         {!loading && list.length === 0 && <EmptyRow colSpan={headers.length} />}
         {list.map((u) => (
           <tr

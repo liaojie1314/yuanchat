@@ -8,6 +8,7 @@
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
+  sendRegisterCode,
   sendResetCode,
   verifyResetCode,
   resetPassword,
@@ -60,25 +61,58 @@ function sentHeaders(): { url: string; method: string; headers: Record<string, s
   };
 }
 
+describe("api/auth 注册发码", () => {
+  beforeEach(() => vi.unstubAllGlobals());
+
+  it("sendRegisterCode 只发 email 一个字段，204 解析为 undefined", async () => {
+    mockNoContentOnce();
+    await expect(sendRegisterCode("new@yuanchat.com")).resolves.toBeUndefined();
+    const req = sentRequest();
+    expect(req.url).toBe("http://localhost:8085/api/v1/auth/register/otp");
+    expect(req.method).toBe("POST");
+    expect(req.body).toEqual({ email: "new@yuanchat.com" });
+  });
+
+  it("sendRegisterCode 把 429 冷却原样抛给调用方（message 即 i18n key）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        status: 429,
+        json: () => Promise.resolve({ code: 429, message: "auth.otpCooldown", data: null }),
+      }),
+    );
+    await expect(sendRegisterCode("new@yuanchat.com")).rejects.toMatchObject({
+      code: 429,
+      message: "auth.otpCooldown",
+    });
+  });
+});
+
 describe("api/auth 改密链路", () => {
   beforeEach(() => vi.unstubAllGlobals());
 
-  it("sendResetCode 只发 phone 一个字段，204 解析为 undefined", async () => {
+  it("sendResetCode 只发 account 一个字段，204 解析为 undefined", async () => {
     mockNoContentOnce();
     await expect(sendResetCode("13800138000")).resolves.toBeUndefined();
     const req = sentRequest();
     expect(req.url).toBe("http://localhost:8085/api/v1/auth/password/otp");
     expect(req.method).toBe("POST");
-    expect(req.body).toEqual({ phone: "13800138000" });
+    expect(req.body).toEqual({ account: "13800138000" });
   });
 
-  it("verifyResetCode 发 phone + code，并把 reset_ticket / expires_in 映射成驼峰", async () => {
+  it("verifyResetCode 发 account + code，并把 reset_ticket / expires_in 映射成驼峰", async () => {
     mockEnvelopeOnce({ reset_ticket: "tk-abc", expires_in: 300 });
     const ticket = await verifyResetCode("13800138000", "123456");
     expect(ticket).toEqual({ resetTicket: "tk-abc", expiresIn: 300 });
     const req = sentRequest();
     expect(req.url).toBe("http://localhost:8085/api/v1/auth/password/verify");
-    expect(req.body).toEqual({ phone: "13800138000", code: "123456" });
+    expect(req.body).toEqual({ account: "13800138000", code: "123456" });
+  });
+
+  it("sendResetCode 账号为邮箱时同样走 account 字段", async () => {
+    mockNoContentOnce();
+    await sendResetCode("alice@example.com");
+    expect(sentRequest().body).toEqual({ account: "alice@example.com" });
   });
 
   it("verifyResetCode 的 expiresIn 取后端值而非写死常量", async () => {

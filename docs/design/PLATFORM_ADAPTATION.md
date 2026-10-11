@@ -401,7 +401,7 @@ CSS 变量:
 
 ```
 分享链接访问:
-  URL: https://app.yuanchat.com/invite/:code
+  URL: https://chat.yuanchat.com/invite/:code
   未登录: 显示 Landing 页（邀请介绍）+ [下载 App] [网页登录]
   已登录: 直接跳转到加好友页面
 

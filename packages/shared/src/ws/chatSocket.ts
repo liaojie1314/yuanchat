@@ -15,6 +15,7 @@ import { ensureFreshToken, needsRefresh } from "../api/tokenManager";
 import type { ConversationDTO } from "../api/chat";
 import { captureException } from "../observability/sentry";
 import { flushOutbox } from "../store/outboxSync";
+import { resolveWsBase } from "../config/serverEndpoint";
 
 /**
  * 客户端 → 服务端的 `content` 载荷，与 `server/internal/ws/protocol.go` 的
@@ -294,14 +295,8 @@ export type FrameHandler = {
   [K in keyof ServerFrames]?: (payload: ServerFrames[K]) => void;
 };
 
-interface ImportMetaEnv {
-  VITE_WS_URL?: string;
-}
-
-const WS_BASE: string =
-  typeof import.meta !== "undefined"
-    ? (import.meta as { env?: ImportMetaEnv }).env?.VITE_WS_URL || "ws://localhost:8086"
-    : "ws://localhost:8086";
+/** WS 基址。来源同 `API_BASE`：用户自定义优先，否则取构建期 `VITE_WS_URL` */
+const WS_BASE: string = resolveWsBase();
 
 const MAX_BACKOFF_MS = 30_000;
 

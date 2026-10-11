@@ -21,7 +21,7 @@
  * @param conversationId - 会话 ID
  * @param onClose - 关闭回调（返回箭头 / 关闭按钮 / Esc / 安卓返回键触发）
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, Download, ImageOff, Pause, Play, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -30,6 +30,7 @@ import {
   formatListTime,
   formatMediaDuration,
   getDownloadUrl,
+  openExternal,
   registerBackInterceptor,
   showToast,
 } from "@yuanchat/shared";
@@ -192,8 +193,10 @@ function MediaFileRow({ item }: { item: MediaItem }) {
   const { Icon, bg } = fileIconOf(meta.ext);
 
   const handleDownload = () => {
-    void getDownloadUrl(item.key)
-      .then((url) => window.open(url, "_blank"))
+    // 第二个参数让服务端签出附件头 + 原始文件名，详见 MessageBubble 的下载按钮
+    void getDownloadUrl(item.key, name || undefined)
+      // 同 MessageBubble：Tauri WebView 不支持 window.open，交给原生 shell
+      .then((url) => openExternal(url))
       .catch(() => showToast("error", t("chat.file.downloadFailed")));
   };
 
@@ -364,7 +367,16 @@ export function ConversationMediaView({
 
   // 安卓系统返回键：本层盖在会话之上，须先关自己再轮到会话
   // （视频播放层自带更上层的拦截器，故此处只需处理大图层与本层）
-  useEffect(() => {
+  //
+  // 这里必须用 useLayoutEffect：拦截器闭包捕获 lightbox，靠依赖变化重注册才能
+  // 认得当前最上层是谁。若放在 useEffect 里，「大图层 DOM 已提交」与「副作用冲洗完成」
+  // 之间存在一个窗口，窗口内按返回会命中旧闭包（lightbox 仍为 null）而关错层 ——
+  // 关掉的是整个相册，大图层反而留着。layout effect 在提交阶段同步跑完，没有这个窗口。
+  //
+  // 下面的 lightbox 分支看着与 ImageLightbox 自带的拦截器重复，**不要删**：
+  // 那个是 passive effect，正好落在上述窗口之外，窗口之内只有这一层顶着。
+  // 删掉就把上面那个竞态放回来了。两者行为一致，重复是有意的。
+  useLayoutEffect(() => {
     return registerBackInterceptor(() => {
       if (lightbox !== null) {
         setLightbox(null);

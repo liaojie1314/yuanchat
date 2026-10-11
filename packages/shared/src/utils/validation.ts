@@ -78,19 +78,24 @@ export function validateYuanchatId(id: string): ValidationResult {
 }
 
 /**
- * 手机号格式校验
+ * 邮箱格式校验
  *
- * 要求：中国大陆手机号 11 位，以 1 开头
+ * 要求：非空，且形如 `local@domain.tld`（本地部分与域名都不含空白与第二个 @，域名带点）
+ *
+ * 只做「明显写错」的前置拦截，最终判定在后端（Gin `binding:"email"`）——
+ * 前端把规则写得比后端更严，只会出现「这个地址后端收但前端不收」的死局。
  *
  * @returns 校验结果，errors 为 i18n key 列表
+ * @remarks 错误 key 用的是 `auth.email*` 而非同文件其他校验的 `validation.*`：
+ *   邮箱文案只在认证链路出现，locale 里就放在 `auth` 命名空间下。
  */
-export function validatePhone(phone: string): ValidationResult {
+export function validateEmail(email: string): ValidationResult {
   const errors: string[] = [];
 
-  if (!phone.trim()) {
-    errors.push("validation.phoneRequired");
-  } else if (!/^1[3-9]\d{9}$/.test(phone.trim())) {
-    errors.push("validation.phoneFormat");
+  if (!email.trim()) {
+    errors.push("auth.emailRequired");
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    errors.push("auth.emailInvalid");
   }
 
   return { valid: errors.length === 0, errors };

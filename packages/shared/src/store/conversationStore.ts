@@ -52,6 +52,11 @@ export interface Conversation {
   lastTime?: string;
   /** 未读消息计数，0 时不显示角标 */
   unreadCount: number;
+  /**
+   * 除自己外所有成员里最落后的已读水位。
+   * 自己发的消息 seq ≤ 它才算真被看到；群里只要有人没读到就不算。
+   */
+  othersMinReadSeq?: number;
   /** 对方/群聊中是否有人在线 */
   isOnline?: boolean;
   /** 是否开启免打扰模式 */

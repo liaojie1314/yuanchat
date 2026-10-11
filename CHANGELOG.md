@@ -1,5 +1,39 @@
 # 更新日志
 
+# [0.5.0](https://github.com/liaojie1314/yuanchat/compare/v0.4.0...v0.5.0) (2026-10-04)
+
+### Bug Fixes
+
+- **i18n:** 首启默认简体中文，并修复安卓 adb 反向转发找不到 adb ([668e764](https://github.com/liaojie1314/yuanchat/commit/668e764631ede3c8c02b363aa75aada763212bf8))
+- **ui:** 补齐按钮悬停与焦点态、弹窗无障碍语义 ([4504afd](https://github.com/liaojie1314/yuanchat/commit/4504afd5d2e133d1293c66048c5bcf26c5dff8c1))
+- **ui:** 恢复提示仅在真实断网后出现，补齐时间序列路由与图表可读性 ([764ac0b](https://github.com/liaojie1314/yuanchat/commit/764ac0bd7cae7eb7214597ae9351e4bffbd01536))
+
+### Features
+
+- **admin:** 零依赖 SVG 图表组件与概览页重构为分层看板 ([58407f6](https://github.com/liaojie1314/yuanchat/commit/58407f622bfe1b58b44705f4bf2c2e41f232897c))
+- **localdb:** 本地库会话单例与 after_seq 客户端 ([da28ca5](https://github.com/liaojie1314/yuanchat/commit/da28ca57e91da2c8fd909ae64fd66394fc331604))
+- **localdb:** 本地消息库开库与降级基座 ([9803583](https://github.com/liaojie1314/yuanchat/commit/9803583787647fa35fd53e5db3b417212fb19517))
+- **localdb:** 撤回编辑清空回放到本地并接入淘汰时机 ([7b6fd72](https://github.com/liaojie1314/yuanchat/commit/7b6fd728398d90480a15a3f7f5348fe09072da4b))
+- **localdb:** 待发队列状态机与 ack 单事务出队 ([a83924b](https://github.com/liaojie1314/yuanchat/commit/a83924bc6a67da931bf812daf5c0274b20e2d808))
+- **localdb:** 登录初始化本地库、登出清库并恢复待发队列 ([ce3eb48](https://github.com/liaojie1314/yuanchat/commit/ce3eb48dc31b8ae39a7bf9c8e4617c74c0497f80))
+- **localdb:** 会话列表双写与僵尸会话连带清理 ([c926354](https://github.com/liaojie1314/yuanchat/commit/c926354ff87e9297c84d2e235b77a8ad8081e00b))
+- **localdb:** 会话投影本地读写 ([ad12dff](https://github.com/liaojie1314/yuanchat/commit/ad12dfffae46fdb5261638e1c16feec0fc9094e0))
+- **localdb:** 离线发送队列与上线串行补发 ([44f79ad](https://github.com/liaojie1314/yuanchat/commit/44f79add551746d903d0d57f6d98744501b55fe1))
+- **localdb:** 媒体本地缓存接入下载链路并去重并发请求 ([a498807](https://github.com/liaojie1314/yuanchat/commit/a498807b88d9ea512939b0d0767782cf4523aecd))
+- **localdb:** 媒体配额 LRU 淘汰与配额超限三段降级 ([d1b7bab](https://github.com/liaojie1314/yuanchat/commit/d1b7bab1627816d7fd4ad7fdb63ebd13bb2cc68c))
+- **localdb:** 统一删除路径与保留窗口淘汰 ([83bd8f0](https://github.com/liaojie1314/yuanchat/commit/83bd8f01aa6464ad511211b7902adeeab978957b))
+- **localdb:** 消息本地读写与空洞探测水位 ([c821e2e](https://github.com/liaojie1314/yuanchat/commit/c821e2e36944b3294c2f2ba31593ae0527986778))
+- **localdb:** 消息双写、冷启动水合与空洞增量补齐 ([9df2ad8](https://github.com/liaojie1314/yuanchat/commit/9df2ad899b85d595e0fd07128b2a65519f49ac12))
+- **server:** 发送幂等化，离线补发不再产生重复消息 ([c3fb13c](https://github.com/liaojie1314/yuanchat/commit/c3fb13ca80d34c406361f8f950f369f92d206e08))
+- **server:** 管理端概览时间序列端点 ([7f0d21e](https://github.com/liaojie1314/yuanchat/commit/7f0d21e28a777b168a6b28eda095859e867d27e7))
+- **server:** 消息历史抽出共用查询构造并加 ListAfter ([490d714](https://github.com/liaojie1314/yuanchat/commit/490d714072fafad5a8154e40a16e5cac02e5b62c))
+- **server:** 消息历史支持 after_seq 增量补齐 ([51d142e](https://github.com/liaojie1314/yuanchat/commit/51d142ebcdfc248833b408c1e8f612b5b3265c5f))
+- **shared:** 网络状态三态 hook ([3b46385](https://github.com/liaojie1314/yuanchat/commit/3b4638569888708207a21eddd7ed0778fd4e4ff4))
+- **ui:** 七个主列表接入下拉刷新 ([ce9023c](https://github.com/liaojie1314/yuanchat/commit/ce9023c6e15e71e8011dcf715e0d307e44184c16))
+- **ui:** 全局离线状态横幅 ([29f9b2f](https://github.com/liaojie1314/yuanchat/commit/29f9b2f8b9cc4b74064d33e259dc7f1290ab9ddb))
+- **ui:** 下拉刷新 hook 与容器组件 ([b94cf65](https://github.com/liaojie1314/yuanchat/commit/b94cf65c1af26353ec1c6ead97df60910a8fe90e))
+- **ui:** 桌面回前台自动对账与三处局部刷新 ([54f7336](https://github.com/liaojie1314/yuanchat/commit/54f73361d8518191d48747835cd22e871ef5aa6a))
+
 # [0.4.0](https://github.com/liaojie1314/yuanchat/compare/v0.3.0...v0.4.0) (2026-09-24)
 
 ### Bug Fixes

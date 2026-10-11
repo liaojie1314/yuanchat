@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "@yuanchat/ui";
 import { listUsers, banUser, unbanUser, resetUserAvatar, type AdminUser } from "../api";
 import { usePagedQuery } from "../hooks/usePagedQuery";
-import { SearchBox, DataTable, Pager, EmptyRow } from "../components/Table";
+import { SearchBox, DataTable, Pager, EmptyRow, SkeletonRows } from "../components/Table";
 
 export function UsersPage() {
   const { t } = useTranslation();
@@ -43,6 +43,8 @@ export function UsersPage() {
       </div>
 
       <DataTable headers={headers}>
+        {/* 翻页 / 搜索时旧行留在原位，只有首屏（还没有任何行）才上骨架 */}
+        {loading && list.length === 0 && <SkeletonRows cols={headers.length} lines={2} />}
         {!loading && list.length === 0 && <EmptyRow colSpan={headers.length} />}
         {list.map((u) => (
           <tr

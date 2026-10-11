@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "@yuanchat/ui";
 import { listConversations, dissolveConversation, type AdminConversation } from "../api";
 import { usePagedQuery } from "../hooks/usePagedQuery";
-import { SearchBox, DataTable, Pager, EmptyRow } from "../components/Table";
+import { SearchBox, DataTable, Pager, EmptyRow, SkeletonRows } from "../components/Table";
 import { cn } from "@yuanchat/shared/utils";
 
 export function ConversationsPage() {
@@ -69,6 +69,7 @@ export function ConversationsPage() {
       </div>
 
       <DataTable headers={headers}>
+        {loading && list.length === 0 && <SkeletonRows cols={headers.length} />}
         {!loading && list.length === 0 && <EmptyRow colSpan={headers.length} />}
         {list.map((cv) => (
           <tr

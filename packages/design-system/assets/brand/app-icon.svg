@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- 与 global.css 的 .brand-gradient 同一组色标（135deg #5b9bd5 → #7ec8e3 → #a8cfff） -->
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#5b9bd5"/>
+      <stop offset="50%" stop-color="#7ec8e3"/>
+      <stop offset="100%" stop-color="#a8cfff"/>
+    </linearGradient>
+
+    <!-- 气泡为白色实体，「元」字做镂空让渐变透出来：
+         小尺寸下负形比描边清晰，线条不会在 48px 下糊成一团。
+         尾巴是个楔形，再用圆角描边把三个尖角抹圆；它的顶边压在气泡内部
+         （气泡底 y=724），所以缩放到任何尺寸都不会与气泡脱开。 -->
+    <mask id="bubble">
+      <rect width="1024" height="1024" fill="black"/>
+      <rect x="160" y="196" width="704" height="528" rx="172" fill="white"/>
+      <path d="M388 676 L344 828 L512 700 Z"
+            fill="white" stroke="white" stroke-width="48" stroke-linejoin="round" stroke-linecap="round"/>
+      <g fill="none" stroke="black" stroke-width="54" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M414 348 H628"/>
+        <path d="M336 448 H688"/>
+        <path d="M458 448 C458 546 430 606 392 644"/>
+        <path d="M578 448 V566 C578 610 606 630 668 624"/>
+      </g>
+    </mask>
+  </defs>
+
+  <rect width="1024" height="1024" rx="228" ry="228" fill="url(#brand)"/>
+  <rect width="1024" height="1024" fill="#ffffff" mask="url(#bubble)"/>
+</svg>

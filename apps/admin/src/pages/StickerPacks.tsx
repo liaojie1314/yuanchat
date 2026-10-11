@@ -14,24 +14,7 @@ import {
   type AdminStickerPack,
 } from "../api";
 import { usePagedQuery } from "../hooks/usePagedQuery";
-import { SearchBox, DataTable, Pager, EmptyRow } from "../components/Table";
-
-/** 表格加载骨架：若干行等高占位，避免布局跳动（CLS = 0） */
-function SkeletonRows({ cols, rows = 5 }: { cols: number; rows?: number }) {
-  return (
-    <>
-      {Array.from({ length: rows }, (_, i) => (
-        <tr key={i} className="border-b border-outline-variant last:border-0">
-          {Array.from({ length: cols }, (_, j) => (
-            <td key={j} className="px-4 py-3">
-              <div className="h-4 w-3/4 animate-pulse rounded bg-surface-container-high" />
-            </td>
-          ))}
-        </tr>
-      ))}
-    </>
-  );
-}
+import { SearchBox, DataTable, Pager, EmptyRow, SkeletonRows } from "../components/Table";
 
 /** 状态徽标：flagged=敏感词命中（红）、taken_down=已下架（警示）、is_official=官方（主色） */
 function StatusBadge({ tone, label }: { tone: "error" | "warn" | "primary"; label: string }) {
@@ -122,83 +105,83 @@ export function StickerPacksPage() {
       </div>
 
       <DataTable headers={headers}>
-        {loading && <SkeletonRows cols={headers.length} />}
+        {/* 翻页 / 搜索时旧行留在原位，只有首屏（还没有任何行）才上骨架 */}
+        {loading && list.length === 0 && <SkeletonRows cols={headers.length} />}
         {!loading && list.length === 0 && <EmptyRow colSpan={headers.length} />}
-        {!loading &&
-          list.map((p) => (
-            <tr
-              key={p.id}
-              className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low"
-            >
-              <td className="max-w-md px-4 py-3 text-body-md text-on-surface">
-                <p className="line-clamp-2">{p.name}</p>
-              </td>
-              <td className="px-4 py-3 text-body-md text-on-surface-variant">
-                {p.owner_name ??
-                  t(p.is_official ? "sticker.market.byOfficial" : "sticker.market.deletedUser")}
-              </td>
-              <td className="whitespace-nowrap px-4 py-3">
-                {p.is_official && (
-                  <StatusBadge tone="primary" label={t("admin.stickerPacks.badgeOfficial")} />
-                )}
-                {p.flagged && (
-                  <StatusBadge tone="error" label={t("admin.stickerPacks.badgeFlagged")} />
-                )}
-                {p.taken_down && (
-                  <StatusBadge tone="warn" label={t("admin.stickerPacks.badgeTakenDown")} />
-                )}
-                {!p.is_official && !p.flagged && !p.taken_down && (
-                  <span className="text-label-md text-on-surface-variant">
-                    {t("admin.stickerPacks.statusNormal")}
-                  </span>
-                )}
-              </td>
-              <td className="px-4 py-3 text-body-md text-on-surface-variant">{p.sticker_count}</td>
-              <td className="whitespace-nowrap px-4 py-3 text-body-md text-on-surface-variant">
-                {new Date(p.created_at).toLocaleString()}
-              </td>
-              <td className="space-x-3 whitespace-nowrap px-4 py-3">
-                {p.flagged && (
-                  <button
-                    onClick={() => void clearPackFlag(p.id).then(refresh)}
-                    className="text-label-lg text-primary hover:underline"
-                  >
-                    {t("admin.moderation.approve")}
-                  </button>
-                )}
-                {p.taken_down ? (
-                  <button
-                    onClick={() => setPending({ pack: p, action: "untakedown" })}
-                    className="text-label-lg text-primary hover:underline"
-                  >
-                    {t("admin.stickerPacks.untakedown")}
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => setPending({ pack: p, action: "takedown" })}
-                    className="text-label-lg text-error hover:underline"
-                  >
-                    {t("admin.moderation.takedown")}
-                  </button>
-                )}
-                {p.is_official ? (
-                  <button
-                    onClick={() => setPending({ pack: p, action: "unsetOfficial" })}
-                    className="text-label-lg text-on-surface-variant hover:underline"
-                  >
-                    {t("admin.stickerPacks.unsetOfficial")}
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => setPending({ pack: p, action: "setOfficial" })}
-                    className="text-label-lg text-primary hover:underline"
-                  >
-                    {t("admin.stickerPacks.setOfficial")}
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
+        {list.map((p) => (
+          <tr
+            key={p.id}
+            className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low"
+          >
+            <td className="max-w-md px-4 py-3 text-body-md text-on-surface">
+              <p className="line-clamp-2">{p.name}</p>
+            </td>
+            <td className="px-4 py-3 text-body-md text-on-surface-variant">
+              {p.owner_name ??
+                t(p.is_official ? "sticker.market.byOfficial" : "sticker.market.deletedUser")}
+            </td>
+            <td className="whitespace-nowrap px-4 py-3">
+              {p.is_official && (
+                <StatusBadge tone="primary" label={t("admin.stickerPacks.badgeOfficial")} />
+              )}
+              {p.flagged && (
+                <StatusBadge tone="error" label={t("admin.stickerPacks.badgeFlagged")} />
+              )}
+              {p.taken_down && (
+                <StatusBadge tone="warn" label={t("admin.stickerPacks.badgeTakenDown")} />
+              )}
+              {!p.is_official && !p.flagged && !p.taken_down && (
+                <span className="text-label-md text-on-surface-variant">
+                  {t("admin.stickerPacks.statusNormal")}
+                </span>
+              )}
+            </td>
+            <td className="px-4 py-3 text-body-md text-on-surface-variant">{p.sticker_count}</td>
+            <td className="whitespace-nowrap px-4 py-3 text-body-md text-on-surface-variant">
+              {new Date(p.created_at).toLocaleString()}
+            </td>
+            <td className="space-x-3 whitespace-nowrap px-4 py-3">
+              {p.flagged && (
+                <button
+                  onClick={() => void clearPackFlag(p.id).then(refresh)}
+                  className="text-label-lg text-primary hover:underline"
+                >
+                  {t("admin.moderation.approve")}
+                </button>
+              )}
+              {p.taken_down ? (
+                <button
+                  onClick={() => setPending({ pack: p, action: "untakedown" })}
+                  className="text-label-lg text-primary hover:underline"
+                >
+                  {t("admin.stickerPacks.untakedown")}
+                </button>
+              ) : (
+                <button
+                  onClick={() => setPending({ pack: p, action: "takedown" })}
+                  className="text-label-lg text-error hover:underline"
+                >
+                  {t("admin.moderation.takedown")}
+                </button>
+              )}
+              {p.is_official ? (
+                <button
+                  onClick={() => setPending({ pack: p, action: "unsetOfficial" })}
+                  className="text-label-lg text-on-surface-variant hover:underline"
+                >
+                  {t("admin.stickerPacks.unsetOfficial")}
+                </button>
+              ) : (
+                <button
+                  onClick={() => setPending({ pack: p, action: "setOfficial" })}
+                  className="text-label-lg text-primary hover:underline"
+                >
+                  {t("admin.stickerPacks.setOfficial")}
+                </button>
+              )}
+            </td>
+          </tr>
+        ))}
       </DataTable>
       <Pager page={page} totalPages={totalPages} total={total} onPage={setPage} />
 

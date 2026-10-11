@@ -56,6 +56,34 @@ fn allow_media(window: &tauri::WebviewWindow) {
     }
 }
 
+/// 用系统默认应用打开外部 http(s) URL（前端点「下载文件」时交给浏览器/下载管理器）。
+///
+/// 为什么不直接用 `@tauri-apps/plugin-shell` 的 JS `open`：那条命令
+/// （`commands::open`）在**所有平台**都走 `OpenScope::open` → `open` crate
+/// （xdg-open / gio / start 之类），**完全不经过**安卓侧的 `ShellPlugin.kt`。
+/// 安卓应用沙箱里那些可执行文件根本不存在，于是调用直接报 IO 错误 ——
+/// 表现为手机端点下载弹「下载失败，请重试」，而 logcat 里连一条 Intent 都没有
+/// （2026-10-09 实测定位）。插件的 **Rust** API 才有 `#[cfg(mobile)]` 分支
+/// 去 `run_mobile_plugin("open", …)`，最终落到 `Intent.ACTION_VIEW`。
+/// 所以这里由 Rust 侧转一手，桌面与安卓共用同一条路径。
+///
+/// 上游已把 shell 的 open 标记废弃、推荐 `tauri-plugin-opener`。等哪天换过去，
+/// 这个命令连同 `openExternal` 的注入点一起删掉即可，前端无需改动。
+///
+/// @param url - 目标地址，仅接受 http/https
+#[tauri::command]
+fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_shell::ShellExt;
+
+    // 这个命令对前端完全开放，必须自己把 scheme 卡死在 http(s)：
+    // 放开 scheme 等于把任意 intent:// / file:// 的入口交给 WebView 里的代码。
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err(format!("unsupported url scheme: {url}"));
+    }
+    #[allow(deprecated)]
+    app.shell().open(url, None).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -77,9 +105,11 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
 
     // Linux 的通话媒体面走进程内 GStreamer（WebKitGTK 没有 RTCPeerConnection），
-    // 其余平台的 WebView 自带 WebRTC，不注册这组命令
+    // 其余平台的 WebView 自带 WebRTC，不注册这组命令。
+    // invoke_handler 只认最后一次调用，所以两个分支各自带上 open_external
     #[cfg(target_os = "linux")]
     let builder = builder.invoke_handler(tauri::generate_handler![
+        open_external,
         native_rtc::native_rtc_available,
         native_rtc::native_rtc_video_available,
         native_rtc::native_rtc_video_url,
@@ -93,6 +123,9 @@ pub fn run() {
         native_rtc::native_rtc_close,
         native_rtc::native_rtc_close_all,
     ]);
+
+    #[cfg(not(target_os = "linux"))]
+    let builder = builder.invoke_handler(tauri::generate_handler![open_external]);
 
     builder
         .setup(|app| {

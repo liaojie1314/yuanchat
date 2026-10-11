@@ -8,11 +8,35 @@
 
 ### 服务
 
-| 变量                      | 默认值        | 说明                                                                                              |
-| ------------------------- | ------------- | ------------------------------------------------------------------------------------------------- |
-| `YUANCHAT_SERVER_ENV`     | `development` | `development` / `staging` / `production`；production 下 gin 走 release 模式且 WS 校验 Origin 同源 |
-| `YUANCHAT_SERVER_PORT`    | `8085`        | REST 端口                                                                                         |
-| `YUANCHAT_WEBSOCKET_PORT` | `8086`        | WebSocket 端口（独立监听）                                                                        |
+| 变量                                   | 默认值        | 说明                                                                                                  |
+| -------------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------- |
+| `YUANCHAT_SERVER_ENV`                  | `development` | `development` / `staging` / `production`；production 下 gin 走 release 模式，且下面两个白名单开始生效 |
+| `YUANCHAT_SERVER_PORT`                 | `8085`        | REST 端口                                                                                             |
+| `YUANCHAT_WEBSOCKET_PORT`              | `8086`        | WebSocket 端口（独立监听）                                                                            |
+| `YUANCHAT_SERVER_CORS_ALLOWED_ORIGINS` | 空            | REST 的 CORS 白名单，逗号分隔。**生产必填**，见下方说明                                               |
+| `YUANCHAT_WEBSOCKET_ALLOWED_ORIGINS`   | 空            | WS 握手的 Origin 白名单，逗号分隔。**生产必填**，取值与上一行一致                                     |
+
+两份 Origin 白名单（REST 的 CORS 与 WS 握手）语义完全一致，分开只因为走的是两个端口两套握手，
+配置时**必须同时改、取值保持一致**。三档行为：
+
+- 开发环境：放行全部 Origin（本地端口多变，收紧只会把自己挡在门外）
+- 生产 + 配了白名单：命中才放行；REST 回显该 Origin 并带 `Vary: Origin`（不回 `*`）
+- 生产 + 留空：退回**仅同源** —— `api.example.com` 与 `chat.example.com` 不同源，
+  等于把 Web 端整个挡死（页面能开、登录能过，唯独 API 与 WS 全被浏览器拦下，极难定位）
+
+生产典型取值（`deploy/docker-compose.prod.yml` 已按 `DOMAIN_CHAT` / `DOMAIN_ADMIN` 自动拼好，
+无需在 `.env` 里重复）：
+
+```
+https://chat.example.com,https://admin.example.com,tauri://localhost,http://tauri.localhost,https://tauri.localhost
+```
+
+后三项是桌面/移动端 WebView 的 Origin，按平台分化：Linux/macOS/iOS 是 `tauri://localhost`，
+Windows WebView2 与 Android 是 `http(s)://tauri.localhost`。漏登记会让对应平台静默连不上。
+
+REST 侧刻意不发 `Access-Control-Allow-Origin: *`：`*` 配上「鉴权走 Authorization 头」虽然挡住了
+跨站读取已登录数据，但**免鉴权端点**仍然敞着 —— 任意网站都能借访客的浏览器与 IP 去打 `/auth/login`
+**并读到响应**，于是撞库可行且按 IP 的限流被摊薄到成千上万个访客 IP 上。
 
 ### 数据库
 
@@ -119,7 +143,7 @@
 | `YUANCHAT_TURN_CREDENTIAL_TTL`     | `1h`        | 签发凭据的有效期                                                                       |
 
 生产不用手工填这几项：`docker-compose.prod.yml` 已从 `deploy/.env` 注入
-`ENABLED`/`HOST`/`PORT`/`REALM`/`STATIC_AUTH_SECRET`，其中 `HOST` 与 `REALM` 取 `DOMAIN_APP`、
+`ENABLED`/`HOST`/`PORT`/`REALM`/`STATIC_AUTH_SECRET`，其中 `HOST` 与 `REALM` 取 `DOMAIN_CHAT`、
 密钥取 `TURN_SECRET` —— 与渲染 `coturn/turnserver.prod.conf` 用的是同一组变量，天然两边同值。
 
 > **凭据不落库**：服务端按 coturn 的 `use-auth-secret`（REST API）口径签发
@@ -150,16 +174,16 @@
 
 供 `docker-compose.prod.yml` 与 `install.sh` 使用，见 [`deploy/.env.prod.example`](../../deploy/.env.prod.example)。
 
-| 变量                                                                          | 说明                                                                                                                                                                                                                                |
-| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DOMAIN_APP` / `DOMAIN_API` / `DOMAIN_WS` / `DOMAIN_ADMIN` / `DOMAIN_STORAGE` | 五个子域名，须已解析到本机；`DOMAIN_STORAGE` 是对象存储对外域名（客户端下载图片/语音/视频/头像走它）                                                                                                                                |
-| `ADMIN_EMAIL`                                                                 | Let's Encrypt 到期通知邮箱                                                                                                                                                                                                          |
-| `DB_PASSWORD` / `REDIS_PASSWORD` / `JWT_SECRET` / `MINIO_*`                   | 留空则 `install.sh` 自动生成随机值                                                                                                                                                                                                  |
-| `PRESENCE_BACKEND`                                                            | 多实例部署改 `redis`                                                                                                                                                                                                                |
-| `DISPATCHER_BACKEND`                                                          | 多实例部署改 `redis`（默认 `inproc` 仅影响实时帧跨实例投递）                                                                                                                                                                        |
-| `TURN_SECRET`                                                                 | coturn 与后端共用的 TURN 密钥，留空则 `install.sh` 自动生成：拿它渲染 `coturn/turnserver.prod.conf` 的 `static-auth-secret`，compose 同时把它作为 `YUANCHAT_TURN_STATIC_AUTH_SECRET` 传给后端，故只有这一个变量（两边同值是硬要求） |
-| `PUBLIC_IP`                                                                   | **必填**，本机**外网** IP（`curl -s https://api.ipify.org`）。渲染进 coturn 的 `external-ip`；无法自动探测（NAT 内取到的是内网地址），留空 `install.sh` 直接报错                                                                    |
-| `APP_VERSION`                                                                 | 自建镜像 tag，**必填**（禁止 `latest`；未设置 compose 直接报错）                                                                                                                                                                    |
-| `TZ`                                                                          | 容器时区，默认 `Asia/Shanghai`                                                                                                                                                                                                      |
+| 变量                                                                           | 说明                                                                                                                                                                                                                                |
+| ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DOMAIN_CHAT` / `DOMAIN_API` / `DOMAIN_WS` / `DOMAIN_ADMIN` / `DOMAIN_STORAGE` | 五个子域名，须已解析到本机；`DOMAIN_STORAGE` 是对象存储对外域名（客户端下载图片/语音/视频/头像走它）                                                                                                                                |
+| `ADMIN_EMAIL`                                                                  | Let's Encrypt 到期通知邮箱                                                                                                                                                                                                          |
+| `DB_PASSWORD` / `REDIS_PASSWORD` / `JWT_SECRET` / `MINIO_*`                    | 留空则 `install.sh` 自动生成随机值                                                                                                                                                                                                  |
+| `PRESENCE_BACKEND`                                                             | 多实例部署改 `redis`                                                                                                                                                                                                                |
+| `DISPATCHER_BACKEND`                                                           | 多实例部署改 `redis`（默认 `inproc` 仅影响实时帧跨实例投递）                                                                                                                                                                        |
+| `TURN_SECRET`                                                                  | coturn 与后端共用的 TURN 密钥，留空则 `install.sh` 自动生成：拿它渲染 `coturn/turnserver.prod.conf` 的 `static-auth-secret`，compose 同时把它作为 `YUANCHAT_TURN_STATIC_AUTH_SECRET` 传给后端，故只有这一个变量（两边同值是硬要求） |
+| `PUBLIC_IP`                                                                    | **必填**，本机**外网** IP（`curl -s https://api.ipify.org`）。渲染进 coturn 的 `external-ip`；无法自动探测（NAT 内取到的是内网地址），留空 `install.sh` 直接报错                                                                    |
+| `APP_VERSION`                                                                  | 自建镜像 tag，**必填**（禁止 `latest`；未设置 compose 直接报错）                                                                                                                                                                    |
+| `TZ`                                                                           | 容器时区，默认 `Asia/Shanghai`                                                                                                                                                                                                      |
 
 > `deploy/.env` 含明文凭据，已被 `.gitignore` 排除，**切勿提交**。

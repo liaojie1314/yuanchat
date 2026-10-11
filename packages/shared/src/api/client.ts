@@ -13,15 +13,14 @@
 import { ensureFreshToken, forceRefresh } from "./tokenManager";
 import type { ApiResponse } from "../types";
 import { captureException } from "../observability/sentry";
+import { resolveApiBase } from "../config/serverEndpoint";
 
-interface ImportMetaEnv {
-  VITE_API_BASE_URL?: string;
-}
-
-export const API_BASE: string =
-  typeof import.meta !== "undefined"
-    ? (import.meta as { env?: ImportMetaEnv }).env?.VITE_API_BASE_URL || "http://localhost:8085"
-    : "http://localhost:8085";
+/**
+ * REST 基址。优先取用户在设置页自定义的服务器地址，其次是构建期注入的
+ * `VITE_API_BASE_URL`。模块级常量，切换地址后需整页重载才生效
+ *（`applyServerEndpoint` 已代为重载）。
+ */
+export const API_BASE: string = resolveApiBase();
 
 /** 业务错误：携带后端返回的 code 与 message */
 export class ApiError extends Error {

@@ -23,10 +23,16 @@ func NewConversationHandler(svc *service.ConversationService, dispatcher ws.Disp
 	return &ConversationHandler{svc: svc, dispatcher: dispatcher, logger: logger}
 }
 
-// CreateGroupBody 建群请求体：群名可选，成员 1-100 个。
+// CreateGroupBody 建群请求体：群名可选，成员 2-100 个（即群至少 3 人）。
+//
+// 下限是 2 而非 1：两个人该用单聊 —— 建成「群」只会凭空多出一套管理语义
+// （群主、公告、踢人、转让），却和二人之间已经存在的单聊会话重复。
+// 这里是信任边界，必须由服务端拦住：前端的按钮禁用只是提示，绕不开 API。
+// 注意服务层 CreateGroup 仍只要求「去重后 ≥1 人」—— 邀请入群、测试夹具等
+// 内部路径不受这条产品规则约束。
 type CreateGroupBody struct {
 	Name      *string     `json:"name" binding:"omitempty,max=100"`
-	MemberIDs []uuid.UUID `json:"member_ids" binding:"required,min=1,max=100"`
+	MemberIDs []uuid.UUID `json:"member_ids" binding:"required,min=2,max=100"`
 }
 
 // Create 建群：校验全员为好友后创建群会话，推送 conversation.created 给全部成员。

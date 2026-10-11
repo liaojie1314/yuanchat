@@ -123,30 +123,40 @@ const signInflight = new Map<string, Promise<string>>();
 /**
  * 换取对象的预签名下载 URL，带进程内缓存与并发去重。
  *
+ * @param key 对象键。
+ * @param attachmentName 传入原始文件名则签成「附件下载」URL（服务端带上
+ *   `Content-Disposition: attachment; filename*=...`）。**只有「点下载按钮」那条
+ *   路径才传**：不传时是内联 URL，`<img src>` / `<audio src>` 要的是那个。
+ *   不传等于沿用旧行为，所以浏览器把 PDF 直接内联渲染、存下来的名字还是对象键里的
+ *   那串 uuid —— 桌面端「点下载只弹了个浏览器」正是这个。
  * @remarks 同一张图在消息流会被反复渲染，缓存避免重复签名请求；
  *   缓存条目在服务端 TTL 到期前 5 分钟即失效重取，防止渲染时正好过期。
  */
-export async function getDownloadUrl(key: string): Promise<string> {
-  const hit = downloadCache.get(key);
+export async function getDownloadUrl(key: string, attachmentName?: string): Promise<string> {
+  // 附件与内联是两条不同的签名（签名覆盖查询串），必须分开缓存，
+  // 否则先渲染过缩略图的对象点下载就会复用内联 URL，附件头丢失。
+  // \n 不可能出现在对象键里，用它当分隔符不会撞车。
+  const cacheKey = attachmentName ? key + "\n" + attachmentName : key;
+  const hit = downloadCache.get(cacheKey);
   if (hit && hit.expiresAt > Date.now()) {
     return hit.url;
   }
-  const pending = signInflight.get(key);
+  const pending = signInflight.get(cacheKey);
   if (pending !== undefined) return pending;
   const task = (async () => {
-    const dto = await apiGet<DownloadUrlDTO>(
-      "/api/v1/files/download-url?key=" + encodeURIComponent(key),
-    );
+    let path = "/api/v1/files/download-url?key=" + encodeURIComponent(key);
+    if (attachmentName) path += "&name=" + encodeURIComponent(attachmentName);
+    const dto = await apiGet<DownloadUrlDTO>(path);
     const ttlMs = Math.max(0, dto.expires_in * 1000 - EARLY_EXPIRE_MS);
-    downloadCache.set(key, { url: dto.url, expiresAt: Date.now() + ttlMs });
+    downloadCache.set(cacheKey, { url: dto.url, expiresAt: Date.now() + ttlMs });
     return dto.url;
   })();
-  signInflight.set(key, task);
+  signInflight.set(cacheKey, task);
   try {
     return await task;
   } finally {
     // 失败也要清表，否则这个 key 永久卡在一个已 reject 的 Promise 上，再也签不出来
-    signInflight.delete(key);
+    signInflight.delete(cacheKey);
   }
 }
 

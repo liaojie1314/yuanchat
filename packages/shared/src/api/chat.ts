@@ -48,6 +48,7 @@ export interface ConversationDTO {
   mention_unread?: boolean;
   last_seq: number;
   my_last_read_seq: number;
+  others_min_read_seq?: number;
   last_message?: LastMessageDTO;
   peer?: PeerDTO;
   updated_at: string;
@@ -220,6 +221,7 @@ export function mapConversation(dto: ConversationDTO): Conversation {
     memberNames: dto.member_names,
     lastSeq: dto.last_seq,
     myLastReadSeq: dto.my_last_read_seq,
+    othersMinReadSeq: dto.others_min_read_seq ?? 0,
     peerId: dto.peer ? dto.peer.id : undefined,
     // 空串与 null 统一映射为 undefined（未设置/已清除同义），与 conversationUpdatePatch 对称
     announcement: dto.announcement || undefined,
@@ -267,6 +269,30 @@ export function formatFileMeta(name: string, bytes: number): { size: string; ext
   const dot = name.lastIndexOf(".");
   const ext = dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toUpperCase() : "FILE";
   return { size: humanSize(bytes), ext };
+}
+
+/**
+ * 把文件名拆成「主干 + 后缀」两段，供 UI 做中间截断。
+ *
+ * @remarks
+ * 文件名在气泡里靠 `truncate` 收尾，而省略号是加在**末尾**的 ——
+ * `图论与网络流理论(高随祥)(Z-Library).pdf` 截完只剩一串书名，最有信息量的
+ * `.pdf` 恰好被吃掉，用户看不出这是什么文件。
+ * 拆成两段后让主干 `truncate`、后缀 `shrink-0` 常驻，效果等于中间截断。
+ *
+ * 无后缀（或以点结尾、或隐藏文件如 `.gitignore`）时 stem 为整个名字、suffix 为空，
+ * 调用方照常渲染即可。
+ *
+ * @param name - 原始文件名
+ * @returns stem 为不含后缀的主干，suffix 含前导点（如 `.pdf`）
+ */
+export function splitFileName(name: string): { stem: string; suffix: string } {
+  const dot = name.lastIndexOf(".");
+  // dot > 0 排除「以点开头的隐藏文件」：那种点不是后缀分隔符
+  if (dot > 0 && dot < name.length - 1) {
+    return { stem: name.slice(0, dot), suffix: name.slice(dot) };
+  }
+  return { stem: name, suffix: "" };
 }
 
 /** content JSON → 文件载荷；非法 JSON 回退空名 */
@@ -414,7 +440,7 @@ export function pseudoWave(duration: number): number[] {
  * @param dto - `GET /conversations/:id/messages` 返回的单条消息
  * @param selfUserId - 当前登录用户 id，用于判定气泡左右
  */
-export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
+export function mapMessage(dto: MessageDTO, selfUserId: string, othersMinReadSeq = 0): ChatMessage {
   const isSelf = dto.sender_id === selfUserId;
   const kindMap: Record<number, ChatMessage["kind"]> = {
     1: "text",
@@ -493,8 +519,11 @@ export function mapMessage(dto: MessageDTO, selfUserId: string): ChatMessage {
     editCount: dto.edit_count ?? 0,
     replyToId: dto.reply_to_id ?? undefined,
     mentions: dto.mentions ?? undefined,
-    // 历史消息不区分 sent/read（read 回执只对新消息实时生效），统一视为已读
-    status: isSelf ? "read" : undefined,
+    // 自己发的消息：按「别人最落后的已读水位」如实判定，而不是一律当已读。
+    // 以前这里写死 "read"，于是刷新一次（重连、重进会话）所有消息就都变双勾 ——
+    // 和对方到底看没看完全无关，这个指示器等于在撒谎。
+    // othersMinReadSeq 由会话 DTO 的 others_min_read_seq 给出，缺省 0 即一律「已送达」。
+    status: isSelf ? (dto.seq <= othersMinReadSeq ? "read" : "sent") : undefined,
   };
 }
 
@@ -567,6 +596,8 @@ export async function fetchMessages(
   beforeSeq: number,
   limit: number,
   selfUserId: string,
+  /** 别人最落后的已读水位；用于如实判定自己的消息是否真被看到 */
+  othersMinReadSeq = 0,
 ): Promise<{ messages: ChatMessage[]; hasMore: boolean }> {
   const data = await apiGet<{ messages: MessageDTO[]; has_more: boolean }>(
     "/api/v1/conversations/" +
@@ -577,7 +608,9 @@ export async function fetchMessages(
       limit,
   );
   // 后端返回 seq 降序，前端消息流按时间升序展示
-  const messages = (data.messages || []).map((m) => mapMessage(m, selfUserId)).reverse();
+  const messages = (data.messages || [])
+    .map((m) => mapMessage(m, selfUserId, othersMinReadSeq))
+    .reverse();
   backfillQuotes(messages);
   return { messages, hasMore: !!data.has_more };
 }

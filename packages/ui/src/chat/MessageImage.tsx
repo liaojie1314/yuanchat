@@ -8,9 +8,10 @@
  * - 加载中显示等比占位骨架（防 CLS）；下载签名失败 / 图片加载失败显示点击重试
  *
  * 尺寸：按原始 width/height 等比缩进 {@link MAX_DISPLAY_EDGE}×{@link MAX_DISPLAY_EDGE}
- * 盒子内（不放大小图）；缺尺寸时回退固定占位框。显式设定盒子宽高防加载抖动。
+ * 盒子内（不放大小图）；缺尺寸时回退固定占位框。盒子宽度可随气泡收缩、高度按比例跟随，
+ * 加载前后尺寸一致（零 CLS）。
  *
- * 兼容性：不用 CSS aspect-ratio（Chrome 88+），改用内联 width/height，Chrome 74 可用。
+ * 兼容性：不用 CSS aspect-ratio（Chrome 88+），改用 padding-top 百分比撑高，Chrome 74 可用。
  *
  * @param image - 图片载荷（width/height 像素尺寸、可选 key / localUrl）
  * @param onOpen - 点击图片打开大图查看器的回调，参数为当前展示 URL
@@ -34,7 +35,8 @@ const LAZY_ROOT_MARGIN = "300px";
 function displayBox(w: number, h: number): { width: number; height: number } {
   if (!w || !h) return FALLBACK_BOX;
   const scale = Math.min(1, MAX_DISPLAY_EDGE / Math.max(w, h));
-  return { width: Math.round(w * scale), height: Math.round(h * scale) };
+  // 下限 1px：极端长条图（如 1×1000）缩放后四舍五入会得 0，宽 0 会让下面的比例计算除零
+  return { width: Math.max(1, Math.round(w * scale)), height: Math.max(1, Math.round(h * scale)) };
 }
 
 type LoadState = "loading" | "loaded" | "error";
@@ -143,6 +145,7 @@ export function MessageImage({
         // 撑到最小尺寸再居中，文案限死一行，避免逐字换行的破碎版式
         style={{
           width: Math.max(box.width, ERROR_BOX_MIN.width),
+          maxWidth: "100%",
           height: Math.max(box.height, ERROR_BOX_MIN.height),
         }}
         className="bg-surface-container-high text-on-surface-variant flex flex-col items-center justify-center gap-1.5 overflow-hidden rounded-lg px-2 transition-opacity hover:opacity-80"
@@ -161,7 +164,16 @@ export function MessageImage({
   return (
     <div
       ref={boxRef}
-      style={box}
+      // 宽度跟随气泡收缩（手机窄屏下 60% 的气泡列比 280px 还窄，定宽会戳出气泡），
+      // 高度用 padding-top 百分比按原图比例撑开 —— 百分比 padding 永远相对**宽度**解析，
+      // 所以缩多少高度就跟着缩多少，比例不变、零 CLS，且不依赖 CSS aspect-ratio（Chrome 88+），
+      // 旧 WebView（Chrome 74）一样生效。绝对定位子元素的包含块是 padding box，
+      // 故 inset-0 会铺满这块 padding 撑出来的高度，不会被顶到下面去
+      style={{
+        width: box.width,
+        maxWidth: "100%",
+        paddingTop: `${(box.height / box.width) * 100}%`,
+      }}
       className="bg-surface-container-high relative overflow-hidden rounded-lg"
     >
       {/* 加载占位骨架：与图同尺寸，防加载完成时的布局跳动 */}
@@ -184,7 +196,7 @@ export function MessageImage({
           onLoad={() => setState("loaded")}
           onError={() => setState("error")}
           className={cn(
-            "block h-full w-full cursor-zoom-in object-cover transition-opacity duration-150",
+            "absolute inset-0 block h-full w-full cursor-zoom-in object-cover transition-opacity duration-150",
             state === "loaded" ? "opacity-100" : "opacity-0",
           )}
         />

@@ -177,7 +177,16 @@ export function ChatWindow({
   useEffect(() => {
     if (items.length === 0) return;
     if (loadingMoreRef.current) return;
-    if (isAtBottomRef.current) {
+    // 「最后一条是自己发的」= 刚刚自己发出去的，此时必须滚到底，不看 isAtBottomRef。
+    //
+    // 不能只靠 isAtBottomRef：手机上软键盘弹起会改视口高度，进而触发一次 onScroll，
+    // distFromBottom 被算成一大截（> 100），这个 ref 就翻成 false —— 结果是手机端
+    // 发完消息根本不滚，自己的消息留在屏幕外面。桌面端键盘不动视口，所以只在手机上犯。
+    //
+    // 放在这里而不是各个 handleSend 里：文本、图片、文件、语音、贴纸、转发是六条
+    // 不同的发送路径，逐个去翻 ref 必然漏，而它们最终都会让 items 末尾多一条自己的消息。
+    // 只有「长度变了」才会进到这里，loadMore 已被上面挡掉，所以不会把正在翻历史的用户拽下来。
+    if (isAtBottomRef.current || items[items.length - 1]?.isSelf) {
       rowVirtualizer.scrollToIndex(items.length - 1, { align: "end", behavior: "auto" });
     }
     // rowVirtualizer 引用稳定，不加入 deps 防止无限循环

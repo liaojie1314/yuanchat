@@ -3,6 +3,9 @@ apiVersion: 1
 
 datasources:
   - name: Loki
+    # uid 必须显式钉死：不指定时 Grafana 自动生成，
+    # 仪表盘里就没法稳定引用它（面板会解析不到数据源而不渲染）
+    uid: yuanchat-loki
     type: loki
     access: proxy
     url: http://loki:3100

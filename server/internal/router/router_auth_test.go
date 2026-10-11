@@ -152,16 +152,22 @@ func TestRefreshBannedUserReturns403(t *testing.T) {
 }
 
 // newResetUser 建一个已知明文密码的一次性用户，用后删除。
-func newResetUser(t *testing.T, db *gorm.DB, plain string) *model.User {
+//
+// 手机号与邮箱都落库：手机号仍是合法的登录账号（老账号得继续能登），
+// 邮箱则是找回密码唯一的发码目标 —— 验证码通道只有 SMTP，
+// 故第二个返回值给的是邮箱。
+func newResetUser(t *testing.T, db *gorm.DB, plain string) (*model.User, string) {
 	t.Helper()
 	hash, err := password.Hash(plain)
 	if err != nil {
 		t.Fatalf("hash password: %v", err)
 	}
 	phone := fmt.Sprintf("197%08d", time.Now().UnixNano()%100000000)
+	email := fmt.Sprintf("reset-%d@example.com", time.Now().UnixNano())
 	user := &model.User{
 		ID:           uuid.New(),
 		Phone:        &phone,
+		Email:        &email,
 		PasswordHash: hash,
 		ShortID:      time.Now().UnixNano() % 1_000_000_000,
 		Nickname:     "reset-flow",
@@ -171,10 +177,10 @@ func newResetUser(t *testing.T, db *gorm.DB, plain string) *model.User {
 		t.Fatalf("create user: %v", err)
 	}
 	t.Cleanup(func() {
-		db.Exec("DELETE FROM verification_codes WHERE target = ?", phone)
+		db.Exec("DELETE FROM verification_codes WHERE target IN (?, ?)", phone, email)
 		db.Unscoped().Delete(user)
 	})
-	return user
+	return user, email
 }
 
 // TestForgotPasswordFlowChangesPassword 三段式链路走完后，新密码能登录、旧密码不能。
@@ -191,23 +197,22 @@ func TestForgotPasswordFlowChangesPassword(t *testing.T) {
 	cfg := authTestConfig()
 	r, _ := Setup(db, rdb, nil, cfg, zap.NewNop(), sender)
 
-	user := newResetUser(t, db, oldPassword)
-	phone := *user.Phone
+	user, email := newResetUser(t, db, oldPassword)
 
 	// 第一段：发码
-	if w := postJSON(r, "/api/v1/auth/password/otp", `{"phone":"`+phone+`"}`); w.Code != http.StatusNoContent {
+	if w := postJSON(r, "/api/v1/auth/password/otp", `{"account":"`+email+`"}`); w.Code != http.StatusNoContent {
 		t.Fatalf("otp status = %d, want 204, body=%s", w.Code, w.Body.String())
 	}
 	calls, target, code := sender.last()
-	if calls != 1 || target != phone {
-		t.Fatalf("下发记录 = (%d, %q), want (1, %q)", calls, target, phone)
+	if calls != 1 || target != email {
+		t.Fatalf("下发记录 = (%d, %q), want (1, %q)", calls, target, email)
 	}
 	if len(code) != 6 {
 		t.Fatalf("验证码 = %q, 期望 6 位", code)
 	}
 
 	// 第二段：校验换票
-	w := postJSON(r, "/api/v1/auth/password/verify", `{"phone":"`+phone+`","code":"`+code+`"}`)
+	w := postJSON(r, "/api/v1/auth/password/verify", `{"account":"`+email+`","code":"`+code+`"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("verify status = %d, want 200, body=%s", w.Code, w.Body.String())
 	}
@@ -233,7 +238,9 @@ func TestForgotPasswordFlowChangesPassword(t *testing.T) {
 		t.Fatalf("reset status = %d, want 204, body=%s", w.Code, w.Body.String())
 	}
 
-	// 旧密码必须失效，否则「重置成功」依旧是假的
+	// 旧密码必须失效，否则「重置成功」依旧是假的。
+	// 这里用手机号登录：发码只走邮箱，但老账号仍要能用手机号登录，顺带守住这一点
+	phone := *user.Phone
 	if w := postJSON(r, "/api/v1/auth/login", `{"account":"`+phone+`","password":"`+oldPassword+`"}`); w.Code != http.StatusUnauthorized {
 		t.Fatalf("旧密码登录 status = %d, want 401, body=%s", w.Code, w.Body.String())
 	}
@@ -242,16 +249,16 @@ func TestForgotPasswordFlowChangesPassword(t *testing.T) {
 	}
 }
 
-// TestForgotPasswordOtpUnknownPhoneReturns204 未注册手机号也返回 204 且不下发，
-// 否则该端点就成了「这个号码注册过没有」的枚举器。
-func TestForgotPasswordOtpUnknownPhoneReturns204(t *testing.T) {
+// TestForgotPasswordOtpUnknownEmailReturns204 未注册邮箱也返回 204 且不下发，
+// 否则该端点就成了「这个邮箱注册过没有」的枚举器。
+func TestForgotPasswordOtpUnknownEmailReturns204(t *testing.T) {
 	db := authTestDB(t)
 	rdb, _ := testutil.NewRedis(t)
 	sender := &recordingSender{}
 	cfg := authTestConfig()
 	r, _ := Setup(db, rdb, nil, cfg, zap.NewNop(), sender)
 
-	w := postJSON(r, "/api/v1/auth/password/otp", `{"phone":"19900000000"}`)
+	w := postJSON(r, "/api/v1/auth/password/otp", `{"account":"nobody-here@example.com"}`)
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204, body=%s", w.Code, w.Body.String())
 	}
@@ -259,7 +266,7 @@ func TestForgotPasswordOtpUnknownPhoneReturns204(t *testing.T) {
 		t.Fatalf("204 不应带响应体，got %q", w.Body.String())
 	}
 	if calls, _, _ := sender.last(); calls != 0 {
-		t.Fatalf("下发次数 = %d, 未注册手机号不应下发", calls)
+		t.Fatalf("下发次数 = %d, 未注册邮箱不应下发", calls)
 	}
 }
 
@@ -300,7 +307,7 @@ func TestLoginLocksAccountAfterFiveFailures(t *testing.T) {
 	cfg := authTestConfig()
 	r, _ := Setup(db, rdb, nil, cfg, zap.NewNop(), &recordingSender{})
 
-	user := newResetUser(t, db, goodPassword)
+	user, _ := newResetUser(t, db, goodPassword)
 	phone := *user.Phone
 
 	for i := 0; i < 5; i++ {

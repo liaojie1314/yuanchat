@@ -4,7 +4,9 @@
  * 覆盖：
  * - getUploadUrl 请求体拼装（filename/content_type/size）+ category query 透传 + DTO 映射
  * - uploadToTicket PUT 直传（非 2xx 抛错）
- * - getDownloadUrl 内存缓存：同 key 二次调用命中缓存不再 fetch；提前过期后重取
+ * - getDownloadUrl 内存缓存：同 key 二次调用命中缓存不再 fetch；提前过期后重取；
+ *   附件（带文件名）与内联分开缓存
+ * - splitFileName 后缀切分（气泡里长文件名中段省略，后缀不能被吃掉）
  *
  * 注：compressImage 依赖 canvas/createImageBitmap，node 测试环境不可用，
  * 由批次 E2E 覆盖（见 task-3.4-report 自评）。
@@ -19,6 +21,7 @@ import {
   outputTypeFor,
   __resetDownloadUrlCache,
 } from "../api/files";
+import { splitFileName } from "../api/chat";
 
 describe("outputTypeFor", () => {
   it("png 保持 png（保 alpha），其余统一 jpeg", () => {
@@ -156,6 +159,40 @@ describe("getDownloadUrl (in-memory cache)", () => {
     vi.advanceTimersByTime(2_000);
     await getDownloadUrl("images/2026/07/exp.png");
     expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  // 附件与内联是两条不同签名，缓存若按 key 合并，先渲染过缩略图的对象
+  // 点下载就会复用内联 URL → 附件头丢失 → 浏览器又变成内联预览
+  it("附件下载与内联分开缓存，且把文件名带进查询串", async () => {
+    const f = vi.fn().mockResolvedValue({
+      json: () =>
+        Promise.resolve({ code: 0, message: "ok", data: { url: "https://u", expires_in: 7200 } }),
+    });
+    vi.stubGlobal("fetch", f);
+
+    await getDownloadUrl("files/2026/07/a.pdf");
+    await getDownloadUrl("files/2026/07/a.pdf", "学术报告单.pdf");
+    expect(f).toHaveBeenCalledTimes(2);
+    expect(f.mock.calls[0][0]).not.toContain("name=");
+    expect(f.mock.calls[1][0]).toContain("&name=" + encodeURIComponent("学术报告单.pdf"));
+
+    // 同名再取命中缓存，不再多发请求
+    await getDownloadUrl("files/2026/07/a.pdf", "学术报告单.pdf");
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("splitFileName", () => {
+  it("切出后缀，让长文件名中段省略时后缀仍在", () => {
+    expect(splitFileName("学术报告单.pdf")).toEqual({ stem: "学术报告单", suffix: ".pdf" });
+    expect(splitFileName("a.tar.gz")).toEqual({ stem: "a.tar", suffix: ".gz" });
+  });
+
+  it("无后缀 / 隐藏文件 / 末尾点号都不当后缀切", () => {
+    expect(splitFileName("README")).toEqual({ stem: "README", suffix: "" });
+    // 开头的点是隐藏文件标记，不是后缀分隔符
+    expect(splitFileName(".gitignore")).toEqual({ stem: ".gitignore", suffix: "" });
+    expect(splitFileName("trailing.")).toEqual({ stem: "trailing.", suffix: "" });
   });
 });
 

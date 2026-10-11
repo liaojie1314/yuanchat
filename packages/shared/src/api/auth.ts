@@ -1,14 +1,15 @@
 /**
- * 认证 REST API — 忘记密码三段式改密 + 扫码登录被扫端
+ * 认证 REST API — 注册邮箱发码 + 忘记密码三段式改密 + 扫码登录被扫端
  *
  * @description
+ * 注册发码对应后端 `POST /auth/register/otp`；
  * 改密对应后端 `POST /auth/password/otp` → `/auth/password/verify` → `/auth/password/reset`；
  * 扫码登录的被扫端对应 `POST /auth/qr/session` 与 `GET /auth/qr/:token`。
- * 全部端点均无需鉴权（用户此时正是登不进去才来走这两条链路）。
+ * 全部端点均无需鉴权（用户此时正是登不进去才来走这几条链路）。
  *
  * 改密契约要点（由后端实现钉死，前端不得自行加工）：
- * - 发码成功是 204 空响应；**手机号未注册时响应完全相同**，前端因此无法、也绝不能
- *   据此提示「该号未注册」，否则等于把用户枚举做成了功能。
+ * - 发码成功是 204 空响应；**邮箱未注册时响应完全相同**，前端因此无法、也绝不能
+ *   据此提示「该邮箱未注册」，否则等于把用户枚举做成了功能。
  * - 验证码校验失败时后端**不消费验证码**，用户可在原地重输，无需重新发码。
  * - 票据一次性消费，有效期由响应里的 `expires_in`（秒）给出，倒计时必须以它初始化。
  * - 改密成功是 204，且该用户 `token_version` 递增 —— 所有设备的既有令牌立即失效，
@@ -23,6 +24,19 @@
  *   被扫端只有轮询到这个状态才能区分「手机上按了取消」与「二维码已过期」。
  */
 import { apiPost, request } from "./client";
+
+/**
+ * 下发注册邮箱验证码
+ *
+ * @param email - 注册用邮箱，验证码发到这里
+ * @remarks 成功为 204 空响应。与改密发码**不同**：注册发码会因邮箱格式非法抛 400
+ *   `auth.emailInvalid`、同邮箱 60 秒内重发抛 429 `auth.otpCooldown`、
+ *   下发通道故障抛 500 `auth.sendFailed`。
+ *   注册链路不存在「账号是否已存在」的隐蔽性顾虑 —— 邮箱是否被占用在注册那一步才判定。
+ */
+export async function sendRegisterCode(email: string): Promise<void> {
+  await apiPost<void>("/api/v1/auth/register/otp", { email });
+}
 
 /** 改密票据：`verifyResetCode` 换回的一次性凭据与其有效期 */
 export interface ResetTicket {
@@ -41,24 +55,24 @@ interface ResetTicketDTO {
 /**
  * 下发改密验证码（第 1 步）
  *
- * @param phone - 手机号
- * @remarks 成功为 204 空响应；手机号未注册时响应与已注册完全一致（不下发、不报错）。
+ * @param account - 注册邮箱（字段名仍叫 `account`，与后端契约一致；验证码通道是 SMTP，只认邮箱）
+ * @remarks 成功为 204 空响应；邮箱未注册时响应与已注册完全一致（不下发、不报错）。
  *   60 秒内重发或下发通道故障会抛 `ApiError`。
  */
-export async function sendResetCode(phone: string): Promise<void> {
-  await apiPost<void>("/api/v1/auth/password/otp", { phone });
+export async function sendResetCode(account: string): Promise<void> {
+  await apiPost<void>("/api/v1/auth/password/otp", { account });
 }
 
 /**
  * 校验改密验证码并换取票据（第 2 步）
  *
- * @param phone - 第 1 步用的同一手机号
+ * @param account - 第 1 步用的同一邮箱
  * @param code - 6 位验证码
  * @returns 一次性票据与其有效期（秒）
  * @remarks 验证码错误抛 `ApiError`，且验证码仍然有效 —— 调用方应让用户原地重输而非重新发码。
  */
-export async function verifyResetCode(phone: string, code: string): Promise<ResetTicket> {
-  const dto = await apiPost<ResetTicketDTO>("/api/v1/auth/password/verify", { phone, code });
+export async function verifyResetCode(account: string, code: string): Promise<ResetTicket> {
+  const dto = await apiPost<ResetTicketDTO>("/api/v1/auth/password/verify", { account, code });
   return { resetTicket: dto.reset_ticket, expiresIn: dto.expires_in };
 }
 
