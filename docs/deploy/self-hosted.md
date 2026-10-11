@@ -433,7 +433,7 @@ $COMPOSE logs yuanchat-coturn | tail -20
 - `external-ip` 是内网地址 → 客户端拿到连不上的 relay candidate，表现就是一直「连接中」
 - 3478 或 49160-49200/udp 被安全组挡住 → 同上
 
-用默认的 `docker-compose.prod.yml` 时，前三项都由 `.env` 的 `TURN_SECRET` 与 `DOMAIN_APP`
+用默认的 `docker-compose.prod.yml` 时，前三项都由 `.env` 的 `TURN_SECRET` 与 `DOMAIN_CHAT`
 推导（compose 与 coturn 配置读的是同一组变量），天然一致；改过其中一边才会出现不匹配。
 `deploy/coturn/turnserver.prod.conf` 是 `install.sh` 渲染的产物，不要手改 ——
 下次运行会被覆盖，要改请改 `turnserver.prod.conf.template`。

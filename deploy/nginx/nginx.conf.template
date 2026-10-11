@@ -13,7 +13,7 @@ upstream yuanchat_s3   { server minio:9000; }
 # ---------- HTTP：ACME 校验 + 全站跳 HTTPS ----------
 server {
     listen 80;
-    server_name ${DOMAIN_APP} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN} ${DOMAIN_STORAGE};
+    server_name ${DOMAIN_CHAT} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN} ${DOMAIN_STORAGE};
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -27,10 +27,10 @@ server {
 server {
     listen 443 ssl;
     http2 on;
-    server_name ${DOMAIN_APP};
+    server_name ${DOMAIN_CHAT};
 
-    ssl_certificate     /etc/letsencrypt/live/${DOMAIN_APP}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_APP}/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN_CHAT}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_CHAT}/privkey.pem;
     include /etc/nginx/ssl-params.conf;
 
     location / {

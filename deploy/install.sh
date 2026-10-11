@@ -32,9 +32,9 @@ command -v openssl >/dev/null 2>&1 || die "缺少 openssl（用于生成随机�
 # 支持两种用法：
 #   1) 直接跑 → 生成 .env 后退出，让用户填域名，再跑第二次
 #   2) 预先用环境变量喂进来 → 一条命令装完，不需要中途编辑文件：
-#        DOMAIN_APP=chat.x.com DOMAIN_API=api.x.com ... ./deploy/install.sh
+#        DOMAIN_CHAT=chat.x.com DOMAIN_API=api.x.com ... ./deploy/install.sh
 # 第二种是「真一键」的关键：CI / 重装脚本里没法交互式编辑文件。
-REQUIRED_VARS="DOMAIN_APP DOMAIN_API DOMAIN_WS DOMAIN_ADMIN DOMAIN_STORAGE ADMIN_EMAIL"
+REQUIRED_VARS="DOMAIN_CHAT DOMAIN_API DOMAIN_WS DOMAIN_ADMIN DOMAIN_STORAGE ADMIN_EMAIL"
 
 if [ ! -f .env ]; then
   info "创建 .env（从 .env.prod.example）"
@@ -73,7 +73,7 @@ fi
 # shellcheck disable=SC1091
 set -a; source .env; set +a
 
-for var in DOMAIN_APP DOMAIN_API DOMAIN_WS DOMAIN_ADMIN DOMAIN_STORAGE ADMIN_EMAIL; do
+for var in DOMAIN_CHAT DOMAIN_API DOMAIN_WS DOMAIN_ADMIN DOMAIN_STORAGE ADMIN_EMAIL; do
   value="${!var:-}"
   [ -n "$value" ] || die ".env 缺少 $var"
   case "$value" in
@@ -145,27 +145,27 @@ fi
 
 # ---------- 3. 渲染 nginx.conf 与 coturn 配置 ----------
 info "渲染 nginx 配置"
-export DOMAIN_APP DOMAIN_API DOMAIN_WS DOMAIN_ADMIN DOMAIN_STORAGE
-envsubst '${DOMAIN_APP} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN} ${DOMAIN_STORAGE}' \
+export DOMAIN_CHAT DOMAIN_API DOMAIN_WS DOMAIN_ADMIN DOMAIN_STORAGE
+envsubst '${DOMAIN_CHAT} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN} ${DOMAIN_STORAGE}' \
   < nginx/nginx.conf.template > nginx/nginx.conf
 
 info "渲染 coturn 配置"
 export TURN_SECRET PUBLIC_IP
-envsubst '${TURN_SECRET} ${DOMAIN_APP} ${PUBLIC_IP}' \
+envsubst '${TURN_SECRET} ${DOMAIN_CHAT} ${PUBLIC_IP}' \
   < coturn/turnserver.prod.conf.template > coturn/turnserver.prod.conf
 
 # ---------- 4. 首次签发证书 ----------
 CERT_PATH="./certbot-conf-check"
 if ! docker volume inspect yuanchat_certbot_conf >/dev/null 2>&1 || \
    ! docker run --rm -v yuanchat_certbot_conf:/etc/letsencrypt alpine \
-       test -d "/etc/letsencrypt/live/${DOMAIN_APP}" 2>/dev/null; then
+       test -d "/etc/letsencrypt/live/${DOMAIN_CHAT}" 2>/dev/null; then
   info "首次签发 Let's Encrypt 证书"
 
   # nginx 需要证书才能起 443；先用临时自签证书让它能启动，
   # 通过 80 端口完成 ACME 校验后再换成真证书
   docker run --rm -v yuanchat_certbot_conf:/etc/letsencrypt alpine sh -c "
     apk add --no-cache openssl >/dev/null 2>&1
-    for d in ${DOMAIN_APP} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN} ${DOMAIN_STORAGE}; do
+    for d in ${DOMAIN_CHAT} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN} ${DOMAIN_STORAGE}; do
       mkdir -p /etc/letsencrypt/live/\$d
       openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
         -keyout /etc/letsencrypt/live/\$d/privkey.pem \
@@ -177,7 +177,7 @@ if ! docker volume inspect yuanchat_certbot_conf >/dev/null 2>&1 || \
   docker compose -f docker-compose.prod.yml up -d nginx
   sleep 5
 
-  for domain in "$DOMAIN_APP" "$DOMAIN_API" "$DOMAIN_WS" "$DOMAIN_ADMIN" "$DOMAIN_STORAGE"; do
+  for domain in "$DOMAIN_CHAT" "$DOMAIN_API" "$DOMAIN_WS" "$DOMAIN_ADMIN" "$DOMAIN_STORAGE"; do
     info "签发 $domain"
     # 上面那批自签占位证书占住了 live/<domain>/，而它没有配套的
     # renewal/<domain>.conf，certbot 会判定「live directory exists」直接拒签 ——
@@ -246,7 +246,7 @@ fi
 
 echo
 info "部署完成"
-echo "  Web 端:     https://${DOMAIN_APP}"
+echo "  Web 端:     https://${DOMAIN_CHAT}"
 echo "  管理后台:   https://${DOMAIN_ADMIN}"
 echo "  API:        https://${DOMAIN_API}"
 if [ -n "${ADMIN_PHONE:-}" ]; then

@@ -87,7 +87,7 @@ services:
       # tauri 三种取值对应不同平台：Linux/macOS/iOS 是 tauri://localhost，
       # Windows WebView2 与 Android 是 http(s)://tauri.localhost。
       YUANCHAT_WEBSOCKET_ALLOWED_ORIGINS: >-
-        https://${DOMAIN_APP},https://${DOMAIN_ADMIN},tauri://localhost,http://tauri.localhost,https://tauri.localhost
+        https://${DOMAIN_CHAT},https://${DOMAIN_ADMIN},tauri://localhost,http://tauri.localhost,https://tauri.localhost
       YUANCHAT_DATABASE_HOST: postgres
       YUANCHAT_DATABASE_PORT: "5432"
       YUANCHAT_DATABASE_USER: ${DB_USER}
@@ -130,13 +130,13 @@ services:
       YUANCHAT_BOOTSTRAP_ADMIN_PHONE: ${ADMIN_PHONE:-}
       YUANCHAT_BOOTSTRAP_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       # TURN：与 coturn 容器共用同一套取值，任一项不一致都会让通话在 NAT 后打不通。
-      # SECRET/REALM 两边同源（install.sh 用同样的 TURN_SECRET / DOMAIN_APP 渲染
+      # SECRET/REALM 两边同源（install.sh 用同样的 TURN_SECRET / DOMAIN_CHAT 渲染
       # coturn/turnserver.prod.conf），HOST 必须是客户端可达的公网域名 ——
       # 填 coturn 这个内网服务名浏览器解析不了（同 MINIO_PUBLIC_ENDPOINT 的道理）
       YUANCHAT_TURN_ENABLED: "true"
-      YUANCHAT_TURN_HOST: ${DOMAIN_APP}
+      YUANCHAT_TURN_HOST: ${DOMAIN_CHAT}
       YUANCHAT_TURN_PORT: "3478"
-      YUANCHAT_TURN_REALM: ${DOMAIN_APP}
+      YUANCHAT_TURN_REALM: ${DOMAIN_CHAT}
       YUANCHAT_TURN_STATIC_AUTH_SECRET: ${TURN_SECRET:?TURN_SECRET required (install.sh 会自动生成；手工部署请先填 deploy/.env)}
       TZ: ${TZ:-Asia/Shanghai}
     depends_on:
