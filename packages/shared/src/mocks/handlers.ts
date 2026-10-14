@@ -21,7 +21,6 @@ interface MockUser {
   id: string;
   nickname: string;
   avatar_url: string | null;
-  phone: string;
   email: string;
   short_id: number;
 }
@@ -30,7 +29,6 @@ const MOCK_USER: MockUser = {
   id: "user_001",
   nickname: "元聊用户",
   avatar_url: null,
-  phone: "13800138000",
   email: "user@yuanchat.com",
   short_id: 10001,
 };
@@ -1232,12 +1230,12 @@ export const handlers = [
   // 改密第 1 步 — 下发验证码
   // POST /api/v1/auth/password/otp
   // 未注册账号与已注册的响应完全一致（同 204、同空体），避免暴露注册状态
-  // 取值顺序与服务端一致：先 account（手机号或邮箱），为空再回落旧字段 phone
+  // 账号形态与服务端一致：只有 account（邮箱），手机号已于迁移 021 移除
   // --------------------------------------------------
   http.post("http://localhost:8085/api/v1/auth/password/otp", async ({ request }) => {
     await delay(300);
-    const body = (await request.json()) as { account?: string; phone?: string };
-    const account = body.account || body.phone;
+    const body = (await request.json()) as { account?: string };
+    const account = body.account;
     if (!account) {
       return apiError(400, "auth.otpRequired");
     }
@@ -1254,8 +1252,8 @@ export const handlers = [
   // --------------------------------------------------
   http.post("http://localhost:8085/api/v1/auth/password/verify", async ({ request }) => {
     await delay(300);
-    const body = (await request.json()) as { account?: string; phone?: string; code?: string };
-    if (!(body.account || body.phone) || !body.code) {
+    const body = (await request.json()) as { account?: string; code?: string };
+    if (!body.account || !body.code) {
       return apiError(400, "auth.otpRequired");
     }
     if (body.code !== MOCK_OTP_CODE) {

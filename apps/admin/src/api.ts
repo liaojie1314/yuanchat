@@ -73,7 +73,6 @@ function adminDelete<T>(path: string): Promise<T> {
 
 export interface AdminUser {
   id: string;
-  phone?: string;
   email?: string;
   short_id: number;
   nickname: string;

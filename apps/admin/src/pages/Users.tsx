@@ -62,9 +62,7 @@ export function UsersPage() {
               </div>
               <span className="text-label-sm text-on-surface-variant">#{u.short_id}</span>
             </td>
-            <td className="px-4 py-3 text-body-md text-on-surface-variant">
-              {u.phone || u.email || "—"}
-            </td>
+            <td className="px-4 py-3 text-body-md text-on-surface-variant">{u.email || "—"}</td>
             <td className="px-4 py-3">
               {u.status === 2 ? (
                 <span className="rounded bg-error-container px-2 py-0.5 text-label-sm text-error-on-container">

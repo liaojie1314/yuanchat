@@ -567,7 +567,7 @@
   "admin.nav.conversations": "대화 관리",
   "admin.nav.messages": "메시지 검토",
   "admin.nav.auditLogs": "감사 로그",
-  "admin.users.searchPlaceholder": "닉네임 / 전화번호 / 이메일 / 사용자 ID",
+  "admin.users.searchPlaceholder": "닉네임 / 이메일 / 사용자 ID",
   "admin.users.colUser": "사용자",
   "admin.users.colContact": "연락처",
   "admin.users.colStatus": "상태",

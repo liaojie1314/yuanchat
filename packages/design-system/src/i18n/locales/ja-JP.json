@@ -567,7 +567,7 @@
   "admin.nav.conversations": "会話管理",
   "admin.nav.messages": "メッセージ審査",
   "admin.nav.auditLogs": "監査ログ",
-  "admin.users.searchPlaceholder": "ニックネーム / 電話番号 / メール / ユーザーID",
+  "admin.users.searchPlaceholder": "ニックネーム / メール / ユーザーID",
   "admin.users.colUser": "ユーザー",
   "admin.users.colContact": "連絡先",
   "admin.users.colStatus": "状態",

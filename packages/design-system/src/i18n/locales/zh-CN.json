@@ -567,7 +567,7 @@
   "admin.nav.conversations": "会话管理",
   "admin.nav.messages": "消息审核",
   "admin.nav.auditLogs": "审计日志",
-  "admin.users.searchPlaceholder": "昵称 / 手机号 / 邮箱 / 用户ID",
+  "admin.users.searchPlaceholder": "昵称 / 邮箱 / 用户ID",
   "admin.users.colUser": "用户",
   "admin.users.colContact": "联系方式",
   "admin.users.colStatus": "状态",

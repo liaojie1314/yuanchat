@@ -567,7 +567,7 @@
   "admin.nav.conversations": "Conversations",
   "admin.nav.messages": "Messages",
   "admin.nav.auditLogs": "Audit Logs",
-  "admin.users.searchPlaceholder": "Nickname / Phone / Email / User ID",
+  "admin.users.searchPlaceholder": "Nickname / Email / User ID",
   "admin.users.colUser": "User",
   "admin.users.colContact": "Contact",
   "admin.users.colStatus": "Status",
