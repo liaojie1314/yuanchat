@@ -321,3 +321,123 @@ tauri-plugin-process = "2"
 > 系统文件管理器里不可见，且卸载应用会一并删除。要落到公共 `Download/` 需走
 > MediaStore（`MediaStore.Downloads` + `ContentResolver`），Tauri fs 插件无此能力，
 > 须自写 Kotlin 插件。
+
+---
+
+## 5. 附带核实：托盘 / 角标 / 落盘权限与 Cargo feature
+
+Task 1 本来只有三条，但 Global Constraints 里「Tauri 权限标识符禁猜」与
+File Structure 表里「`Cargo.toml` 按 Task 1 结论增依赖（若需要）」把下面这些也拽进了
+本 Task 的范围。全部已核实，Task 6 / Task 14 直接抄，**不要再猜一遍**。
+
+### 5.1 权限标识符（从 `gen/schemas/{desktop,mobile}-schema.json` 核实）
+
+两份 schema 里这些 `core:*` 标识符**都存在**（core 权限不按 schema 分平台，平台差异在运行时）：
+
+| 用途             | 标识符                                                                                                                                                           |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 托盘             | `core:tray:default`、`core:tray:allow-new`、`core:tray:allow-set-icon`、`core:tray:allow-set-tooltip`、`core:tray:allow-set-menu`、`core:tray:allow-set-visible` |
+| 角标（数字）     | `core:window:allow-set-badge-count`                                                                                                                              |
+| 角标（文字）     | `core:window:allow-set-badge-label`                                                                                                                              |
+| Windows 叠加图标 | `core:window:allow-set-overlay-icon`                                                                                                                             |
+| 图标构造         | `core:image:default`、`core:image:allow-from-bytes`、`core:image:allow-from-path`、`core:image:allow-new`                                                        |
+| 菜单             | `core:menu:default`、`core:menu:allow-new`、`core:menu:allow-append`                                                                                             |
+
+### 5.2 现有 capability 现状（三个文件都要改）
+
+| 文件           | `platforms`                   | 现有权限                                                                                               |
+| -------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `default.json` | 无（即全平台）                | 27 条，含 `core:default`、一堆 `core:window:*`、`fs:default`、`dialog:default`、`notification:default` |
+| `desktop.json` | `["macOS","windows","linux"]` | 仅 `updater:default`、`process:default`                                                                |
+| `mobile.json`  | `["android","iOS"]`           | 仅 5 条 `barcode-scanner:*`                                                                            |
+
+托盘 / 角标 / 叠加图标 / 菜单 / image 全部进 **`desktop.json`**（移动端没有托盘与任务栏）。
+
+### 5.3 ⚠️ `fs:default` 是**只读**的 —— 落盘权限必须显式加
+
+`tauri-plugin-fs-2.5.1/permissions/default.toml` 的实际内容：
+
+```toml
+permissions = [
+  "create-app-specific-dirs",
+  "read-app-specific-dirs-recursive",
+  "deny-default",
+]
+```
+
+即：只给 **AppConfig / AppData / AppLocalData / AppCache / AppLog 的读权限** 加 `mkdir`。
+**没有任何写权限，也不含 Download 目录。** 所以 Task 6 的 `fileSink` 两端都写不了盘，
+除非显式补：
+
+- `capabilities/desktop.json` 增：`fs:allow-download-write-recursive`、`fs:allow-download-read-recursive`、`fs:allow-download-meta-recursive`、`fs:scope-download-recursive`
+- `capabilities/mobile.json` 增：同上四条
+
+（第 1 节只提了 mobile 是因为计划表里只列了 mobile —— 这是计划的疏漏，**桌面端同样需要**。）
+
+### 5.4 JS 依赖：零新增
+
+`apps/desktop/package.json` 已有 `@tauri-apps/api`（实装 **2.11.0**）与
+`@tauri-apps/plugin-fs`。托盘、窗口角标、菜单、Image 全在 `@tauri-apps/api` 里，
+**不需要装任何新 npm 包**。核实到的 API 签名：
+
+```ts
+// @tauri-apps/api/tray
+class TrayIcon extends Resource {
+  static new(options?: TrayIconOptions): Promise<TrayIcon>;
+  setIcon(icon: string | Image | Uint8Array | ArrayBuffer | number[] | null): Promise<void>;
+  setMenu(menu: Menu | Submenu | null): Promise<void>;
+  setTooltip(tooltip: string | null): Promise<void>;
+}
+type TrayIconEventType = 'Click' | 'DoubleClick' | 'Enter' | 'Move' | 'Leave';
+// TrayIconOptions.action?: (event: TrayIconEvent) => void
+
+// @tauri-apps/api/image
+class Image extends Resource {
+  static new(rgba: number[] | Uint8Array | ArrayBuffer, width: number, height: number): Promise<Image>;
+  static fromBytes(bytes: number[] | Uint8Array | ArrayBuffer): Promise<Image>;
+  static fromPath(path: string): Promise<Image>;
+}
+
+// @tauri-apps/api/window —— Window 实例方法
+setBadgeCount(count?: number): Promise<void>;   // app 级而非窗口级；undefined 清除
+setBadgeLabel(label?: string): Promise<void>;
+setOverlayIcon(icon?: string | Image | Uint8Array | ArrayBuffer | number[]): Promise<void>;
+```
+
+### 5.5 ⚠️ 平台支持矩阵（来自 `window.d.ts` 的官方 JSDoc，不是推测）
+
+| API              | Windows                               | macOS        | Linux                                             |
+| ---------------- | ------------------------------------- | ------------ | ------------------------------------------------- |
+| `setBadgeCount`  | **不支持**，官方指向 `setOverlayIcon` | 支持         | 支持（依赖 Unity launcher 协议，须装 `.desktop`） |
+| `setBadgeLabel`  | 不支持                                | **仅 macOS** | 不支持                                            |
+| `setOverlayIcon` | **仅 Windows**                        | 不支持       | 不支持                                            |
+
+这正是 spec §1.3「不做数字角标生成」那条决策的依据 —— 三平台三套 API，没有统一面。
+Task 14 的实现要按平台分支，且**每个分支都要 try/catch**（Review Focus 第 4 条）。
+
+### 5.6 ⚠️ `setOverlayIcon` 需要 `image-png` Cargo feature
+
+`window.d.ts:1098-1107` 的 JSDoc 原文：
+
+> Note that you may need the `image-ico` or `image-png` Cargo features to use this API.
+
+当前 `apps/desktop/src-tauri/Cargo.toml:49` 是：
+
+```toml
+tauri = { version = "2.11.2", features = ["tray-icon"] }
+```
+
+**Task 14 必须改成**（否则 Windows 分支拿 PNG 当叠加图标会在运行时失败）：
+
+```toml
+tauri = { version = "2.11.2", features = ["tray-icon", "image-png"] }
+```
+
+这是本批**唯一**需要新增的 Cargo feature，没有新增 crate 依赖。
+
+### 对 plan 的影响
+
+- Task 6：`capabilities/desktop.json` 也要加 fs 落盘权限（计划只写了 mobile.json）。
+- Task 14：`Cargo.toml` 加 `image-png` feature；权限按 5.1 的清单进 `desktop.json`；
+  按 5.5 的矩阵写平台分支。
+- 本批不新增任何 npm 包与 crate。
