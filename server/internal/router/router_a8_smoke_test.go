@@ -288,3 +288,29 @@ func TestA8QRSessionAndPollSmoke(t *testing.T) {
 		t.Fatalf("message = %q, want auth.qrFailed", got.Message)
 	}
 }
+
+// TestUpdateEndpointsRegistered 两个对外更新端点必须免鉴权可达。
+//
+// 路由注册本身就是本条链路最容易漏的一环：Gin 在同一层同时注册静态段与通配段
+// 会直接 panic，而这个 panic 只在 Setup 真跑一遍时才暴露。
+// 测试环境 st 为 nil，故期望的是 503 降级（不是 404 —— 404 说明路由没挂上）。
+func TestUpdateEndpointsRegistered(t *testing.T) {
+	db := authTestDB(t)
+	cfg := authTestConfig()
+	r, _ := Setup(db, nil, nil, cfg, zap.NewNop(), &recordingSender{})
+
+	for _, target := range []string{
+		"/api/v1/updates/catalog",
+		"/api/v1/updates/linux/x86_64?version=0.7.0&device=d1",
+	} {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code == http.StatusNotFound {
+			t.Errorf("%s 返回 404，路由没挂上", target)
+		}
+		if w.Code == http.StatusUnauthorized {
+			t.Errorf("%s 返回 401，更新检查必须免鉴权 —— 登不进去的版本最需要收到更新", target)
+		}
+	}
+}

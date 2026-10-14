@@ -102,6 +102,18 @@ func Setup(
 	callSvc := service.NewCallService(rdb, cfg.Turn, logger)
 	callH := handler.NewCallHandler(callSvc, userRepo, logger)
 
+	// OTA 版本分发：对外更新端点免鉴权，管理端五端点走 admin 组
+	releaseRepo := repository.NewReleaseRepository(db)
+	releaseSvc := service.NewReleaseService(releaseRepo, logger)
+	// st 为 nil（MinIO 不可达）时端点降级为 503，与 fileH 同一套策略。
+	// 刻意不选「不注册路由」：503 让 Tauri updater 落到 GitHub 兜底，
+	// 而 204 会让它直接认定「确定没有更新」从此不再问第二个 endpoint。
+	var releasePresigner handler.ReleasePresigner
+	if st != nil {
+		releasePresigner = st
+	}
+	updateH := handler.NewUpdateHandler(releaseSvc, releasePresigner, logger)
+
 	adminRepo := repository.NewAdminRepository(db)
 	flaggedUGCRepo := repository.NewFlaggedUGCRepository(db)
 	adminSvc := service.NewAdminService(adminRepo, convRepo, userRepo, flaggedUGCRepo, logger)
@@ -309,6 +321,21 @@ func Setup(
 	api.GET("/health", healthH.Check)
 	// VAPID 公钥：前端 pushManager.subscribe 前拉取，无需鉴权
 	api.GET("/push/public-key", pushH.PublicKey)
+
+	// OTA 更新检查：免鉴权 —— 更新检查发生在登录之前也要能用，
+	// 一个因为 bug 登不进去的版本恰恰最需要收到更新。只暴露版本号与安装包
+	// 预签名 URL，不碰任何用户数据，故按 IP 限流即足。
+	updates := api.Group("/updates")
+	{
+		// 静态段 catalog 与两段的 :platform/:arch **不同层级**，
+		// 同层注册静态段与通配段会让 Gin panic。
+		// 故不注册单段的 /updates/:platform。
+		// 下载页一次加载就一条请求，额度不必宽。
+		updates.GET("/catalog", middleware.LimitByIP(10, 20), updateH.Catalog)
+		// updater 的检查频率：桌面端启动一次 + 手动点一次，安卓同理。
+		// 留宽一些，免得同一出口 IP 下的办公网集体撞 429 后集体停在旧版。
+		updates.GET("/:platform/:arch", middleware.LimitByIP(30, 60), updateH.Check)
+	}
 	api.POST("/auth/refresh", middleware.LimitByIP(20, 40), userH.Refresh)
 	// 登出只需鉴权（前端 authStore 一直在调，此前 404 被 try/catch 吞掉）
 	api.POST("/auth/logout", middleware.AuthRequired(cfg.JWT), userH.Logout)
