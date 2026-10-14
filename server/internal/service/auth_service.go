@@ -71,8 +71,7 @@ func NewAuthService(
 
 // Redis 键一律带 auth: 命名空间，避免与裸键混在一起。
 //
-// target 是手机号或邮箱：两种账号共用同一组键，键里带的就是用户输入的原值，
-// 不会互相覆盖（手机号与邮箱不可能是同一个字符串）。
+// target 是邮箱：键里带的就是用户输入的原值，不同账号天然不会互相覆盖。
 func otpKey(target string) string         { return "auth:pwd:otp:" + target }
 func otpCooldownKey(target string) string { return "auth:pwd:otp:cd:" + target }
 func otpFailKey(target string) string     { return "auth:pwd:otp:fail:" + target }
@@ -81,14 +80,18 @@ func regOtpKey(email string) string       { return "auth:reg:otp:" + email }
 func regCooldownKey(email string) string  { return "auth:reg:otp:cd:" + email }
 func regFailKey(email string) string      { return "auth:reg:otp:fail:" + email }
 
-// findByAccount 按 target 的形态选择查询方式：含 @ 查邮箱，否则查手机号。
+// findByAccount 按邮箱查账号。
 //
-// 两个 repo 方法对未命中都返回 (nil, nil)，调用方据此判断账号不存在。
+// 忘记密码只认邮箱 —— 验证码要发到一个能收的地方，元聊号不是联系方式，
+// 手机号已于迁移 021 彻底移除。非邮箱输入在入口就被 ErrTargetNotEmail 拒掉，
+// 这里仍留一层形态判断，避免把元聊号当邮箱查出个 NULL 匹配。
+//
+// repo 方法对未命中返回 (nil, nil)，调用方据此判断账号不存在。
 func (s *AuthService) findByAccount(ctx context.Context, target string) (*model.User, error) {
-	if strings.Contains(target, "@") {
-		return s.repo.FindByEmail(ctx, target)
+	if !strings.Contains(target, "@") {
+		return nil, nil
 	}
-	return s.repo.FindByPhone(ctx, target)
+	return s.repo.FindByEmail(ctx, target)
 }
 
 // SendResetCode 生成 6 位验证码并通过下发通道送出。

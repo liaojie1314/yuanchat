@@ -21,7 +21,7 @@ import (
 
 // UserService 可能返回的错误。
 var (
-	ErrDuplicateUser   = errors.New("phone or email already registered")
+	ErrDuplicateUser   = errors.New("email already registered")
 	ErrInvalidPassword = errors.New("invalid password")
 	ErrUserNotFound    = errors.New("user not found")
 	ErrInvalidRefresh  = errors.New("invalid or expired refresh token")
@@ -140,8 +140,8 @@ func NewUserService(repo *repository.UserRepository, jwtGen *jwt.Generator, sidG
 
 // RegisterRequest 是注册新账号的入参。
 //
-// 没有手机号：注册只认邮箱（验证码走 SMTP）。users.phone 列与按手机号
-// 登录都保留，仅供老账号使用，新账号的 phone 一律为 NULL。
+// 没有手机号：注册只认邮箱（验证码走 SMTP）。手机号已于迁移 021
+// 从数据库与登录链路一并移除，不再有任何兼容面。
 type RegisterRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
@@ -150,7 +150,7 @@ type RegisterRequest struct {
 
 // LoginRequest 是登录认证的入参。
 type LoginRequest struct {
-	Account  string `json:"account"` // phone or email
+	Account  string `json:"account"` // 邮箱或元聊号
 	Password string `json:"password"`
 }
 
@@ -177,8 +177,7 @@ func (s *UserService) Register(ctx context.Context, req RegisterRequest) (*AuthR
 	}
 
 	// 查重
-	// 注册不收手机号，手机号位传空串：phone 是 NULL 或真实号码，匹配不到空串
-	exists, err := s.repo.ExistsByPhoneOrEmail(ctx, "", req.Email)
+	exists, err := s.repo.ExistsByEmail(ctx, req.Email)
 	if err != nil {
 		return nil, fmt.Errorf("check duplicate: %w", err)
 	}
@@ -257,22 +256,17 @@ func (s *UserService) Login(ctx context.Context, req LoginRequest) (*AuthResult,
 		return nil, ErrAccountLocked
 	}
 
-	// 按手机号、邮箱或元聊号查用户
+	// 按邮箱或元聊号查用户。手机号已彻底移除（见迁移 021）：
+	// 含 @ 即邮箱，否则按元聊号解析 —— 登录框标的就是「邮箱 / 元聊号」。
 	var user *model.User
 
 	if strings.Contains(req.Account, "@") {
 		user, err = s.repo.FindByEmail(ctx, req.Account)
-	} else {
-		user, err = s.repo.FindByPhone(ctx, req.Account)
-		// 元聊号登录：登录框标的就是「元聊号」，设置页与名片页又把它做成可复制的身份，
-		// 用户自然会拿它来登录。先手机号后短号，反过来会让手机号登录白查一次；
-		// 两者也不会串：短号从 10000 起递增，要撞上 11 位手机号得有上百亿用户。
-		if err == nil && user == nil {
-			if shortID, convErr := strconv.ParseInt(req.Account, 10, 64); convErr == nil {
-				user, err = s.repo.FindByShortID(ctx, shortID)
-			}
-		}
+	} else if shortID, convErr := strconv.ParseInt(req.Account, 10, 64); convErr == nil {
+		user, err = s.repo.FindByShortID(ctx, shortID)
 	}
+	// 既不含 @ 又不是数字 → user 与 err 均为零值，下面统一按「用户不存在」处理，
+	// 并照既有口径计入失败计数（不计数的话「格式错」与「不存在」就成了枚举探针）
 	if err != nil {
 		return nil, fmt.Errorf("find user: %w", err)
 	}

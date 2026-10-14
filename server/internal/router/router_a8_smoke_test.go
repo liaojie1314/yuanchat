@@ -147,13 +147,13 @@ func TestA8AuthEndpointsSmoke(t *testing.T) {
 		wantMessage string
 	}{
 		{
-			name: "发码缺手机号是 400", method: http.MethodPost,
+			name: "发码缺账号是 400", method: http.MethodPost,
 			target: "/api/v1/auth/password/otp", body: `{}`,
 			wantStatus: http.StatusBadRequest, wantCode: 400, wantMessage: "auth.otpRequired",
 		},
 		{
 			name: "校验码缺字段是 400", method: http.MethodPost,
-			target: "/api/v1/auth/password/verify", body: `{"phone":"13800138000"}`,
+			target: "/api/v1/auth/password/verify", body: `{"account":"someone@example.com"}`,
 			wantStatus: http.StatusBadRequest, wantCode: 400, wantMessage: "auth.otpRequired",
 		},
 		{

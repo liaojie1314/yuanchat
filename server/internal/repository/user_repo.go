@@ -45,16 +45,6 @@ func (r *UserRepository) FindByIDs(ctx context.Context, ids []uuid.UUID) ([]mode
 	return users, err
 }
 
-// FindByPhone 按手机号查用户。
-func (r *UserRepository) FindByPhone(ctx context.Context, phone string) (*model.User, error) {
-	var user model.User
-	err := r.db.WithContext(ctx).First(&user, "phone = ?", phone).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	return &user, err
-}
-
 // FindByEmail 按邮箱查用户。
 func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*model.User, error) {
 	var user model.User
@@ -75,11 +65,14 @@ func (r *UserRepository) FindByShortID(ctx context.Context, shortID int64) (*mod
 	return &user, err
 }
 
-// ExistsByPhoneOrEmail 判断手机号或邮箱是否已被注册。
-func (r *UserRepository) ExistsByPhoneOrEmail(ctx context.Context, phone, email string) (bool, error) {
+// ExistsByEmail 判断邮箱是否已被注册。
+//
+// 签名从 ExistsByPhoneOrEmail(phone, email) 收窄而来：手机号已彻底移除，
+// 留一个恒传空串的参数位就是留个坑 —— 下一个人会以为它还有用。
+func (r *UserRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&model.User{}).
-		Where("phone = ? OR email = ?", phone, email).
+		Where("email = ?", email).
 		Count(&count).Error
 	return count > 0, err
 }

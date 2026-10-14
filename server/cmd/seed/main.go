@@ -37,16 +37,17 @@ import (
 )
 
 type seedUser struct {
-	phone    string
+	email    string
 	nickname string
 	role     int16
 }
 
+// seed 账号以邮箱为唯一键：手机号已于迁移 021 移除。
 var seedUsers = []seedUser{
-	{"13800000001", "Alice", model.RoleUser},
-	{"13800000002", "Bob", model.RoleUser},
-	{"13800000003", "Carol", model.RoleUser},
-	{"13800000009", "Admin", model.RoleAdmin},
+	{"alice@example.com", "Alice", model.RoleUser},
+	{"bob@example.com", "Bob", model.RoleUser},
+	{"carol@example.com", "Carol", model.RoleUser},
+	{"admin@example.com", "Admin", model.RoleAdmin},
 }
 
 const seedPassword = "Test@1234"
@@ -161,7 +162,7 @@ func main() {
 	fmt.Println("Seed 完成 ✔")
 	fmt.Println("测试账号（密码均为 Test@1234）：")
 	for i, u := range users {
-		fmt.Printf("  %-6s phone=%s short_id=%d id=%s\n", seedUsers[i].nickname, seedUsers[i].phone, u.ShortID, u.ID)
+		fmt.Printf("  %-6s email=%s short_id=%d id=%s\n", seedUsers[i].nickname, seedUsers[i].email, u.ShortID, u.ID)
 	}
 	fmt.Printf("单聊会话: %s\n群聊会话: %s\nBob-Carol 单聊: %s\n", privateConv.ID, groupConv.ID, bcConv.ID)
 	fmt.Println("好友：Alice↔Bob、Bob↔Carol；待处理申请：Carol → Alice")
@@ -174,7 +175,7 @@ func ensureUsers(ctx context.Context, db *gorm.DB) ([]*model.User, error) {
 
 	for _, su := range seedUsers {
 		var existing model.User
-		err := db.WithContext(ctx).First(&existing, "phone = ?", su.phone).Error
+		err := db.WithContext(ctx).First(&existing, "email = ?", su.email).Error
 		if err == nil {
 			result = append(result, &existing)
 			continue
@@ -192,9 +193,9 @@ func ensureUsers(ctx context.Context, db *gorm.DB) ([]*model.User, error) {
 			return nil, err
 		}
 
-		phone := su.phone
+		email := su.email
 		user := &model.User{
-			Phone:        &phone,
+			Email:        &email,
 			PasswordHash: hash,
 			ShortID:      sid,
 			Nickname:     su.nickname,

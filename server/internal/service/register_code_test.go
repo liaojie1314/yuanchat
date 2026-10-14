@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 )
 
@@ -62,27 +63,30 @@ func TestSendRegisterCodeRejectsNonEmail(t *testing.T) {
 	}
 }
 
-// 手机号走改密发码也必须在入口就被拒。
+// 非邮箱账号走改密发码必须在入口就被拒。
 //
-// 这不只是「发不出去」：放手机号进来的话，已注册的手机号会一路走到 Send 才失败并返回
-// 500，而未注册的手机号在查库那步静默返回 204 —— 两种响应不同，接口就成了
-// 「这个手机号是否注册」的探测器。所以必须在查库**之前**按同一个错误拒掉，
-// 本用例特意用一个**已注册**的手机号，确保拒绝发生在查库之前。
-func TestSendResetCodeRejectsPhone(t *testing.T) {
+// 这不只是「发不出去」：放非邮箱账号进来的话，已注册的账号会一路走到 Send 才失败并返回
+// 500，而未注册的在查库那步静默返回 204 —— 两种响应不同，接口就成了
+// 「这个账号是否注册」的探测器。所以必须在查库**之前**按同一个错误拒掉，
+// 本用例特意用一个**已注册**的元聊号，确保拒绝发生在查库之前。
+//
+// 原先这条用的是已注册的手机号；手机号于迁移 021 移除后，元聊号是唯一还能
+// 「既已注册又不是邮箱」的账号形态，拿它钉同一个不变量。
+func TestSendResetCodeRejectsNonEmail(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
-	// 用一个**已注册**的手机号：拒绝必须发生在查库之前，否则就有响应差异
-	user, _ := f.seedResetUser(t, "手机号用户")
-	phone := *user.Phone
+	// 用一个**已注册**的元聊号：拒绝必须发生在查库之前，否则就有响应差异
+	user, _ := f.seedResetUser(t, "元聊号用户")
+	shortID := strconv.FormatInt(user.ShortID, 10)
 
-	if err := f.svc.SendResetCode(ctx, phone); !errors.Is(err, ErrTargetNotEmail) {
+	if err := f.svc.SendResetCode(ctx, shortID); !errors.Is(err, ErrTargetNotEmail) {
 		t.Fatalf("err = %v，期望 ErrTargetNotEmail", err)
 	}
 	if f.sender.count() != 0 {
 		t.Fatal("非邮箱不应触发下发")
 	}
 	// 冷却键也不能留下：否则用户换成邮箱重试还要白等 60 秒
-	if f.exists(t, "auth:pwd:otp:cd:"+phone) {
+	if f.exists(t, "auth:pwd:otp:cd:"+shortID) {
 		t.Error("入口拒绝不应写冷却键")
 	}
 }

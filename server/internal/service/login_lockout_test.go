@@ -42,7 +42,7 @@ func newLoginFixture(t *testing.T) *loginFixture {
 	if err := db.Model(user).Update("password_hash", hash).Error; err != nil {
 		t.Fatalf("写入密码哈希: %v", err)
 	}
-	return &loginFixture{svc: svc, rdb: rdb, mr: mr, db: db, account: *user.Phone}
+	return &loginFixture{svc: svc, rdb: rdb, mr: mr, db: db, account: *user.Email}
 }
 
 // login 用给定密码尝试登录夹具里的账号。

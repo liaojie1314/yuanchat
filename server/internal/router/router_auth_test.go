@@ -108,10 +108,10 @@ func authTestDB(t *testing.T) *gorm.DB {
 // newBannedUser 建一个被封禁的一次性用户，用后删除。
 func newBannedUser(t *testing.T, db *gorm.DB) *model.User {
 	t.Helper()
-	phone := fmt.Sprintf("198%08d", time.Now().UnixNano()%100000000)
+	email := fmt.Sprintf("banned-%d@test.local", time.Now().UnixNano())
 	user := &model.User{
 		ID:           uuid.New(),
-		Phone:        &phone,
+		Email:        &email,
 		PasswordHash: "x",
 		ShortID:      time.Now().UnixNano() % 1_000_000_000,
 		Nickname:     "banned-refresh",
@@ -153,20 +153,17 @@ func TestRefreshBannedUserReturns403(t *testing.T) {
 
 // newResetUser 建一个已知明文密码的一次性用户，用后删除。
 //
-// 手机号与邮箱都落库：手机号仍是合法的登录账号（老账号得继续能登），
-// 邮箱则是找回密码唯一的发码目标 —— 验证码通道只有 SMTP，
-// 故第二个返回值给的是邮箱。
+// 邮箱既是登录账号也是找回密码唯一的发码目标（验证码通道只有 SMTP），
+// 故第二个返回值给的就是它。
 func newResetUser(t *testing.T, db *gorm.DB, plain string) (*model.User, string) {
 	t.Helper()
 	hash, err := password.Hash(plain)
 	if err != nil {
 		t.Fatalf("hash password: %v", err)
 	}
-	phone := fmt.Sprintf("197%08d", time.Now().UnixNano()%100000000)
 	email := fmt.Sprintf("reset-%d@example.com", time.Now().UnixNano())
 	user := &model.User{
 		ID:           uuid.New(),
-		Phone:        &phone,
 		Email:        &email,
 		PasswordHash: hash,
 		ShortID:      time.Now().UnixNano() % 1_000_000_000,
@@ -177,7 +174,7 @@ func newResetUser(t *testing.T, db *gorm.DB, plain string) (*model.User, string)
 		t.Fatalf("create user: %v", err)
 	}
 	t.Cleanup(func() {
-		db.Exec("DELETE FROM verification_codes WHERE target IN (?, ?)", phone, email)
+		db.Exec("DELETE FROM verification_codes WHERE target = ?", email)
 		db.Unscoped().Delete(user)
 	})
 	return user, email
@@ -240,11 +237,11 @@ func TestForgotPasswordFlowChangesPassword(t *testing.T) {
 
 	// 旧密码必须失效，否则「重置成功」依旧是假的。
 	// 这里用手机号登录：发码只走邮箱，但老账号仍要能用手机号登录，顺带守住这一点
-	phone := *user.Phone
-	if w := postJSON(r, "/api/v1/auth/login", `{"account":"`+phone+`","password":"`+oldPassword+`"}`); w.Code != http.StatusUnauthorized {
+	account := *user.Email
+	if w := postJSON(r, "/api/v1/auth/login", `{"account":"`+account+`","password":"`+oldPassword+`"}`); w.Code != http.StatusUnauthorized {
 		t.Fatalf("旧密码登录 status = %d, want 401, body=%s", w.Code, w.Body.String())
 	}
-	if w := postJSON(r, "/api/v1/auth/login", `{"account":"`+phone+`","password":"`+newPassword+`"}`); w.Code != http.StatusOK {
+	if w := postJSON(r, "/api/v1/auth/login", `{"account":"`+account+`","password":"`+newPassword+`"}`); w.Code != http.StatusOK {
 		t.Fatalf("新密码登录 status = %d, want 200, body=%s", w.Code, w.Body.String())
 	}
 }
@@ -308,16 +305,16 @@ func TestLoginLocksAccountAfterFiveFailures(t *testing.T) {
 	r, _ := Setup(db, rdb, nil, cfg, zap.NewNop(), &recordingSender{})
 
 	user, _ := newResetUser(t, db, goodPassword)
-	phone := *user.Phone
+	account := *user.Email
 
 	for i := 0; i < 5; i++ {
-		w := postJSON(r, "/api/v1/auth/login", `{"account":"`+phone+`","password":"`+badPassword+`"}`)
+		w := postJSON(r, "/api/v1/auth/login", `{"account":"`+account+`","password":"`+badPassword+`"}`)
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("第 %d 次错误密码 status = %d, want 401, body=%s", i+1, w.Code, w.Body.String())
 		}
 	}
 
-	w := postJSON(r, "/api/v1/auth/login", `{"account":"`+phone+`","password":"`+goodPassword+`"}`)
+	w := postJSON(r, "/api/v1/auth/login", `{"account":"`+account+`","password":"`+goodPassword+`"}`)
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("锁定后 status = %d, want 429, body=%s", w.Code, w.Body.String())
 	}

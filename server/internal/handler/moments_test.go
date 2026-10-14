@@ -31,10 +31,10 @@ func momentsTestDB(t *testing.T) *gorm.DB {
 // newMomentsTestUser 建一次性用户（handler 层用例）。
 func newMomentsTestUser(t *testing.T, db *gorm.DB, tag string) *model.User {
 	t.Helper()
-	phone := fmt.Sprintf("199%08d", time.Now().UnixNano()%100000000)
+	email := fmt.Sprintf("moments-u%d@test.local", time.Now().UnixNano())
 	user := &model.User{
 		ID:           uuid.New(),
-		Phone:        &phone,
+		Email:        &email,
 		PasswordHash: "x",
 		ShortID:      time.Now().UnixNano()%1_000_000_000 + int64(len(tag)),
 		Nickname:     tag,

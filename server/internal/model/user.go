@@ -10,7 +10,6 @@ import (
 // User 用户模型
 type User struct {
 	ID           uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	Phone        *string        `gorm:"type:varchar(20);uniqueIndex" json:"phone,omitempty"`
 	Email        *string        `gorm:"type:varchar(255);uniqueIndex" json:"email,omitempty"`
 	PasswordHash string         `gorm:"type:varchar(255);not null" json:"-"`
 	ShortID      int64          `gorm:"type:bigint;uniqueIndex;not null" json:"short_id"` // QQ 号风格短号
