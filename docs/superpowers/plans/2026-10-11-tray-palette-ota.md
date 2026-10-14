@@ -10,6 +10,47 @@
 
 **Spec:** [`docs/superpowers/specs/2026-10-11-tray-palette-ota-design.md`](../specs/2026-10-11-tray-palette-ota-design.md)
 
+## 执行进度
+
+截至 2026-10-14，分支 `feature/tray-palette-ota`。工作区干净，本地已验：
+`go vet ./...` / `go build ./...` / `node scripts/check-i18n.mjs`（803 key × 4 语）全绿，
+OTA 与搜索相关的 service / handler / repository 测试全绿。
+
+| Task | 状态      | Commit                                                                 |
+| ---- | --------- | ---------------------------------------------------------------------- |
+| 1    | ✅        | `37225ea` + `5ecb922` + `1a33f81`（研究文档，另见下方「Task 1 结论」） |
+| 2    | ✅        | `352f7c8`                                                              |
+| 3    | ✅        | `6af4fe1`                                                              |
+| 9    | ✅        | `10826ff`                                                              |
+| 10   | ✅        | `dddf29c`                                                              |
+| 16   | ✅        | `90e1fcf`                                                              |
+| 17   | ✅        | `cd218de`                                                              |
+| 18   | ✅        | `e3d9fb2`                                                              |
+| 其余 | ⬜ 未开始 | Task 4-8、11-15、19-21                                                 |
+
+另有 `200ed6c`：预先画好 Task 14 要用的 Windows 叠加角标红点图标
+（`icons/badge-dot-16.png` / `badge-dot-32.png`）。
+
+**下次从 Task 4 继续**（Stage B 应用内下载），前端系列为 Task 4-8、11-15、19-20，
+收口为 Task 21。
+
+### Task 1 结论对后续任务的修正（务必先读研究文档）
+
+[`docs/superpowers/research/2026-10-11-android-fileprovider-preflight.md`](../research/2026-10-11-android-fileprovider-preflight.md)
+
+- **Task 6**：`capabilities/desktop.json` **也**要加 fs 落盘权限（`fs:default` 是只读的，
+  本计划原先只写了 `mobile.json`，是疏漏）；`gen/android` 的清单与 `file_paths.xml`
+  都已被 git 跟踪，直接改即可；需补 `REQUEST_INSTALL_PACKAGES` 权限。
+- **Task 14**：`Cargo.toml` 的 tauri features 要加 **`image-png`**，否则 Windows
+  `setOverlayIcon` 运行时失败。角标按平台分支：`setBadgeCount` Windows 不支持、
+  `setBadgeLabel` 仅 macOS、`setOverlayIcon` 仅 Windows。
+- **Task 19**：Android 的 `BaseDirectory.Download` 落在 app 私有外部存储
+  （`Android/data/<pkg>/files/Download`），零权限但文件管理器不可见；
+  updater 自建端点返 **204 会让它直接停下、不再试 GitHub 兜底**，
+  只有 5xx 才回落。
+- **Task 21**：`/usr/share/applications/yuanchat.desktop` 已安装，Linux 角标不必重打 `.deb`；
+  安卓实测有现成 AVD `Medium_Phone`，不必连 USB。
+
 ## Global Constraints
 
 - **分支**：`feature/tray-palette-ota`，自 `dev` 切出，完成后 `--no-ff` 合回 `dev`。禁止 squash。
