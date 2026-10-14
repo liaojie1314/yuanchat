@@ -728,14 +728,23 @@ type MessageSearchResult struct {
 	Excerpt        string    `json:"excerpt"`
 	CreatedAt      time.Time `json:"created_at"`
 	Seq            int64     `json:"seq"`
+	// MessageType 消息类型（对应 model.MessageType），前端据此分组与选图标。
+	MessageType int16 `json:"message_type"`
+	// FileName 图片/文件/视频的原始文件名；文本消息为空。
+	FileName string `json:"file_name,omitempty"`
+	// ObjectKey 对象键，用于出缩略图；文本消息为空。
+	ObjectKey string `json:"object_key,omitempty"`
 }
 
 // Search 全文搜索消息，返回最多 limit 条按时间倒序的结果。
+//
+// types 非空时限定消息类型（前端的「文件/图片/视频/语音」筛选器），为空不过滤。
 func (s *MessageService) Search(
 	ctx context.Context,
 	userID uuid.UUID,
 	query string,
 	convIDStr string,
+	types []int16,
 	beforeStr string,
 	limit int,
 ) ([]MessageSearchResult, bool, error) {
@@ -764,7 +773,7 @@ func (s *MessageService) Search(
 		beforeTime = &t
 	}
 
-	rows, err := s.msgRepo.Search(ctx, userID, query, convID, beforeTime, limit+1)
+	rows, err := s.msgRepo.Search(ctx, userID, query, convID, types, beforeTime, limit+1)
 	if err != nil {
 		return nil, false, err
 	}
@@ -778,9 +787,17 @@ func (s *MessageService) Search(
 	for _, row := range rows {
 		var content struct {
 			Text string `json:"text"`
+			Name string `json:"name"`
+			Key  string `json:"key"`
 		}
+		// 脏 content 不让整页失败：搜索是浏览视图，取不到字段就当空值。
 		_ = json.Unmarshal([]byte(row.Content), &content)
-		excerpt := []rune(content.Text)
+		// 文件类消息没有 text，摘要退回文件名 —— 否则列表里是一行空白。
+		raw := content.Text
+		if raw == "" {
+			raw = content.Name
+		}
+		excerpt := []rune(raw)
 		if len(excerpt) > 120 {
 			excerpt = append(excerpt[:120], []rune("…")...)
 		}
@@ -792,6 +809,9 @@ func (s *MessageService) Search(
 			Excerpt:        string(excerpt),
 			CreatedAt:      row.CreatedAt,
 			Seq:            row.Seq,
+			MessageType:    row.MessageType,
+			FileName:       content.Name,
+			ObjectKey:      content.Key,
 		})
 	}
 	return results, hasMore, nil

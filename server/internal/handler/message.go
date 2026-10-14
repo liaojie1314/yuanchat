@@ -414,6 +414,7 @@ func (h *MessageHandler) Search(c *gin.Context) {
 		userID,
 		q,
 		c.Query("conversation_id"),
+		nil,
 		c.Query("before"),
 		limit,
 	)

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -463,4 +464,193 @@ func TestCreateWithSeqIdempotent(t *testing.T) {
 			}
 		}
 	})
+}
+
+// ========================================
+// Search —— 文件名检索 / 类型过滤 / LIKE 通配符
+// ========================================
+
+// seedSearchFixture 建一个「用户 + 自己是成员的群会话」，用后清理。
+//
+// 夹具必须自清理：本包测试直连测试库，不清理会把测试数据留给后续用例，
+// 让「命中几条」这类断言随执行顺序飘。
+func seedSearchFixture(t *testing.T, db *gorm.DB) (*model.User, *model.Conversation) {
+	t.Helper()
+	u := newTestUser(t, db, "search")
+	conv := &model.Conversation{Type: model.ConversationTypeGroup, LastSeq: 0}
+	if err := db.Create(conv).Error; err != nil {
+		t.Fatalf("create conv: %v", err)
+	}
+	if err := db.Create(&model.ConversationMember{ConversationID: conv.ID, UserID: u.ID}).Error; err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM messages WHERE conversation_id = ?`, conv.ID)
+		db.Exec(`DELETE FROM conversation_members WHERE conversation_id = ?`, conv.ID)
+		db.Unscoped().Delete(conv)
+	})
+	return u, conv
+}
+
+// seedSearchMessage 往夹具会话里插一条消息，seq 自增。
+func seedSearchMessage(
+	t *testing.T, db *gorm.DB,
+	conv *model.Conversation, u *model.User,
+	msgType int16, content string,
+) *model.Message {
+	t.Helper()
+	conv.LastSeq++
+	msg := &model.Message{
+		ConversationID: conv.ID,
+		SenderID:       u.ID,
+		Seq:            conv.LastSeq,
+		MessageType:    msgType,
+		Content:        content,
+		Status:         model.MessageStatusNormal,
+	}
+	if err := db.Create(msg).Error; err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+	return msg
+}
+
+func seedTextMessage(t *testing.T, db *gorm.DB, conv *model.Conversation, u *model.User, text string) *model.Message {
+	t.Helper()
+	body, err := json.Marshal(map[string]string{"text": text})
+	if err != nil {
+		t.Fatalf("marshal text content: %v", err)
+	}
+	return seedSearchMessage(t, db, conv, u, model.MessageTypeText, string(body))
+}
+
+func seedFileMessage(t *testing.T, db *gorm.DB, conv *model.Conversation, u *model.User, name string) *model.Message {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"name": name, "key": "files/" + name, "size": 1024})
+	if err != nil {
+		t.Fatalf("marshal file content: %v", err)
+	}
+	return seedSearchMessage(t, db, conv, u, model.MessageTypeFile, string(body))
+}
+
+func seedE2EEMessage(t *testing.T, db *gorm.DB, conv *model.Conversation, u *model.User) *model.Message {
+	t.Helper()
+	// name 里刻意放上关键词：本 Task 新加的文件名 OR 分支本来就能命中它，
+	// 排除必须靠类型条件而不是靠「内容碰不上」
+	return seedSearchMessage(t, db, conv, u, model.MessageTypeE2EE, `{"cipher":"xxx","name":"aaa.pdf"}`)
+}
+
+// TestSearch_LikeWildcardsAreLiteral LIKE 通配符必须按字面量搜。
+//
+// 用户输入直接拼进 ILIKE 模式时，搜一个 % 就等于 ILIKE '%%%' —— 整张表被捞出来。
+// 本 Task 给检索条件加了文件名 OR 分支后这个代价还要翻倍，所以必须同批转义。
+func TestSearch_LikeWildcardsAreLiteral(t *testing.T) {
+	db := testDB(t)
+	repo := NewMessageRepository(db)
+	ctx := context.Background()
+
+	u, conv := seedSearchFixture(t, db)
+	seedTextMessage(t, db, conv, u, "季度报告 100% 完成")
+	seedTextMessage(t, db, conv, u, "无关消息甲")
+	seedTextMessage(t, db, conv, u, "无关消息乙")
+
+	got, err := repo.Search(ctx, u.ID, "100%", nil, nil, nil, 20)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("搜 \"100%%\" 应只命中 1 条，实际 %d 条", len(got))
+	}
+	if !strings.Contains(got[0].Content, "100%") {
+		t.Fatalf("命中了错误的消息: %s", got[0].Content)
+	}
+
+	// 单独搜通配符不应该把全部消息都捞出来
+	got, err = repo.Search(ctx, u.ID, "%%%", nil, nil, nil, 20)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("通配符被当成模式解释了，捞出 %d 条消息", len(got))
+	}
+
+	// 下划线同理（LIKE 里 _ 匹配任意单字符）
+	seedTextMessage(t, db, conv, u, "a_b 的配置")
+	seedTextMessage(t, db, conv, u, "axb 不该被命中")
+	got, err = repo.Search(ctx, u.ID, "a_b", nil, nil, nil, 20)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("搜 \"a_b\" 应只命中 1 条，实际 %d 条", len(got))
+	}
+}
+
+// TestSearch_MatchesFileName 文件名此前压根没进 WHERE —— 这是「搜不到文件」的根因。
+func TestSearch_MatchesFileName(t *testing.T) {
+	db := testDB(t)
+	repo := NewMessageRepository(db)
+	ctx := context.Background()
+
+	u, conv := seedSearchFixture(t, db)
+	seedFileMessage(t, db, conv, u, "季度财报.xlsx")
+	seedTextMessage(t, db, conv, u, "纯文本消息")
+
+	got, err := repo.Search(ctx, u.ID, "财报", nil, nil, nil, 20)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("按文件名应命中 1 条，实际 %d 条", len(got))
+	}
+	if got[0].MessageType != model.MessageTypeFile {
+		t.Fatalf("命中类型 = %d，want %d", got[0].MessageType, model.MessageTypeFile)
+	}
+}
+
+// TestSearch_TypeFilter types 非空时限定类型，为空表示不过滤。
+func TestSearch_TypeFilter(t *testing.T) {
+	db := testDB(t)
+	repo := NewMessageRepository(db)
+	ctx := context.Background()
+
+	u, conv := seedSearchFixture(t, db)
+	seedFileMessage(t, db, conv, u, "报告.pdf")
+	seedTextMessage(t, db, conv, u, "报告写完了")
+
+	onlyFiles, err := repo.Search(ctx, u.ID, "报告", nil, []int16{model.MessageTypeFile}, nil, 20)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(onlyFiles) != 1 {
+		t.Fatalf("只筛文件应命中 1 条，实际 %d 条", len(onlyFiles))
+	}
+	if onlyFiles[0].MessageType != model.MessageTypeFile {
+		t.Fatalf("命中类型 = %d，want %d", onlyFiles[0].MessageType, model.MessageTypeFile)
+	}
+
+	all, err := repo.Search(ctx, u.ID, "报告", nil, nil, nil, 20)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("空 types 应不过滤，期望 2 条，实际 %d 条", len(all))
+	}
+}
+
+// TestSearch_E2EEStillExcludedWithTypeFilter 加过滤不能顺手放宽可见性口径。
+func TestSearch_E2EEStillExcludedWithTypeFilter(t *testing.T) {
+	db := testDB(t)
+	repo := NewMessageRepository(db)
+	ctx := context.Background()
+
+	u, conv := seedSearchFixture(t, db)
+	seedE2EEMessage(t, db, conv, u)
+
+	got, err := repo.Search(ctx, u.ID, "aaa", nil, []int16{model.MessageTypeE2EE}, nil, 20)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("E2EE 消息必须始终排除，实际命中 %d 条", len(got))
+	}
 }
