@@ -125,6 +125,8 @@ func Setup(
 	pushH := handler.NewPushHandler(pushSvc, logger)
 	// 概览的推送订阅视图与用户侧订阅读写同一张表
 	adminSvc.SetPushRepo(pushRepo)
+	// 版本分发：未注入时相关端点明确返 503，不静默把发布关掉
+	adminSvc.SetReleaseRepo(releaseRepo)
 
 	e2eeH := handler.NewE2EEHandler(repository.NewE2EERepository(db), logger)
 
@@ -476,6 +478,8 @@ func Setup(
 		admin.POST("/sticker-packs/:id/untakedown", adminH.UntakeDownStickerPack)
 		admin.POST("/sticker-packs/:id/official", adminH.SetStickerPackOfficial)
 		admin.DELETE("/sticker-packs/:id/flag", adminH.ClearStickerPackFlag)
+		// OTA 版本分发：登记 / 改配 / 发布 / 回滚全部留审计日志
+		handler.RegisterAdminReleaseRoutes(admin, adminH)
 		admin.GET("/reports", adminH.ListReports)
 		admin.POST("/reports/:id/handle", adminH.HandleReport)
 		admin.GET("/messages/:id/media", adminH.MessageMedia)

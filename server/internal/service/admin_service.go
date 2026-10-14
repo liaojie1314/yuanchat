@@ -25,7 +25,9 @@ type AdminService struct {
 	ugcRepo  *repository.FlaggedUGCRepository
 	// pushRepo 推送订阅仓库（SetPushRepo 注入，可为 nil）：概览订阅视图用
 	pushRepo *repository.PushRepository
-	logger   *zap.Logger
+	// releaseRepo OTA 版本仓储（SetReleaseRepo 注入，可为 nil）：版本分发页用
+	releaseRepo *repository.ReleaseRepository
+	logger      *zap.Logger
 }
 
 func NewAdminService(
