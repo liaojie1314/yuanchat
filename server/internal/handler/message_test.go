@@ -350,3 +350,78 @@ func TestHistoryAfterSeq(t *testing.T) {
 		}
 	})
 }
+
+// ========================================
+// Search —— types 查询参数
+// ========================================
+
+// newSearchEngine 把搜索端点挂到独立 gin 引擎上，以中间件模拟 AuthRequired
+// 注入 user_id。搜索是只读端点，dispatcher 传 nil。
+func newSearchEngine(db *gorm.DB, userID uuid.UUID) *gin.Engine {
+	svc := service.NewMessageService(
+		repository.NewMessageRepository(db),
+		repository.NewConversationRepository(db),
+		repository.NewUserRepository(db),
+		repository.NewReactionRepository(db),
+		repository.NewBlocklistRepository(db),
+		zap.NewNop(),
+	)
+	h := NewMessageHandler(svc, nil, zap.NewNop())
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set("user_id", userID)
+		c.Next()
+	})
+	r.GET("/api/v1/messages/search", h.Search)
+	return r
+}
+
+func doSearch(t *testing.T, r *gin.Engine, target string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+// TestSearchRejectsUnknownType 未知类型必须 400 而非静默忽略。
+//
+// 静默忽略会让前端以为筛选生效了，用户看到的是「筛了文件却还是混着文本」。
+func TestSearchRejectsUnknownType(t *testing.T) {
+	db := packTestDB(t)
+	u := newPackTestUser(t, db, "搜索用户")
+	r := newSearchEngine(db, u.ID)
+
+	w := doSearch(t, r, "/api/v1/messages/search?q=abc&types=file,banana")
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestSearchAcceptsKnownTypes 六个已知类型名全部放行。
+func TestSearchAcceptsKnownTypes(t *testing.T) {
+	db := packTestDB(t)
+	u := newPackTestUser(t, db, "搜索用户")
+	r := newSearchEngine(db, u.ID)
+
+	w := doSearch(t, r, "/api/v1/messages/search?q=abc&types=text,image,file,voice,video,sticker")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestSearchEmptyTypesMeansNoFilter 不传 types 等于不过滤，不是 400。
+func TestSearchEmptyTypesMeansNoFilter(t *testing.T) {
+	db := packTestDB(t)
+	u := newPackTestUser(t, db, "搜索用户")
+	r := newSearchEngine(db, u.ID)
+
+	for _, target := range []string{
+		"/api/v1/messages/search?q=abc",
+		"/api/v1/messages/search?q=abc&types=",
+	} {
+		if w := doSearch(t, r, target); w.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200, body=%s", target, w.Code, w.Body.String())
+		}
+	}
+}

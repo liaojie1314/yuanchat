@@ -736,6 +736,57 @@ const MOCK_MOMENT_ACTIVITIES = [
 // 处理器
 // ========================================
 
+/** 对外类型名 → message_type，与后端 handler 的 searchTypeNames 同构 */
+const SEARCH_TYPE_IDS: Record<string, number> = {
+  text: 1,
+  image: 2,
+  file: 3,
+  voice: 4,
+  video: 5,
+  sticker: 8,
+};
+
+/**
+ * 搜索结果 mock：至少覆盖 text / file / image 三类。
+ * image 带 object_key，让缩略图那条路径也在 mock 覆盖之内。
+ */
+const MOCK_SEARCH_RESULTS = [
+  {
+    message_id: "msg_search_1",
+    conversation_id: "conv_001",
+    conv_name: "产品讨论组",
+    sender_nickname: "李明",
+    excerpt: "季度报告写完了，下午发群里",
+    created_at: "2026-10-10T08:30:00Z",
+    seq: 128,
+    message_type: 1,
+  },
+  {
+    message_id: "msg_search_2",
+    conversation_id: "conv_001",
+    conv_name: "产品讨论组",
+    sender_nickname: "王芳",
+    excerpt: "季度财报.xlsx",
+    created_at: "2026-10-09T14:05:00Z",
+    seq: 115,
+    message_type: 3,
+    file_name: "季度财报.xlsx",
+    object_key: "files/2026/10/季度财报.xlsx",
+  },
+  {
+    message_id: "msg_search_3",
+    conversation_id: "conv_002",
+    conv_name: "张伟",
+    sender_nickname: "张伟",
+    excerpt: "报告封面.png",
+    created_at: "2026-10-08T03:12:00Z",
+    seq: 42,
+    message_type: 2,
+    file_name: "报告封面.png",
+    object_key: "images/2026/10/cover.png",
+  },
+];
+
 export const handlers = [
   // --------------------------------------------------
   // 认证 — 登录
@@ -1136,6 +1187,37 @@ export const handlers = [
     if (!mockMyStickers.some((s) => s.id === id)) return apiError(40401, "sticker not found");
     mockMyStickers = mockMyStickers.filter((s) => s.id !== id);
     return apiOk({ message: "removed" });
+  }),
+
+  // --------------------------------------------------
+  // 消息搜索 — 全局 / 会话内，带类型筛选
+  // GET /api/v1/messages/search
+  //
+  // 四态开关走关键词，不另开 query 参数：命令面板只有一个输入框，
+  // 用关键词触发才测得到真实链路。
+  //   正常 → 任意关键词；空 → 含 "nomatch"；错误 → 含 "boom"；加载 → 含 "slow"
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/messages/search", async ({ request }) => {
+    const qs = new URL(request.url).searchParams;
+    const q = qs.get("q") ?? "";
+    const types = (qs.get("types") ?? "").split(",").filter(Boolean);
+
+    if (q.includes("boom")) return apiError(500, "search failed");
+    if (q.includes("slow")) await delay(1500);
+    else await delay(150);
+    if (q.includes("nomatch")) return apiOk({ results: [], has_more: false });
+
+    // 未知类型与服务端同口径返 400，否则前端以为筛选生效了。
+    // 这里传 400 而不是 4xxxx 业务码：apiError 用业务码挑 HTTP 状态，
+    // 五位业务码会被判成 >= 500 而映射到 HTTP 500（本文件既有的坑）。
+    const unknown = types.find((t) => !(t in SEARCH_TYPE_IDS));
+    if (unknown) return apiError(400, "unknown message type: " + unknown);
+
+    const wanted = new Set(types.map((t) => SEARCH_TYPE_IDS[t]));
+    const results = wanted.size
+      ? MOCK_SEARCH_RESULTS.filter((r) => wanted.has(r.message_type))
+      : MOCK_SEARCH_RESULTS;
+    return apiOk({ results, has_more: false });
   }),
 
   // --------------------------------------------------

@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/yuanchat/server/internal/middleware"
+	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/repository"
 	"github.com/yuanchat/server/internal/service"
 	"github.com/yuanchat/server/internal/ws"
@@ -384,6 +385,21 @@ func (h *MessageHandler) React(c *gin.Context) {
 	Success(c, gin.H{"emoji": result.Emoji, "count": result.Count, "reacted": result.Reacted})
 }
 
+// searchTypeNames 把对外的类型名映射到内部 message_type。
+//
+// 对外用名字而不是裸数字：数字是内部实现细节，写进 URL 就固化成了契约，
+// 以后插一个新类型会把客户端的 URL 全打乱。
+//
+// system 与 e2ee 刻意不在表里：系统消息不是用户内容，E2EE 密文服务端读不了。
+var searchTypeNames = map[string]int16{
+	"text":    model.MessageTypeText,
+	"image":   model.MessageTypeImage,
+	"file":    model.MessageTypeFile,
+	"voice":   model.MessageTypeVoice,
+	"video":   model.MessageTypeVideo,
+	"sticker": model.MessageTypeSticker,
+}
+
 // Search 全文搜索当前用户有权访问的消息。
 //
 //	@Summary		搜索消息
@@ -391,6 +407,7 @@ func (h *MessageHandler) React(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Param			q				query	string	true	"搜索关键词（至少 3 字）"
 //	@Param			conversation_id	query	string	false	"限定在该会话内搜索"
+//	@Param			types			query	string	false	"类型过滤（逗号分隔：text,image,file,voice,video,sticker）"
 //	@Param			before			query	string	false	"分页游标（RFC3339）"
 //	@Param			limit			query	int		false	"每页条数（默认 20，上限 50）"
 //	@Success		200	{object}	Response
@@ -408,13 +425,31 @@ func (h *MessageHandler) Search(c *gin.Context) {
 		return
 	}
 
+	var types []int16
+	if raw := strings.TrimSpace(c.Query("types")); raw != "" {
+		for _, name := range strings.Split(raw, ",") {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			mt, ok := searchTypeNames[name]
+			if !ok {
+				// 不静默忽略：前端会以为筛选生效了，用户看到的是
+				// 「筛了文件却还是混着文本」
+				BadRequest(c, "unknown message type: "+name)
+				return
+			}
+			types = append(types, mt)
+		}
+	}
+
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	results, hasMore, err := h.svc.Search(
 		c.Request.Context(),
 		userID,
 		q,
 		c.Query("conversation_id"),
-		nil,
+		types,
 		c.Query("before"),
 		limit,
 	)
