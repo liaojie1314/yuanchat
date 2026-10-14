@@ -441,3 +441,44 @@ tauri = { version = "2.11.2", features = ["tray-icon", "image-png"] }
 - Task 14：`Cargo.toml` 加 `image-png` feature；权限按 5.1 的清单进 `desktop.json`；
   按 5.5 的矩阵写平台分支。
 - 本批不新增任何 npm 包与 crate。
+
+---
+
+## 6. 附带核实：Task 21 实测环境就绪情况
+
+实测环节（Task 21）要四端跑真实后端，先把环境摸清，免得到那一步才发现缺东西。
+
+| 项目               | 状态 | 实际位置 / 备注                                                                                                                      |
+| ------------------ | ---- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| PostgreSQL         | ✅   | 容器 `yuanchat-postgres`，宿主 **5434**                                                                                              |
+| Redis              | ✅   | 容器 `yuanchat-redis`，宿主 **6380**                                                                                                 |
+| MinIO              | ❌   | 未启动，实测前需 `deploy/docker-compose.yml` 起（文件下载链路必需）                                                                  |
+| Playwright 浏览器  | ✅   | `~/env/playwright`（chromium-1228 / webkit-2311）                                                                                    |
+| Linux 托盘宿主     | ✅   | `libayatana-appindicator3.so.1` + GNOME 扩展 `ubuntu-appindicators@ubuntu.com`                                                       |
+| Linux 角标前置条件 | ✅   | `/usr/share/applications/yuanchat.desktop` **已安装**（`Name=yuanchat`、`Exec=yuanchat-desktop`、`StartupWMClass=yuanchat-desktop`） |
+| `adb`              | ✅   | `~/env/Android/Sdk/platform-tools/adb`（1.0.41），**不在默认 PATH**，`ANDROID_HOME` 已设                                             |
+| Android 模拟器     | ✅   | AVD **`Medium_Phone`** 可用                                                                                                          |
+| Windows / macOS    | ❌   | 无测试设备，按 spec 说明登记为未实测                                                                                                 |
+
+两条对 plan 的修正：
+
+1. **Linux 角标不必重装 `.deb`。** 原先的判断是「`setBadgeCount` 需要已安装的
+   `yuanchat.desktop`，所以得装 `.deb` 而不能用 `tauri dev`」。实际上该 desktop
+   entry **早就装在 `/usr/share/applications/` 了**（上一次 `.deb` 安装留下的），
+   所以 `pnpm dev:desktop` 下就能验角标。真机验证还是要装 `.deb` 走一遍完整路径，
+   但调试阶段不用每改一行就重打包。
+2. **安卓实测走模拟器，不必连 USB。** 有现成 AVD `Medium_Phone`。
+   用户那条「需要提前叫我连接 USB」只在模拟器覆盖不了时才触发 ——
+   OTA 的 FileProvider + `ACTION_VIEW` 安装流程模拟器完全能跑。
+
+实测前的启动顺序（Task 21 照抄）：
+
+```bash
+# 1. 基础设施（含 minio）
+pnpm dev:server          # 或先 docker compose -f deploy/docker-compose.yml up -d
+# 2. 安卓
+export ANDROID_HOME=~/env/Android/Sdk
+export PATH="$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator"
+emulator -avd Medium_Phone &
+adb wait-for-device
+```
