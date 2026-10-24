@@ -39,6 +39,14 @@ export * from "./crypto/keyBackup";
 export * from "./api/e2ee";
 export { setNotifier, notifyIncoming, __resetNotifier } from "./notify";
 export { setUrlOpener, openExternal, __resetUrlOpener } from "./openExternal";
+export {
+  setFileSink,
+  getFileSink,
+  __resetFileSink,
+  uniqueFileName,
+  type FileSink,
+  type SinkDir,
+} from "./download/fileSink";
 export { applyConversationSetting } from "./conversationSettings";
 export {
   setRefreshHandler,
