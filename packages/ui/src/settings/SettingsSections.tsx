@@ -330,7 +330,7 @@ export function AboutSection({ extra }: { extra?: ReactNode } = {}) {
         <InfoRow
           icon={Globe}
           label={t("settings.officialSite")}
-          value="yuanchat.example.com"
+          value="chat.yuanyuan.blog"
           copyable
         />
         <InfoRow

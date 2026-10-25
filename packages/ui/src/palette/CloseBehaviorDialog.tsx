@@ -38,6 +38,7 @@ export function CloseBehaviorDialog({
   const quitRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const rememberRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   // 打开前的焦点主，关闭后还原
   const previousFocusRef = useRef<Element | null>(null);
@@ -48,8 +49,9 @@ export function CloseBehaviorDialog({
       return;
     }
     previousFocusRef.current = document.activeElement;
-    // 默认焦点落在破坏性较小的一侧
-    trayRef.current?.focus();
+    // 初始焦点落在弹窗容器上，**不预选任何选项** —— 高亮「最小化到托盘」
+    // 会被读成默认已选中；容器持有焦点保住 Tab 陷阱与 Esc，视觉上两案平等
+    panelRef.current?.focus();
     return () => {
       (previousFocusRef.current as HTMLElement | null)?.focus?.();
     };
@@ -85,10 +87,12 @@ export function CloseBehaviorDialog({
       onMouseDown={onCancel}
     >
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="bg-surface-container-low w-[340px] rounded-lg p-5 shadow-xl"
+        tabIndex={-1}
+        className="bg-surface-container-low w-[340px] rounded-lg p-5 shadow-xl outline-none"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-2">

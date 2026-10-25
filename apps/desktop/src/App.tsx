@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
@@ -177,6 +177,13 @@ function App() {
     void resize();
   }, [isAuthenticated]);
 
+  // navigate 的函数身份随导航变化；进 effect 依赖会让每次切路由都卸装一次托盘
+  // （顶栏短暂出现第二个图标）。走 ref 取最新值，effect 只认装/不装的条件。
+  const navigateRef = useRef(navigate);
+  useEffect(() => {
+    navigateRef.current = navigate;
+  }, [navigate]);
+
   // 托盘 + 系统未读角标：仅主窗口安装（桌面 app、已登录）。登出时本 effect
   // 的清理函数会卸掉托盘并清角标，否则登出后托盘还挂着旧账号的未读数
   useEffect(() => {
@@ -192,7 +199,7 @@ function App() {
         const d = await installTray({
           onOpenConversation: (id) => {
             // null 表示没有未读：只聚焦窗口，不跳转 —— 否则会把用户正在看的位置顶掉
-            if (id) navigate(`/chat/${id}`);
+            if (id) navigateRef.current(`/chat/${id}`);
           },
         });
         // 异步竞态：安装完成前 effect 已清理（登出），直接走卸载而不是挂回去
@@ -206,7 +213,7 @@ function App() {
       cancelled = true;
       dispose?.();
     };
-  }, [isDesktop, isMobile, isAuthenticated, isCallWindow, navigate]);
+  }, [isDesktop, isMobile, isAuthenticated, isCallWindow]);
 
   if (!isAuthenticated) {
     return (
