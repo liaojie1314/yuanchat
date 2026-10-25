@@ -47,6 +47,14 @@ export {
   type FileSink,
   type SinkDir,
 } from "./download/fileSink";
+export {
+  useDownloadStore,
+  startDownload,
+  cancelDownload,
+  clearDownload,
+  type DownloadEntry,
+  type DownloadPhase,
+} from "./download/downloadStore";
 export { applyConversationSetting } from "./conversationSettings";
 export {
   setRefreshHandler,
