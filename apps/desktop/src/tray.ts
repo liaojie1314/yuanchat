@@ -87,6 +87,9 @@ export async function installTray(opts: {
       await win.unminimize();
       await win.show();
       await win.setFocus();
+      // GNOME 的焦点防抢占会让 setFocus 不抬窗：短暂置顶再取消，强制把窗口顶到前台
+      await win.setAlwaysOnTop(true);
+      await win.setAlwaysOnTop(false);
     } catch (e) {
       console.warn("[tray] 激活窗口失败", e);
     }
