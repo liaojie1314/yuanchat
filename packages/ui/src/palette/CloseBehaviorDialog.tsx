@@ -17,8 +17,9 @@
  */
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useId, useState } from "react";
-import { Minimize2, Power, X } from "lucide-react";
+import { Minimize2, Power } from "lucide-react";
 import { cn } from "@yuanchat/shared/utils";
+import { BrandMark } from "../primitives/BrandMark";
 
 export function CloseBehaviorDialog({
   open,
@@ -88,19 +89,19 @@ export function CloseBehaviorDialog({
 
   return (
     <div
-      className="animate-fade-in fixed inset-0 z-50 grid place-items-center bg-black/40"
+      className="animate-fade-in fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-[2px]"
       onMouseDown={onCancel}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="bg-surface-container-low w-[360px] rounded-lg p-6 shadow-xl"
+        className="bg-surface-container-low w-[340px] rounded-lg p-6 shadow-xl"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex flex-col items-center text-center">
-          <div className="brand-gradient flex h-10 w-10 items-center justify-center rounded-lg text-white">
-            <X size={20} strokeWidth={2.2} />
+          <div className="brand-gradient shadow-elevation-2 flex h-12 w-12 items-center justify-center rounded-lg text-white">
+            <BrandMark size={26} />
           </div>
           <h3 id={titleId} className="text-title-md text-on-surface mt-3 font-semibold">
             {t("desktop.closeTitle")}
@@ -108,7 +109,7 @@ export function CloseBehaviorDialog({
           <p className="text-body-sm text-on-surface-variant mt-1">{t("desktop.closeBody")}</p>
         </div>
 
-        <div className="mt-5 grid grid-cols-2 gap-2.5">
+        <div className="mt-5 grid grid-cols-2 gap-3">
           <button
             ref={trayRef}
             type="button"
@@ -119,8 +120,10 @@ export function CloseBehaviorDialog({
             )}
             onClick={() => onPick("tray", remember)}
           >
-            <Minimize2 size={22} className="text-primary" />
-            <span className="text-label-lg font-medium">{t("desktop.closeToTray")}</span>
+            <span className="bg-primary/15 flex h-10 w-10 items-center justify-center rounded-full">
+              <Minimize2 size={19} className="text-primary" />
+            </span>
+            <span className="text-label-lg mt-1.5 font-medium">{t("desktop.closeToTray")}</span>
             <span className="text-label-xs opacity-80">{t("desktop.closeToTrayHint")}</span>
           </button>
           <button
@@ -132,15 +135,17 @@ export function CloseBehaviorDialog({
             )}
             onClick={() => onPick("quit", remember)}
           >
-            <Power size={22} className="text-on-surface-variant" />
-            <span className="text-label-lg font-medium">{t("desktop.closeQuit")}</span>
+            <span className="bg-on-surface-variant/10 flex h-10 w-10 items-center justify-center rounded-full">
+              <Power size={19} className="text-on-surface-variant" />
+            </span>
+            <span className="text-label-lg mt-1.5 font-medium">{t("desktop.closeQuit")}</span>
             <span className="text-label-xs text-on-surface-variant">
               {t("desktop.closeQuitHint")}
             </span>
           </button>
         </div>
 
-        <div className="border-outline-variant mt-4 flex items-center justify-center border-t pt-3">
+        <div className="border-outline-variant/60 mt-4 flex items-center justify-center border-t pt-3">
           <label className="text-body-sm text-on-surface-variant flex cursor-pointer items-center gap-2">
             <input
               ref={rememberRef}
