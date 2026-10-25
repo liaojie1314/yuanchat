@@ -39,7 +39,8 @@
   "nickname": "小元"
 }
 
-// POST /auth/login 请求。account 可以是手机号 / 邮箱 / 元聊号三种形态
+// POST /auth/login 请求。account 可以是邮箱 / 元聊号两种形态
+// （手机号已随迁移 021 整列移除，不再作为登录账号）
 { "account": "someone@example.com", "password": "pass1234" }
 ```
 
@@ -58,8 +59,7 @@
 ### POST /api/v1/auth/password/otp · /verify · /reset（忘记密码三段式）
 
 ```json
-// 1. 发码 → 204。account 可以是手机号**或邮箱**
-//    服务端按是否含 @ 路由到 FindByEmail / FindByPhone
+// 1. 发码 → 204。account 只认邮箱（手机号已随迁移 021 移除）
 { "account": "someone@example.com" }
 
 // 2. 校验 → 200，换一张一次性改密票据（5 分钟）
@@ -73,9 +73,9 @@
 **账号未注册时第 1 步同样返回 204 且不下发**，响应与已注册完全一致 ——
 否则这个端点退化成「这个号注册过没有」的枚举器。
 
-> 入参原先叫 `phone`，只认手机号，于是邮箱注册的用户彻底锁死在门外（登录早就认邮箱）。
-> 现已改为 `account`；为兼容已发布的旧客户端，服务端**仍然接受 `phone` 字段**，
-> 取值顺序是 `account` 优先、为空回落 `phone`。
+> 入参原先叫 `phone`，只认手机号，邮箱注册的用户彻底锁死在门外（登录早就认邮箱），
+> 后改为 `account` 并短暂兼容过 `phone` 字段回落。迁移 021 删掉 `users.phone` 后
+> 手机号链路（含 `phone` 字段兼容）整体移除，不做兼容。
 
 校验步骤是唯一的爆破入口：IP 限流 10/20 之外，还有账号维度的失败计数
 （错 5 次锁 15 分钟，429 `auth.accountLocked`）。锁定判断排在比对之前 ——
@@ -549,6 +549,54 @@ E2EE 密文服务端无法解读其对象键。
   不再退化成 `{"type":"text"}` 空气泡——落库仍是完整 content，对端刷新后可正常看到。
 - 部分成功不做回滚：任一目标会话失败即立刻回错，已成功的目标已产生独立消息（转发本身是"广播"语义）。
 
+### GET /api/v1/messages/search
+
+消息全文搜索（全局 + 会话内）。基于 PostgreSQL `pg_trgm` GIN 索引：
+`idx_messages_text_trgm`（`content->>'text'`，迁移 003）与 `idx_messages_name_trgm`
+（`content->>'name'`，迁移 022），后者把检索范围扩展到图片/文件/视频的原始文件名。
+只命中当前用户有权访问的会话，并遵循本人「清空聊天记录」水位。IP 限流 20/40。
+
+| Query 参数        | 说明                                                                                   |
+| ----------------- | -------------------------------------------------------------------------------------- |
+| `q`               | 搜索关键词，必填，至少 3 字符（否则 `400 search query must be at least 3 characters`） |
+| `conversation_id` | 选填，限定在该会话内搜索                                                               |
+| `types`           | 选填，逗号分隔的类型名：`text,image,file,voice,video,sticker`；空 = 不过滤             |
+| `before`          | 选填，分页游标（RFC3339）                                                              |
+| `limit`           | 每页条数，默认 20                                                                      |
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "results": [
+      {
+        "message_id": "uuid",
+        "conversation_id": "uuid",
+        "conv_name": "产品研发群",
+        "sender_nickname": "Alice",
+        "excerpt": "…命中关键词的片段…",
+        "created_at": "2026-10-20T10:00:00+08:00",
+        "seq": 42,
+        "message_type": 3,
+        "file_name": "季度报表.xlsx",
+        "object_key": "files/2026/10/<uuid>.xlsx"
+      }
+    ],
+    "has_more": true
+  }
+}
+```
+
+- **`types` 未知类型名返回 `400`，不静默忽略**（`unknown message type: <name>`）——
+  静默忽略会让前端以为筛选生效了，用户看到的是「筛了文件却还是混着文本」。
+  `system` 与 `e2ee` 刻意不在白名单里：系统消息不是用户内容，E2EE 密文服务端读不了。
+  对外用类型名而不是裸数字：数字是内部实现细节，写进 URL 就固化成了契约。
+- `message_type`：1=文本 2=图片 3=文件 4=语音 5=视频 8=贴纸，前端据此分组与选图标。
+- `file_name` / `object_key` 仅媒体消息返回（`omitempty`）：`file_name` 是原始文件名，
+  `object_key` 供前端出缩略图（经 `files/download-url` 预签名）。
+- LIKE 通配符（`%`/`_`）按字面量转义后参与匹配，`%` 不会被当成通配符扩大命中面。
+
 ### GET /api/v1/presence
 
 返回**我的好友中当前在线的用户 ID**。登录/重连时拉一次做快照，之后靠 `presence` 帧增量维护。
@@ -563,7 +611,7 @@ E2EE 密文服务端无法解读其对象键。
 ### GET /api/v1/users/:id
 
 按用户 ID 查看**公开资料**（好友资料卡、群成员点击等入口）。仅返回对外可见字段，
-不含手机号、账号状态等隐私信息。
+不含邮箱等隐私信息。
 
 ```json
 {
@@ -627,7 +675,6 @@ E2EE 密文服务端无法解读其对象键。
   "message": "ok",
   "data": {
     "id": "uuid",
-    "phone": "13800000001",
     "short_id": 10001,
     "nickname": "Alice",
     "bio": "介绍一下自己…",
@@ -645,7 +692,8 @@ E2EE 密文服务端无法解读其对象键。
 ### GET /api/v1/users/search?q=…
 
 精确搜索用户（好友添加入口，不做模糊匹配防扫号）。`q` 按格式路由：
-11 位数字 → 手机号；纯数字 → 元聊号（short_id）；含 `@` → 邮箱。
+含 `@` → 邮箱；纯数字 → 元聊号（short_id）。
+手机号路由已随迁移 021 移除。
 
 ```json
 {
@@ -1182,6 +1230,27 @@ friend_requests_week, otp_today, otp_week}, "runtime": {online_connections}}`。
 - `GET /api/v1/admin/push-subscriptions?page=&size=` — 分页列出 Web Push 订阅
   （最新在前，附 `user_nickname`，LEFT JOIN 软删用户不剔除）。
 
+**更新分发（Releases，自建 OTA 的管理面）**
+
+登记 → publish → 对外端点即刻可查（见「三点六、更新分发」）；写操作写审计日志；
+同一 `(platform, arch, version, channel)` 重复登记返回 `409`（库上唯一索引兜底）。
+
+- `GET /api/v1/admin/releases?platform=&channel=&status=&page=&size=` — 分页检索
+  版本记录。`status` ∈ `draft|published|rolled_back`。只读，不写审计。
+- `POST /api/v1/admin/releases` — 登记新版本（`status=draft`）：body 含
+  `platform/arch/version/channel?/notes/object_key/sha256/size/min_version?/mandatory?/rollout?`。
+  重复登记 → `409`。审计 action=`create_release`。
+- `PATCH /api/v1/admin/releases/:id` — 调整 `rollout`（0-100 灰度，0 = 暂停下发）/
+  `mandatory` / `notes`。平台/架构/版本号/对象键刻意不可改（改它们等于换一条记录，
+  该走「新建 + 回滚旧的」）。审计 action=`update_release`。
+- `POST /api/v1/admin/releases/:id/publish` — 发布：`status → published` 并写
+  `published_at`，对外检查端点即刻按灰度百分比放行。审计 action=`publish_release`。
+- `POST /api/v1/admin/releases/:id/rollback` — 回滚：`status → rolled_back`，
+  **对外更新端点即刻止发**（204），已下载到本地的安装包不受影响。审计 action=`rollback_release`。
+
+管理后台 `apps/admin` 有对应「Releases」页面。签名私钥不入库也不进管理端进程——
+管理端只做登记与状态流转，`signature` 字段存 release 流水线产出的 minisign `.sig` 文本。
+
 #### 对象存储
 
 上传类别新增 **`sticker-covers/`**（`POST /files/upload-url?category=sticker-covers`）：
@@ -1335,6 +1404,76 @@ friend_requests_week, otp_today, otp_week}, "runtime": {online_connections}}`。
   「通话窗口刷新 / 重开」天然可恢复。
 - 非房间参与者 `403` —— 快照里含各方 `conn_id`，那是信令的定址凭据。
 - 房间不存在（含已终结）`404`；`call_id` 非 UUID `400`。
+
+## 三点六、更新分发（OTA，免鉴权）
+
+自建 OTA（迁移 023 `app_releases` 表）。两个对外端点**免 JWT**：更新检查发生在登录之前
+也要能用——一个因为 bug 登不进去的版本，恰恰最需要收到更新。只暴露版本号与安装包 URL，
+不碰任何用户数据；路由侧配 IP 限流（检查 30/40、目录 10/20）。
+安装包预签名 URL 的 TTL 为 **6 小时**（比普通媒体的 2h 长：安卓「稍后更新」可能隔几十分钟
+才真正点下载）。版本登记、灰度与回滚走管理端五端点（见下文 admin 节）。
+
+### GET /api/v1/updates/:platform/:arch
+
+检查更新（桌面 Tauri updater 与安卓自建更新链路共用）。
+
+| 参数       | 位置  | 说明                                                                   |
+| ---------- | ----- | ---------------------------------------------------------------------- |
+| `platform` | path  | `darwin` / `linux` / `windows` / `android`                             |
+| `arch`     | path  | `x86_64` / `aarch64` / `universal` / …                                 |
+| `version`  | query | 客户端当前版本（必填）                                                 |
+| `channel`  | query | `stable`（默认）/ `beta`                                               |
+| `device`   | query | 设备标识，用于稳定灰度判定；缺失回落 ClientIP（换网会变，弱于 device） |
+
+- **无更新 / 未中灰度 / 未知平台一律 `204` 空体**。返 200 带同版本号会让 updater
+  当成有更新、把同一个包再装一遍；204 的语义就是「确定没有」。
+- 服务端自身故障（含对象存储不可达）必须 **5xx**（`503` / `500`），**刻意不降级成 204**：
+  Tauri updater 收到 204 会直接认定没有更新、**不再**尝试 endpoints 列表里的下一个，
+  只有 5xx 才会落到 GitHub 兜底。
+- `200` 返回**扁平的 dynamic 格式更新体，不包 `{data}` 外层**——tauri-plugin-updater
+  直接解析响应体根对象，包一层它读不到 `version` 字段；也绝不能带 `platforms` 字段
+  （该字段一出现 updater 就切到 static 格式解析）：
+
+```json
+{
+  "version": "0.7.0",
+  "notes": "修复…",
+  "pub_date": "2026-10-25T08:00:00Z",
+  "url": "https://storage.yuanyuan.blog/yuanchat/releases/<uuid>.AppImage?X-Amz-...",
+  "signature": "<minisign 签名文本>",
+  "sha256": "<hex>",
+  "size": 94371840,
+  "mandatory": false
+}
+```
+
+- `pub_date` 必须是 RFC3339：格式不对会让 updater **整个响应**反序列化失败，而不是丢掉该字段。
+
+### GET /api/v1/updates/catalog?channel=
+
+列出某渠道下每个平台/架构的最新已发布版本，供 Web 端下载页用。
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "items": [
+      {
+        "platform": "linux",
+        "arch": "x86_64",
+        "version": "0.7.0",
+        "size": 94371840,
+        "notes": "…",
+        "url": "https://…?X-Amz-…"
+      }
+    ]
+  }
+}
+```
+
+- `items` 为空时是 `[]` 而非 `null`（服务端显式保证，前端空态靠它渲染）。
+- 单条预签名失败只跳过该条，不让整页 500——下载页有五端包，一个对象缺失不该把其余的也藏起来。
 
 ## 四、seq 与已读机制
 

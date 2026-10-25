@@ -129,7 +129,7 @@
 
 ```
 功能：
-- 注册（手机号/邮箱 + 验证码）
+- 注册（邮箱 + 验证码）
 - 登录（密码 / 验证码 / 扫码）
 - JWT Token 签发与刷新
 - 用户资料 CRUD
@@ -416,6 +416,60 @@ minio              — :9000, :9001 (console)
 elasticsearch      — :9200
 web                — 前端静态资源 :3000
 ```
+
+---
+
+## 七、客户端架构与更新分发（实际实现）
+
+> 上面各节是立项时的目标微服务架构；本节记录**已落地**的客户端侧机制，
+> 与 `packages/shared`、`apps/desktop` 的当前实现对应。
+
+### 7.1 应用内文件下载（downloadStore + fileSink 注入层）
+
+- **downloadStore** 是下载状态的唯一真源：按 `message_id` 记录阶段（idle / downloading /
+  done / failed / cancelled）与进度；文件气泡下方的进度条是**确定性**的（由下载字节数驱动，
+  不用无限动画），按钮按阶段分流：下载 → 取消 → 失败重试 → 完成后打开。
+- **fileSink** 是「字节落到哪里」的注入抽象，三端各给一个实现，UI 层零平台分支：
+  - Web：`<a download>` 触发浏览器下载；
+  - 桌面 / 安卓：Tauri plugin-fs 落盘；安卓落在 **app 私有 external Download 目录**
+    ——零存储权限、文件管理器不可见、卸载即删（隐私取舍）。
+- `open_local_file` 命令把可打开的路径**卡在应用自有目录内**，防止拼接任意路径打开
+  用户私钥之类的文件。
+- **outbox 磁盘副本**：断网 outbox 里的待发消息（图片/文件等 blob）在发送前把字节
+  落一份 appdata 磁盘副本，重试从磁盘读、服务端 ack 即删——收掉「安卓重启后
+  IndexedDB 里的 blob URL 失效、离线队列永远发不出去」的债。
+
+### 7.2 OTA 更新分发链路（自建）
+
+```
+管理端 Releases 页（五端点：list/create/patch/publish/rollback，写操作留审计）
+        │ 登记 draft → publish（rollout 0-100 灰度）
+        ▼
+app_releases 表（UNIQUE(platform, arch, version, channel)，status: draft→published→rolled_back）
+        │ 灰度判定：hash(device) < rollout%（device 缺失回落 ClientIP，同机判定稳定）
+        ▼
+GET /updates/:platform/:arch —— 200 扁平 dynamic 格式（预签名 URL，TTL 6h）/ 204 无更新
+        │
+        ├── 桌面 Tauri updater：endpoints 自有域名（api.yuanyuan.blog）在前，
+        │   GitHub latest.json 兜底在后；5xx 才落兜底（204 会被当作「确定没有」而停试）
+        └── Android 自建链路：查端点 → 应用内自绘更新说明卡 → 下载进度条复用 7.1 的
+            downloadStore → sha256 校验不过即删文件拒装 → install_apk 走
+            FileProvider content:// 拉系统安装器（清单声明 REQUEST_INSTALL_PACKAGES）
+```
+
+回滚 = 状态翻 `rolled_back`，对外端点即刻止发（204）；已下载到本地的包不受影响。
+
+### 7.3 桌面端系统集成与命令面板
+
+- **托盘**：托盘图标 + 右键菜单（未读数 / 打开 / 退出）+ 左键直达第一个未读会话。
+- **未读角标**：macOS / Linux 走 `setBadgeCount`；Windows `setOverlayIcon` 静态红点
+  （Windows 没有数字角标 API，overlay 是唯一手段）。
+- **关窗二选一**：点关闭按钮弹「最小化到托盘 / 退出」选择框，可记住选择；
+  之后在设置页可改（三选：每次询问 / 最小化 / 退出）。
+- **命令面板**（`CommandPalette`，Ctrl+K，替代已删除的 SearchModal）：
+  空输入 = 动作注册表 + 最近会话；有输入 = 联系人 / 群聊 / 消息 / 文件与媒体四分组
+  搜索 + 类型筛选，媒体结果带 40×40 缩略图（骨架占位防 CLS）。
+  桌面端用 720×560 大面板形态，Web/移动端为常规弹层。
 
 ---
 

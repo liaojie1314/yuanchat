@@ -38,11 +38,11 @@
 
 已实现的能力（代码路径与协议细节见 `docs/CHAT_API.md`、`docs/ARCHITECTURE.md`）：
 
-- 认证：注册/登录（手机号/邮箱 + 密码 + SVG 验证码）、JWT 双 Token、
+- 认证：注册/登录（邮箱/元聊号 + 密码 + SVG 验证码）、JWT 双 Token、
   token 静默刷新（滑动会话轮换 + 401 兜底重试，`api/tokenManager.ts`）
 - 聊天核心闭环：会话列表、文本消息 WebSocket 实时收发、已读回执、
   正在输入、历史游标分页、断线重连、失败重试
-- 好友与关系：精确搜索（手机号/元聊号/邮箱）→ 发申请（WS 实时推送）→
+- 好友与关系：精确搜索（邮箱/元聊号）→ 发申请（WS 实时推送）→
   同意/拒绝 → 同意即原子建单聊 + 打招呼消息 → 字母分组好友列表
   （`ContactsScreen.tsx` 三端编排）；删好友（双向软删，幂等）+ 黑名单
   （单聊发送拦截 403 `BLOCKED`，群聊不受影响）
@@ -65,18 +65,40 @@
   否则「先发干净文本再改成敏感词」可绕过审核）、引用回复、表情回应（`message.reaction` 帧
   实时 + 历史聚合回填，mine 相对请求者）、转发（一次最多 9 个会话）、
   `@` 提及（落 `mention_unread` → 会话列表角标）、收藏
-- 消息搜索：全局 + 会话内，`GET /messages/search`，PostgreSQL `pg_trgm` GIN 索引，
+- 消息搜索：全局 + 会话内，`GET /messages/search`，PostgreSQL `pg_trgm` GIN 索引
+  （文本 + 文件名两条 trgm 索引，迁移 003/022），`types` 类型过滤（未知类型 400），
   只命中当前用户有权访问的会话
+- 命令面板：Ctrl+K（`CommandPalette`，替代已删除的 SearchModal）；空输入 =
+  动作注册表 + 最近会话，有输入 = 联系人/群聊/消息/文件与媒体四分组 +
+  类型筛选 + 40×40 媒体缩略图骨架占位；桌面 720×560 大面板
+- 应用内下载：`downloadStore` + `fileSink` 注入抽象（Web `<a download>`；
+  桌面/安卓 plugin-fs 落盘，安卓落 app 私有 external 目录零权限、卸载即删）；
+  文件气泡下方确定性进度条、按钮按阶段分流（下载/取消/重试/打开）；
+  `open_local_file` 把路径卡在应用自有目录内；outbox 发送前落 appdata 磁盘副本、
+  重试从磁盘读、ack 即删（收掉「安卓重启后 blob 失效」债）
 - Presence 在线状态：Hub 首连/末连回调 → 广播给在线好友；`GET /presence` 快照
   加 `presence` 帧增量；`applyPresence` 按 peerId 匹配单聊
 - 通知：桌面 Tauri notification plugin（注入 shared `notifyIncoming`，失焦 + 非免打扰时弹）；
   Web Push（VAPID + Service Worker，仅推离线收件人并过滤免打扰会话，未配 VAPID 密钥即关闭）
+- 桌面托盘与未读角标：托盘图标 + 右键菜单（未读数/打开/退出）+ 左键直达第一个未读；
+  角标 macOS/Linux `setBadgeCount`、Windows `setOverlayIcon` 静态红点；
+  关窗二选一弹窗（最小化到托盘/退出 + 记住选择）+ 设置页三选
 - 端到端加密：X3DH + Double Ratchet（`packages/shared/src/crypto/`），用户自行开启，
   仅单聊，对方未启用自动降级明文，支持密钥备份/恢复
 - 管理后台 `apps/admin`：用户封禁解封、会话解散、消息检索与删除、举报处理、审计日志；
   `/api/v1/admin/*` 走 JWT + `role=admin` 双重校验，写操作留审计日志；
   敏感词命中标记 `flagged=true` 进审核队列（不阻塞发送）
 - PWA：生产构建注入自定义 Service Worker（app shell 预缓存 + Web Push 监听）
+- 自建 OTA：迁移 023 `app_releases` 表（platform/arch/version/channel 唯一），
+  灰度 0-100% 按设备稳定判定、回滚后对外端点即刻止发；管理端 Releases 五端点
+  （`/admin/releases`，写操作留审计、重复登记 409）；对外免鉴权
+  `GET /updates/:platform/:arch`（无更新/未中灰度 204，200 为不包 `{data}` 的
+  dynamic 格式）与 `GET /updates/catalog`；桌面 updater endpoints 自有域名在前、
+  GitHub latest.json 兜底在后；Android 自建自动更新（sha256 校验不过即删文件拒装，
+  install_apk 走 FileProvider）
+- Web 下载入口：侧栏（桌面 web）+ 设置页（手机 web）的 DownloadPanel，
+  按 userAgentData/UA 识别平台高亮推荐包，走 `/updates/catalog`，
+  空态给 GitHub Releases 兜底链接
 - 语音/视频通话：信令走 WS 8 帧，房间态存 Redis，服务端不碰媒体字节；mesh 全连接、
   房间上限 4 人；TURN 走 coturn + HMAC 临时凭据（`GET /calls/ice-servers`）。
   **Linux 桌面端没有 `RTCPeerConnection`**（WebKitGTK 未编进 GstWebRTC），媒体面在独立

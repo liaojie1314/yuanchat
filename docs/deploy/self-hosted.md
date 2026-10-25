@@ -196,6 +196,10 @@ docker compose -f docker-compose.prod.yml up -d
 `APP_VERSION` 一定要跟着改：镜像 tag 用的就是它，不改就会拿旧镜像起新代码的容器。
 前端镜像在 build 时把版本号烤进产物，所以**先 checkout 再 build**，顺序反了产物里是旧版本号。
 
+> ⚠️ **升级到含迁移 021 的版本必须先改 `.env` 的管理员变量**：`ADMIN_PHONE` 已废弃，
+> 换成 `ADMIN_EMAIL` 且**填同一个管理员注册时用的邮箱**。不改的话 `bootstrap-admin`
+> 按新变量取不到值，下次重跑 `install.sh` 会**再建一个管理员**（而旧的还在）。
+
 内存小于 4G 的机器把三个镜像分开构建（如上），别一条命令并行构 ——
 `pnpm install` 加两个 vite build 的峰值会 OOM。`GOPROXY` 那个参数在国内必须带，
 否则 `go mod download` 卡死在 `proxy.golang.org`。
@@ -329,34 +333,34 @@ compose 的镜像 tag 是 `yuanchat/server:${APP_VERSION}`，两者脱节时 com
 ### 管理员账号
 
 **管理后台没有注册入口**，因此第一个管理员必须在部署时引导出来 —— 否则装完谁都登不进
-`admin` 子域。在 `deploy/.env` 里填好手机号即可，密码留空由 `install.sh` 随机生成：
+`admin` 子域。在 `deploy/.env` 里填好邮箱即可，密码留空由 `install.sh` 随机生成：
 
 ```bash
-ADMIN_PHONE=13800138000     # 管理后台的登录账号，必须自己填
-ADMIN_PASSWORD=             # 留空则自动生成并写回 .env
+ADMIN_EMAIL=admin@your-domain.com   # 管理后台的登录账号，必须自己填
+ADMIN_PASSWORD=                     # 留空则自动生成并写回 .env
 ```
 
 `install.sh` 会在服务起好后跑一次 `/app/bootstrap-admin`，建号并打印登录信息。
 这一步**幂等**：库里已存在任一管理员时直接跳过，**不会**把线上密码重置回 `.env` 里的值 ——
 否则每次重跑 `install.sh` 都等于给管理员留一把永久后门（`.env` 常年躺在服务器上）。
 
-手机号已被占用时（常见于先在 Web 端注册了再跑脚本）会**提权该账号而非新建**，密码保持原样 ——
-不这么做会撞 `phone` 唯一索引直接失败。
+邮箱已被占用时（常见于先在 Web 端注册了再跑脚本）会**提权该账号而非新建**，密码保持原样 ——
+不这么做会撞 `email` 唯一索引直接失败。
 
 首次登录后请做两件事：
 
 1. 在应用内改密（改密递增 `token_version`，旧令牌立即失效）
 2. 清空 `.env` 里的 `ADMIN_PASSWORD`
 
-漏填 `ADMIN_PHONE` 时脚本会告警跳过。补救方式是先在 Web 端注册一个账号，再手工提权：
+漏填 `ADMIN_EMAIL` 时脚本会告警跳过。补救方式是先在 Web 端注册一个账号，再手工提权：
 
 ```bash
 COMPOSE="docker compose -f deploy/docker-compose.prod.yml"
 $COMPOSE exec postgres psql -U yuanchat -d yuanchat \
-  -c "UPDATE users SET role = 1 WHERE phone = '你的手机号';"
+  -c "UPDATE users SET role = 1 WHERE email = '你的邮箱';"
 ```
 
-填好 `ADMIN_PHONE` 后重跑 `./deploy/install.sh` 也可以，脚本会补上这一步。
+填好 `ADMIN_EMAIL` 后重跑 `./deploy/install.sh` 也可以，脚本会补上这一步。
 
 ### 换管理员密码（改 .env 不生效）
 
@@ -365,7 +369,7 @@ $COMPOSE exec postgres psql -U yuanchat -d yuanchat \
 （而 `.env` 常年躺在服务器上，等于留了把永久后门）。
 
 代价是：**改 `.env` 的 `ADMIN_PASSWORD` 再重跑脚本，密码不会变**。
-它还有一条「手机号已被占用则提权」的分支，但那条明确只改 `role`、不碰密码。
+它还有一条「邮箱已被占用则提权」的分支，但那条明确只改 `role`、不碰密码。
 
 正确做法有两条，**都不要自己手写 bcrypt 哈希**（cost 必须与
 `internal/pkg/password` 一致，写错了只会得到一个登不进去的账号）：
@@ -394,17 +398,9 @@ docker exec yuanchat-postgres psql -U "$DB_USER" -d "$DB_NAME" \
 $COMPOSE run --rm --entrypoint /app/bootstrap-admin yuanchat-server
 ```
 
-注意是 `DELETE` 而不是软删：软删会留着 `phone` 的唯一索引，
+注意是 `DELETE` 而不是软删：软删会留着 `email` 的唯一索引，
 `bootstrap-admin` 新建时仍然撞索引。**只有在那四个计数全是 0 时才能这么干** ——
 若该账号已经发过消息、进过群、办过管理动作，删它会牵连那些数据，这时只能走办法一。
-
-> `ADMIN_PHONE` 这一项为什么还是手机号：注册与找回密码已经全面改成邮箱，
-> 但**登录**仍然支持「手机号 / 邮箱 / 元聊号」三种账号形态，
-> 而 `bootstrap-admin` 建的就是手机号账号。引导出来的管理员默认没有邮箱，
-> 想用「忘记密码」得先在设置页补一个。
->
-> 这是**已登记的技术债**（见 MASTER_PLAN「未做清单总览」）：手机号登录与
-> `ADMIN_PHONE` 都计划完全移除，改为邮箱引导。本版未动，照上面做即可。
 
 ## 五、备份
 

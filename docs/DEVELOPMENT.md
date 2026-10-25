@@ -164,8 +164,8 @@ PATH 里遮住系统版本，用 `gst-inspect-1.0` 会得到「元件全部缺�
 
 **Mock 覆盖的接口**：
 
-- `POST /api/v1/auth/login` — 账号（手机号/邮箱）+ 密码登录（密码 `wrong` 测试错误）
-- `POST /api/v1/auth/register` — 手机号 + 密码 + 验证码 + 昵称注册
+- `POST /api/v1/auth/login` — 账号（邮箱/元聊号）+ 密码登录（密码 `wrong` 测试错误）
+- `POST /api/v1/auth/register/otp` + `POST /api/v1/auth/register` — 邮箱验证码 + 密码 + 昵称注册
 - `POST /api/v1/auth/logout` — 登出（始终返回成功，300ms 延迟）
 - `GET /api/v1/captcha` — SVG 验证码
 
@@ -231,6 +231,12 @@ Tauri 2 桌面端同时承担**桌面端**（Windows / macOS / Linux）和**移�
 - 登录页尺寸：540 × 600（固定，不可拉伸）
 - 登录后自动切换为首页尺寸：1200 × 800（可拉伸，最小 900 × 600）
 - 标题栏：自定义（`decorations: false`），含最小化/最大化/关闭按钮
+
+托盘与未读角标（Linux 验证前提）：角标走 `window.setBadgeCount`（macOS/Linux）与
+`window.setOverlayIcon`（Windows 静态红点），Linux 侧数字角标依赖桌面环境能按
+`.desktop` 条目找到应用 —— 即 `yuanchat.desktop` 已安装（装 `.deb`，或复用
+`/usr/share/applications` 里已装的条目）才能生效；`tauri dev` 开发模式下同样可验证，
+但裸跑二进制而没有 desktop 条目时角标静默不显示。
 
 构建产物位置：`apps/desktop/src-tauri/target/release/bundle/`
 
@@ -374,7 +380,7 @@ pnpm --filter @yuanchat/desktop tauri android build
 # 1. 启动基础设施（PostgreSQL :5434 + Redis :6380）
 docker compose -f deploy/docker-compose.yml up -d
 
-# 2. 灌入测试数据（3 个用户 + 单聊 + 群聊 + 历史消息）
+# 2. 灌入测试数据（4 个账号：Alice/Bob/Carol + Admin 管理员，含单聊 + 群聊 + 历史消息）
 cd server && go run ./cmd/seed
 
 # 3. 启动后端（REST :8085 + WS :8086）
@@ -384,17 +390,18 @@ go run ./cmd/server
 pnpm --filter @yuanchat/web dev:real
 ```
 
-**测试账号**（密码均为 `Test@1234`）：
+**测试账号**（密码均为 `Test@1234`，seed 以邮箱为唯一键——手机号已随迁移 021 移除）：
 
-| 昵称  | 手机号（登录账号） | 说明                                   |
-| ----- | ------------------ | -------------------------------------- |
-| Alice | `13800000001`      | 单聊（Bob）+ 群聊（群主）；好友 Bob    |
-| Bob   | `13800000002`      | 单聊（Alice、Carol）+ 群聊；好友双向   |
-| Carol | `13800000003`      | 单聊（Bob）+ 群聊；有发给 Alice 的申请 |
+| 昵称  | 邮箱（登录账号）    | 说明                                   |
+| ----- | ------------------- | -------------------------------------- |
+| Alice | `alice@example.com` | 单聊（Bob）+ 群聊（群主）；好友 Bob    |
+| Bob   | `bob@example.com`   | 单聊（Alice、Carol）+ 群聊；好友双向   |
+| Carol | `carol@example.com` | 单聊（Bob）+ 群聊；有发给 Alice 的申请 |
+| Admin | `admin@example.com` | 管理员（可登管理后台）                 |
 
 两个浏览器（或普通+隐身窗口）分别登录 Alice / Bob 即可互发消息，验证实时收发、已读回执（双勾变蓝）、正在输入、未读角标。
 
-通讯录联调：登录 Alice → 通讯录「新的朋友」有 Carol 的待处理申请（同意后自动建单聊 + 打招呼消息）；「+」添加联系人支持手机号 / 元聊号 / 邮箱精确搜索。
+通讯录联调：登录 Alice → 通讯录「新的朋友」有 Carol 的待处理申请（同意后自动建单聊 + 打招呼消息）；「+」添加联系人支持邮箱 / 元聊号精确搜索。
 
 > 聊天 REST 端点与 WebSocket 协议详见 [`docs/CHAT_API.md`](./CHAT_API.md)。
 
