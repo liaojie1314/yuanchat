@@ -34,6 +34,18 @@ const BADGE_DOT_ICON = "icons/badge-dot-32.png";
 const TRAY_ID = "main";
 
 /**
+ * 托盘创建/移除的串行化链与当前实例指针。
+ *
+ * React StrictMode 在 dev 下双跑 effect（挂载→卸载→再挂载挤在极短时间内），
+ * 两个 installTray 并发用同一 id 在 DBus 注册，后到的注册被拒后，
+ * 幸存的 item 会丢 Activate 方法 —— 左键点托盘没反应，图标还会时隐时现。
+ * 所有创建/移除都排进这条链保序，
+ * 且卸载只关自己创建的那个实例，晚到的卸载不误杀新一轮托盘。
+ */
+let trayOp: Promise<unknown> = Promise.resolve();
+let currentTray: TrayIcon | null = null;
+
+/**
  * 把未读数反映到系统角标上。
  *
  * 所有调用都裹 try/catch 并只记 warn：Linux 的 setBadgeCount 走 Unity
@@ -67,7 +79,23 @@ function unreadLabel(count: number): string {
  *   没有未读，调用方应只聚焦窗口不做跳转
  * @returns 卸载函数（登出时调用，否则登出后托盘还挂着旧账号的未读数）
  */
-export async function installTray(opts: {
+export function installTray(opts: {
+  onOpenConversation: (id: string | null) => void;
+}): Promise<() => void> {
+  const run = trayOp.then(() => doInstall(opts));
+  // 链上只保序、吞掉结果与异常；对外把安装失败折成 no-op 卸载器，调用方无需分支
+  trayOp = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run.then(
+    (dispose) => dispose,
+    () => () => {},
+  );
+}
+
+/** 真正的安装逻辑，只在串行链内执行（见 {@link installTray}） */
+async function doInstall(opts: {
   onOpenConversation: (id: string | null) => void;
 }): Promise<() => void> {
   const win = getCurrentWindow();
@@ -92,6 +120,13 @@ export async function installTray(opts: {
     ],
   });
 
+  // 清掉同 id 残留（上一轮的移除可能还在路上）；removeById 幂等，不存在即忽略
+  try {
+    await TrayIcon.removeById(TRAY_ID);
+  } catch {
+    // DBus 上没有同名 item，直接建
+  }
+
   const tray = await TrayIcon.new({
     id: TRAY_ID,
     icon: (await defaultWindowIcon()) ?? undefined,
@@ -105,6 +140,8 @@ export async function installTray(opts: {
       }
     },
   });
+
+  currentTray = tray;
 
   // 未读数同步：角标 + tooltip + 菜单项三处一起更；last 去重避免无谓的系统调用
   let last = -1;
@@ -135,6 +172,9 @@ export async function installTray(opts: {
   return () => {
     unsub();
     void applyBadge(0);
-    void TrayIcon.removeById(TRAY_ID);
+    // 只关自己建的那个：这轮卸载晚到时，托盘可能已被新一轮 install 接管
+    if (currentTray !== tray) return;
+    currentTray = null;
+    trayOp = trayOp.then(() => tray.close()).catch(() => {});
   };
 }
