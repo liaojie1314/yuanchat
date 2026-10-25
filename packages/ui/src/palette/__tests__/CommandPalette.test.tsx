@@ -70,6 +70,27 @@ describe("CommandPalette", () => {
     expect(screen.getAllByRole("option").length).toBeGreaterThan(0);
   });
 
+  // 路由大量 replace 使 WebView 历史恒为 1，安卓上面板开着按返回键
+  // 原生兜底就是退出应用。拦截器必须同步关面板并消费返回。
+  it("面板打开时安卓返回键被拦截并关面板；未打开时不拦截", async () => {
+    const { runBackInterceptors } = await import("@yuanchat/shared");
+    const onClose = vi.fn();
+
+    // 未打开：不注册拦截，返回键交回系统（此处即无人消费）
+    const closed = wrap(<CommandPalette show={false} onClose={onClose} />);
+    expect(runBackInterceptors()).toBe(false);
+    closed.unmount();
+
+    // 打开：返回 = 关面板，且消费掉本次返回（不退出应用）
+    const opened = wrap(<CommandPalette show onClose={onClose} />);
+    expect(runBackInterceptors()).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    opened.unmount();
+
+    // 卸载后拦截器随之注销，不留残余吞返回键
+    expect(runBackInterceptors()).toBe(false);
+  });
+
   it("↑↓ 移动选中项，aria-selected 跟随", () => {
     wrap(<CommandPalette show onClose={vi.fn()} />);
     const input = screen.getByRole("combobox");

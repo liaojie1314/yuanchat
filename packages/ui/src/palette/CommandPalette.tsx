@@ -38,6 +38,7 @@ import {
   useBreakpoint,
   useIsDesktop,
   captureException,
+  registerBackInterceptor,
 } from "@yuanchat/shared";
 import type { MessageSearchResponse, MessageSearchResult, SearchType } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
@@ -367,6 +368,17 @@ export function CommandPalette({ show, onClose }: Props) {
     const timer = setTimeout(() => inputRef.current?.focus(), 50);
     return () => clearTimeout(timer);
   }, [show]);
+
+  // ── 安卓返回键：面板开着时返回 = 关面板，而不是退出应用 ──
+  // 本应用路由大量 replace，WebView 历史恒为 1，原生返回兜底就是 finish Activity。
+  // 拦截器必须同步消费。
+  useEffect(() => {
+    if (!show) return;
+    return registerBackInterceptor(() => {
+      onClose();
+      return true;
+    });
+  }, [show, onClose]);
 
   // ── 搜索主流程：查询变化防抖 300ms；类型筛选/重试变化立即重查 ──
   // 依赖刻意只列驱动搜索的状态；entry 构造器捕获的 navigate/onClose/setActive
