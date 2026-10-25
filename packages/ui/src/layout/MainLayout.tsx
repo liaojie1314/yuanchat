@@ -31,6 +31,7 @@ import {
   useChatBootstrap,
   useContactStore,
   useConversationStore,
+  selectTotalUnread,
   useMomentsStore,
   useBreakpoint,
 } from "@yuanchat/shared";
@@ -88,9 +89,8 @@ export function MainLayout({
   // presence/消息帧全程可达；登出（布局卸载）时断开
   useChatBootstrap();
 
-  const totalUnread = useConversationStore((s) =>
-    s.conversations.reduce((sum, c) => sum + (c.isMuted ? 0 : c.unreadCount), 0),
-  );
+  // 未读口径唯一来源是 selectTotalUnread（托盘角标用同一个选择器，两处不漂移）
+  const totalUnread = useConversationStore((s) => selectTotalUnread(s.conversations));
   const pendingRequests = useContactStore(
     (s) => s.requests.filter((r) => r.direction === "in" && r.status === 0).length,
   );
