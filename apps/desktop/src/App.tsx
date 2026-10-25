@@ -12,6 +12,7 @@ import {
   setNotifier,
   setUrlOpener,
   useAuthStore,
+  useConversationStore,
   useDesktopStore,
   useIsDesktop,
   useKeyboardAwareViewport,
@@ -198,8 +199,13 @@ function App() {
         const { installTray } = await import("./tray");
         const d = await installTray({
           onOpenConversation: (id) => {
-            // null 表示没有未读：只聚焦窗口，不跳转 —— 否则会把用户正在看的位置顶掉
-            if (id) navigateRef.current(`/chat/${id}`);
+            // null 表示没有未读：只聚焦窗口，不跳转 —— 否则会把用户正在看的位置顶掉。
+            // 会话视图由 store 的 activeId 驱动（/chat/:id 的参数不被消费），
+            // 只 navigate 不 setActive 的结果是 URL 变了界面纹丝不动
+            if (id) {
+              useConversationStore.getState().setActive(id);
+              navigateRef.current(`/chat/${id}`);
+            }
           },
         });
         // 异步竞态：安装完成前 effect 已清理（登出），直接走卸载而不是挂回去
