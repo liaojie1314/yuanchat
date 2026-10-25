@@ -21,6 +21,7 @@ import {
   Info,
   User,
   ArrowLeft,
+  Download,
   Sticker,
   Star,
   Smile,
@@ -37,6 +38,7 @@ import {
 } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "../primitives/Avatar";
+import { DownloadPanel } from "../download/DownloadPanel";
 import { ProfileEditView } from "./ProfileEditView";
 import {
   AccountSection,
@@ -123,6 +125,9 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
   const logout = useAuthStore((s) => s.logout);
 
   const isMobile = bp === "mobile";
+  // 下载客户端入口仅 web 构建渲染（手机 web；Tauri app 内已装好，再给是噪音）
+  const isDesktopApp = useIsDesktop();
+  const [showDownload, setShowDownload] = useState(false);
   // 桌面/平板默认选中个人资料；移动端从 index 列表开始
   const [view, setView] = useState<SettingsView>("profile");
   const [confirmLogout, setConfirmLogout] = useState(false);
@@ -349,6 +354,21 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
               onClick={() => onNavClick(item)}
             />
           ))}
+          {/* 下载客户端：手机 web 独有的入口（桌面侧栏另有沉底按钮） */}
+          {!isDesktopApp && (
+            <button
+              onClick={() => setShowDownload(true)}
+              className="bg-surface-container hover:bg-surface-container-high flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors"
+            >
+              <span className="bg-primary-container/60 text-primary-on-container flex h-9 w-9 shrink-0 items-center justify-center rounded-lg">
+                <Download size={18} />
+              </span>
+              <span className="text-body-lg text-on-surface flex-1 truncate font-medium">
+                {t("download.title")}
+              </span>
+              <ChevronRight size={18} className="text-on-surface-variant shrink-0" />
+            </button>
+          )}
         </div>
         <div className="mb-4">{logoutBlock}</div>
         <p className="text-label-sm text-on-surface-variant mt-auto pt-4 text-center">
@@ -357,6 +377,7 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
         {logoutDialog}
         <ChangePasswordDialog open={changePwdOpen} onClose={() => setChangePwdOpen(false)} />
         <UserStatusEditor open={statusOpen} onClose={() => setStatusOpen(false)} />
+        {showDownload && <DownloadPanel onClose={() => setShowDownload(false)} />}
       </div>
     );
   }

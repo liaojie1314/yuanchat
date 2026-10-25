@@ -135,6 +135,10 @@ export {
 // 关窗二选一弹窗（桌面端托盘配套）
 export { CloseBehaviorDialog } from "./palette/CloseBehaviorDialog";
 
+// 下载面板（Web 端侧栏 / 手机设置项的客户端下载入口）
+export { DownloadPanel } from "./download/DownloadPanel";
+export { detectPlatform, type DetectedPlatform } from "./download/detectPlatform";
+
 export { E2EEIndicator } from "./e2ee/E2EEIndicator";
 export { SafetyNumberDialog } from "./e2ee/SafetyNumberDialog";
 export { E2EESection } from "./e2ee/E2EESection";

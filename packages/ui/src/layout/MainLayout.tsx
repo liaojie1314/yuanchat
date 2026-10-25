@@ -24,7 +24,7 @@
  * <MainLayout />
  */
 import { Link, useLocation, Outlet } from "react-router-dom";
-import { Sun, Moon, LogOut } from "lucide-react";
+import { Sun, Moon, LogOut, Download } from "lucide-react";
 import {
   useThemeStore,
   useAuthStore,
@@ -34,6 +34,7 @@ import {
   selectTotalUnread,
   useMomentsStore,
   useBreakpoint,
+  useIsDesktop,
 } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { useTranslation } from "react-i18next";
@@ -41,6 +42,7 @@ import { type ReactNode, useState, useEffect } from "react";
 import { Avatar } from "../primitives/Avatar";
 import { CallHost } from "../call/CallHost";
 import { CommandPalette } from "../palette/CommandPalette";
+import { DownloadPanel } from "../download/DownloadPanel";
 import { ToastHost } from "../primitives/Toast";
 import { NetworkBanner } from "./NetworkBanner";
 import {
@@ -72,6 +74,9 @@ export function MainLayout({
   const { t } = useTranslation();
   const bp = useBreakpoint();
   const [showSearch, setShowSearch] = useState(false);
+  // 仅 web 构建显示下载入口 —— 桌面 app 与安卓 app 里已经装好了，再给是噪音
+  const isDesktopApp = useIsDesktop();
+  const [showDownload, setShowDownload] = useState(false);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -209,6 +214,7 @@ export function MainLayout({
       <NetworkBanner />
       {callMode === "overlay" ? <CallHost /> : null}
       <CommandPalette show={showSearch} onClose={() => setShowSearch(false)} />
+      {showDownload && <DownloadPanel onClose={() => setShowDownload(false)} />}
       {/* 左侧品牌色导航栏 — 渐变背景 */}
       <nav className="nav-gradient shadow-elevation-2 z-20 flex w-16 shrink-0 flex-col items-center gap-1 py-3 text-white">
         {/* 我的头像 + 在线状态 */}
@@ -223,6 +229,17 @@ export function MainLayout({
 
         {/* 设置沉底：与主题/登出同属「不常点但要随手够到」的一档 */}
         {renderNavItem(DESKTOP_SETTINGS_ITEM)}
+
+        {/* 下载客户端：仅 web（浏览器 / PWA），插在设置之下、主题切换之上 */}
+        {!isDesktopApp && (
+          <button
+            onClick={() => setShowDownload(true)}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white/70 transition-all duration-200 hover:bg-white/15 hover:text-white"
+            title={t("download.title")}
+          >
+            <Download size={20} />
+          </button>
+        )}
 
         {/* 主题切换 — M3 图标按钮 */}
         <button
