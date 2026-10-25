@@ -34,6 +34,7 @@ import {
   Copy,
   Download,
   Flag,
+  FolderOpen,
   Forward,
   Loader2,
   Pause,
@@ -41,6 +42,7 @@ import {
   Phone,
   PhoneMissed,
   Play,
+  RefreshCw,
   Reply,
   RotateCcw,
   Smile,
@@ -48,18 +50,21 @@ import {
   Star,
   Undo2,
   Video,
+  X,
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
   canEdit,
-  getDownloadUrl,
+  cancelDownload,
+  getFileSink,
   isPermanentFailure,
-  openExternal,
   resolveObjectUrl,
   showToast,
   splitFileName,
+  startDownload,
+  useDownloadStore,
 } from "@yuanchat/shared";
 import type { ChatMessage } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
@@ -70,6 +75,7 @@ import { MessageVideo } from "./MessageVideo";
 import { StickerImage } from "../stickers/StickerImage";
 import { copyText } from "../util/copyText";
 import { fileIconOf } from "../util/fileIcon";
+import { FileProgressBar } from "./FileProgressBar";
 import { useLongPress } from "../util/useLongPress";
 import {
   getVoiceRate,
@@ -163,6 +169,9 @@ export function MessageBubble({
   onShowEditHistory?: (messageId: string) => void;
 }) {
   const { t } = useTranslation();
+  // 下载进度：文件气泡的按钮按阶段分流（下载/取消/重试/打开），进度条挂在气泡下方。
+  // 订阅整个 entries：进度更新按 100ms 节流（见 downloadStore），逐条 selector 省不了几次渲染
+  const downloadEntries = useDownloadStore((s) => s.entries);
   // 气泡内联操作菜单（右键 / 长按弹出，点外部关闭）
   const [menuOpen, setMenuOpen] = useState(false);
   // 撤回项是否在 2 分钟窗口内——在打开菜单的事件里用 Date.now() 求值并存下，
@@ -451,6 +460,8 @@ export function MessageBubble({
             // data-kind 挂在气泡本体（右键菜单的宿主元素）上：E2E 既能按形态计数，
             // 也能直接右键定位到会弹菜单的那个节点。原 E2E 用的选择器应用里不存在。
             data-kind={msg.kind}
+            // 文件气泡的固定测试锚点：E2E 靠类名定位会随样式漂移（下载进度条用例）
+            data-testid={msg.kind === "file" ? "file-bubble" : undefined}
             // 自己/对方也挂在同一宿主上：E2E 用 [data-kind="text"][data-self="true"]
             // 精确选中「自己发的文本消息」（编辑入口只对这一类出现）
             data-self={msg.isSelf ? "true" : "false"}
@@ -544,29 +555,70 @@ export function MessageBubble({
                   </div>
                   <div className="text-label-xs mt-0.5 opacity-80">{msg.file.size}</div>
                 </div>
-                <button
-                  aria-label={t("file.download")}
-                  onClick={() => {
-                    const key = msg.file?.key;
-                    if (!key) return;
+                {(() => {
+                  // 下载按钮按阶段分流：downloading/saving → 取消；failed → 重试；
+                  // done 且拿得到落盘路径 → 打开（web 实现没有 reveal，也不会进这个态）；
+                  // 其余（未开始 / done 但拿不到路径）→ 下载
+                  const entry = downloadEntries[msg.id];
+                  const phase = entry?.phase;
+                  const key = msg.file?.key;
+                  const name = msg.file?.name;
+
+                  const onClick = () => {
+                    if (!key || !name) return;
+                    if (phase === "downloading" || phase === "saving") {
+                      cancelDownload(msg.id);
+                      return;
+                    }
+                    if (phase === "done" && entry?.savedPath) {
+                      const reveal = getFileSink().reveal;
+                      // web 实现没有 reveal：浏览器自己的下载目录不由我们管
+                      if (reveal)
+                        void reveal(entry.savedPath).catch(() =>
+                          showToast("error", t("chat.file.openFailed")),
+                        );
+                      return;
+                    }
                     // 带上原始文件名：服务端据此签出带 Content-Disposition: attachment
                     // 的 URL。不带的话浏览器按 Content-Type 内联渲染（PDF 直接打开
-                    // 预览，什么都没存下来），存下来的名字也是对象键里的那串 uuid
-                    void getDownloadUrl(key, msg.file?.name)
-                      // 走 openExternal 而非 window.open：Tauri WebView 里 window.open
-                      // 是哑的（安卓上点了毫无反应），需交给原生 shell 打开
-                      .then((url) => openExternal(url))
-                      .catch(() => showToast("error", t("chat.file.downloadFailed")));
-                  }}
-                  className={cn(
-                    "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors",
-                    isSelf
-                      ? "bg-white/15 text-white hover:bg-white/25"
-                      : "bg-primary-container text-primary-on-container hover:opacity-85",
-                  )}
-                >
-                  <Download size={15} />
-                </button>
+                    // 预览，什么都没存下来），存下来的名字也是对象键里的那串 uuid。
+                    // 走应用内下载而非 openExternal：跳出应用后用户看不到进度
+                    // 也不知道文件去哪了，桌面与安卓改成落盘 + 一键打开
+                    void startDownload(msg.id, key, name);
+                  };
+
+                  const Icon =
+                    phase === "downloading" || phase === "saving"
+                      ? X
+                      : phase === "failed"
+                        ? RefreshCw
+                        : phase === "done" && entry?.savedPath
+                          ? FolderOpen
+                          : Download;
+
+                  return (
+                    <button
+                      aria-label={t(
+                        phase === "downloading" || phase === "saving"
+                          ? "common.cancel"
+                          : phase === "failed"
+                            ? "common.retry"
+                            : phase === "done" && entry?.savedPath
+                              ? "chat.file.open"
+                              : "file.download",
+                      )}
+                      onClick={onClick}
+                      className={cn(
+                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors",
+                        isSelf
+                          ? "bg-white/15 text-white hover:bg-white/25"
+                          : "bg-primary-container text-primary-on-container hover:opacity-85",
+                      )}
+                    >
+                      <Icon size={15} />
+                    </button>
+                  );
+                })()}
               </div>
             )}
 
@@ -762,6 +814,11 @@ export function MessageBubble({
               )}
           </div>
         </div>
+
+        {/* 下载进度条：挂在气泡行之后（与气泡行同级），不放气泡内 ——
+            进度条有最小宽度诉求，放里面会向上贡献 min-content，
+            再踩一次「气泡顶穿父列」那个坑（见上方 w-full 的长注释） */}
+        {msg.kind === "file" && <FileProgressBar messageId={msg.id} />}
 
         {/* 表情回应：点击气泡 toggle 自己的参与态 */}
         {msg.reactions && msg.reactions.length > 0 && (

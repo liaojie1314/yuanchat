@@ -45,6 +45,7 @@ export { ChatWindow } from "./chat/ChatWindow";
 export { MessageBubble, TypingIndicator } from "./chat/MessageBubble";
 export { MessageImage } from "./chat/MessageImage";
 export { MessageVideo } from "./chat/MessageVideo";
+export { FileProgressBar } from "./chat/FileProgressBar";
 export { StickerImage } from "./stickers/StickerImage";
 export { ImageLightbox } from "./chat/ImageLightbox";
 export { VideoPlaybackOverlay } from "./chat/VideoPlaybackOverlay";
