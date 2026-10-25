@@ -566,6 +566,7 @@
   "palette.filterVoice": "Voice",
   "palette.empty": "No results",
   "palette.searchFailed": "Search failed, tap to retry",
+  "palette.windowTitle": "YuanChat · Search",
   "favorites.title": "My Favorites",
   "favorites.all": "All",
   "favorites.text": "Text",

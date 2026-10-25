@@ -48,16 +48,38 @@ export interface PaletteAction {
   /** 额外匹配词（英文/别名），与 labelKey 的译文一起参与匹配 */
   keywords: string[];
   run: (ctx: PaletteContext) => void;
+  /**
+   * 独立搜索窗口形态下是否保留。
+   *
+   * @remarks true 表示动作只做路由跳转，可安全经跨窗口导航桥在**主窗口**落地；
+   *   切主题 / 登出这类改「执行时所在窗口」store 的动作不带此标记 —— 搜索窗口是
+   *   独立 JS 上下文，在那里执行它们会动到错误的上下文（登出会把主窗口仍持有的
+   *   token 从 localStorage 抽掉，主窗口却还亮着），而主题切换只改一半窗口。
+   */
+  windowSafe?: boolean;
+}
+
+/** buildPaletteActions 的可选项 */
+export interface PaletteActionsOptions {
+  /**
+   * 只保留 {@link PaletteAction.windowSafe} 的动作 —— 独立搜索窗口形态用。
+   * 不传（默认）返回完整动作表，主窗口面板形态行为不变。
+   */
+  navigationOnly?: boolean;
 }
 
 /** 按宿主能力构造动作列表 */
-export function buildPaletteActions(ctx: PaletteContext): PaletteAction[] {
+export function buildPaletteActions(
+  ctx: PaletteContext,
+  opts?: PaletteActionsOptions,
+): PaletteAction[] {
   const actions: PaletteAction[] = [
     {
       id: "new-group",
       labelKey: "chat.group.create",
       icon: UserPlus,
       keywords: ["group", "qun", "新建群聊"],
+      windowSafe: true,
       run: (c) => c.navigate("/contacts?new=group"),
     },
     {
@@ -65,6 +87,7 @@ export function buildPaletteActions(ctx: PaletteContext): PaletteAction[] {
       labelKey: "chat.title",
       icon: MessageCircle,
       keywords: ["chat", "message"],
+      windowSafe: true,
       run: (c) => c.navigate("/chat"),
     },
     {
@@ -72,6 +95,7 @@ export function buildPaletteActions(ctx: PaletteContext): PaletteAction[] {
       labelKey: "contacts.title",
       icon: Users,
       keywords: ["contacts", "friends"],
+      windowSafe: true,
       run: (c) => c.navigate("/contacts"),
     },
     {
@@ -79,6 +103,7 @@ export function buildPaletteActions(ctx: PaletteContext): PaletteAction[] {
       labelKey: "moments.title",
       icon: Camera,
       keywords: ["moments", "feed"],
+      windowSafe: true,
       run: (c) => c.navigate("/moments"),
     },
     {
@@ -86,6 +111,7 @@ export function buildPaletteActions(ctx: PaletteContext): PaletteAction[] {
       labelKey: "favorites.title",
       icon: Star,
       keywords: ["favorites", "saved"],
+      windowSafe: true,
       run: (c) => c.navigate("/favorites"),
     },
     {
@@ -93,6 +119,7 @@ export function buildPaletteActions(ctx: PaletteContext): PaletteAction[] {
       labelKey: "sticker.market.title",
       icon: Sticker,
       keywords: ["stickers", "emoji", "market"],
+      windowSafe: true,
       run: (c) => c.navigate("/stickers"),
     },
     {
@@ -100,6 +127,7 @@ export function buildPaletteActions(ctx: PaletteContext): PaletteAction[] {
       labelKey: "settings.title",
       icon: Settings,
       keywords: ["settings", "preferences"],
+      windowSafe: true,
       run: (c) => c.navigate("/settings"),
     },
     {
@@ -129,7 +157,8 @@ export function buildPaletteActions(ctx: PaletteContext): PaletteAction[] {
       run: (c) => c.checkUpdate?.(),
     });
   }
-  return actions;
+  // 独立搜索窗口只留导航类：改上下文的动作在错误窗口执行（见 windowSafe 备注）
+  return opts?.navigationOnly ? actions.filter((a) => a.windowSafe === true) : actions;
 }
 
 /**

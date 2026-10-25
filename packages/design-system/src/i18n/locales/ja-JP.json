@@ -566,6 +566,7 @@
   "palette.filterVoice": "音声",
   "palette.empty": "該当する結果がありません",
   "palette.searchFailed": "検索に失敗しました。再試行",
+  "palette.windowTitle": "元聊 · 検索",
   "favorites.title": "お気に入り",
   "favorites.all": "すべて",
   "favorites.text": "テキスト",

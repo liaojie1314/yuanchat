@@ -16,10 +16,16 @@ import {
   useDesktopStore,
   useIsDesktop,
   useKeyboardAwareViewport,
+  useMessageStore,
 } from "@yuanchat/shared";
 import { TitleBar } from "./components/TitleBar";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { useCallWindow } from "./hooks/useCallWindow";
+import {
+  SEARCH_NAVIGATE_EVENT,
+  useSearchWindow,
+  type SearchNavigatePayload,
+} from "./hooks/useSearchWindow";
 import { EXIT_CONFIRM_MS, useAndroidBack } from "./hooks/useAndroidBack";
 import { ExitHint } from "./components/ExitHint";
 
@@ -73,6 +79,9 @@ const StickerMinePage = lazy(() =>
 const CallWindowPage = lazy(() =>
   import("./pages/CallWindowPage").then((m) => ({ default: m.CallWindowPage })),
 );
+const SearchWindowPage = lazy(() =>
+  import("./pages/SearchWindowPage").then((m) => ({ default: m.SearchWindowPage })),
+);
 
 // 模块级一次性注册：把原生「用系统应用打开」注入 shared 的外链抽象。
 // WebView 里 window.open 是哑的（安卓上点「下载」毫无反应），必须交给系统浏览器。
@@ -109,8 +118,14 @@ function App() {
   const navigate = useNavigate();
   // 通话窗口跑的是同一个 SPA：它自己就是承载方，不能再套一层开窗逻辑；
   // 移动端没有多窗口，通话走 MainLayout 里的浮层
-  const isCallWindow = useLocation().pathname === "/call";
-  useCallWindow(!isMobile && !isCallWindow);
+  const { pathname } = useLocation();
+  const isCallWindow = pathname === "/call";
+  // 独立搜索窗口同理：搜索的承载方就是它自己（数据自拉、结果经事件桥出窗），
+  // 不再注册开窗逻辑，也不安装托盘/不吃窗口尺寸复位（见下方三个 effect）
+  const isSearchWindow = pathname === "/search-window";
+  const isStandaloneWindow = isCallWindow || isSearchWindow;
+  useCallWindow(!isMobile && !isStandaloneWindow);
+  useSearchWindow(!isMobile && !isStandaloneWindow);
 
   // 移动端软键盘弹出时把内容顶起（桌面端 / 旧 WebView 自动降级为无操作）
   useKeyboardAwareViewport();
@@ -152,6 +167,9 @@ function App() {
 
   // 登录态驱动窗口形态：已认证 → 首页大窗可缩放；登出/未登录 → 恢复登录小窗不可缩放
   useEffect(() => {
+    // 独立窗口（通话/搜索）不吃这套尺寸复位：label 检查在下面已兜底，
+    // 这里显式挡掉是表明意图 —— 它们的尺寸归各自的宿主逻辑管
+    if (isStandaloneWindow) return;
     const resize = async () => {
       try {
         const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
@@ -176,7 +194,7 @@ function App() {
       }
     };
     void resize();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isStandaloneWindow]);
 
   // navigate 的函数身份随导航变化；进 effect 依赖会让每次切路由都卸装一次托盘
   // （顶栏短暂出现第二个图标）。走 ref 取最新值，effect 只认装/不装的条件。
@@ -185,10 +203,55 @@ function App() {
     navigateRef.current = navigate;
   }, [navigate]);
 
+  // 跨窗口导航桥（仅主窗口注册监听）：搜索窗口选中结果后 emit("search:navigate")，
+  // 在这里落地。落在 App 而不是 MainLayout：桥的两端（emit 在 SearchWindowPage）
+  // 都要碰 Tauri API，desktop 外壳是唯一不违反「ui 包不依赖 @tauri-apps/*」约定
+  // 的位置，且 navigateRef 已经在这层为托盘建好了。
+  //
+  // setActive 必须在主窗口做（搜索窗口里的 store 是另一个 JS 上下文，动它无效）：
+  // 会话视图由 conversationStore.activeId 驱动、ChatScreen 不消费 /chat/:id 路由
+  // 参数，只 navigate 界面不会切换（托盘跳转踩过的同一个坑）。
+  useEffect(() => {
+    if (!isDesktop || isMobile || !isAuthenticated || isStandaloneWindow) return;
+    let dispose: (() => void) | undefined;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        // 搜索/通话/注册等子窗口跑的是同一个 bundle，桥只归 main 管
+        if (cancelled || getCurrentWindow().label !== "main") return;
+        const { listen } = await import("@tauri-apps/api/event");
+        const unlisten = await listen<SearchNavigatePayload>(SEARCH_NAVIGATE_EVENT, (e) => {
+          const { path, conversationId, seek } = e.payload;
+          if (conversationId) useConversationStore.getState().setActive(conversationId);
+          if (seek) {
+            void useMessageStore
+              .getState()
+              .seekToMessage(seek.conversationId, seek.messageId, seek.seq);
+          }
+          navigateRef.current(path);
+          // 搜索窗口关了自己之后焦点不一定自动回落（视窗口管理器而定），显式带回主窗口
+          void getCurrentWindow()
+            .setFocus()
+            .catch(() => {});
+        });
+        // 异步竞态：装好前 effect 已清理（登出），直接退订不留悬空监听
+        if (cancelled) unlisten();
+        else dispose = unlisten;
+      } catch {
+        /* 非 Tauri 环境（浏览器 dev）忽略 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+      dispose?.();
+    };
+  }, [isDesktop, isMobile, isAuthenticated, isStandaloneWindow]);
+
   // 托盘 + 系统未读角标：仅主窗口安装（桌面 app、已登录）。登出时本 effect
   // 的清理函数会卸掉托盘并清角标，否则登出后托盘还挂着旧账号的未读数
   useEffect(() => {
-    if (!isDesktop || isMobile || !isAuthenticated || isCallWindow) return;
+    if (!isDesktop || isMobile || !isAuthenticated || isStandaloneWindow) return;
     let dispose: (() => void) | undefined;
     let cancelled = false;
     void (async () => {
@@ -219,7 +282,7 @@ function App() {
       cancelled = true;
       dispose?.();
     };
-  }, [isDesktop, isMobile, isAuthenticated, isCallWindow]);
+  }, [isDesktop, isMobile, isAuthenticated, isStandaloneWindow]);
 
   if (!isAuthenticated) {
     return (
@@ -257,6 +320,8 @@ function App() {
         <Routes>
           {/* 独立通话窗口：不套 MainLayout —— 它自建 WebSocket 并整屏渲染 CallView */}
           <Route path="/call" element={<CallWindowPage />} />
+          {/* 独立搜索窗口：不套 MainLayout —— 数据自拉，选中结果经事件桥回主窗口 */}
+          <Route path="/search-window" element={<SearchWindowPage />} />
           <Route
             element={
               <MainLayout

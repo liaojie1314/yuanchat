@@ -6,12 +6,14 @@
  * 一旦输入就进搜索（三源并发 + 分组结果 + 类型筛选）。
  * K3 与 K18 合并实现 —— 两者都要改这个组件，分两次做第二次得先拆掉第一次的结构。
  *
- * 桌面端刻意**不开独立原生窗口**而是放大面板：Tauri 每个 WebviewWindow 是独立
- * JS 上下文，store 不共享，联系人与会话列表得重新拉，每个快捷动作还要一轮跨窗口
- * RPC；而面板的全部价值在于对主窗口做事。用户的抱怨是「屏幕再大也只有一个窄弹窗」，
- * 那是宽度问题，断点就能解。详见设计文档 §1.2。
+ * 两种承载形态（variant）：
+ * - `panel`（默认）：主窗口内的浮层面板。断点形态 mobile 全屏 / tablet 560px /
+ *   desktop 720×560。web 与移动端用这个形态。
+ * - `window`：独立搜索窗口（桌面 app）里的**常开全出血**形态 —— 铺满窗口、
+ *   无 fixed 遮罩与圆角浮层。Tauri 每个 WebviewWindow 是独立 JS 上下文，
+ *   store 不共享，所以选中结果不走路由而是经 {@link Props.onNavigate} 交给宿主
+ *   （桌面端 emit 给主窗口落地），Escape / 选中后的关闭语义由宿主接（关窗）。
  *
- * 断点形态：mobile 全屏 / tablet 560px / desktop 720×560。
  * 断点一律内部 useBreakpoint() 推导，不接 isDesktop prop（沿用裁决 D1）。
  */
 import { useEffect, useId, useRef, useState } from "react";
@@ -47,11 +49,36 @@ import { fileIconOf } from "../util/fileIcon";
 import { buildPaletteActions } from "./paletteActions";
 import type { PaletteContext } from "./paletteActions";
 
+/**
+ * window 形态下随路径一起交给宿主的附加定位信息。
+ *
+ * @remarks 会话视图由 conversationStore.activeId 驱动（ChatScreen 不消费
+ *   `/chat/:id` 路由参数），只发路径主窗口不会切会话 —— 所以会话类结果必须
+ *   带上 conversationId，让**主窗口**先 setActive 再 navigate。
+ */
+export interface PaletteNavigateMeta {
+  /** 会话类结果：主窗口需先 setActive 的会话 ID */
+  conversationId?: string;
+  /** 消息类结果：主窗口定位到该消息（拉历史 + 高亮滚动） */
+  seek?: { conversationId: string; messageId: string; seq: number };
+}
+
 interface Props {
-  /** 是否打开；由宿主（MainLayout 的 Ctrl/Cmd+K 监听）驱动 */
-  show: boolean;
-  /** 关闭回调（Escape / 遮罩点击 / 关闭按钮 / 选中条目后） */
+  /**
+   * 是否打开；由宿主（MainLayout 的 Ctrl/Cmd+K 监听）驱动。
+   * @remarks window 形态常开，宿主可不传（默认 true）。
+   */
+  show?: boolean;
+  /** 关闭回调（Escape / 遮罩点击 / 关闭按钮 / 选中条目后）。window 形态下=关窗 */
   onClose: () => void;
+  /** `panel`（默认）主窗口浮层面板；`window` 独立搜索窗口常开全出血形态 */
+  variant?: "panel" | "window";
+  /**
+   * window 形态的导航出口：选中条目交给宿主（桌面端 emit 给主窗口落地）。
+   * 未传时回落本地 useNavigate（浏览器里跑桌面 SPA 的降级路径）。
+   * panel 形态忽略此 prop。
+   */
+  onNavigate?: (path: string, meta?: PaletteNavigateMeta) => void;
 }
 
 /** 面板里一个可执行条目 —— 各分组共用的最小单元，扁平化后供键盘连续导航 */
@@ -249,7 +276,7 @@ function SkeletonRows() {
  * @param props.show 打开状态
  * @param props.onClose 关闭回调
  */
-export function CommandPalette({ show, onClose }: Props) {
+export function CommandPalette({ show = true, onClose, variant = "panel", onNavigate }: Props) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const toggleTheme = useThemeStore((s) => s.toggleMode);
@@ -274,6 +301,10 @@ export function CommandPalette({ show, onClose }: Props) {
   const [selected, setSelected] = useState(0);
   const [retryTick, setRetryTick] = useState(0);
 
+  // window 形态常开：独立搜索窗口没有「关了再开」，宿主不需要传 show
+  const isWindow = variant === "window";
+  const effectiveShow = isWindow ? true : show;
+
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
   /** 过期响应守卫：只让最后一次搜索落地（防抖 + 筛选切换 + 重试都可能并发） */
@@ -281,13 +312,54 @@ export function CommandPalette({ show, onClose }: Props) {
   /** 上一次发起搜索的查询词：区分「查询变了要防抖」与「筛选/重试变了立即刷」 */
   const lastQueryRef = useRef("");
 
-  const ctx: PaletteContext = { navigate, toggleTheme, logout, isDesktopApp };
-  const allActions = buildPaletteActions(ctx);
+  /**
+   * window 形态的导航出口：有 onNavigate 走宿主桥（桌面端 emit 给主窗口落地），
+   * 未传回落本地路由（浏览器里跑桌面 SPA 的降级路径）。panel 形态恒走本地路由。
+   */
+  const navigateOut = (path: string, meta?: PaletteNavigateMeta) => {
+    if (isWindow && onNavigate) {
+      onNavigate(path, meta);
+      return;
+    }
+    navigate(path);
+  };
 
-  /** 落到目标会话：store 置活跃 + 路由进 /chat/:id + 关面板 */
-  const openConversation = (convId: string) => {
+  const ctx: PaletteContext = {
+    // 动作注册表只吃「跳哪」：window 形态跳的是主窗口的路由。选完的关闭
+    // 归宿主桥一条路（onNavigate → 关窗）；仅当没有宿主桥时才自己关，
+    // 否则两条路径都关一次，close 计数翻倍还互相竞态
+    navigate: (path) => {
+      navigateOut(path);
+      if (isWindow && !onNavigate) onClose();
+    },
+    toggleTheme,
+    logout,
+    isDesktopApp,
+  };
+  // 独立搜索窗口只留导航类动作：切主题/登出/检查更新动的是「执行时所在窗口」
+  // 的上下文，在搜索窗口里执行会动错地方（见 paletteActions.windowSafe 备注）
+  const allActions = buildPaletteActions(ctx, isWindow ? { navigationOnly: true } : undefined);
+
+  /**
+   * 落到目标会话。
+   *
+   * panel 形态：主窗口自己的 store 置活跃 + 路由进 /chat/:id + 关面板。
+   * window 形态：经导航桥把 conversationId 交给主窗口（会话视图由
+   * activeId 驱动、不吃路由参数，只发路径不会切换），并关窗。
+   */
+  const openConversation = (convId: string, seek?: PaletteNavigateMeta["seek"]) => {
+    if (isWindow) {
+      // 关窗归宿主桥一条路（同 ctx.navigate 的备注）：palette 不重复关
+      navigateOut(`/chat/${convId}`, { conversationId: convId, seek });
+      if (!onNavigate) onClose();
+      return;
+    }
     setActive(convId);
     navigate(`/chat/${convId}`);
+    if (seek) {
+      // 落到会话后定位该消息（高亮滚动）；刻意不 await，别让定位阻塞关面板
+      void seekToMessage(seek.conversationId, seek.messageId, seek.seq);
+    }
     onClose();
   };
 
@@ -306,7 +378,7 @@ export function CommandPalette({ show, onClose }: Props) {
             openConversation(f.conversationId);
           } else {
             // 还没建单聊的好友（历史脏数据 conversationId=null）：去通讯录找 TA
-            navigate("/contacts");
+            navigateOut("/contacts");
             onClose();
           }
         },
@@ -338,11 +410,12 @@ export function CommandPalette({ show, onClose }: Props) {
         title: r.message_type === 1 ? r.excerpt : r.file_name || r.excerpt,
         subtitle: `${r.conv_name} · ${r.sender_nickname}`,
         lead: <ResultLead result={r} />,
-        run: () => {
-          openConversation(r.conversation_id);
-          // 落到会话后定位该消息（高亮滚动）；刻意不 await，别让定位阻塞关面板
-          void seekToMessage(r.conversation_id, r.message_id, r.seq);
-        },
+        run: () =>
+          openConversation(r.conversation_id, {
+            conversationId: r.conversation_id,
+            messageId: r.message_id,
+            seq: r.seq,
+          }),
       };
       if (r.message_type === 1) messages.push(entry);
       else files.push(entry);
@@ -352,8 +425,9 @@ export function CommandPalette({ show, onClose }: Props) {
   };
 
   // ── 打开时重置（沿用 SearchModal 的既有行为）：清空 query/结果/筛选并聚焦 ──
+  // window 形态常开，本 effect 只在挂载时跑一次（聚焦输入框）
   useEffect(() => {
-    if (!show) return;
+    if (!effectiveShow) return;
     setQuery("");
     setTypeFilter("all");
     setSelected(0);
@@ -367,24 +441,24 @@ export function CommandPalette({ show, onClose }: Props) {
     lastQueryRef.current = "";
     const timer = setTimeout(() => inputRef.current?.focus(), 50);
     return () => clearTimeout(timer);
-  }, [show]);
+  }, [effectiveShow]);
 
   // ── 安卓返回键：面板开着时返回 = 关面板，而不是退出应用 ──
   // 本应用路由大量 replace，WebView 历史恒为 1，原生返回兜底就是 finish Activity。
-  // 拦截器必须同步消费。
+  // 拦截器必须同步消费。window 形态只在桌面搜索窗口里存在，没有安卓返回键。
   useEffect(() => {
-    if (!show) return;
+    if (!effectiveShow || isWindow) return;
     return registerBackInterceptor(() => {
       onClose();
       return true;
     });
-  }, [show, onClose]);
+  }, [effectiveShow, isWindow, onClose]);
 
   // ── 搜索主流程：查询变化防抖 300ms；类型筛选/重试变化立即重查 ──
   // 依赖刻意只列驱动搜索的状态；entry 构造器捕获的 navigate/onClose/setActive
   // 行为稳定（onClose 恒为「关面板」），不需要触发重搜。
   useEffect(() => {
-    if (!show) return;
+    if (!effectiveShow) return;
     const trimmed = query.trim();
 
     if (!trimmed) {
@@ -442,7 +516,7 @@ export function CommandPalette({ show, onClose }: Props) {
     }, delay);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, typeFilter, retryTick, show]);
+  }, [query, typeFilter, retryTick, effectiveShow]);
 
   // ── 命令模式的两组条目 ──
   const actionEntries: PaletteEntry[] = allActions.map((a) => ({
@@ -502,29 +576,41 @@ export function CommandPalette({ show, onClose }: Props) {
     }
   };
 
-  if (!show) return null;
+  if (!effectiveShow) return null;
 
   return (
     <div
       role="dialog"
-      aria-modal="true"
+      aria-modal={isWindow ? undefined : true}
       aria-label={t("palette.placeholder")}
       className={cn(
-        "fixed inset-0 z-50 flex justify-center bg-black/40",
-        bp === "mobile" ? "items-stretch" : "items-start pt-[10vh]",
+        isWindow
+          ? // 全出血：铺满窗口，没有遮罩与圆角浮层（关窗语义在宿主的标题栏/Escape）
+            "bg-surface flex h-full w-full flex-col overflow-hidden"
+          : "fixed inset-0 z-50 flex justify-center bg-black/40",
+        !isWindow && (bp === "mobile" ? "items-stretch" : "items-start pt-[10vh]"),
       )}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+      onClick={
+        isWindow
+          ? undefined
+          : (e) => {
+              if (e.target === e.currentTarget) onClose();
+            }
+      }
     >
       <div
         className={cn(
-          "bg-surface shadow-elevation-2 flex min-h-0 flex-col overflow-hidden",
-          bp === "mobile"
-            ? "h-full w-full rounded-none"
-            : bp === "tablet"
-              ? "mx-4 max-h-[70vh] w-[560px] rounded-lg"
-              : "h-[560px] w-[720px] rounded-lg",
+          "flex min-h-0 flex-col overflow-hidden",
+          isWindow
+            ? "h-full w-full flex-1"
+            : cn(
+                "bg-surface shadow-elevation-2",
+                bp === "mobile"
+                  ? "h-full w-full rounded-none"
+                  : bp === "tablet"
+                    ? "mx-4 max-h-[70vh] w-[560px] rounded-lg"
+                    : "h-[560px] w-[720px] rounded-lg",
+              ),
         )}
       >
         {/* 输入区 —— combobox 三件套：aria-expanded / aria-controls / aria-activedescendant */}
@@ -545,14 +631,17 @@ export function CommandPalette({ show, onClose }: Props) {
             placeholder={t("palette.placeholder")}
             className="text-on-surface placeholder:text-on-surface-variant flex-1 bg-transparent text-sm outline-none"
           />
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t("search.close")}
-            className="text-on-surface-variant hover:bg-surface-container-high rounded-lg p-1"
-          >
-            <X size={16} />
-          </button>
+          {/* window 形态的关闭在自绘标题栏（SearchWindowHost），输入行不再放第二个 X */}
+          {!isWindow && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={t("search.close")}
+              className="text-on-surface-variant hover:bg-surface-container-high rounded-lg p-1"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
 
         {/* 类型筛选条：仅搜索模式出现，筛选变化立即重查（不走防抖） */}

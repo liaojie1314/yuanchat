@@ -566,6 +566,7 @@
   "palette.filterVoice": "음성",
   "palette.empty": "결과가 없습니다",
   "palette.searchFailed": "검색 실패, 다시 시도",
+  "palette.windowTitle": "元聊 · 검색",
   "favorites.title": "내 즐겨찾기",
   "favorites.all": "전체",
   "favorites.text": "텍스트",

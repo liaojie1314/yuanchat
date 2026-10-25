@@ -42,6 +42,7 @@ import { type ReactNode, useState, useEffect } from "react";
 import { Avatar } from "../primitives/Avatar";
 import { CallHost } from "../call/CallHost";
 import { CommandPalette } from "../palette/CommandPalette";
+import { launchSearchWindow } from "../palette/searchWindowActions";
 import { DownloadPanel } from "../download/DownloadPanel";
 import { ToastHost } from "../primitives/Toast";
 import { NetworkBanner } from "./NetworkBanner";
@@ -82,6 +83,9 @@ export function MainLayout({
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
+        // 桌面 app 宿主注入了搜索窗口承载器 → 开/聚焦独立原生窗口，面板不出；
+        // web / 移动端没有宿主注入（返回 false），保持浮层面板形态
+        if (launchSearchWindow()) return;
         setShowSearch((v) => !v);
       }
       if (e.key === "Escape") setShowSearch(false);

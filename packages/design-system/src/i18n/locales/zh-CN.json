@@ -566,6 +566,7 @@
   "palette.filterVoice": "语音",
   "palette.empty": "没有找到相关结果",
   "palette.searchFailed": "搜索失败，点击重试",
+  "palette.windowTitle": "元聊 · 搜索",
   "favorites.title": "我的收藏",
   "favorites.all": "全部",
   "favorites.text": "文字",

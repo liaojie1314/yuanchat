@@ -19,9 +19,10 @@
  * 离线环境装不了；本包既有用例（MainLayout 等）也统一走 fireEvent。
  */
 import { describe, it, expect, vi, beforeEach, beforeAll, afterAll, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
+import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { server } from "@yuanchat/shared/mocks/server";
+import { useConversationStore } from "@yuanchat/shared";
 import { buildPaletteActions, filterActions } from "../paletteActions";
 import { CommandPalette } from "../CommandPalette";
 
@@ -56,6 +57,18 @@ describe("paletteActions", () => {
   it("空查询返回全部动作", () => {
     const actions = buildPaletteActions(ctx);
     expect(filterActions(actions, "", (k) => k)).toHaveLength(actions.length);
+  });
+
+  // 独立搜索窗口形态只保留导航类动作：切主题/登出/检查更新动的是「执行时所在
+  // 窗口」的 store 上下文，在搜索窗口（独立 JS 上下文）里执行会动错地方 ——
+  // 登出会把主窗口仍持有的 token 从 localStorage 抽掉，主题切换只改一半窗口。
+  it("navigationOnly 裁掉会动本窗口上下文的动作，只留可经导航桥跳转的", () => {
+    const ids = buildPaletteActions(ctx, { navigationOnly: true }).map((a) => a.id);
+    expect(ids).not.toContain("toggle-theme");
+    expect(ids).not.toContain("logout");
+    expect(ids).not.toContain("check-update");
+    expect(ids).toContain("go-settings");
+    expect(ids).toContain("new-group");
   });
 });
 
@@ -127,5 +140,92 @@ describe("CommandPalette", () => {
       const urls = spy.mock.calls.map((c) => String(c[0]));
       expect(urls.some((u) => u.includes("types=file"))).toBe(true);
     });
+  });
+});
+
+// ── window 形态（独立搜索窗口）───────────────────────────────────────────────
+describe("CommandPalette window 形态（独立搜索窗口）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useConversationStore.setState({ conversations: [] });
+  });
+
+  const wrap = (ui: React.ReactElement) => render(<MemoryRouter>{ui}</MemoryRouter>);
+
+  it("常开渲染：不传 show 也出 listbox，且没有 panel 形态的 fixed 遮罩层", () => {
+    wrap(<CommandPalette variant="window" onClose={vi.fn()} />);
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("listbox")).toBeInTheDocument();
+    expect(dialog.className).not.toContain("fixed");
+    expect(dialog.className).not.toContain("bg-black");
+  });
+
+  // 用户实测踩过的坑：选完条目搜索窗口留在屏幕上。「选中必关窗」由宿主桥一条路
+  // 负责（onNavigate → 关窗）：palette 若再自己关一次，两条 close 链互相竞态，
+  // close 计数在 0/2 之间飘（桌面 page 桥测试同题）。
+  it("选中条目走 onNavigate 出窗，关窗归宿主桥、palette 不重复关", () => {
+    const onNavigate = vi.fn();
+    const onClose = vi.fn();
+    wrap(<CommandPalette variant="window" onClose={onClose} onNavigate={onNavigate} />);
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+    // 第一个动作是 new-group → 跳通讯录建群
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(onNavigate.mock.calls[0][0]).toBe("/contacts?new=group");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("未传 onNavigate 时 palette 自己关窗（无宿主桥的降级路径也要选中必关窗）", () => {
+    const onClose = vi.fn();
+    wrap(<CommandPalette variant="window" onClose={onClose} />);
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("Escape 只关窗、不导航", () => {
+    const onNavigate = vi.fn();
+    const onClose = vi.fn();
+    wrap(<CommandPalette variant="window" onClose={onClose} onNavigate={onNavigate} />);
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it("未传 onNavigate 时回落本地 useNavigate（浏览器 dev 的降级路径）", () => {
+    const paths: string[] = [];
+    function LocationProbe() {
+      paths.push(useLocation().pathname + useLocation().search);
+      return null;
+    }
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <CommandPalette variant="window" onClose={vi.fn()} />
+        <Routes>
+          <Route path="*" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+    expect(paths).toContain("/contacts?new=group");
+  });
+
+  it("会话类结果把 conversationId 装进 meta 交给主窗口（主窗口需先 setActive）", async () => {
+    useConversationStore.setState({
+      conversations: [
+        { id: "c1", type: "group", name: "季度汇报群", unreadCount: 0, isMuted: false },
+      ],
+    });
+    const onNavigate = vi.fn();
+    const onClose = vi.fn();
+    wrap(<CommandPalette variant="window" onClose={onClose} onNavigate={onNavigate} />);
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "季度汇报群" } });
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /季度汇报群/ })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("option", { name: /季度汇报群/ }));
+    expect(onNavigate).toHaveBeenCalledWith(
+      "/chat/c1",
+      expect.objectContaining({ conversationId: "c1" }),
+    );
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

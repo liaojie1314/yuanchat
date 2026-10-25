@@ -126,12 +126,18 @@ export { TAB_ROOT_PATHS } from "./layout/navItems";
 
 // 命令面板
 export { CommandPalette } from "./palette/CommandPalette";
+export type { PaletteNavigateMeta } from "./palette/CommandPalette";
 export {
   buildPaletteActions,
   filterActions,
   type PaletteAction,
+  type PaletteActionsOptions,
   type PaletteContext,
 } from "./palette/paletteActions";
+// 独立搜索窗口（桌面 app）：承载组件 + 开窗承载器注册点（与 setCallLauncher 同一模式）
+export { SearchWindowHost } from "./palette/SearchWindowHost";
+export { launchSearchWindow, setSearchWindowLauncher } from "./palette/searchWindowActions";
+export type { SearchWindowLauncher } from "./palette/searchWindowActions";
 // 关窗二选一弹窗（桌面端托盘配套）
 export { CloseBehaviorDialog } from "./palette/CloseBehaviorDialog";
 
