@@ -83,15 +83,30 @@ export async function installTray(opts: {
 
   /** 左键/菜单「打开」共用：把窗口带到前台并直达第一个未读 */
   const activate = async () => {
-    try {
-      await win.unminimize();
-      await win.show();
-      await win.setFocus();
-      // GNOME 的焦点防抢占会让 setFocus 不抬窗：短暂置顶再取消，强制把窗口顶到前台
-      await win.setAlwaysOnTop(true);
-      await win.setAlwaysOnTop(false);
-    } catch (e) {
-      console.warn("[tray] 激活窗口失败", e);
+    // 隐藏（withdrawn）与最小化是两种状态，先 show 重新映射窗口；
+    // 每步独立兜错 —— 一步失败（如对已隐藏窗口 unminimize）不能让
+    // 后面的步骤被跳过，否则窗口永远唤不回
+    const steps: Array<[string, () => Promise<void>]> = [
+      ["show", () => win.show()],
+      ["unminimize", () => win.unminimize()],
+      ["setFocus", () => win.setFocus()],
+      [
+        // GNOME 的焦点防抢占会让 setFocus 不抬窗：短暂置顶再取消，强制顶到前台
+        "raise",
+        async () => {
+          await win.setAlwaysOnTop(true);
+          await win.setAlwaysOnTop(false);
+        },
+      ],
+      // 从托盘唤回视为一次「重新打开」，居中呈现而不是停在上次的角落位置
+      ["center", () => win.center()],
+    ];
+    for (const [name, run] of steps) {
+      try {
+        await run();
+      } catch (e) {
+        console.warn(`[tray] 激活窗口失败：${name}`, e);
+      }
     }
     opts.onOpenConversation(selectFirstUnreadId(useConversationStore.getState().conversations));
   };
