@@ -846,7 +846,9 @@
   "desktop.closeTitle": "Close window",
   "desktop.closeBody": "Minimizing to the tray keeps receiving messages.",
   "desktop.closeToTray": "Minimize to tray",
+  "desktop.closeToTrayHint": "Keep receiving messages",
   "desktop.closeQuit": "Quit app",
+  "desktop.closeQuitHint": "Disconnect and quit",
   "desktop.rememberChoice": "Remember my choice",
   "desktop.closeBehavior": "When closing the window",
   "desktop.closeBehaviorAsk": "Ask every time"
