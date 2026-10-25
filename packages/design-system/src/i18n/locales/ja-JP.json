@@ -820,5 +820,10 @@
   "admin.releases.publish": "公開",
   "admin.releases.publishConfirm": "配信対象のすべてのクライアントにこのバージョンが届きます。公開しますか？",
   "admin.releases.rollback": "ロールバック",
-  "admin.releases.rollbackConfirm": "すべてのクライアントへの配信が直ちに停止します。ロールバックしますか？"
+  "admin.releases.rollbackConfirm": "すべてのクライアントへの配信が直ちに停止します。ロールバックしますか？",
+  "tray.tooltip": "元聊",
+  "tray.unread": "未読 %{count} 件",
+  "tray.noUnread": "未読はありません",
+  "tray.open": "元聊を開く",
+  "tray.quit": "終了"
 }

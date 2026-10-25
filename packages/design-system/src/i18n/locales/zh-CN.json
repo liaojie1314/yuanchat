@@ -820,5 +820,10 @@
   "admin.releases.publish": "发布",
   "admin.releases.publishConfirm": "发布后所有命中灰度的客户端都会收到该版本。确定发布？",
   "admin.releases.rollback": "回滚",
-  "admin.releases.rollbackConfirm": "回滚后所有客户端立刻停止收到该版本。确定回滚？"
+  "admin.releases.rollbackConfirm": "回滚后所有客户端立刻停止收到该版本。确定回滚？",
+  "tray.tooltip": "元聊",
+  "tray.unread": "未读 %{count} 条",
+  "tray.noUnread": "没有未读消息",
+  "tray.open": "打开元聊",
+  "tray.quit": "退出"
 }

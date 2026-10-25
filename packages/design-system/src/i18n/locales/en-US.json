@@ -820,5 +820,10 @@
   "admin.releases.publish": "Publish",
   "admin.releases.publishConfirm": "Every client in the rollout bucket will receive this version. Publish it?",
   "admin.releases.rollback": "Roll back",
-  "admin.releases.rollbackConfirm": "All clients will immediately stop receiving this version. Roll it back?"
+  "admin.releases.rollbackConfirm": "All clients will immediately stop receiving this version. Roll it back?",
+  "tray.tooltip": "YuanChat",
+  "tray.unread": "%{count} unread",
+  "tray.noUnread": "No unread messages",
+  "tray.open": "Open YuanChat",
+  "tray.quit": "Quit"
 }

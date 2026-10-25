@@ -820,5 +820,10 @@
   "admin.releases.publish": "배포",
   "admin.releases.publishConfirm": "배포 대상 클라이언트 전체가 이 버전을 받게 됩니다. 배포할까요?",
   "admin.releases.rollback": "롤백",
-  "admin.releases.rollbackConfirm": "모든 클라이언트가 즉시 이 버전 수신을 중단합니다. 롤백할까요?"
+  "admin.releases.rollbackConfirm": "모든 클라이언트가 즉시 이 버전 수신을 중단합니다. 롤백할까요?",
+  "tray.tooltip": "위안챗",
+  "tray.unread": "읽지 않음 %{count}개",
+  "tray.noUnread": "읽지 않은 메시지 없음",
+  "tray.open": "위안챗 열기",
+  "tray.quit": "종료"
 }

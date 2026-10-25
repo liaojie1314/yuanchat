@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from "react";
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -12,6 +12,7 @@ import {
   setNotifier,
   setUrlOpener,
   useAuthStore,
+  useIsDesktop,
   useKeyboardAwareViewport,
 } from "@yuanchat/shared";
 import { TitleBar } from "./components/TitleBar";
@@ -102,6 +103,8 @@ function App() {
   const exitHintSeq = useAndroidBack();
   const { t } = useTranslation();
   const isMobile = useIsMobile();
+  const isDesktop = useIsDesktop();
+  const navigate = useNavigate();
   // 通话窗口跑的是同一个 SPA：它自己就是承载方，不能再套一层开窗逻辑；
   // 移动端没有多窗口，通话走 MainLayout 里的浮层
   const isCallWindow = useLocation().pathname === "/call";
@@ -137,6 +140,37 @@ function App() {
     };
     void resize();
   }, [isAuthenticated]);
+
+  // 托盘 + 系统未读角标：仅主窗口安装（桌面 app、已登录）。登出时本 effect
+  // 的清理函数会卸掉托盘并清角标，否则登出后托盘还挂着旧账号的未读数
+  useEffect(() => {
+    if (!isDesktop || isMobile || !isAuthenticated || isCallWindow) return;
+    let dispose: (() => void) | undefined;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        // 注册/忘记密码/通话等子窗口跑的是同一个 bundle，托盘只归 main 管
+        if (cancelled || getCurrentWindow().label !== "main") return;
+        const { installTray } = await import("./tray");
+        const d = await installTray({
+          onOpenConversation: (id) => {
+            // null 表示没有未读：只聚焦窗口，不跳转 —— 否则会把用户正在看的位置顶掉
+            if (id) navigate(`/chat/${id}`);
+          },
+        });
+        // 异步竞态：安装完成前 effect 已清理（登出），直接走卸载而不是挂回去
+        if (cancelled) d();
+        else dispose = d;
+      } catch {
+        /* 非 Tauri 环境（浏览器 dev）忽略 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+      dispose?.();
+    };
+  }, [isDesktop, isMobile, isAuthenticated, isCallWindow, navigate]);
 
   if (!isAuthenticated) {
     return (
