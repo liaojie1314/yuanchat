@@ -1,9 +1,10 @@
 /**
- * 全局搜索浮层 E2E 测试
+ * 全局搜索（命令面板）E2E 测试
  *
  * @description
- * 覆盖：Ctrl/Cmd+K 打开搜索弹窗、输入框自动聚焦、
- * Escape 关闭、关闭按钮关闭、打开时显示提示文案。
+ * 原针对 SearchModal；Task 12 起该组件升维为 CommandPalette（同一快捷键链路），
+ * 用例随之改指新面板。覆盖：Ctrl/Cmd+K 打开、输入框自动聚焦、
+ * Escape 关闭、关闭按钮关闭、空输入时列出快捷动作。
  *
  * ⚠️ Ctrl+K 是 Chromium 保留快捷键（地址栏搜索），浏览器会先吞事件，
  * 不会冒泡到页面 window keydown handler。测试改用 evaluate 派发合成
@@ -34,13 +35,13 @@ async function dispatchKey(
 async function openSearch(page: Page): Promise<void> {
   await expect(async () => {
     await dispatchKey(page, { key: "k", ctrlKey: true });
-    await expect(page.getByRole("dialog", { name: "搜索消息" })).toBeVisible({
+    await expect(page.getByRole("dialog", { name: "搜索或输入命令…" })).toBeVisible({
       timeout: 500,
     });
   }).toPass({ timeout: 5000 });
 }
 
-test.describe("Global Search Modal (Cmd/Ctrl+K)", () => {
+test.describe("Global Command Palette (Cmd/Ctrl+K)", () => {
   test.beforeEach(async ({ page }) => {
     await setAuth(page);
     await waitForMSW(page);
@@ -54,7 +55,7 @@ test.describe("Global Search Modal (Cmd/Ctrl+K)", () => {
   test("Meta+K opens search dialog (macOS)", async ({ page }) => {
     await expect(async () => {
       await dispatchKey(page, { key: "k", metaKey: true });
-      await expect(page.getByRole("dialog", { name: "搜索消息" })).toBeVisible({
+      await expect(page.getByRole("dialog", { name: "搜索或输入命令…" })).toBeVisible({
         timeout: 500,
       });
     }).toPass({ timeout: 5000 });
@@ -62,23 +63,24 @@ test.describe("Global Search Modal (Cmd/Ctrl+K)", () => {
 
   test("search input is focused when modal opens", async ({ page }) => {
     await openSearch(page);
-    await expect(page.getByPlaceholder("搜索聊天记录…")).toBeFocused();
+    await expect(page.getByPlaceholder("搜索或输入命令…")).toBeFocused();
   });
 
   test("Escape closes search dialog", async ({ page }) => {
     await openSearch(page);
     await dispatchKey(page, { key: "Escape" });
-    await expect(page.getByRole("dialog", { name: "搜索消息" })).not.toBeVisible();
+    await expect(page.getByRole("dialog", { name: "搜索或输入命令…" })).not.toBeVisible();
   });
 
   test("close button closes search dialog", async ({ page }) => {
     await openSearch(page);
     await page.getByRole("button", { name: "关闭搜索" }).click();
-    await expect(page.getByRole("dialog", { name: "搜索消息" })).not.toBeVisible();
+    await expect(page.getByRole("dialog", { name: "搜索或输入命令…" })).not.toBeVisible();
   });
 
-  test("shows hint before typing", async ({ page }) => {
+  test("shows quick actions before typing", async ({ page }) => {
     await openSearch(page);
-    await expect(page.getByText("输入至少 3 个字符")).toBeVisible();
+    // 空输入是命令模式：渲染动作注册表而非搜索提示
+    await expect(page.getByRole("option").first()).toBeVisible();
   });
 });

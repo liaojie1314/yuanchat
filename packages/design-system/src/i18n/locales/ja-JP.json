@@ -550,7 +550,6 @@
   "search.hint": "3 文字以上入力してください",
   "search.loading": "検索中…",
   "search.placeholder": "チャット履歴を検索…",
-  "search.title": "メッセージを検索",
   "palette.placeholder": "検索またはコマンド入力…",
   "palette.toggleTheme": "テーマ切り替え",
   "palette.actions": "クイック操作",

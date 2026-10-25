@@ -39,7 +39,7 @@ import { useTranslation } from "react-i18next";
 import { type ReactNode, useState, useEffect } from "react";
 import { Avatar } from "../primitives/Avatar";
 import { CallHost } from "../call/CallHost";
-import { SearchModal } from "./SearchModal";
+import { CommandPalette } from "../palette/CommandPalette";
 import { ToastHost } from "../primitives/Toast";
 import { NetworkBanner } from "./NetworkBanner";
 import {
@@ -150,7 +150,7 @@ export function MainLayout({
         <ToastHost />
         <NetworkBanner />
         {callMode === "overlay" ? <CallHost /> : null}
-        <SearchModal show={showSearch} onClose={() => setShowSearch(false)} />
+        <CommandPalette show={showSearch} onClose={() => setShowSearch(false)} />
         {titleBar}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <Outlet />
@@ -208,7 +208,7 @@ export function MainLayout({
       <ToastHost />
       <NetworkBanner />
       {callMode === "overlay" ? <CallHost /> : null}
-      <SearchModal show={showSearch} onClose={() => setShowSearch(false)} />
+      <CommandPalette show={showSearch} onClose={() => setShowSearch(false)} />
       {/* 左侧品牌色导航栏 — 渐变背景 */}
       <nav className="nav-gradient shadow-elevation-2 z-20 flex w-16 shrink-0 flex-col items-center gap-1 py-3 text-white">
         {/* 我的头像 + 在线状态 */}
