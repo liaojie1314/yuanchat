@@ -117,6 +117,8 @@ export {
   ServerEndpointDialog,
   ServerSwitchLink,
 } from "./settings/ServerEndpointEditor";
+export { AndroidUpdateCard } from "./settings/AndroidUpdateCard";
+export { APP_VERSION } from "./settings/settingsUtils";
 
 // 布局组件
 export { MainLayout } from "./layout/MainLayout";

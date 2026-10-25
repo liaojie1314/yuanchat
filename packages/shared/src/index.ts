@@ -20,6 +20,7 @@ export * from "./api/chat";
 export * from "./api/contacts";
 export * from "./api/users";
 export * from "./api/files";
+export * from "./api/releases";
 export * from "./api/groups";
 export * from "./api/presence";
 export * from "./api/search";
@@ -52,6 +53,7 @@ export {
 export {
   useDownloadStore,
   startDownload,
+  startDownloadFromUrl,
   cancelDownload,
   clearDownload,
   type DownloadEntry,

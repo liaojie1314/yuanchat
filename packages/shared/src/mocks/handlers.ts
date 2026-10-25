@@ -1766,6 +1766,85 @@ export const handlers = [
   }),
 
   // --------------------------------------------------
+  // OTA — 更新检查（Tauri updater 与 Android 自建链路共用）
+  // GET /api/v1/updates/:platform/:arch
+  // 四态：正常（动态格式更新体）/ 空（204）/ 错误（500）/ 加载（delay）
+  // 注意响应体**不带 {code,data} 信封** —— updater 直接解析根对象
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/updates/:platform/:arch", async ({ request }) => {
+    await delay(300);
+    const url = new URL(request.url);
+    if (url.searchParams.get("error") === "1") {
+      return HttpResponse.json(
+        { code: 500, message: "resolve failed", data: null },
+        { status: 500 },
+      );
+    }
+    if (url.searchParams.get("empty") === "1") {
+      return new HttpResponse(null, { status: 204 });
+    }
+    return HttpResponse.json({
+      version: "9.9.9",
+      notes: "mock：修复若干问题，优化体验。",
+      pub_date: "2026-10-01T08:00:00Z",
+      url: "http://localhost:9002/releases/mock/app.apk",
+      signature: "mock-signature",
+      sha256: "aa".repeat(32),
+      size: 42_000_000,
+      mandatory: false,
+    });
+  }),
+
+  // --------------------------------------------------
+  // OTA — 下载页目录（每个平台/架构的最新已发布版本）
+  // GET /api/v1/updates/catalog
+  // 四态：正常（三桌面 + 安卓）/ 空（[]）/ 错误（500）/ 加载（delay）
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/updates/catalog", async ({ request }) => {
+    await delay(300);
+    const url = new URL(request.url);
+    if (url.searchParams.get("error") === "1") return apiError(500, "catalog failed");
+    if (url.searchParams.get("empty") === "1") return apiOk({ items: [] });
+    return apiOk({
+      items: [
+        {
+          platform: "linux",
+          arch: "x86_64",
+          version: "0.8.0",
+          size: 78_000_000,
+          notes: "Linux AppImage 安装包",
+          url: "http://localhost:9002/releases/mock/yuanchat-linux.AppImage",
+        },
+        {
+          platform: "windows",
+          arch: "x86_64",
+          version: "0.8.0",
+          size: 64_000_000,
+          notes: "Windows 安装包",
+          url: "http://localhost:9002/releases/mock/yuanchat-setup.exe",
+        },
+        {
+          platform: "darwin",
+          arch: "universal",
+          version: "0.8.0",
+          size: 82_000_000,
+          notes: "macOS 通用安装包",
+          url: "http://localhost:9002/releases/mock/yuanchat.dmg",
+        },
+        {
+          platform: "android",
+          arch: "aarch64",
+          version: "0.8.0",
+          size: 42_000_000,
+          notes: "Android APK",
+          sha256: "bb".repeat(32),
+          url: "http://localhost:9002/releases/mock/yuanchat.apk",
+        },
+      ],
+    });
+  }),
+
+  // --------------------------------------------------
   // 朋友圈 — 某人的主页动态
   // GET /api/v1/moments/user/:id
   // --------------------------------------------------
