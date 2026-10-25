@@ -27,7 +27,14 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { registerBackInterceptor, useAuthStore, useBreakpoint } from "@yuanchat/shared";
+import {
+  registerBackInterceptor,
+  useAuthStore,
+  useBreakpoint,
+  useDesktopStore,
+  useIsDesktop,
+  type CloseBehavior,
+} from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "../primitives/Avatar";
 import { ProfileEditView } from "./ProfileEditView";
@@ -179,7 +186,11 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
       case "appearance":
         return (
           <MobileHeader show={isMobile} title={t("settings.appearance")} onBack={onBack}>
-            <AppearanceSection />
+            <div className="flex flex-col gap-6">
+              <AppearanceSection />
+              {/* 桌面 app 专属：关窗行为三选（内部自行判断平台，非桌面渲染 null） */}
+              <DesktopSection />
+            </div>
           </MobileHeader>
         );
       case "favorites":
@@ -399,6 +410,53 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
         <div className="mx-auto max-w-2xl px-8 py-8">{renderContent(() => setView("profile"))}</div>
       </div>
       <UserStatusEditor open={statusOpen} onClose={() => setStatusOpen(false)} />
+    </div>
+  );
+}
+
+/**
+ * 桌面端专属设置：点关闭按钮的行为三选。
+ *
+ * 仅桌面 app 且非移动显示（web / 安卓 / iOS 没有托盘与关窗行为可言）。
+ * 必须有这一项 —— 关窗弹窗勾了「记住我的选择」之后，这里给得出回头路，
+ * 否则勾完就再也改不了。
+ */
+function DesktopSection() {
+  const { t } = useTranslation();
+  const bp = useBreakpoint();
+  const isDesktop = useIsDesktop();
+  const closeBehavior = useDesktopStore((s) => s.closeBehavior);
+  const setCloseBehavior = useDesktopStore((s) => s.setCloseBehavior);
+
+  if (!isDesktop || bp === "mobile") return null;
+
+  const options: Array<{ value: CloseBehavior; label: string }> = [
+    { value: "ask", label: t("desktop.closeBehaviorAsk") },
+    { value: "tray", label: t("desktop.closeToTray") },
+    { value: "quit", label: t("desktop.closeQuit") },
+  ];
+
+  return (
+    <div>
+      <h3 className="text-title-sm text-on-surface mb-3 font-semibold">
+        {t("desktop.closeBehavior")}
+      </h3>
+      <div className="bg-surface-container inline-flex w-full rounded-lg p-1">
+        {options.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => setCloseBehavior(opt.value)}
+            className={cn(
+              "text-label-lg flex-1 rounded-md py-2 font-medium transition-all",
+              closeBehavior === opt.value
+                ? "bg-surface shadow-elevation-1 text-on-surface"
+                : "text-on-surface-variant hover:text-on-surface",
+            )}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

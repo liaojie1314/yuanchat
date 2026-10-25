@@ -825,5 +825,12 @@
   "tray.unread": "未读 %{count} 条",
   "tray.noUnread": "没有未读消息",
   "tray.open": "打开元聊",
-  "tray.quit": "退出"
+  "tray.quit": "退出",
+  "desktop.closeTitle": "关闭窗口",
+  "desktop.closeBody": "最小化到托盘可继续接收消息。",
+  "desktop.closeToTray": "最小化到托盘",
+  "desktop.closeQuit": "退出应用",
+  "desktop.rememberChoice": "记住我的选择",
+  "desktop.closeBehavior": "点击关闭按钮时",
+  "desktop.closeBehaviorAsk": "每次询问"
 }

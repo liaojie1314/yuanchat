@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
@@ -7,11 +7,12 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
-import { MainLayout, AppErrorBoundary } from "@yuanchat/ui";
+import { MainLayout, AppErrorBoundary, CloseBehaviorDialog } from "@yuanchat/ui";
 import {
   setNotifier,
   setUrlOpener,
   useAuthStore,
+  useDesktopStore,
   useIsDesktop,
   useKeyboardAwareViewport,
 } from "@yuanchat/shared";
@@ -113,6 +114,41 @@ function App() {
   // 移动端软键盘弹出时把内容顶起（桌面端 / 旧 WebView 自动降级为无操作）
   useKeyboardAwareViewport();
 
+  // 关窗行为：默认每次询问；勾「记住」后写进 desktopStore（本机持久化），
+  // 之后由设置页的三选开关给回头路
+  const [askClose, setAskClose] = useState(false);
+  const closeBehavior = useDesktopStore((s) => s.closeBehavior);
+  const setCloseBehavior = useDesktopStore((s) => s.setCloseBehavior);
+
+  /**
+   * 关窗动作。
+   *
+   * @remarks 最小化到托盘要用 hide 而非 minimize：minimize 仍在任务栏占位，
+   * 而「最小化到托盘」的本意是从任务栏消失、只留托盘图标。
+   */
+  const doClose = async (b: "tray" | "quit") => {
+    try {
+      if (b === "tray") {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        await getCurrentWindow().hide();
+      } else {
+        const { exit } = await import("@tauri-apps/plugin-process");
+        await exit(0);
+      }
+    } catch {
+      /* 非 Tauri 环境（浏览器 dev）忽略 */
+    }
+  };
+
+  /** 点关闭按钮：偏好为 ask 时弹窗询问，其余直接执行记住的选择 */
+  const handleClose = async () => {
+    if (closeBehavior === "ask") {
+      setAskClose(true);
+      return;
+    }
+    await doClose(closeBehavior);
+  };
+
   // 登录态驱动窗口形态：已认证 → 首页大窗可缩放；登出/未登录 → 恢复登录小窗不可缩放
   useEffect(() => {
     const resize = async () => {
@@ -211,7 +247,7 @@ function App() {
           <Route
             element={
               <MainLayout
-                titleBar={isMobile ? undefined : <TitleBar />}
+                titleBar={isMobile ? undefined : <TitleBar onClose={handleClose} />}
                 callMode={isMobile ? "overlay" : "window"}
               />
             }
@@ -237,6 +273,16 @@ function App() {
           </Route>
         </Routes>
       </Suspense>
+      {/* 关窗二选一弹窗：仅主窗口的 TitleBar 关闭按钮会唤起 */}
+      <CloseBehaviorDialog
+        open={askClose}
+        onCancel={() => setAskClose(false)}
+        onPick={(b, remember) => {
+          setAskClose(false);
+          if (remember) setCloseBehavior(b);
+          void doClose(b);
+        }}
+      />
     </AppErrorBoundary>
   );
 }

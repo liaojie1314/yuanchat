@@ -825,5 +825,12 @@
   "tray.unread": "읽지 않음 %{count}개",
   "tray.noUnread": "읽지 않은 메시지 없음",
   "tray.open": "위안챗 열기",
-  "tray.quit": "종료"
+  "tray.quit": "종료",
+  "desktop.closeTitle": "창 닫기",
+  "desktop.closeBody": "트레이로 최소화하면 메시지를 계속 받습니다.",
+  "desktop.closeToTray": "트레이로 최소화",
+  "desktop.closeQuit": "앱 종료",
+  "desktop.rememberChoice": "내 선택 기억하기",
+  "desktop.closeBehavior": "닫기 버튼을 누를 때",
+  "desktop.closeBehaviorAsk": "매번 확인"
 }

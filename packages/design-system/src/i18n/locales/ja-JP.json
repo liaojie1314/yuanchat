@@ -825,5 +825,12 @@
   "tray.unread": "未読 %{count} 件",
   "tray.noUnread": "未読はありません",
   "tray.open": "元聊を開く",
-  "tray.quit": "終了"
+  "tray.quit": "終了",
+  "desktop.closeTitle": "ウィンドウを閉じる",
+  "desktop.closeBody": "トレイに最小化するとメッセージを受信し続けます。",
+  "desktop.closeToTray": "トレイに最小化",
+  "desktop.closeQuit": "アプリを終了",
+  "desktop.rememberChoice": "選択を記憶する",
+  "desktop.closeBehavior": "閉じるボタンを押したとき",
+  "desktop.closeBehaviorAsk": "毎回確認"
 }

@@ -130,6 +130,8 @@ export {
   type PaletteAction,
   type PaletteContext,
 } from "./palette/paletteActions";
+// 关窗二选一弹窗（桌面端托盘配套）
+export { CloseBehaviorDialog } from "./palette/CloseBehaviorDialog";
 
 export { E2EEIndicator } from "./e2ee/E2EEIndicator";
 export { SafetyNumberDialog } from "./e2ee/SafetyNumberDialog";

@@ -825,5 +825,12 @@
   "tray.unread": "%{count} unread",
   "tray.noUnread": "No unread messages",
   "tray.open": "Open YuanChat",
-  "tray.quit": "Quit"
+  "tray.quit": "Quit",
+  "desktop.closeTitle": "Close window",
+  "desktop.closeBody": "Minimizing to the tray keeps receiving messages.",
+  "desktop.closeToTray": "Minimize to tray",
+  "desktop.closeQuit": "Quit app",
+  "desktop.rememberChoice": "Remember my choice",
+  "desktop.closeBehavior": "When closing the window",
+  "desktop.closeBehaviorAsk": "Ask every time"
 }
