@@ -4,5 +4,13 @@
   "description": "Desktop-only capabilities (updater/process are not compiled on mobile)",
   "platforms": ["macOS", "windows", "linux"],
   "windows": ["main"],
-  "permissions": ["updater:default", "process:default"]
+  "permissions": [
+    "updater:default",
+    "process:default",
+    "fs:allow-download-write-recursive",
+    "fs:allow-download-read-recursive",
+    "fs:allow-download-meta-recursive",
+    "fs:scope-download-recursive",
+    "fs:allow-applocaldata-write-recursive"
+  ]
 }

@@ -38,6 +38,13 @@ if ("__TAURI_INTERNALS__" in window) {
       window.location.href = "/chat";
     });
   });
+
+  // 注入 Tauri 的落盘实现：下载进度 store 落盘时不再走 <a download>，
+  // 而是写进应用 Download 目录（安卓是私有 external files，零权限）。
+  // 必须在任何下载开始前装好；web 构建里这段不会执行
+  import("./fileSink").then(({ installFileSink }) => {
+    installFileSink();
+  });
 }
 
 async function bootstrap() {
