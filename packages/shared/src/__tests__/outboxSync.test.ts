@@ -197,3 +197,116 @@ describe("restoreOutbox —— 冷启动恢复", () => {
     await initLocalStore("outbox-sync-test");
   });
 });
+
+// ---------------------------------------------------------------------------
+// 发送前的磁盘副本（outbox 落盘）
+// ---------------------------------------------------------------------------
+
+import { setFileSink, __resetFileSink, type FileSink } from "../download/fileSink";
+import {
+  clearStagedOutboxFile,
+  readStagedOutboxFile,
+  sniffImageMime,
+  stageOutboxFile,
+  STAGED_IMAGE_NAME,
+  STAGED_VOICE_NAME,
+} from "../store/outboxSync";
+
+/** 造一个以 `dir/name` 为键的内存磁盘 sink（模拟 Tauri 侧的 read/remove 能力） */
+function diskSink(): { sink: FileSink; disk: Map<string, Uint8Array>; failRemove: () => void } {
+  const disk = new Map<string, Uint8Array>();
+  let breakRemove = false;
+  const sink: FileSink = {
+    save: async (bytes, name, _mime, dir) => {
+      disk.set(`${dir}/${name}`, bytes);
+      return name;
+    },
+    read: async (name, dir) => {
+      const hit = disk.get(`${dir}/${name}`);
+      if (!hit) throw new Error("ENOENT");
+      return hit;
+    },
+    remove: async (name, dir) => {
+      if (breakRemove) throw new Error("EBUSY");
+      disk.delete(`${dir}/${name}`);
+    },
+  };
+  return { sink, disk, failRemove: () => (breakRemove = true) };
+}
+
+describe("outbox 落盘副本", () => {
+  afterEach(() => {
+    __resetFileSink();
+  });
+
+  it("应用重启后 blob 失效，重试仍能从磁盘副本读回字节", async () => {
+    const { sink, disk } = diskSink();
+    setFileSink(sink);
+
+    // 发送：字节应以 `${clientMsgId}-${fileName}` 为键落盘（键带消息前缀，
+    // 同名文件的并发发送互不覆盖，ack 清理也只清自己这条的副本）
+    const clientMsgId = "c-1";
+    await stageOutboxFile(clientMsgId, new Uint8Array([7, 8, 9]), "a.pdf", "application/pdf");
+    expect(disk.has(`appdata/${clientMsgId}-a.pdf`)).toBe(true);
+
+    // 模拟重启：blob URL 全失效，只剩磁盘副本
+    const bytes = await readStagedOutboxFile(clientMsgId, "a.pdf");
+    expect(Array.from(bytes)).toEqual([7, 8, 9]);
+
+    // 发送成功（ack）后清理
+    await clearStagedOutboxFile(clientMsgId, "a.pdf");
+    expect(disk.has(`appdata/${clientMsgId}-a.pdf`)).toBe(false);
+  });
+
+  it("文件名里的路径分隔符被替换，副本键永远是 outbox/ 下的平铺文件", async () => {
+    const { sink, disk } = diskSink();
+    setFileSink(sink);
+
+    await stageOutboxFile("c-2", new Uint8Array([1]), "../../evil.pdf", "application/pdf");
+    const keys = [...disk.keys()];
+    expect(keys).toEqual(["appdata/c-2-.._.._evil.pdf"]);
+    // 读回与清理用同一个键变换，两边对得上
+    expect(Array.from(await readStagedOutboxFile("c-2", "../../evil.pdf"))).toEqual([1]);
+    await clearStagedOutboxFile("c-2", "../../evil.pdf");
+    expect(disk.size).toBe(0);
+  });
+
+  it("清理失败不抛错（最坏结果只是多占一点私有目录空间）", async () => {
+    const { sink, failRemove } = diskSink();
+    setFileSink(sink);
+    await stageOutboxFile("c-3", new Uint8Array([1]), "a.bin", "application/octet-stream");
+    failRemove();
+    await expect(clearStagedOutboxFile("c-3", "a.bin")).resolves.toBeUndefined();
+  });
+
+  it("web 无磁盘 sink：stage / clear 是 no-op，read 抛错由调用方回落原行为", async () => {
+    // 不注入 sink —— 默认 web 实现只有 save
+    await expect(
+      stageOutboxFile("c-4", new Uint8Array([1]), "a.pdf", "application/pdf"),
+    ).resolves.toBeUndefined();
+    await expect(readStagedOutboxFile("c-4", "a.pdf")).rejects.toThrow("no disk sink");
+    await expect(clearStagedOutboxFile("c-4", "a.pdf")).resolves.toBeUndefined();
+  });
+
+  it("图片 mime 按魔数嗅探（副本只存了字节），认不出时按 jpeg 兜底", () => {
+    expect(sniffImageMime(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe("image/jpeg");
+    expect(sniffImageMime(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe(
+      "image/png",
+    );
+    expect(sniffImageMime(new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]))).toBe("image/gif");
+    expect(
+      sniffImageMime(new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50])),
+    ).toBe("image/webp");
+    expect(sniffImageMime(new Uint8Array([1, 2, 3, 4]))).toBe("image/jpeg");
+    expect(sniffImageMime(new Uint8Array([1]))).toBe("image/jpeg");
+  });
+
+  it("image / voice 副本用固定名（重试端可独立重建键）", async () => {
+    const { sink, disk } = diskSink();
+    setFileSink(sink);
+
+    await stageOutboxFile("c-5", new Uint8Array([1]), STAGED_IMAGE_NAME, "image/jpeg");
+    await stageOutboxFile("c-6", new Uint8Array([2]), STAGED_VOICE_NAME, "audio/webm");
+    expect([...disk.keys()].sort()).toEqual(["appdata/c-5-img", "appdata/c-6-voice.webm"]);
+  });
+});
