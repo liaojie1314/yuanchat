@@ -846,9 +846,7 @@
   "desktop.closeTitle": "ウィンドウを閉じる",
   "desktop.closeBody": "トレイに最小化するとメッセージを受信し続けます。",
   "desktop.closeToTray": "トレイに最小化",
-  "desktop.closeToTrayHint": "バックグラウンドで受信を続ける",
   "desktop.closeQuit": "アプリを終了",
-  "desktop.closeQuitHint": "切断して終了する",
   "desktop.rememberChoice": "選択を記憶する",
   "desktop.closeBehavior": "閉じるボタンを押したとき",
   "desktop.closeBehaviorAsk": "毎回確認"

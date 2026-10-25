@@ -846,9 +846,7 @@
   "desktop.closeTitle": "창 닫기",
   "desktop.closeBody": "트레이로 최소화하면 메시지를 계속 받습니다.",
   "desktop.closeToTray": "트레이로 최소화",
-  "desktop.closeToTrayHint": "백그라운드에서 계속 수신",
   "desktop.closeQuit": "앱 종료",
-  "desktop.closeQuitHint": "연결을 끊고 종료",
   "desktop.rememberChoice": "내 선택 기억하기",
   "desktop.closeBehavior": "닫기 버튼을 누를 때",
   "desktop.closeBehaviorAsk": "매번 확인"

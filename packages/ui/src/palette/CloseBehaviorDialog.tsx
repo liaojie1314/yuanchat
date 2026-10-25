@@ -2,24 +2,22 @@
  * CloseBehaviorDialog — 关窗二选一弹窗（桌面端点关闭按钮且偏好为「每次询问」时）
  *
  * @description
- * 视觉走「品牌渐变头部 + 双选项卡片」：两张卡片各自带图标与后果提示，
- * 推荐侧（最小化到托盘）用 primary-container 高亮，退出侧保持中性 ——
- * 用户扫一眼就知道默认该选哪个、选另一个会发生什么，不必读完整句子。
- * 复选框状态由本组件自持，选择经 `onPick(behavior, remember)` 一次性回传。
- * 不用原生弹窗 —— 项目约定确认与授权一律应用内自绘。
+ * 刻意保持简单：标题 + 一句说明 + 两个并排选项按钮 + 一行「记住我的选择」。
+ * 推荐侧（最小化到托盘）用 primary-container 高亮，退出侧保持中性，
+ * 扫一眼就知道默认该选哪个。不用原生弹窗 —— 项目约定确认与授权一律应用内自绘。
  *
  * 无障碍要求（与 ConfirmDialog 同一套）：
- * - `role="dialog"` + `aria-modal` + `aria-labelledby` 指向标题
+ * - `role="dialog"` + `aria-modal` + `aria-labelledby` 指向标题；
+ *   右上角关闭按钮带 `aria-label`
  * - 初始焦点落在「最小化到托盘」：破坏性较小的那个，回车不至于误退应用
- * - 焦点陷阱：Tab/Shift+Tab 只在弹窗内三个控件（两张卡片 + 复选框）间循环
+ * - 焦点陷阱：Tab/Shift+Tab 只在弹窗内三个控件（两个选项 + 关闭 + 复选框）间循环
  * - Esc 关闭：等价于 `onCancel`，既不最小化也不退出
  * - 关闭后焦点还原到打开弹窗之前的元素
  */
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useId, useState } from "react";
-import { Minimize2, Power } from "lucide-react";
+import { Minimize2, Power, X, Check } from "lucide-react";
 import { cn } from "@yuanchat/shared/utils";
-import { BrandMark } from "../primitives/BrandMark";
 
 export function CloseBehaviorDialog({
   open,
@@ -30,7 +28,7 @@ export function CloseBehaviorDialog({
   open: boolean;
   /** 用户选定动作；`remember` 为 true 时调用方应把选择写进 desktopStore */
   onPick: (behavior: "tray" | "quit", remember: boolean) => void;
-  /** 用户取消（点背景/Esc）：既不最小化也不退出 */
+  /** 用户取消（点背景/Esc/右上角关闭）：既不最小化也不退出 */
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
@@ -38,6 +36,7 @@ export function CloseBehaviorDialog({
   const [remember, setRemember] = useState(false);
   const trayRef = useRef<HTMLButtonElement>(null);
   const quitRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const rememberRef = useRef<HTMLInputElement>(null);
   const titleId = useId();
   // 打开前的焦点主，关闭后还原
@@ -63,10 +62,10 @@ export function CloseBehaviorDialog({
         onCancel();
         return;
       }
-      // 焦点陷阱：托盘卡片 → 退出卡片 → 复选框 三点循环，防 Tab 逃出弹窗
+      // 焦点陷阱：托盘 → 退出 → 右上角关闭 → 复选框，循环防 Tab 逃出弹窗
       if (e.key === "Tab") {
         e.preventDefault();
-        const order = [trayRef.current, quitRef.current, rememberRef.current];
+        const order = [trayRef.current, quitRef.current, closeRef.current, rememberRef.current];
         const idx = order.indexOf(document.activeElement as HTMLButtonElement | null);
         const next = e.shiftKey
           ? order[(idx - 1 + order.length) % order.length]
@@ -80,13 +79,6 @@ export function CloseBehaviorDialog({
 
   if (!open) return null;
 
-  /** 双选项卡片的公共骨架：图标 + 标签 + 后果提示，竖排居中 */
-  const cardClass = cn(
-    "flex flex-col items-center gap-1 rounded-lg px-3 py-4 transition-colors duration-200",
-    // ring 约定与 Button 相同：只挂 focus-visible，旧 WebView 不认时原生 outline 兜底
-    "focus-visible:ring-primary focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent focus-visible:outline-none",
-  );
-
   return (
     <div
       className="animate-fade-in fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-[2px]"
@@ -96,67 +88,71 @@ export function CloseBehaviorDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="bg-surface-container-low w-[340px] rounded-lg p-6 shadow-xl"
+        className="bg-surface-container-low w-[340px] rounded-lg p-5 shadow-xl"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="flex flex-col items-center text-center">
-          <div className="brand-gradient shadow-elevation-2 flex h-12 w-12 items-center justify-center rounded-lg text-white">
-            <BrandMark size={26} />
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h3 id={titleId} className="text-title-md text-on-surface font-semibold">
+              {t("desktop.closeTitle")}
+            </h3>
+            <p className="text-body-sm text-on-surface-variant mt-1">{t("desktop.closeBody")}</p>
           </div>
-          <h3 id={titleId} className="text-title-md text-on-surface mt-3 font-semibold">
-            {t("desktop.closeTitle")}
-          </h3>
-          <p className="text-body-sm text-on-surface-variant mt-1">{t("desktop.closeBody")}</p>
+          <button
+            ref={closeRef}
+            type="button"
+            aria-label={t("common.close")}
+            className="text-on-surface-variant hover:bg-surface-container-high focus-visible:ring-primary -mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent focus-visible:outline-none"
+            onClick={onCancel}
+          >
+            <X size={18} />
+          </button>
         </div>
 
-        <div className="mt-5 grid grid-cols-2 gap-3">
+        <div className="mt-4 grid grid-cols-2 gap-2.5">
           <button
             ref={trayRef}
             type="button"
             className={cn(
-              cardClass,
-              // 推荐侧：primary-container 高亮，hover 抬浓度
-              "bg-primary-container text-on-primary-container border-primary/50 hover:bg-primary-container/80 border",
+              "text-label-lg text-on-primary-container bg-primary-container hover:bg-primary-container/80 border-primary/50 focus-visible:ring-primary flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 font-medium transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent focus-visible:outline-none",
             )}
             onClick={() => onPick("tray", remember)}
           >
-            <span className="bg-primary/15 flex h-10 w-10 items-center justify-center rounded-full">
-              <Minimize2 size={19} className="text-primary" />
-            </span>
-            <span className="text-label-lg mt-1.5 font-medium">{t("desktop.closeToTray")}</span>
-            <span className="text-label-xs opacity-80">{t("desktop.closeToTrayHint")}</span>
+            <Minimize2 size={17} />
+            {t("desktop.closeToTray")}
           </button>
           <button
             ref={quitRef}
             type="button"
-            className={cn(
-              cardClass,
-              "bg-surface-container-high text-on-surface hover:bg-surface-container-highest border border-transparent",
-            )}
+            className="text-label-lg text-on-surface bg-surface-container-high hover:bg-surface-container-highest focus-visible:ring-primary flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 font-medium transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent focus-visible:outline-none"
             onClick={() => onPick("quit", remember)}
           >
-            <span className="bg-on-surface-variant/10 flex h-10 w-10 items-center justify-center rounded-full">
-              <Power size={19} className="text-on-surface-variant" />
-            </span>
-            <span className="text-label-lg mt-1.5 font-medium">{t("desktop.closeQuit")}</span>
-            <span className="text-label-xs text-on-surface-variant">
-              {t("desktop.closeQuitHint")}
-            </span>
+            <Power size={17} className="text-on-surface-variant" />
+            {t("desktop.closeQuit")}
           </button>
         </div>
 
-        <div className="border-outline-variant/60 mt-4 flex items-center justify-center border-t pt-3">
-          <label className="text-body-sm text-on-surface-variant flex cursor-pointer items-center gap-2">
-            <input
-              ref={rememberRef}
-              type="checkbox"
-              checked={remember}
-              onChange={(e) => setRemember(e.target.checked)}
-              className="accent-primary h-4 w-4"
-            />
-            {t("desktop.rememberChoice")}
-          </label>
-        </div>
+        <label className="text-body-sm text-on-surface-variant mt-4 flex cursor-pointer items-center justify-center gap-2">
+          {/* 原生 input 只保语义与键盘，视觉用自绘方块：accent 样式各平台不一，露出来就是丑的 */}
+          <input
+            ref={rememberRef}
+            type="checkbox"
+            className="peer sr-only"
+            checked={remember}
+            onChange={(e) => setRemember(e.target.checked)}
+          />
+          <span
+            aria-hidden
+            className={cn(
+              "flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[4px] border transition-colors duration-150",
+              "peer-focus-visible:ring-primary peer-focus-visible:ring-2 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-transparent peer-focus-visible:outline-none",
+              remember ? "border-primary bg-primary text-primary-on" : "border-outline-variant",
+            )}
+          >
+            {remember && <Check size={12} strokeWidth={3.5} />}
+          </span>
+          {t("desktop.rememberChoice")}
+        </label>
       </div>
     </div>
   );

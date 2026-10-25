@@ -846,9 +846,7 @@
   "desktop.closeTitle": "关闭窗口",
   "desktop.closeBody": "最小化到托盘可继续接收消息。",
   "desktop.closeToTray": "最小化到托盘",
-  "desktop.closeToTrayHint": "后台继续接收消息",
   "desktop.closeQuit": "退出应用",
-  "desktop.closeQuitHint": "断开连接并退出",
   "desktop.rememberChoice": "记住我的选择",
   "desktop.closeBehavior": "点击关闭按钮时",
   "desktop.closeBehaviorAsk": "每次询问"
