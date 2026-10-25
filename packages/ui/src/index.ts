@@ -12,7 +12,8 @@
  *
  * - `primitives/` 无业务语义的原子组件：Button、Input、Avatar、GroupAvatar、Toast、
  *   ConfirmDialog、ResizeHandle、AppErrorBoundary
- * - `layout/` 页面框架与全局浮层：MainLayout（路由 Layout Route）、SearchModal
+ * - `layout/` 页面框架与全局浮层：MainLayout（路由 Layout Route）
+ * - `palette/` 命令面板：Cmd/Ctrl+K 的动作注册表 + 全局搜索（原 SearchModal 升维）
  * - `chat/` 会话与消息：会话列表、聊天窗口、消息气泡与各类消息体、输入区、
  *   表情面板、语音播放、图片/视频查看
  * - `call/` 音视频通话：通话窗口、邀请弹窗、发起/加入通话的动作层与时长格式化
@@ -120,7 +121,16 @@ export {
 // 布局组件
 export { MainLayout } from "./layout/MainLayout";
 export { TAB_ROOT_PATHS } from "./layout/navItems";
-export { SearchModal } from "./layout/SearchModal";
+
+// 命令面板
+export { CommandPalette } from "./palette/CommandPalette";
+export {
+  buildPaletteActions,
+  filterActions,
+  type PaletteAction,
+  type PaletteContext,
+} from "./palette/paletteActions";
+
 export { E2EEIndicator } from "./e2ee/E2EEIndicator";
 export { SafetyNumberDialog } from "./e2ee/SafetyNumberDialog";
 export { E2EESection } from "./e2ee/E2EESection";
