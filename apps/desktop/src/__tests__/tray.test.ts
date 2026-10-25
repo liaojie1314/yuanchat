@@ -62,28 +62,22 @@ it("Windows 上未读为 0 时清 overlay（传 undefined）", async () => {
   expect(setOverlayIcon).toHaveBeenCalledWith(undefined);
 });
 
-// StrictMode 双跑 effect 时两个 installTray 并发用同一 id 在 DBus 注册，
-// 后到的被拒，幸存 item 丢 Activate（左键失灵）。
-// 这里钉两件事：安装串行且每轮 new 前先清残留；晚到的卸载不误杀新一轮托盘。
-it("并发 installTray 串行执行，晚到的卸载只关自己的实例", async () => {
-  const order: string[] = [];
-  const closed: number[] = [];
-  let seq = 0;
+// StrictMode 双跑 effect 时创建/卸载挤在一起：若各实例共用一个托盘 id，
+// 前一轮卸载（按 id 移除）与后一轮创建在 DBus 上乱序，会把新托盘一并删掉。
+// 钉两件事：并发安装拿到的是互不相同的 id；卸载只关自己那个 id。
+it("并发 installTray 各得唯一 id，卸载只关自己的", async () => {
+  const created: string[] = [];
+  const closed: string[] = [];
   vi.doMock("@tauri-apps/api/tray", () => ({
     TrayIcon: {
-      new: async () => {
-        const id = (seq += 1);
-        order.push(`new${id}`);
+      new: async ({ id }: { id: string }) => {
+        created.push(id);
         return {
           setTooltip: vi.fn().mockResolvedValue(undefined),
           close: async () => {
             closed.push(id);
-            order.push(`close${id}`);
           },
         };
-      },
-      removeById: async () => {
-        order.push("remove");
       },
     },
   }));
@@ -104,16 +98,17 @@ it("并发 installTray 串行执行，晚到的卸载只关自己的实例", asy
   const { installTray } = await import("../tray");
   const noop = () => {};
 
-  // 两个安装背靠背并发发起（StrictMode 的挂载节奏），必须串行成 remove→new→remove→new
+  // 两个安装背靠背并发发起（StrictMode 的挂载节奏）
   const [d1, d2] = await Promise.all([
     installTray({ onOpenConversation: noop }),
     installTray({ onOpenConversation: noop }),
   ]);
-  expect(order).toEqual(["remove", "new1", "remove", "new2"]);
+  expect(created).toHaveLength(2);
+  expect(new Set(created).size).toBe(2);
 
-  // 第一轮的卸载晚到：此时托盘已归第二轮，new1 不该被关掉
+  // 各自的卸载只关各自的 id，互不波及
   d1();
   d2();
   await new Promise((r) => setTimeout(r, 0));
-  expect(closed).toEqual([2]);
+  expect(closed.sort()).toEqual([...created].sort());
 });

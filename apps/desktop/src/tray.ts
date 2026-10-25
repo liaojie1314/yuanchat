@@ -18,6 +18,12 @@
  * 两侧就位，本批零新增）。注意它在未授 `os:default` 权限时 reject，
  * capability 里必须带上；调用的所有失败都裹 try/catch 只 warn ——
  * 托盘与角标是增强，坏了应用必须照常用。
+ *
+ * **每次安装用独立的托盘 id**：React StrictMode 在 dev 下双跑 effect，
+ * 挂载→卸载→再挂载挤在极短时间内。若所有实例共用一个 id，前一轮的
+ * 卸载（按 id 移除）与后一轮的创建在 DBus 上乱序时，会把新托盘一并删掉
+ * —— 表现为顶栏没有托盘图标、日志反复出现 register object 冲突。
+ * 唯一 id 让每次 close 只关自己，天然免竞争，也不需要串行链。
  */
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { platform } from "@tauri-apps/plugin-os";
@@ -31,19 +37,8 @@ import { useConversationStore, selectTotalUnread, selectFirstUnreadId } from "@y
 /** Windows 任务栏叠加图标：静态红点（bundle.icon 已登记，否则运行时找不到文件） */
 const BADGE_DOT_ICON = "icons/badge-dot-32.png";
 
-const TRAY_ID = "main";
-
-/**
- * 托盘创建/移除的串行化链与当前实例指针。
- *
- * React StrictMode 在 dev 下双跑 effect（挂载→卸载→再挂载挤在极短时间内），
- * 两个 installTray 并发用同一 id 在 DBus 注册，后到的注册被拒后，
- * 幸存的 item 会丢 Activate 方法 —— 左键点托盘没反应，图标还会时隐时现。
- * 所有创建/移除都排进这条链保序，
- * 且卸载只关自己创建的那个实例，晚到的卸载不误杀新一轮托盘。
- */
-let trayOp: Promise<unknown> = Promise.resolve();
-let currentTray: TrayIcon | null = null;
+/** 已装实例的序号，拼进托盘 id 保证唯一 */
+let traySeq = 0;
 
 /**
  * 把未读数反映到系统角标上。
@@ -79,25 +74,11 @@ function unreadLabel(count: number): string {
  *   没有未读，调用方应只聚焦窗口不做跳转
  * @returns 卸载函数（登出时调用，否则登出后托盘还挂着旧账号的未读数）
  */
-export function installTray(opts: {
+export async function installTray(opts: {
   onOpenConversation: (id: string | null) => void;
 }): Promise<() => void> {
-  const run = trayOp.then(() => doInstall(opts));
-  // 链上只保序、吞掉结果与异常；对外把安装失败折成 no-op 卸载器，调用方无需分支
-  trayOp = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  return run.then(
-    (dispose) => dispose,
-    () => () => {},
-  );
-}
-
-/** 真正的安装逻辑，只在串行链内执行（见 {@link installTray}） */
-async function doInstall(opts: {
-  onOpenConversation: (id: string | null) => void;
-}): Promise<() => void> {
+  // id 唯一：StrictMode 的创建/销毁乱序也不会误删别的实例（见文件头说明）
+  const trayId = `main-${(traySeq += 1)}`;
   const win = getCurrentWindow();
 
   /** 左键/菜单「打开」共用：把窗口带到前台并直达第一个未读 */
@@ -120,15 +101,8 @@ async function doInstall(opts: {
     ],
   });
 
-  // 清掉同 id 残留（上一轮的移除可能还在路上）；removeById 幂等，不存在即忽略
-  try {
-    await TrayIcon.removeById(TRAY_ID);
-  } catch {
-    // DBus 上没有同名 item，直接建
-  }
-
   const tray = await TrayIcon.new({
-    id: TRAY_ID,
+    id: trayId,
     icon: (await defaultWindowIcon()) ?? undefined,
     tooltip: i18next.t("tray.tooltip"),
     menu,
@@ -140,8 +114,6 @@ async function doInstall(opts: {
       }
     },
   });
-
-  currentTray = tray;
 
   // 未读数同步：角标 + tooltip + 菜单项三处一起更；last 去重避免无谓的系统调用
   let last = -1;
@@ -172,9 +144,7 @@ async function doInstall(opts: {
   return () => {
     unsub();
     void applyBadge(0);
-    // 只关自己建的那个：这轮卸载晚到时，托盘可能已被新一轮 install 接管
-    if (currentTray !== tray) return;
-    currentTray = null;
-    trayOp = trayOp.then(() => tray.close()).catch(() => {});
+    // fire-and-forget：id 唯一，即使与下一轮的创建乱序也只关自己
+    void tray.close().catch(() => {});
   };
 }
