@@ -15,14 +15,34 @@ import { getFileSink } from "../download/fileSink";
 import { localRowOf } from "./messageLocalSync";
 import type { ChatMessage } from "./messageStore";
 
-/** 发送时入队（fire-and-forget，失败静默）。 */
-export function enqueueSend(convId: string, clientMsgId: string, payload: unknown): void {
+/** 只保存已支持磁盘恢复的附件，并去掉重启后失效的预览 URL。 */
+function uploadDraftOf(message?: ChatMessage): ChatMessage | undefined {
+  if (!message || !["file", "image", "voice"].includes(message.kind)) return undefined;
+  return {
+    ...message,
+    seq: undefined,
+    status: "failed",
+    file: message.file ? { ...message.file, localUrl: undefined } : undefined,
+    image: message.image ? { ...message.image, localUrl: undefined } : undefined,
+    voice: message.voice ? { ...message.voice, localUrl: undefined } : undefined,
+  };
+}
+
+/** 发送时入队；附件保留快照以便冷启动后处理 ACK 清理（失败静默）。 */
+export function enqueueSend(
+  convId: string,
+  clientMsgId: string,
+  payload: unknown,
+  message?: ChatMessage,
+): void {
   const db = localDb();
   if (db === null) return;
+  const draft = uploadDraftOf(message);
   void enqueueOutbox(db, {
     clientMsgId,
     conversationId: convId,
     payload,
+    ...(draft ? { draft } : {}),
     createdAt: Date.now(),
     status: "pending",
     attempts: 0,
@@ -58,7 +78,8 @@ export async function flushOutbox(
   let rows: OutboxRow[];
   try {
     await expireOutbox(db, Date.now());
-    rows = (await listOutbox(db)).filter((r) => r.status !== "expired");
+    // 未上传草稿只能由用户重试上传，不能作为缺少对象 key 的 WS 帧发出去。
+    rows = (await listOutbox(db)).filter((r) => r.status !== "expired" && r.payload !== null);
   } catch {
     return { sent: 0, left: 0 };
   }
@@ -79,24 +100,34 @@ export async function flushOutbox(
 }
 
 /**
- * 冷启动把队列里未发出的**文本**条目恢复成 `failed` 气泡。
+ * 冷启动把文本及有快照的附件恢复成 `failed` 气泡。
  *
  * 恢复出来的条目**没有 seq**（服务端从未确认过），因此不会进 messages store，
  * 只在内存时间线末尾显示，由用户决定重发还是删除。
  *
- * 非文本载荷不在此恢复：媒体的字节早已上传完成、载荷里带着对象 key，
- * 链路一通 `flushOutbox` 就能原样重发；而按文本气泡渲染只会得到一个空气泡。
+ * 旧媒体行没有快照，仍只由 flushOutbox 补发；不能把它们当成空文本恢复。
  */
 export async function restoreOutbox(): Promise<ChatMessage[]> {
   const db = localDb();
   if (db === null) return [];
   try {
     const rows = await listOutbox(db);
-    return rows
-      .filter((r) => (r.payload as { content?: { type?: string } }).content?.type === "text")
-      .map((r) => {
-        const p = r.payload as { content?: { text?: string } };
-        return {
+    return rows.flatMap((r): ChatMessage[] => {
+      const draft = uploadDraftOf(r.draft as ChatMessage | undefined);
+      if (draft) {
+        return [
+          {
+            ...draft,
+            id: r.clientMsgId,
+            clientMsgId: r.clientMsgId,
+            conversationId: r.conversationId,
+          },
+        ];
+      }
+      const p = r.payload as { content?: { type?: string; text?: string } } | null;
+      if (p?.content?.type !== "text") return [];
+      return [
+        {
           id: r.clientMsgId,
           clientMsgId: r.clientMsgId,
           conversationId: r.conversationId,
@@ -105,8 +136,9 @@ export async function restoreOutbox(): Promise<ChatMessage[]> {
           text: p.content?.text ?? "",
           time: "",
           status: "failed",
-        } as ChatMessage;
-      });
+        },
+      ];
+    });
   } catch {
     return [];
   }
@@ -136,16 +168,31 @@ function stagedKey(clientMsgId: string, fileName: string): string {
  * 清理策略：发送成功即删，不引入 LRU 配额。outbox 条目本来就短命，
  * 给它配一套配额账本是无谓的基建。Web 的授权下载可读，但不提供 appdata 磁盘副本；
  * 这组函数在 Web 上整体降级：stage / clear 是 no-op，read 抛错由调用方回落原行为。
+ * 提供消息快照时，成功写盘后还要先保存当前账号的上传草稿，调用方才能开始上传。
  */
 export async function stageOutboxFile(
   clientMsgId: string,
   bytes: Uint8Array,
   fileName: string,
   mime: string,
+  message?: ChatMessage,
 ): Promise<void> {
   const sink = getFileSink();
   if (!sink.read) return; // 无读回能力时不落；Web 的 appdata save 自行保持 no-op。
-  await sink.save(bytes, stagedKey(clientMsgId, fileName), mime, "appdata");
+  const db = localDb();
+  const draft = uploadDraftOf(message);
+  const saved = await sink.save(bytes, stagedKey(clientMsgId, fileName), mime, "appdata");
+  // Web 的空操作不产生草稿；换号后迟到的写盘也不能污染新账号的队列。
+  if (saved === null || !draft || !db || localDb() !== db) return;
+  await enqueueOutbox(db, {
+    clientMsgId,
+    conversationId: draft.conversationId,
+    payload: null,
+    draft,
+    createdAt: draft.createdAtMs ?? Date.now(),
+    status: "pending",
+    attempts: 0,
+  });
 }
 
 /** 读回发送前落的磁盘副本；副本不存在（如较旧的消息）或无磁盘 sink 时抛错 */

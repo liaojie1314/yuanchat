@@ -131,6 +131,8 @@ export interface ChatMessage {
   id: string;
   conversationId: string;
   kind: ChatMessageKind;
+  /** 本地附件的上传 MIME，随出站草稿保留，重试从磁盘重建时使用。 */
+  uploadMimeType?: string;
   /** 是否自己发送（决定气泡左右与配色） */
   isSelf: boolean;
   /** 发送者昵称（群聊接收方气泡上方显示） */
@@ -541,6 +543,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       id: clientMsgId,
       conversationId,
       kind: "image",
+      uploadMimeType: blob.type,
       isSelf: true,
       image: { width, height, localUrl },
       time: now(),
@@ -572,6 +575,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       new Uint8Array(await blob.arrayBuffer()),
       STAGED_IMAGE_NAME,
       blob.type,
+      msg,
     ).catch(() => {});
 
     // 3. 申请上传 URL → 直传 → WS image 帧（含对象 key），失败置 failed
@@ -585,6 +589,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       id: clientMsgId,
       conversationId,
       kind: "file",
+      uploadMimeType: file.type,
       isSelf: true,
       file: { name: file.name, ...formatFileMeta(file.name, file.size), localUrl },
       time: now(),
@@ -613,6 +618,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       new Uint8Array(await file.arrayBuffer()),
       file.name,
       file.type,
+      msg,
     ).catch(() => {});
 
     await dispatchFileSend(conversationId, file, clientMsgId, get);
@@ -625,6 +631,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       id: clientMsgId,
       conversationId,
       kind: "voice",
+      uploadMimeType: blob.type,
       isSelf: true,
       voice: { seconds: duration, wave: pseudoWave(duration), localUrl },
       time: now(),
@@ -652,6 +659,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       new Uint8Array(await blob.arrayBuffer()),
       STAGED_VOICE_NAME,
       blob.type,
+      msg,
     ).catch(() => {});
 
     await dispatchVoiceSend(conversationId, blob, duration, clientMsgId, get);
@@ -749,8 +757,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     // 图片：从本地 blob URL 重新取回压缩后的字节，整条流程（上传+发送）重跑
     if (msg.kind === "image") {
       const localUrl = msg.image?.localUrl;
-      // 无本地副本（如重进会话后的历史消息、整页跳转后 blob 失效）无法重传
-      if (!localUrl) {
+      if (!msg.image) {
         reportRetryUnavailable(conversationId, messageId, get);
         return;
       }
@@ -763,13 +770,13 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       const w = msg.image?.width ?? 0;
       const h = msg.image?.height ?? 0;
       // blob 取不回（应用重启后必然如此）时回落发送前落的磁盘副本：
-      // mime 按魔数嗅探（副本只存了字节）；连副本也没有才如实报「本地文件已失效」
+      // 优先用草稿里的 MIME，旧副本才按魔数嗅探；副本丢失则如实报「本地文件已失效」。
       const retryFromStaged = () =>
         readStagedOutboxFile(clientMsgId, STAGED_IMAGE_NAME)
           .then((bytes) =>
             dispatchImageSend(
               conversationId,
-              new Blob([bytes], { type: sniffImageMime(bytes) }),
+              new Blob([bytes], { type: msg.uploadMimeType || sniffImageMime(bytes) }),
               w,
               h,
               clientMsgId,
@@ -777,6 +784,10 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
             ),
           )
           .catch(() => reportRetryUnavailable(conversationId, messageId, get));
+      if (!localUrl) {
+        void retryFromStaged();
+        return;
+      }
       void fetch(localUrl)
         .then((r) => r.blob())
         .then((blob) => dispatchImageSend(conversationId, blob, w, h, clientMsgId, get))
@@ -788,7 +799,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     if (msg.kind === "file") {
       const localUrl = msg.file?.localUrl;
       const fileName = msg.file?.name;
-      if (!localUrl || !fileName) {
+      if (!fileName) {
         reportRetryUnavailable(conversationId, messageId, get);
         return;
       }
@@ -798,20 +809,28 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
         return;
       }
       const clientMsgId = msg.clientMsgId ?? messageId;
-      // blob 取不回时回落磁盘副本。副本只有字节：File 不带 type，dispatchFileSend
-      // 会按无类型口径（application/octet-stream）签名上传，WS 载荷里的原始文件名不受影响
+      // 磁盘副本只有字节，必须恢复首次选择的 MIME，不能退成后端拒绝的 octet-stream。
       const retryFromStaged = () =>
         readStagedOutboxFile(clientMsgId, fileName)
           .then((bytes) =>
-            dispatchFileSend(conversationId, new File([bytes], fileName), clientMsgId, get),
+            dispatchFileSend(
+              conversationId,
+              new File([bytes], fileName, { type: msg.uploadMimeType }),
+              clientMsgId,
+              get,
+            ),
           )
           .catch(() => reportRetryUnavailable(conversationId, messageId, get));
+      if (!localUrl) {
+        void retryFromStaged();
+        return;
+      }
       void fetch(localUrl)
         .then((r) => r.blob())
         .then((blob) =>
           dispatchFileSend(
             conversationId,
-            new File([blob], fileName, { type: blob.type }),
+            new File([blob], fileName, { type: msg.uploadMimeType || blob.type }),
             clientMsgId,
             get,
           ),
@@ -824,7 +843,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     if (msg.kind === "voice") {
       const localUrl = msg.voice?.localUrl;
       const duration = msg.voice?.seconds;
-      if (!localUrl || !duration) {
+      if (!duration) {
         reportRetryUnavailable(conversationId, messageId, get);
         return;
       }
@@ -834,19 +853,23 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
         return;
       }
       const clientMsgId = msg.clientMsgId ?? messageId;
-      // blob 取不回时回落磁盘副本（副本名与发送时一致，mime 固定 webm）
+      // blob 取不回时回落磁盘副本，沿用原 MIME；旧副本按录音格式 webm 恢复。
       const retryFromStaged = () =>
         readStagedOutboxFile(clientMsgId, STAGED_VOICE_NAME)
           .then((bytes) =>
             dispatchVoiceSend(
               conversationId,
-              new Blob([bytes], { type: "audio/webm" }),
+              new Blob([bytes], { type: msg.uploadMimeType || "audio/webm" }),
               duration,
               clientMsgId,
               get,
             ),
           )
           .catch(() => reportRetryUnavailable(conversationId, messageId, get));
+      if (!localUrl) {
+        void retryFromStaged();
+        return;
+      }
       void fetch(localUrl)
         .then((r) => r.blob())
         .then((blob) => dispatchVoiceSend(conversationId, blob, duration, clientMsgId, get))
@@ -966,6 +989,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
             // 本地 client id 提升为服务端 message id：撤回/去重以服务端 id 为准，
             // clientMsgId 原样保留供 message.receive 自回显去重
             id: messageId,
+            uploadMimeType: undefined,
             status: "sent" as const,
             seq,
             time: formatMessageTime(new Date(timestamp).toISOString()),
@@ -1207,7 +1231,10 @@ async function maybeEncryptAndSend(
  * 会话与幂等 id 直接取自载荷本身，不另传参，避免两处对不上。
  */
 function sendWithOutbox(payload: ClientFrames["message.send"]): void {
-  enqueueSend(payload.conversation_id, payload.client_msg_id, payload);
+  const message = useMessageStore
+    .getState()
+    .messagesByConv[payload.conversation_id]?.find((m) => m.clientMsgId === payload.client_msg_id);
+  enqueueSend(payload.conversation_id, payload.client_msg_id, payload, message);
   chatSocket.send("message.send", payload);
 }
 
