@@ -1,13 +1,12 @@
 /**
- * useKeyboardAwareViewport 行为测试 —— 键盘弹起时的居中策略
+ * useKeyboardAwareViewport 行为测试 —— 视口同步与键盘弹起时的居中策略
  *
- * 为什么要有这组用例：真机上「弹起键盘页面明显闪动」的根因有两条，
- * 两条都只在「连续 resize」或「输入框本就可见」这种时序下才暴露，
- * 肉眼之外唯一能钉住的办法就是这里：
+ * 覆盖真机上会导致「弹起键盘页面明显闪动」的三种时序：
  * 1. 键盘弹起动画期间 visualViewport 会连续触发十几次 resize。每次都
  *    scrollIntoView 的话内容被反复重新居中 —— 必须防抖成只滚一次。
  * 2. 输入框本来就完整落在可见区时（居中表单靠 --app-height 收缩后就是这样），
  *    scrollIntoView 仍会拽一下布局，那一下纯属多余的跳动。
+ * 3. 可见视口已经缩放后，页面高度不能再延迟到下一帧才更新。
  *
  * 该 Hook 住在 @yuanchat/shared，但测试放在 ui 包：jsdom / react-dom /
  * @testing-library/react 只在 ui 包的 devDependencies 里。
@@ -77,12 +76,11 @@ beforeEach(() => {
   rect = { top: 700, bottom: 780 };
   Object.defineProperty(window, "visualViewport", { value: vv, configurable: true });
   Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
-  // rAF 在假定时器下不会自动跑，这里同步执行即可（Hook 只用它合并同帧的 resize）
-  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
-    cb(0);
-    return 1;
-  });
-  vi.stubGlobal("cancelAnimationFrame", () => {});
+  // 保留下一帧前的时间窗口，才能发现视口已缩放但页面仍沿用旧高度的闪帧。
+  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) =>
+    window.setTimeout(() => cb(0), 16),
+  );
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => window.clearTimeout(id));
 });
 
 afterEach(() => {
@@ -92,7 +90,7 @@ afterEach(() => {
 });
 
 describe("useKeyboardAwareViewport", () => {
-  it("把可见视口高度与键盘高度写进 CSS 变量", () => {
+  it("下一帧前同步键盘弹收后的视口高度", () => {
     renderFocused();
     expect(document.documentElement.style.getPropertyValue("--app-height")).toBe("800px");
 
@@ -100,6 +98,10 @@ describe("useKeyboardAwareViewport", () => {
     expect(document.documentElement.style.getPropertyValue("--app-height")).toBe("500px");
     // 键盘高度 = 800 − 500 − 0
     expect(document.documentElement.style.getPropertyValue("--keyboard-inset")).toBe("300px");
+
+    act(() => vv.resizeTo(800));
+    expect(document.documentElement.style.getPropertyValue("--app-height")).toBe("800px");
+    expect(document.documentElement.style.getPropertyValue("--keyboard-inset")).toBe("0px");
   });
 
   it("键盘弹起动画期间连续 resize 只居中一次", () => {
