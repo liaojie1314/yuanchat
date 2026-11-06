@@ -2,20 +2,23 @@
  * FileProgressBar — 文件气泡下方的下载进度条。
  *
  * @description
- * 刻意放在**气泡之外**（与气泡行同级、其下方）：进度条有最小宽度诉求，放气泡内
- * 会向上贡献 min-content，再踩一次「气泡顶穿父列」那个坑（min-width:0 只解除
- * 本元素的最小尺寸，压不住子孙贡献上来的 min-content）。本行用 `w-full`，
- * 宽度由父列正推为定值 —— 412px 视口下 E2E 量真实 boundingBox 钉死这一点。
+ * 与气泡行同级，始终预留紧凑的 20px 内容区和 2px 间距；没有条目、完成或取消
+ * 只清空内容，不移除占位，消息高度不会随下载状态变化。进度内容绝对定位，
+ * 文件名较短时也不会参与父列的固有宽度计算，长状态文案不会撑宽气泡。
+ * 子项用兄弟 margin 留出 2px，兼容旧 WebView 并避开 gap 任意值的插件冲突。
  *
  * 样式语言与桌面端更新进度条（UpdateChecker）一致，不另造一套。
- * 无进度条目或已完成时渲染 null：占一行空高度会让气泡在下载开始时跳一下（CLS）。
+ * 错误摘要保持单行；错误全文与保存位置复用现有弹窗，经 portal 脱离虚拟列表的 transform。
  * 完成瞬间经这里弹一次「已保存到 %{path}」—— 安卓的落盘目录在文件管理器里
- * 看不见，这条 toast 是用户知道文件去哪了的唯一线索（web 实现拿不到路径，不弹）。
+ * 看不见；Web 授权目录显示目录名和文件名，默认浏览器下载不伪造位置。
  */
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { Info } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { showToast, useDownloadStore } from "@yuanchat/shared";
+import { getFileSink, showToast, useDownloadStore } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
+import { ConfirmDialog } from "../primitives/ConfirmDialog";
 
 /** 已弹过「已保存到」的 messageId：聊天层与相册层可能同时挂载同一条，只弹一次 */
 const savedToasts = new Set<string>();
@@ -28,61 +31,113 @@ function humanSize(n: number): string {
 }
 
 /** 文件下载进度条；进度真源是 shared 的 useDownloadStore，键为 messageId */
-export function FileProgressBar({ messageId }: { messageId: string }) {
+export function FileProgressBar({
+  messageId,
+  location,
+  onCloseLocation,
+}: {
+  messageId: string;
+  location?: string | null;
+  onCloseLocation?: () => void;
+}) {
   const { t } = useTranslation();
   const entry = useDownloadStore((s) => s.entries[messageId]);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
 
-  // 完成即提示落盘位置（只对拿得到绝对路径的平台：web 的 save 返回 null）
+  // 完成即提示实际位置，Web 的本页引用必须先经句柄转换成可读目录与文件名。
   useEffect(() => {
     if (!entry || entry.phase !== "done") {
       // 离开 done（重下同一文件 / 清掉条目）后允许下一次完成再提示
       savedToasts.delete(messageId);
       return;
     }
-    if (!entry.savedPath || savedToasts.has(messageId)) return;
+    if (!entry.savedPath || entry.restored || savedToasts.has(messageId)) return;
+    const sink = getFileSink();
+    const path = sink.describe ? sink.describe(entry.savedPath) : entry.savedPath;
+    if (!path) return;
     savedToasts.add(messageId);
-    showToast("info", t("chat.file.savedTo", { path: entry.savedPath }));
+    showToast("info", t("chat.file.savedTo", { path }));
   }, [entry, messageId, t]);
 
-  // 没有进度就什么都不渲染 —— 占一行空高度会让气泡在下载开始时跳一下（CLS）
-  if (!entry) return null;
-  if (entry.phase === "done" || entry.phase === "canceled") return null;
-
-  const determinate = entry.total > 0;
-  const percent = determinate ? Math.min(100, Math.round((entry.received / entry.total) * 100)) : 0;
-  const failed = entry.phase === "failed";
+  const progress = entry && entry.phase !== "done" && entry.phase !== "canceled" ? entry : null;
+  const percent =
+    progress && progress.total > 0
+      ? Math.min(100, Math.round((progress.received / progress.total) * 100))
+      : null;
+  const failed = progress?.phase === "failed";
+  const errorText = t(progress?.errorKey ?? "chat.file.downloadFailed");
+  const closeDetails = () => {
+    setErrorDetails(null);
+    onCloseLocation?.();
+  };
 
   return (
-    <div className="mt-1 w-full">
+    <>
       <div
-        role="progressbar"
-        aria-label={t("chat.file.downloading")}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        {...(determinate ? { "aria-valuenow": percent } : {})}
-        className="bg-surface-container-highest h-1.5 overflow-hidden rounded-full"
+        data-testid="file-progress-slot"
+        className="relative mt-[2px] h-[20px] w-full min-w-0 shrink-0"
       >
-        <div
-          className={cn(
-            "h-full transition-all duration-200",
-            failed ? "bg-error" : "bg-primary",
-            !determinate && !failed && "animate-pulse",
-          )}
-          style={{
-            // 失败态把条拉满红：半截灰条看起来像还能继续，其实已经死了
-            width: determinate || failed ? `${Math.max(percent, failed ? 100 : 0)}%` : "40%",
-          }}
-        />
+        {progress && (
+          <div className="absolute inset-0 flex min-w-0 flex-col space-y-[2px]">
+            <div
+              role="progressbar"
+              aria-label={t("chat.file.downloading")}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={percent ?? undefined}
+              className="bg-surface-container-highest h-[4px] shrink-0 overflow-hidden rounded-full"
+            >
+              <div
+                className={cn(
+                  "h-full transition-all duration-200",
+                  failed ? "bg-error" : "bg-primary",
+                  percent === null && !failed && "animate-pulse",
+                )}
+                // 失败态拉满红条，保留原始进度的 ARIA 值；其余状态按真实字节数显示。
+                style={{ width: failed ? "100%" : percent === null ? "40%" : `${percent}%` }}
+              />
+            </div>
+            {failed ? (
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                title={errorText}
+                onClick={() => setErrorDetails(errorText)}
+                // 扩展到 24px 点击区域，不参与布局，兼顾触控目标与固定进度槽。
+                className="text-error relative flex h-[14px] w-full min-w-0 shrink-0 items-center gap-1 rounded-sm text-left text-[11px] leading-[14px] before:absolute before:inset-x-0 before:-inset-y-[5px]"
+              >
+                <span className="min-w-0 flex-1 truncate">{errorText}</span>
+                <Info size={12} className="shrink-0" aria-hidden />
+              </button>
+            ) : (
+              <p className="text-on-surface-variant m-0 h-[14px] shrink-0 truncate text-[11px] leading-[14px]">
+                {progress.phase === "saving"
+                  ? t("chat.file.saving")
+                  : percent !== null
+                    ? `${percent}% · ${humanSize(progress.received)} / ${humanSize(progress.total)}`
+                    : humanSize(progress.received)}
+              </p>
+            )}
+          </div>
+        )}
       </div>
-      <p className="text-label-xs text-on-surface-variant mt-0.5">
-        {failed
-          ? t(entry.errorKey ?? "chat.file.downloadFailed")
-          : entry.phase === "saving"
-            ? t("chat.file.saving")
-            : determinate
-              ? `${percent}% · ${humanSize(entry.received)} / ${humanSize(entry.total)}`
-              : humanSize(entry.received)}
-      </p>
-    </div>
+      {(errorDetails !== null || location) &&
+        createPortal(
+          <div className="break-words">
+            <ConfirmDialog
+              open
+              title={t(
+                errorDetails !== null ? "chat.file.downloadFailed" : "chat.file.viewLocation",
+              )}
+              message={errorDetails ?? location ?? ""}
+              confirmLabel={t("common.close")}
+              hideCancel={errorDetails === null}
+              onConfirm={closeDetails}
+              onCancel={closeDetails}
+            />
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }

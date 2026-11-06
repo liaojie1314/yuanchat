@@ -1,25 +1,15 @@
 /**
- * CommandPalette — 命令面板与全局搜索（Cmd/Ctrl+K）。
+ * 统一搜索内容：全局搜索含快捷动作与本地联系人/群聊，会话内只查询当前会话。
  *
- * @description
- * **一个组件两种模式**：输入为空时是命令面板（动作注册表 + 最近会话），
- * 一旦输入就进搜索（三源并发 + 分组结果 + 类型筛选）。
- * K3 与 K18 合并实现 —— 两者都要改这个组件，分两次做第二次得先拆掉第一次的结构。
- *
- * 两种承载形态（variant）：
- * - `panel`（默认）：主窗口内的浮层面板。断点形态 mobile 全屏 / tablet 560px /
- *   desktop 720×560。web 与移动端用这个形态。
- * - `window`：独立搜索窗口（桌面 app）里的**常开全出血**形态 —— 铺满窗口、
- *   无 fixed 遮罩与圆角浮层。Tauri 每个 WebviewWindow 是独立 JS 上下文，
- *   store 不共享，所以选中结果不走路由而是经 {@link Props.onNavigate} 交给宿主
- *   （桌面端 emit 给主窗口落地），Escape / 选中后的关闭语义由宿主接（关窗）。
- *
- * 断点一律内部 useBreakpoint() 推导，不接 isDesktop prop（沿用裁决 D1）。
+ * 三种承载：panel 为桌面 Web 弹窗，page 为手机独立路由，window 为原生搜索窗口。
+ * 原生结果交给宿主导航桥；Web/手机先更新会话与消息定位，再执行本地导航。
+ * 范围、输入和类型筛选变化均作废旧响应，快速请求不闪骨架。
  */
 import { useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Search,
+  ArrowLeft,
   X,
   FileText,
   Film,
@@ -42,7 +32,7 @@ import {
   captureException,
   registerBackInterceptor,
 } from "@yuanchat/shared";
-import type { MessageSearchResponse, MessageSearchResult, SearchType } from "@yuanchat/shared";
+import type { MessageSearchResult, SearchType } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "../primitives/Avatar";
 import { fileIconOf } from "../util/fileIcon";
@@ -57,6 +47,8 @@ import type { PaletteContext } from "./paletteActions";
  *   带上 conversationId，让**主窗口**先 setActive 再 navigate。
  */
 export interface PaletteNavigateMeta {
+  /** 只在主窗口执行的状态动作，不能修改独立搜索窗口的 store。 */
+  action?: "toggle-theme" | "logout";
   /** 会话类结果：主窗口需先 setActive 的会话 ID */
   conversationId?: string;
   /** 消息类结果：主窗口定位到该消息（拉历史 + 高亮滚动） */
@@ -69,10 +61,12 @@ interface Props {
    * @remarks window 形态常开，宿主可不传（默认 true）。
    */
   show?: boolean;
+  /** 限定当前会话；省略时为全局搜索与快捷动作。 */
+  conversationId?: string;
   /** 关闭回调（Escape / 遮罩点击 / 关闭按钮 / 选中条目后）。window 形态下=关窗 */
   onClose: () => void;
-  /** `panel`（默认）主窗口浮层面板；`window` 独立搜索窗口常开全出血形态 */
-  variant?: "panel" | "window";
+  /** 桌面 Web 弹窗、独立原生窗口或手机路由页面。 */
+  variant?: "panel" | "window" | "page";
   /**
    * window 形态的导航出口：选中条目交给宿主（桌面端 emit 给主窗口落地）。
    * 未传时回落本地 useNavigate（浏览器里跑桌面 SPA 的降级路径）。
@@ -139,14 +133,6 @@ function settle<T>(value: T | Promise<T>): Promise<Settled<T>> {
     (v) => ({ status: "fulfilled" as const, value: v }),
     (reason) => ({ status: "rejected" as const, reason }),
   );
-}
-
-/**
- * 与后端同口径的字符数（[]rune 计数）：GIN 索引要求关键词至少 3 个字符，
- * JS 的 string.length 会把代理对算成 2，这里统一按码点数。
- */
-function runeLength(s: string): number {
-  return Array.from(s).length;
 }
 
 /** 文件名 → 小写扩展名（无扩展名返回空串，fileIconOf 会兜底通用图标） */
@@ -276,7 +262,13 @@ function SkeletonRows() {
  * @param props.show 打开状态
  * @param props.onClose 关闭回调
  */
-export function CommandPalette({ show = true, onClose, variant = "panel", onNavigate }: Props) {
+export function CommandPalette({
+  show = true,
+  onClose,
+  variant = "panel",
+  onNavigate,
+  conversationId,
+}: Props) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const toggleTheme = useThemeStore((s) => s.toggleMode);
@@ -284,26 +276,40 @@ export function CommandPalette({ show = true, onClose, variant = "panel", onNavi
   const isDesktopApp = useIsDesktop();
   const bp = useBreakpoint();
 
-  // 搜索模式的本地过滤走 getState() 快照（搜索是瞬时动作，不需要响应式重跑）；
-  // 命令模式的「最近会话」需要跟随列表变化，才订阅 conversations
+  // 本地源订阅 store：独立窗口的好友/会话异步到达后，已有查询立即重新匹配。
+  const friends = useContactStore((s) => s.friends);
   const conversations = useConversationStore((s) => s.conversations);
   const setActive = useConversationStore((s) => s.setActive);
   const seekToMessage = useMessageStore((s) => s.seekToMessage);
 
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<TypeFilterKey>("all");
-  const [contactEntries, setContactEntries] = useState<PaletteEntry[]>([]);
-  const [groupEntries, setGroupEntries] = useState<PaletteEntry[]>([]);
   const [messageEntries, setMessageEntries] = useState<PaletteEntry[]>([]);
   const [fileEntries, setFileEntries] = useState<PaletteEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [skeletonVisible, setSkeletonVisible] = useState(false);
   const [serverError, setServerError] = useState(false);
   const [selected, setSelected] = useState(0);
   const [retryTick, setRetryTick] = useState(0);
 
   // window 形态常开：独立搜索窗口没有「关了再开」，宿主不需要传 show
   const isWindow = variant === "window";
-  const effectiveShow = isWindow ? true : show;
+  const isPage = variant === "page";
+  const isPanel = variant === "panel";
+  const effectiveShow = isPanel ? show : true;
+  const placeholder = t(conversationId ? "search.placeholder" : "palette.placeholder");
+
+  useEffect(() => {
+    if (!effectiveShow || isWindow || conversationId) return;
+    // Web 首次从聊天页打开时通讯录尚未挂载，不能依赖它来填充搜人数据。
+    // 独立窗口已有 SearchWindowHost 拉取，避免重复请求。
+    void useContactStore
+      .getState()
+      .loadFriends()
+      .catch((err) => {
+        captureException(err, { context: "palette.loadFriends" });
+      });
+  }, [effectiveShow, isWindow, conversationId]);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
@@ -321,7 +327,7 @@ export function CommandPalette({ show = true, onClose, variant = "panel", onNavi
       onNavigate(path, meta);
       return;
     }
-    navigate(path);
+    navigate(path, { replace: isPage });
   };
 
   const ctx: PaletteContext = {
@@ -330,15 +336,29 @@ export function CommandPalette({ show = true, onClose, variant = "panel", onNavi
     // 否则两条路径都关一次，close 计数翻倍还互相竞态
     navigate: (path) => {
       navigateOut(path);
-      if (isWindow && !onNavigate) onClose();
+      if (isPanel || (isWindow && !onNavigate)) onClose();
     },
-    toggleTheme,
-    logout,
+    toggleTheme: () => {
+      if (isWindow && onNavigate) navigateOut("", { action: "toggle-theme" });
+      else {
+        toggleTheme();
+        onClose();
+      }
+    },
+    logout: () => {
+      if (isWindow && onNavigate) navigateOut("", { action: "logout" });
+      else {
+        void logout();
+        onClose();
+      }
+    },
     isDesktopApp,
   };
-  // 独立搜索窗口只留导航类动作：切主题/登出/检查更新动的是「执行时所在窗口」
-  // 的上下文，在搜索窗口里执行会动错地方（见 paletteActions.windowSafe 备注）
-  const allActions = buildPaletteActions(ctx, isWindow ? { navigationOnly: true } : undefined);
+  // 有宿主桥时状态动作也交给主窗口；无桥的浏览器降级仍只留导航，防止改错上下文。
+  const allActions = buildPaletteActions(
+    ctx,
+    isWindow && !onNavigate ? { navigationOnly: true } : undefined,
+  );
 
   /**
    * 落到目标会话。
@@ -355,20 +375,19 @@ export function CommandPalette({ show = true, onClose, variant = "panel", onNavi
       return;
     }
     setActive(convId);
-    navigate(`/chat/${convId}`);
     if (seek) {
-      // 落到会话后定位该消息（高亮滚动）；刻意不 await，别让定位阻塞关面板
+      // 先触发定位再导航；手机结果替换搜索页，不执行返回回调覆盖目标路由。
       void seekToMessage(seek.conversationId, seek.messageId, seek.seq);
     }
-    onClose();
+    navigateOut(`/chat/${convId}`);
+    if (isPanel) onClose();
   };
 
   /** 联系人内存过滤（本地源一）：昵称包含查询词即命中 */
   const filterContactEntries = (needle: string): PaletteEntry[] => {
     const n = needle.toLowerCase();
-    return useContactStore
-      .getState()
-      .friends.filter((f) => f.nickname.toLowerCase().includes(n))
+    return friends
+      .filter((f) => f.nickname.toLowerCase().includes(n))
       .map((f) => ({
         key: `contact-${f.id}`,
         title: f.nickname,
@@ -379,7 +398,7 @@ export function CommandPalette({ show = true, onClose, variant = "panel", onNavi
           } else {
             // 还没建单聊的好友（历史脏数据 conversationId=null）：去通讯录找 TA
             navigateOut("/contacts");
-            onClose();
+            if (isPanel || (isWindow && !onNavigate)) onClose();
           }
         },
       }));
@@ -388,9 +407,8 @@ export function CommandPalette({ show = true, onClose, variant = "panel", onNavi
   /** 群聊内存过滤（本地源二）：群名包含查询词即命中 */
   const filterGroupEntries = (needle: string): PaletteEntry[] => {
     const n = needle.toLowerCase();
-    return useConversationStore
-      .getState()
-      .conversations.filter((c) => c.type === "group" && c.name.toLowerCase().includes(n))
+    return conversations
+      .filter((c) => c.type === "group" && c.name.toLowerCase().includes(n))
       .map((c) => ({
         key: `group-${c.id}`,
         title: c.name,
@@ -425,7 +443,7 @@ export function CommandPalette({ show = true, onClose, variant = "panel", onNavi
   };
 
   // ── 打开时重置（沿用 SearchModal 的既有行为）：清空 query/结果/筛选并聚焦 ──
-  // window 形态常开，本 effect 只在挂载时跑一次（聚焦输入框）
+  // 窗口/页面常开：挂载和范围变化时重置并聚焦输入框。
   useEffect(() => {
     if (!effectiveShow) return;
     setQuery("");
@@ -433,38 +451,42 @@ export function CommandPalette({ show = true, onClose, variant = "panel", onNavi
     setSelected(0);
     setLoading(false);
     setServerError(false);
-    setContactEntries([]);
-    setGroupEntries([]);
     setMessageEntries([]);
     setFileEntries([]);
     seqRef.current += 1; // 作废上一次打开遗留的在途请求
     lastQueryRef.current = "";
     const timer = setTimeout(() => inputRef.current?.focus(), 50);
     return () => clearTimeout(timer);
-  }, [effectiveShow]);
+  }, [effectiveShow, conversationId]);
 
   // ── 安卓返回键：面板开着时返回 = 关面板，而不是退出应用 ──
   // 本应用路由大量 replace，WebView 历史恒为 1，原生返回兜底就是 finish Activity。
   // 拦截器必须同步消费。window 形态只在桌面搜索窗口里存在，没有安卓返回键。
   useEffect(() => {
-    if (!effectiveShow || isWindow) return;
+    if (!effectiveShow || !isPanel) return;
     return registerBackInterceptor(() => {
       onClose();
       return true;
     });
-  }, [effectiveShow, isWindow, onClose]);
+  }, [effectiveShow, isPanel, onClose]);
 
   // ── 搜索主流程：查询变化防抖 300ms；类型筛选/重试变化立即重查 ──
   // 依赖刻意只列驱动搜索的状态；entry 构造器捕获的 navigate/onClose/setActive
   // 行为稳定（onClose 恒为「关面板」），不需要触发重搜。
   useEffect(() => {
+    // 输入/筛选变化时立即作废旧响应，不能等到新防抖定时器开始。
+    const seq = ++seqRef.current;
     if (!effectiveShow) return;
     const trimmed = query.trim();
+    // 所有非空词都检索；防抖等待也是加载态，不能在请求之前先闪「无结果」。
+    setLoading(trimmed !== "");
+    setSkeletonVisible(false);
+    setServerError(false);
+    setMessageEntries([]);
+    setFileEntries([]);
 
     if (!trimmed) {
       // 命令模式：清空搜索态
-      setContactEntries([]);
-      setGroupEntries([]);
       setMessageEntries([]);
       setFileEntries([]);
       setLoading(false);
@@ -478,45 +500,57 @@ export function CommandPalette({ show = true, onClose, variant = "panel", onNavi
     lastQueryRef.current = trimmed;
     const delay = queryChanged ? 300 : 0;
 
+    let skeletonTimer: ReturnType<typeof setTimeout> | undefined;
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
+    let skeletonShownAt = 0;
     const timer = setTimeout(() => {
-      const seq = ++seqRef.current;
-      // 后端 GIN 索引要求 ≥3 个字符（[]rune 口径），短查询只搜本地
-      const needServer = runeLength(trimmed) >= 3;
-      if (needServer) setLoading(true);
+      // 快速请求不闪骨架；一旦出现至少停留 250ms，尺寸与结果行保持一致。
+      skeletonTimer = setTimeout(() => {
+        if (seq !== seqRef.current) return;
+        skeletonShownAt = Date.now();
+        setSkeletonVisible(true);
+      }, 200);
       setServerError(false);
       setSelected(0);
 
       const activeTypes = TYPE_FILTERS.find((f) => f.key === typeFilter)?.types;
 
-      // 三源并发：本地两源是同步过滤包成已决 Promise，服务端源可能失败 ——
-      // 逐源 settle 后 Promise.all 等价 allSettled：服务端挂了不该把本地联系人结果一起丢掉
-      void Promise.all([
-        settle(filterContactEntries(trimmed)),
-        settle(filterGroupEntries(trimmed)),
-        settle(
-          needServer
-            ? searchMessages({ q: trimmed, types: activeTypes, limit: 20 })
-            : (null as MessageSearchResponse | null),
-        ),
-      ]).then(([c, g, s]) => {
-        if (seq !== seqRef.current) return; // 已有更新一次的搜索落地，丢弃过期响应
-        setContactEntries(c.status === "fulfilled" ? c.value : []);
-        setGroupEntries(g.status === "fulfilled" ? g.value : []);
-        if (s.status === "fulfilled") {
-          splitServerEntries(s.value?.results ?? []);
-          setServerError(false);
-        } else {
-          captureException(s.reason, { context: "CommandPalette" });
-          setMessageEntries([]);
-          setFileEntries([]);
-          setServerError(true);
-        }
-        setLoading(false);
+      // 本地源在 render 中同步派生；异步服务端失败不能覆盖本地匹配结果。
+      void settle(
+        searchMessages({
+          q: trimmed,
+          conversation_id: conversationId,
+          types: activeTypes,
+          limit: 20,
+        }),
+      ).then((s) => {
+        clearTimeout(skeletonTimer);
+        const apply = () => {
+          if (seq !== seqRef.current) return;
+          if (s.status === "fulfilled") {
+            splitServerEntries(s.value?.results ?? []);
+            setServerError(false);
+          } else {
+            captureException(s.reason, { context: "CommandPalette" });
+            setMessageEntries([]);
+            setFileEntries([]);
+            setServerError(true);
+          }
+          setLoading(false);
+          setSkeletonVisible(false);
+        };
+        const remaining = skeletonShownAt ? Math.max(0, 250 - (Date.now() - skeletonShownAt)) : 0;
+        if (remaining) settleTimer = setTimeout(apply, remaining);
+        else apply();
       });
     }, delay);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(skeletonTimer);
+      clearTimeout(settleTimer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, typeFilter, retryTick, effectiveShow]);
+  }, [query, typeFilter, retryTick, effectiveShow, conversationId]);
 
   // ── 命令模式的两组条目 ──
   const actionEntries: PaletteEntry[] = allActions.map((a) => ({
@@ -533,7 +567,10 @@ export function CommandPalette({ show = true, onClose, variant = "panel", onNavi
     run: () => openConversation(c.id),
   }));
 
-  const inSearch = query.trim().length > 0;
+  const trimmedQuery = query.trim();
+  const inSearch = trimmedQuery.length > 0;
+  const contactEntries = inSearch && !conversationId ? filterContactEntries(trimmedQuery) : [];
+  const groupEntries = inSearch && !conversationId ? filterGroupEntries(trimmedQuery) : [];
   const groups: PaletteGroup[] = inSearch
     ? [
         { labelKey: "palette.groupContacts", entries: contactEntries },
@@ -542,10 +579,12 @@ export function CommandPalette({ show = true, onClose, variant = "panel", onNavi
         { labelKey: "palette.groupMessages", entries: loading ? [] : messageEntries },
         { labelKey: "palette.groupFiles", entries: loading ? [] : fileEntries },
       ]
-    : [
-        { labelKey: "palette.actions", entries: actionEntries },
-        { labelKey: "palette.recent", entries: recentEntries },
-      ];
+    : conversationId
+      ? []
+      : [
+          { labelKey: "palette.actions", entries: actionEntries },
+          { labelKey: "palette.recent", entries: recentEntries },
+        ];
 
   // 跨分组的扁平可选项序列：键盘 ↑↓ 在它上面连续移动
   const flat: PaletteEntry[] = groups.flatMap((g) => g.entries);
@@ -561,6 +600,11 @@ export function CommandPalette({ show = true, onClose, variant = "panel", onNavi
   }, [current, listId]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // 输入法的 Enter/方向键/Escape 只用于选字，229 兼容组合结束时 isComposing 已清零的 WebView。
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) {
+      e.stopPropagation();
+      return;
+    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setSelected((i) => Math.min(Math.min(i, flat.length - 1) + 1, flat.length - 1));
@@ -580,18 +624,18 @@ export function CommandPalette({ show = true, onClose, variant = "panel", onNavi
 
   return (
     <div
-      role="dialog"
-      aria-modal={isWindow ? undefined : true}
-      aria-label={t("palette.placeholder")}
+      role={isPage ? "region" : "dialog"}
+      aria-modal={isPanel ? true : undefined}
+      aria-label={placeholder}
       className={cn(
-        isWindow
+        !isPanel
           ? // 全出血：铺满窗口，没有遮罩与圆角浮层（关窗语义在宿主的标题栏/Escape）
             "bg-surface flex h-full w-full flex-col overflow-hidden"
           : "fixed inset-0 z-50 flex justify-center bg-black/40",
-        !isWindow && (bp === "mobile" ? "items-stretch" : "items-start pt-[10vh]"),
+        isPanel && (bp === "mobile" ? "items-stretch" : "items-start pt-[10vh]"),
       )}
       onClick={
-        isWindow
+        !isPanel
           ? undefined
           : (e) => {
               if (e.target === e.currentTarget) onClose();
@@ -601,7 +645,7 @@ export function CommandPalette({ show = true, onClose, variant = "panel", onNavi
       <div
         className={cn(
           "flex min-h-0 flex-col overflow-hidden",
-          isWindow
+          !isPanel
             ? "h-full w-full flex-1"
             : cn(
                 "bg-surface shadow-elevation-2",
@@ -615,7 +659,18 @@ export function CommandPalette({ show = true, onClose, variant = "panel", onNavi
       >
         {/* 输入区 —— combobox 三件套：aria-expanded / aria-controls / aria-activedescendant */}
         <div className="border-outline-variant flex shrink-0 items-center gap-2 border-b px-4 py-3">
-          <Search size={18} className="text-on-surface-variant shrink-0" />
+          {isPage ? (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={t("chat.back")}
+              className="md3-icon-btn text-on-surface-variant shrink-0"
+            >
+              <ArrowLeft size={20} />
+            </button>
+          ) : (
+            <Search size={18} className="text-on-surface-variant shrink-0" />
+          )}
           <input
             ref={inputRef}
             type="text"
@@ -624,15 +679,15 @@ export function CommandPalette({ show = true, onClose, variant = "panel", onNavi
             aria-controls={listId}
             aria-activedescendant={flat.length > 0 ? `${listId}-opt-${current}` : undefined}
             aria-autocomplete="list"
-            aria-label={t("palette.placeholder")}
+            aria-label={placeholder}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={t("palette.placeholder")}
+            placeholder={placeholder}
             className="text-on-surface placeholder:text-on-surface-variant flex-1 bg-transparent text-sm outline-none"
           />
           {/* window 形态的关闭在自绘标题栏（SearchWindowHost），输入行不再放第二个 X */}
-          {!isWindow && (
+          {isPanel && (
             <button
               type="button"
               onClick={onClose}
@@ -717,7 +772,7 @@ export function CommandPalette({ show = true, onClose, variant = "panel", onNavi
               </div>
             ),
           )}
-          {loading && <SkeletonRows />}
+          {loading && skeletonVisible && <SkeletonRows />}
           {!loading && inSearch && !serverError && flat.length === 0 && (
             <p className="text-on-surface-variant px-4 py-6 text-center text-sm">
               {t("palette.empty")}

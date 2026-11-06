@@ -136,6 +136,7 @@ export {
 } from "./palette/paletteActions";
 // 独立搜索窗口（桌面 app）：承载组件 + 开窗承载器注册点（与 setCallLauncher 同一模式）
 export { SearchWindowHost } from "./palette/SearchWindowHost";
+export { SearchPage } from "./palette/SearchPage";
 export { launchSearchWindow, setSearchWindowLauncher } from "./palette/searchWindowActions";
 export type { SearchWindowLauncher } from "./palette/searchWindowActions";
 // 关窗二选一弹窗（桌面端托盘配套）
@@ -148,7 +149,6 @@ export { detectPlatform, type DetectedPlatform } from "./download/detectPlatform
 export { E2EEIndicator } from "./e2ee/E2EEIndicator";
 export { SafetyNumberDialog } from "./e2ee/SafetyNumberDialog";
 export { E2EESection } from "./e2ee/E2EESection";
-export { InConversationSearch } from "./chat/InConversationSearch";
 
 // 认证组件
 export { ForgotPasswordScreen } from "./auth/ForgotPasswordScreen";

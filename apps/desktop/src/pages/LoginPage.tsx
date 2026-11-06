@@ -9,6 +9,7 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { TitleBar } from "../components/TitleBar";
 import { QrCode } from "lucide-react";
 
+/** 密码登录页：登录态驱动主窗口跳转与尺寸，页面只负责认证表单。 */
 export function LoginPage() {
   const { t } = useTranslation();
   const isDesktop = useIsDesktop();
@@ -30,19 +31,6 @@ export function LoginPage() {
     window.addEventListener("mousemove", onMove);
     return () => window.removeEventListener("mousemove", onMove);
   }, []);
-
-  const resizeToHomepage = async () => {
-    try {
-      const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
-      const win = getCurrentWindow();
-      await win.setSize(new LogicalSize(1200, 800));
-      await win.setResizable(true);
-      await win.setMinSize(new LogicalSize(900, 600));
-      await win.center();
-    } catch {
-      // 非 Tauri 环境忽略
-    }
-  };
 
   // 关闭登录窗口时同时关闭所有子窗口（注册、忘记密码等）
   const handleCloseAll = async () => {
@@ -83,8 +71,8 @@ export function LoginPage() {
 
     setLoading(true);
     try {
+      // 主窗口尺寸统一由 App 的登录态 effect 管理，不在登录页重复覆盖。
       await loginWithPassword(yuanchatId, password);
-      if (isDesktop) await resizeToHomepage();
     } catch (e) {
       setPasswordError(e instanceof Error ? e.message : t("auth.loginFailed"));
     } finally {

@@ -12,8 +12,7 @@
  * text/file/image 三类），本包不直接依赖 msw —— 复用
  * @yuanchat/shared/mocks/server 收敛导出的 Node 服务。
  *
- * 查询词用「季度报告」（4 个字符）：面板与后端同口径，≥3 个字符才打服务端
- * （GIN 索引下限），2 字符查询不会发出请求、也就没有分组结果可言。
+ * 查询词用「季度报告」覆盖分组；任意去除首尾空白后的非空词都会请求服务端。
  *
  * 交互用 fireEvent 而非 user-event：后者不在本仓任何 package.json 里，
  * 离线环境装不了；本包既有用例（MainLayout 等）也统一走 fireEvent。
@@ -22,7 +21,7 @@ import { describe, it, expect, vi, beforeEach, beforeAll, afterAll, afterEach } 
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { server } from "@yuanchat/shared/mocks/server";
-import { useConversationStore } from "@yuanchat/shared";
+import { useContactStore, useConversationStore } from "@yuanchat/shared";
 import { buildPaletteActions, filterActions } from "../paletteActions";
 import { CommandPalette } from "../CommandPalette";
 
@@ -170,7 +169,7 @@ describe("CommandPalette window 形态（独立搜索窗口）", () => {
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
     // 第一个动作是 new-group → 跳通讯录建群
     expect(onNavigate).toHaveBeenCalledTimes(1);
-    expect(onNavigate.mock.calls[0][0]).toBe("/contacts?new=group");
+    expect(onNavigate.mock.calls[0][0]).toBe("/chat?new=group");
     expect(onClose).not.toHaveBeenCalled();
   });
 
@@ -205,7 +204,7 @@ describe("CommandPalette window 形态（独立搜索窗口）", () => {
       </MemoryRouter>,
     );
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
-    expect(paths).toContain("/contacts?new=group");
+    expect(paths).toContain("/chat?new=group");
   });
 
   it("会话类结果把 conversationId 装进 meta 交给主窗口（主窗口需先 setActive）", async () => {
@@ -228,4 +227,60 @@ describe("CommandPalette window 形态（独立搜索窗口）", () => {
     );
     expect(onClose).not.toHaveBeenCalled();
   });
+});
+
+describe("CommandPalette 会话范围", () => {
+  it("空词不展示全局动作、联系人或最近会话", () => {
+    useConversationStore.setState({
+      conversations: [
+        { id: "scope", type: "group", name: "季度报告群", unreadCount: 0, isMuted: false },
+      ],
+    });
+    render(
+      <MemoryRouter>
+        <CommandPalette conversationId="scope" onClose={vi.fn()} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+  });
+
+  it("真实 searchMessages 请求携带 conversation_id，并保留类型筛选且不搜联系人", async () => {
+    useContactStore.setState({
+      friends: [
+        {
+          id: "friend",
+          shortId: 10002,
+          nickname: "季度报告好友",
+          avatarUrl: "",
+          conversationId: "other",
+        },
+      ],
+    });
+    const spy = vi.spyOn(globalThis, "fetch");
+    render(
+      <MemoryRouter>
+        <CommandPalette conversationId="scope" onClose={vi.fn()} />
+      </MemoryRouter>,
+    );
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "季度报告" } });
+    fireEvent.click(screen.getByRole("button", { name: /文件|Files/i }));
+    await waitFor(() => {
+      const requests = spy.mock.calls
+        .map((c) => String(c[0]))
+        .filter((url) => url.includes("/messages/search?"));
+      expect(
+        requests.some((url) => url.includes("conversation_id=scope") && url.includes("types=file")),
+      ).toBe(true);
+    });
+    expect(screen.queryByRole("option", { name: /季度报告好友/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /群聊|Groups/i })).not.toBeInTheDocument();
+  });
+});
+
+it("未注入检查回调时，桌面更新动作仍跳关于页并触发检查", () => {
+  const desktop = { navigate: vi.fn(), toggleTheme: vi.fn(), logout: vi.fn(), isDesktopApp: true };
+  buildPaletteActions(desktop)
+    .find((action) => action.id === "check-update")!
+    .run(desktop);
+  expect(desktop.navigate).toHaveBeenCalledWith("/settings?section=about&checkUpdate=1");
 });

@@ -32,8 +32,8 @@ export interface MessageSearchResponse {
 }
 
 /**
- * 全文搜索消息（后端 pg_trgm GIN 加速，检索正文与文件名）。
- * @param params.q 关键词，至少 3 个字符
+ * 搜索正文与文件名；较长关键词可利用后端 pg_trgm GIN 索引。
+ * @param params.q 去除首尾空白后须非空，无最低字数限制
  * @param params.conversation_id 限定会话（可选）
  * @param params.types 类型过滤；空数组与省略同义（不过滤）。未知类型后端返 400
  * @param params.before RFC3339 翻页游标（可选）
@@ -46,7 +46,7 @@ export async function searchMessages(params: {
   before?: string;
   limit?: number;
 }): Promise<MessageSearchResponse> {
-  const qs = new URLSearchParams({ q: params.q });
+  const qs = new URLSearchParams({ q: params.q.trim() });
   if (params.conversation_id) qs.set("conversation_id", params.conversation_id);
   if (params.types?.length) qs.set("types", params.types.join(","));
   if (params.before) qs.set("before", params.before);

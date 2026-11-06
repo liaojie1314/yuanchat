@@ -1189,6 +1189,24 @@ export const handlers = [
     return apiOk({ message: "removed" });
   }),
 
+  // 全局搜索首次打开会拉好友列表；四态复用已有 scenario 约定，禁止穿透真实后端。
+  http.get("http://localhost:8085/api/v1/contacts", async ({ request }) => {
+    const scenario = new URL(request.url).searchParams.get("scenario");
+    if (scenario === "error") return apiError(500, "mock contacts error");
+    await delay(scenario === "slow" ? 2000 : 150);
+    const friends =
+      scenario === "empty"
+        ? []
+        : DEMO_FRIENDS.map((friend) => ({
+            user_id: friend.id,
+            nickname: friend.nickname,
+            avatar_url: friend.avatarUrl,
+            short_id: friend.shortId,
+            conversation_id: friend.conversationId,
+          }));
+    return apiOk({ friends });
+  }),
+
   // --------------------------------------------------
   // 消息搜索 — 全局 / 会话内，带类型筛选
   // GET /api/v1/messages/search
@@ -1199,7 +1217,8 @@ export const handlers = [
   // --------------------------------------------------
   http.get("http://localhost:8085/api/v1/messages/search", async ({ request }) => {
     const qs = new URL(request.url).searchParams;
-    const q = qs.get("q") ?? "";
+    const q = (qs.get("q") ?? "").trim();
+    if (!q) return apiError(400, "q is required");
     const types = (qs.get("types") ?? "").split(",").filter(Boolean);
 
     if (q.includes("boom")) return apiError(500, "search failed");
@@ -1214,9 +1233,13 @@ export const handlers = [
     if (unknown) return apiError(400, "unknown message type: " + unknown);
 
     const wanted = new Set(types.map((t) => SEARCH_TYPE_IDS[t]));
-    const results = wanted.size
-      ? MOCK_SEARCH_RESULTS.filter((r) => wanted.has(r.message_type))
-      : MOCK_SEARCH_RESULTS;
+    // 会话范围与类型同时收敛，避免用全局夹具制造会话内搜索的假阳性。
+    const conversationId = qs.get("conversation_id");
+    const results = MOCK_SEARCH_RESULTS.filter(
+      (r) =>
+        (!conversationId || r.conversation_id === conversationId) &&
+        (!wanted.size || wanted.has(r.message_type)),
+    );
     return apiOk({ results, has_more: false });
   }),
 

@@ -32,9 +32,12 @@ interface Props {
   onNavigate?: (path: string, meta?: PaletteNavigateMeta) => void;
   /** 关闭本窗口（桌面端注入 getCurrentWindow().close()） */
   onClose: () => void;
+  /** 当前会话范围；由宿主 URL 与范围事件更新，省略即全局。 */
+  conversationId?: string;
 }
 
-export function SearchWindowHost({ onNavigate, onClose }: Props) {
+/** 原生搜索窗口的自绘标题栏和数据源，内容与 Web/手机搜索共用。 */
+export function SearchWindowHost({ onNavigate, onClose, conversationId }: Props) {
   const { t } = useTranslation();
 
   // 独立 JS 上下文 store 为空：挂载即各拉一次本地源（各一次，不重复拉）。
@@ -51,7 +54,7 @@ export function SearchWindowHost({ onNavigate, onClose }: Props) {
   }, []);
 
   return (
-    <div className="bg-surface flex h-full min-h-0 flex-col overflow-hidden">
+    <div className="bg-surface app-screen flex min-h-0 flex-col overflow-hidden">
       {/* 自绘标题栏：样式对齐桌面 TitleBar（h-8 / surface-container / label-sm）。
           data-tauri-drag-region 在非 Tauri 环境只是无人认识的属性，无害。 */}
       <div
@@ -59,7 +62,7 @@ export function SearchWindowHost({ onNavigate, onClose }: Props) {
         className="bg-surface-container flex h-8 shrink-0 items-center justify-between px-2 select-none"
       >
         <span className="text-on-surface-variant text-label-sm pl-2 font-medium">
-          {t("palette.windowTitle")}
+          {t(conversationId ? "chat.searchHistory" : "palette.windowTitle")}
         </span>
         <button
           type="button"
@@ -73,7 +76,12 @@ export function SearchWindowHost({ onNavigate, onClose }: Props) {
 
       {/* window 形态面板：常开全出血，铺满标题栏以下的整窗 */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <CommandPalette variant="window" onClose={onClose} onNavigate={onNavigate} />
+        <CommandPalette
+          variant="window"
+          conversationId={conversationId}
+          onClose={onClose}
+          onNavigate={onNavigate}
+        />
       </div>
     </div>
   );

@@ -23,3 +23,23 @@ export function detectPlatform(ua: string, uaDataPlatform?: string): DetectedPla
   if (s.includes("linux") || s.includes("x11")) return "linux";
   return "unknown";
 }
+
+/** 能可靠识别的安装包架构；未知时不猜测，也不推荐任意一个包。 */
+export type DetectedArchitecture = "x86_64" | "aarch64" | "i686" | "armv7" | "unknown";
+
+/** 优先使用 UAData 的架构/位数，旧浏览器回落明确的 CPU 标记；Mac 的 Intel UA 不可信。 */
+export function detectArchitecture(
+  ua: string,
+  info?: { architecture?: string; bitness?: string },
+): DetectedArchitecture {
+  const arch = (info?.architecture ?? "").toLowerCase();
+  if (arch === "arm" && info?.bitness === "64") return "aarch64";
+  if (arch === "arm" && info?.bitness === "32") return "armv7";
+  if (arch === "x86" && info?.bitness === "64") return "x86_64";
+  if (arch === "x86" && info?.bitness === "32") return "i686";
+  if (/aarch64|arm64|armv8/i.test(ua)) return "aarch64";
+  if (/armv7/i.test(ua)) return "armv7";
+  if (/x86_64|amd64|Win64|WOW64|\bx64\b/i.test(ua)) return "x86_64";
+  if (/i[3-6]86|Win32/i.test(ua)) return "i686";
+  return "unknown";
+}

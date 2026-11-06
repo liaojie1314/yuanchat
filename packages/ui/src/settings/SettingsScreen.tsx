@@ -17,7 +17,7 @@ import {
   ChevronRight,
   LogOut,
   ShieldCheck,
-  Palette,
+  SlidersHorizontal,
   Info,
   User,
   ArrowLeft,
@@ -27,7 +27,7 @@ import {
   Smile,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   registerBackInterceptor,
   useAuthStore,
@@ -50,9 +50,11 @@ import { APP_VERSION } from "./settingsUtils";
 import { ConfirmDialog } from "../primitives/ConfirmDialog";
 import { ChangePasswordDialog } from "../auth/ChangePasswordDialog";
 import { UserStatusEditor } from "./UserStatusEditor";
+import { ShortcutSection } from "./ShortcutSection";
+import { DownloadDirectorySection } from "./DownloadDirectorySection";
 
 /** 设置内容区视图 */
-type SettingsView = "index" | "profile" | "account" | "appearance" | "favorites" | "about";
+type SettingsView = "index" | "profile" | "account" | "general" | "favorites" | "about";
 
 /** 设置页分组项：view 为设置页内部视图切换，route 为跳走的独立页面。 */
 type SettingsNavItem =
@@ -85,10 +87,10 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   },
   {
     kind: "view",
-    view: "appearance",
-    icon: Palette,
-    labelKey: "settings.appearance",
-    descKey: "settings.appearanceDesc",
+    view: "general",
+    icon: SlidersHorizontal,
+    labelKey: "settings.general",
+    descKey: "settings.generalDesc",
   },
   {
     kind: "route",
@@ -117,9 +119,12 @@ const SETTINGS_NAV: SettingsNavItem[] = [
 /** 列表 key：view 项用视图名，route 项用路由，两者不会撞 */
 const navKey = (item: SettingsNavItem) => (item.kind === "view" ? item.view : item.to);
 
+/** 三端设置编排，支持命令面板直接打开关于分区。 */
 export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedSection = searchParams.get("section");
   const bp = useBreakpoint();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
@@ -128,8 +133,10 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
   // 下载客户端入口仅 web 构建渲染（手机 web；Tauri app 内已装好，再给是噪音）
   const isDesktopApp = useIsDesktop();
   const [showDownload, setShowDownload] = useState(false);
-  // 桌面/平板默认选中个人资料；移动端从 index 列表开始
-  const [view, setView] = useState<SettingsView>("profile");
+  // 首次提交就匹配断点与深链，避免先挂载个人资料再由 effect 换页。
+  const [view, setView] = useState<SettingsView>(() =>
+    requestedSection === "about" ? "about" : isMobile ? "index" : "profile",
+  );
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [changePwdOpen, setChangePwdOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
@@ -170,8 +177,8 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
 
   // 移动端首屏应落在 index；断点切回桌面时确保有选中项
   useEffect(() => {
-    setView(isMobile ? "index" : "profile");
-  }, [isMobile]);
+    setView(requestedSection === "about" ? "about" : isMobile ? "index" : "profile");
+  }, [isMobile, requestedSection]);
 
   /** 右内容区：按 view 渲染对应子视图 */
   const renderContent = (onBack: () => void) => {
@@ -188,11 +195,13 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
             />
           </MobileHeader>
         );
-      case "appearance":
+      case "general":
         return (
-          <MobileHeader show={isMobile} title={t("settings.appearance")} onBack={onBack}>
+          <MobileHeader show={isMobile} title={t("settings.general")} onBack={onBack}>
             <div className="flex flex-col gap-6">
               <AppearanceSection />
+              <DownloadDirectorySection />
+              {!isMobile && <ShortcutSection />}
               {/* 桌面 app 专属：关窗行为三选（内部自行判断平台，非桌面渲染 null） */}
               <DesktopSection />
             </div>
@@ -350,7 +359,11 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
               key={navKey(item)}
               icon={item.icon}
               label={t(item.labelKey)}
-              desc={t(item.descKey)}
+              desc={t(
+                item.kind === "view" && item.view === "general"
+                  ? "settings.generalDescMobile"
+                  : item.descKey,
+              )}
               onClick={() => onNavClick(item)}
             />
           ))}

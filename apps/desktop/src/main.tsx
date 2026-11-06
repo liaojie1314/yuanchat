@@ -38,16 +38,14 @@ if ("__TAURI_INTERNALS__" in window) {
       window.location.href = "/chat";
     });
   });
-
-  // 注入 Tauri 的落盘实现：下载进度 store 落盘时不再走 <a download>，
-  // 而是写进应用 Download 目录（安卓是私有 external files，零权限）。
-  // 必须在任何下载开始前装好；web 构建里这段不会执行
-  import("./fileSink").then(({ installFileSink }) => {
-    installFileSink();
-  });
 }
 
 async function bootstrap() {
+  // 设置页首屏与下载记录恢复都要读取落盘能力，必须在挂载 React 前完成注入。
+  if ("__TAURI_INTERNALS__" in window) {
+    const { installFileSink } = await import("./fileSink");
+    installFileSink();
+  }
   // 开发阶段且 VITE_ENABLE_MOCK=true 时启动 MSW Mock Service Worker
   // 联调真实后端：VITE_ENABLE_MOCK=false pnpm --filter @yuanchat/desktop dev
   // 动态 import 确保 MSW 在 production build 中被 tree-shake

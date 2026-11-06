@@ -10,26 +10,35 @@
  * → relaunch() 重启生效。签名校验失败会在 check/download 阶段直接抛错，
  * 不会安装未签名或被篡改的包。
  */
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { RefreshCw, Download, CheckCircle2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { captureException, deviceCohort } from "@yuanchat/shared";
 
 type Phase = "idle" | "checking" | "available" | "downloading" | "ready" | "latest" | "error";
 
+/** 设置页的桌面签名更新入口，匿名灰度桶在每次检查时复用。 */
 export function UpdateChecker() {
   const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const busyRef = useRef(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [update, setUpdate] = useState<Update | null>(null);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
 
-  const handleCheck = async () => {
+  const handleCheck = useCallback(async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setPhase("checking");
     setError("");
     try {
-      const found = await check();
+      const found = await check({
+        headers: { "X-YuanChat-Update-Cohort": String(deviceCohort()) },
+      });
       if (found) {
         setUpdate(found);
         setPhase("available");
@@ -37,13 +46,26 @@ export function UpdateChecker() {
         setPhase("latest");
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      captureException(e, { context: "desktopUpdate" });
+      setError(t("update.failed"));
       setPhase("error");
+    } finally {
+      busyRef.current = false;
     }
-  };
+  }, [t]);
+
+  useEffect(() => {
+    if (searchParams.get("checkUpdate") !== "1") return;
+    // 消费一次性深链，重复导航和 StrictMode 不会重入在途更新检查。
+    const next = new URLSearchParams(searchParams);
+    next.delete("checkUpdate");
+    setSearchParams(next, { replace: true });
+    void handleCheck();
+  }, [searchParams, setSearchParams, handleCheck]);
 
   const handleInstall = async () => {
-    if (!update) return;
+    if (!update || busyRef.current) return;
+    busyRef.current = true;
     setPhase("downloading");
     setProgress(0);
     try {
@@ -60,8 +82,11 @@ export function UpdateChecker() {
       });
       setPhase("ready");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      captureException(e, { context: "desktopUpdate" });
+      setError(t("update.failed"));
       setPhase("error");
+    } finally {
+      busyRef.current = false;
     }
   };
 

@@ -18,6 +18,7 @@ import { Button } from "./Button";
  * @param message      描述性正文
  * @param confirmLabel 确认按钮文案，省略时显示 "Confirm"
  * @param danger       危险模式：确认按钮用 `danger` 变体
+ * @param hideCancel   纯信息弹窗只显示一个关闭按钮，默认保留取消
  * @param onConfirm    用户点击确认的回调
  * @param onCancel     用户取消（点背景/Esc/取消键）的回调
  */
@@ -27,6 +28,7 @@ export function ConfirmDialog({
   message,
   confirmLabel,
   danger = false,
+  hideCancel = false,
   onConfirm,
   onCancel,
 }: {
@@ -35,6 +37,7 @@ export function ConfirmDialog({
   message: string;
   confirmLabel?: string;
   danger?: boolean;
+  hideCancel?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -50,12 +53,12 @@ export function ConfirmDialog({
     // 记录焦点来源
     previousFocusRef.current = document.activeElement;
     // 初始焦点：取消键，防止回车误触危险操作
-    cancelRef.current?.focus();
+    (hideCancel ? confirmRef : cancelRef).current?.focus();
     return () => {
       // 弹窗关闭时焦点还原
       (previousFocusRef.current as HTMLElement | null)?.focus?.();
     };
-  }, [open]);
+  }, [open, hideCancel]);
 
   useEffect(() => {
     if (!open) return;
@@ -66,6 +69,11 @@ export function ConfirmDialog({
       }
       // 焦点陷阱：只在两个按钮间循环，防止 Tab 逃出弹窗到背后内容
       if (e.key === "Tab") {
+        if (hideCancel) {
+          e.preventDefault();
+          confirmRef.current?.focus();
+          return;
+        }
         const cancel = cancelRef.current;
         const confirm = confirmRef.current;
         if (!cancel || !confirm) return;
@@ -84,7 +92,7 @@ export function ConfirmDialog({
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, onCancel]);
+  }, [open, onCancel, hideCancel]);
 
   if (!open) return null;
   return (
@@ -104,9 +112,11 @@ export function ConfirmDialog({
         </h3>
         <p className="text-body-md text-on-surface-variant mt-2">{message}</p>
         <div className="mt-5 flex justify-end gap-2">
-          <Button ref={cancelRef} variant="ghost" className="px-4 py-2" onClick={onCancel}>
-            {t("common.cancel")}
-          </Button>
+          {!hideCancel && (
+            <Button ref={cancelRef} variant="ghost" className="px-4 py-2" onClick={onCancel}>
+              {t("common.cancel")}
+            </Button>
+          )}
           <Button
             ref={confirmRef}
             variant={danger ? "danger" : "primary"}

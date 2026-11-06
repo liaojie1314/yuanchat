@@ -21,7 +21,8 @@
     font-size: 14px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    scrollbar-gutter: stable;
+
+    /* 页面根节点不占滚动条槽位；实际滚动只发生在应用内部列表。 */
     border-radius: 12px;
   }
 

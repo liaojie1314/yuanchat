@@ -11,7 +11,8 @@
  * 签名字段只接收 release 流水线产出的 `.sig` 文本内容；**签名私钥不入库、
  * 不进管理端进程**，这个页面只做登记。
  */
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ApiError, captureException } from "@yuanchat/shared";
 import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "@yuanchat/ui";
 import { cn } from "@yuanchat/shared/utils";
@@ -70,6 +71,7 @@ const EMPTY_FORM: CreateReleaseBody = {
 const PLATFORMS = ["linux", "windows", "darwin", "android"] as const;
 const ARCHES = ["x86_64", "aarch64", "universal", "i686", "armv7"] as const;
 
+/** 管理已登记的安装包；写操作收到成功响应才刷新，并显式展示失败。 */
 export function ReleasesPage() {
   const { t } = useTranslation();
   const [platform, setPlatform] = useState("");
@@ -94,6 +96,36 @@ export function ReleasesPage() {
     rel: AdminRelease;
     action: "publish" | "rollback";
   } | null>(null);
+
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const writing = useRef(false);
+  const [rolloutDrafts, setRolloutDrafts] = useState<Record<string, string>>({});
+  useEffect(() => {
+    setRolloutDrafts({});
+  }, [list]);
+
+  // 同步闩锁阻止同一轮事件中连点提交；失败不会刷新或覆盖服务端状态。
+  const runWrite = async (
+    call: () => Promise<unknown>,
+    onSuccess: () => void,
+    onError: (err: unknown) => void = () => setActionError(t("admin.releases.actionFailed")),
+  ) => {
+    if (writing.current) return;
+    writing.current = true;
+    setSaving(true);
+    setActionError(null);
+    try {
+      await call();
+      onSuccess();
+    } catch (err) {
+      captureException(err, { context: "adminRelease.write" });
+      onError(err);
+    } finally {
+      writing.current = false;
+      setSaving(false);
+    }
+  };
 
   const headers = [
     t("admin.releases.platform"),
@@ -122,39 +154,68 @@ export function ReleasesPage() {
   const confirmMeta = pending ? CONFIRM_KEYS[pending.action] : null;
 
   const runPending = () => {
-    if (!pending) return;
+    if (!pending || writing.current) return;
     const { rel, action } = pending;
     setPending(null);
-    const call = action === "publish" ? publishRelease(rel.id) : rollbackRelease(rel.id);
-    void call.then(refresh);
+    void runWrite(
+      () => (action === "publish" ? publishRelease(rel.id) : rollbackRelease(rel.id)),
+      refresh,
+    );
   };
 
-  const submitForm = async () => {
+  const submitForm = () => {
     setFormError(null);
-    try {
-      await createRelease({
-        ...form,
-        // 空串在后端会撞 omitempty 的校验（如 sha256 要求 64 位），统一抹成 undefined
-        signature: form.signature || undefined,
-        sha256: form.sha256 || undefined,
-        min_version: form.min_version || undefined,
-        notes: form.notes || undefined,
-      });
-      setForm(EMPTY_FORM);
-      setFormOpen(false);
-      refresh();
-    } catch (err) {
-      // 409（重复登记同一版）与 400（字段非法）都走这里，原样显示后端消息 ——
-      // 自己编一句「保存失败」会把「版本号已存在」这条关键信息吞掉
-      setFormError(err instanceof Error ? err.message : t("admin.releases.createFailed"));
-    }
+    void runWrite(
+      () =>
+        createRelease({
+          ...form,
+          signature: form.signature || undefined,
+          sha256: form.sha256 || undefined,
+          min_version: form.min_version || undefined,
+          notes: form.notes || undefined,
+        }),
+      () => {
+        setForm(EMPTY_FORM);
+        setFormOpen(false);
+        refresh();
+      },
+      (err) => {
+        setFormError(
+          t(
+            err instanceof ApiError && err.code === 409
+              ? "admin.releases.duplicate"
+              : err instanceof ApiError && err.code === 400
+                ? "admin.releases.invalidForm"
+                : "admin.releases.createFailed",
+          ),
+        );
+      },
+    );
   };
 
-  /** 行内改灰度：失焦即提交，值没变就不发请求。 */
+  /** 行内灰度只接受0至100的非空整数；失败清掉草稿，恢复服务端原值。 */
   const commitRollout = (rel: AdminRelease, raw: string) => {
+    const reset = () =>
+      setRolloutDrafts((drafts) => {
+        const next = { ...drafts };
+        delete next[rel.id];
+        return next;
+      });
     const next = Number(raw);
-    if (!Number.isFinite(next) || next < 0 || next > 100 || next === rel.rollout) return;
-    void updateRelease(rel.id, { rollout: next }).then(refresh);
+    if (!raw.trim() || !Number.isInteger(next) || next < 0 || next > 100) {
+      reset();
+      setActionError(t("admin.releases.rolloutInvalid"));
+      return;
+    }
+    if (next === rel.rollout || writing.current) return;
+    void runWrite(
+      () => updateRelease(rel.id, { rollout: next }),
+      refresh,
+      () => {
+        reset();
+        setActionError(t("admin.releases.actionFailed"));
+      },
+    );
   };
 
   return (
@@ -275,7 +336,6 @@ export function ReleasesPage() {
                 rows={2}
                 value={form.signature ?? ""}
                 onChange={(e) => setForm({ ...form, signature: e.target.value })}
-                placeholder="untrusted comment: signature from tauri secret key"
                 className="rounded-lg border border-outline-variant bg-surface px-2 py-1 font-mono text-body-sm text-on-surface"
               />
               <span className="text-label-sm text-on-surface-variant">
@@ -329,7 +389,11 @@ export function ReleasesPage() {
             </label>
           </div>
 
-          {formError && <p className="mt-3 text-body-sm text-error">{formError}</p>}
+          {formError && (
+            <p role="alert" className="mt-3 text-body-sm text-error">
+              {formError}
+            </p>
+          )}
 
           <p className="mt-3 text-label-sm text-on-surface-variant">
             {t("admin.releases.createIsDraftHint")}
@@ -337,6 +401,7 @@ export function ReleasesPage() {
           <div className="mt-3 flex gap-2">
             <button
               type="submit"
+              disabled={saving}
               className="h-9 rounded-lg bg-primary px-4 text-label-lg text-primary-on hover:opacity-90"
             >
               {t("admin.releases.submit")}
@@ -355,6 +420,11 @@ export function ReleasesPage() {
         </form>
       )}
 
+      {actionError && (
+        <p role="alert" className="mb-3 text-body-sm text-error">
+          {actionError}
+        </p>
+      )}
       <DataTable headers={headers}>
         {/* 翻页 / 筛选时旧行留在原位，只有首屏才上骨架 */}
         {loading && list.length === 0 && <SkeletonRows cols={headers.length} />}
@@ -390,7 +460,11 @@ export function ReleasesPage() {
                 type="number"
                 min={0}
                 max={100}
-                defaultValue={rel.rollout}
+                value={rolloutDrafts[rel.id] ?? String(rel.rollout)}
+                disabled={saving}
+                onChange={(e) =>
+                  setRolloutDrafts((drafts) => ({ ...drafts, [rel.id]: e.target.value }))
+                }
                 aria-label={t("admin.releases.rollout")}
                 onBlur={(e) => commitRollout(rel, e.target.value)}
                 className="h-8 w-16 rounded-lg border border-outline-variant bg-surface px-2 text-body-md text-on-surface"
@@ -406,6 +480,7 @@ export function ReleasesPage() {
             <td className="space-x-3 whitespace-nowrap px-4 py-3">
               {rel.status !== "published" && (
                 <button
+                  disabled={saving}
                   onClick={() => setPending({ rel, action: "publish" })}
                   className="text-label-lg text-primary hover:underline"
                 >
@@ -414,6 +489,7 @@ export function ReleasesPage() {
               )}
               {rel.status === "published" && (
                 <button
+                  disabled={saving}
                   onClick={() => setPending({ rel, action: "rollback" })}
                   className="text-label-lg text-error hover:underline"
                 >

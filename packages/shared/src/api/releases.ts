@@ -102,6 +102,15 @@ export function deviceUid(): string {
   }
 }
 
+/** 返回与服务端 FNV-1a 32 位一致的灰度桶；插件兜底请求只携带桶，不泄露唯一设备标识。 */
+export function deviceCohort(uid = deviceUid()): number {
+  let hash = 2166136261;
+  for (const byte of new TextEncoder().encode(uid)) {
+    hash = Math.imul(hash ^ byte, 16777619) >>> 0;
+  }
+  return hash % 100;
+}
+
 /**
  * 检查某平台/架构是否有更新。
  *

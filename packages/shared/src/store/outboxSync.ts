@@ -134,8 +134,8 @@ function stagedKey(clientMsgId: string, fileName: string): string {
  * 此时「重试」只能如实报「本地文件已失效」—— 对用户就是消息永久卡住。
  *
  * 清理策略：发送成功即删，不引入 LRU 配额。outbox 条目本来就短命，
- * 给它配一套配额账本是无谓的基建。web 端 sink 没有 read 方法（没有磁盘），
- * 这组函数在 web 上整体降级：stage / clear 是 no-op，read 抛错由调用方回落原行为。
+ * 给它配一套配额账本是无谓的基建。Web 的授权下载可读，但不提供 appdata 磁盘副本；
+ * 这组函数在 Web 上整体降级：stage / clear 是 no-op，read 抛错由调用方回落原行为。
  */
 export async function stageOutboxFile(
   clientMsgId: string,
@@ -144,7 +144,7 @@ export async function stageOutboxFile(
   mime: string,
 ): Promise<void> {
   const sink = getFileSink();
-  if (!sink.read) return; // web：没有磁盘，不落
+  if (!sink.read) return; // 无读回能力时不落；Web 的 appdata save 自行保持 no-op。
   await sink.save(bytes, stagedKey(clientMsgId, fileName), mime, "appdata");
 }
 

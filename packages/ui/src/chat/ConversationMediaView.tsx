@@ -35,6 +35,7 @@ import {
   registerBackInterceptor,
   showToast,
   startDownload,
+  revealDownload,
   useDownloadStore,
 } from "@yuanchat/shared";
 import type { MediaItem } from "@yuanchat/shared";
@@ -202,6 +203,7 @@ function MediaFileRow({ item }: { item: MediaItem }) {
   const { Icon, bg } = fileIconOf(meta.ext);
   const entry = useDownloadStore((s) => s.entries[item.messageId]);
   const phase = entry?.phase;
+  const [savedLocation, setSavedLocation] = useState<string | null>(null);
 
   const handleDownload = () => {
     if (!name) return; // 与气泡侧同口径：没有原始文件名就不发起（签不出附件头）
@@ -210,10 +212,20 @@ function MediaFileRow({ item }: { item: MediaItem }) {
       return;
     }
     if (phase === "done" && entry?.savedPath) {
-      const reveal = getFileSink().reveal;
-      // web 实现没有 reveal：浏览器自己的下载目录不由我们管
-      if (reveal)
-        void reveal(entry.savedPath).catch(() => showToast("error", t("chat.file.openFailed")));
+      void revealDownload(item.messageId, item.key, name)
+        .then((path) => {
+          if (path) setSavedLocation(path);
+        })
+        .catch((error: unknown) =>
+          showToast(
+            "error",
+            t(
+              error instanceof Error && error.message === "download.directoryPermissionRequired"
+                ? "download.directoryPermissionRequired"
+                : "chat.file.openFailed",
+            ),
+          ),
+        );
       return;
     }
     // 文件名作第二参让服务端签出附件头 + 原始文件名，详见 MessageBubble 的下载按钮。
@@ -259,7 +271,11 @@ function MediaFileRow({ item }: { item: MediaItem }) {
               : phase === "failed"
                 ? "common.retry"
                 : phase === "done" && entry?.savedPath
-                  ? "chat.file.open"
+                  ? getFileSink().revealTarget === "location"
+                    ? "chat.file.viewLocation"
+                    : getFileSink().revealTarget === "folder"
+                      ? "chat.file.openFolder"
+                      : "chat.file.open"
                   : "file.download",
           )}
           className="md3-icon-btn text-on-surface-variant shrink-0"
@@ -268,7 +284,11 @@ function MediaFileRow({ item }: { item: MediaItem }) {
         </button>
       </div>
       {/* 进度条挂在行内布局之下：行是 items-center 的横排，放里面会被压扁 */}
-      <FileProgressBar messageId={item.messageId} />
+      <FileProgressBar
+        messageId={item.messageId}
+        location={savedLocation}
+        onCloseLocation={() => setSavedLocation(null)}
+      />
     </div>
   );
 }

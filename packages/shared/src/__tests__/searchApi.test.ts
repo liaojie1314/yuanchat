@@ -31,6 +31,12 @@ function spyUrl() {
 }
 
 describe("searchMessages 查询串", () => {
+  it("发送查询前去除首尾空白，保留双字中文", async () => {
+    const seen = spyUrl();
+    await searchMessages({ q: " \u3000托盘\t" });
+    const url = seen.find((u) => u.includes("/messages/search"));
+    expect(new URL(url!).searchParams.get("q")).toBe("托盘");
+  });
   it("types 以逗号分隔写进 URL", async () => {
     const seen = spyUrl();
     await searchMessages({ q: "报告", types: ["file", "image"] });
@@ -61,6 +67,12 @@ describe("searchMessages 查询串", () => {
 });
 
 describe("MSW /messages/search 四态", () => {
+  it.each(["托", "托盘", "A", "AI", "🙂", "%", "_"])("非空查询 %s 可搜索", async (q) => {
+    expect((await searchMessages({ q })).results.length).toBeGreaterThan(0);
+  });
+  it.each(["", " ", "\u3000\t"])("空白查询 %s 与真实服务一样拒绝", async (q) => {
+    await expect(searchMessages({ q })).rejects.toMatchObject({ code: 400 });
+  });
   it("正常：返回结果并带上 message_type / file_name / object_key", async () => {
     const res = await searchMessages({ q: "报告" });
     expect(res.results.length).toBeGreaterThan(0);

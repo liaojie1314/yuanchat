@@ -12,6 +12,7 @@ import { chatSocket } from "../ws/chatSocket";
 import * as filesApi from "../api/files";
 import i18n from "@yuanchat/design-system/i18n";
 import { useToastStore } from "../store/toastStore";
+import { setFileSink, __resetFileSink } from "../download/fileSink";
 
 const CONV = "conv-1";
 
@@ -517,6 +518,71 @@ describe("messageStore.sendFile (real mode)", () => {
     expect(after.file?.key).toBe("files/2026/07/k.pdf");
     expect(revokeSpy).toHaveBeenCalledWith("blob:file-1");
   });
+});
+
+describe("附件发送先落盘后发帧", () => {
+  afterEach(() => {
+    __resetFileSink();
+    vi.unstubAllGlobals();
+  });
+
+  it.each(["file", "image", "voice"] as const)(
+    "%s 副本写完前不能发帧，ack 后没有孤儿文件",
+    async (kind) => {
+      vi.stubGlobal("URL", { createObjectURL: () => "blob:staged", revokeObjectURL: vi.fn() });
+      vi.spyOn(filesApi, "getUploadUrl").mockResolvedValue({
+        uploadUrl: "https://put",
+        objectKey: "files/staged",
+      });
+      vi.spyOn(filesApi, "uploadToTicket").mockResolvedValue(undefined);
+      const blob = new Blob([new Uint8Array([1, 2])], { type: "image/jpeg" });
+      vi.spyOn(filesApi, "compressImage").mockResolvedValue({ blob, width: 1, height: 1 });
+      const disk = new Map<string, Uint8Array>();
+      let finish!: () => void;
+      let entered!: () => void;
+      const writing = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      setFileSink({
+        save: async (bytes, name) => {
+          entered();
+          await new Promise<void>((resolve) => {
+            finish = resolve;
+          });
+          disk.set(name, bytes);
+          return name;
+        },
+        read: async (name) => disk.get(name)!,
+        remove: async (name) => {
+          disk.delete(name);
+        },
+      });
+      const store = useMessageStore.getState();
+      const file = new File([blob], "a.jpg", { type: "image/jpeg" });
+      const pending =
+        kind === "file"
+          ? store.sendFile(CONV, file)
+          : kind === "image"
+            ? store.sendImage(CONV, file)
+            : store.sendVoice(CONV, blob, 1);
+      await writing;
+      // 旧实现会在写盘仍挂起时完成上传、发帧，服务端 ack 因而可能先删后写。
+      await Promise.resolve();
+      await Promise.resolve();
+      try {
+        expect(chatSocket.send).not.toHaveBeenCalled();
+      } finally {
+        finish();
+        await pending;
+      }
+      const id = useMessageStore.getState().messagesByConv[CONV][0].clientMsgId!;
+      useMessageStore.getState().applyAck(id, "server-staged", CONV, 1, Date.now());
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(disk.size).toBe(0);
+      expect(useMessageStore.getState().messagesByConv[CONV][0].status).toBe("sent");
+    },
+  );
 });
 
 describe("messageStore.sendVideo (real mode)", () => {

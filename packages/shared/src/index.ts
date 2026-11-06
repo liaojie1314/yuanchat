@@ -48,17 +48,22 @@ export {
   __resetFileSink,
   uniqueFileName,
   type FileSink,
+  type DownloadDirectory,
   type SinkDir,
 } from "./download/fileSink";
 export {
   useDownloadStore,
   startDownload,
+  revealDownload,
+  refreshDownloads,
   startDownloadFromUrl,
   cancelDownload,
   clearDownload,
   type DownloadEntry,
   type DownloadPhase,
 } from "./download/downloadStore";
+export * from "./store/shortcutStore";
+export * from "./download/browserDirectory";
 export { applyConversationSetting } from "./conversationSettings";
 export {
   setRefreshHandler,

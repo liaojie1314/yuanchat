@@ -13,6 +13,18 @@ import { it, expect, vi, beforeEach } from "vitest";
 
 const setBadgeCount = vi.fn();
 const setOverlayIcon = vi.fn();
+const overlayImage = { rid: 42, close: vi.fn().mockResolvedValue(undefined) };
+vi.mock("@tauri-apps/api/path", () => ({
+  resolveResource: async () => "/bundled/icons/badge-dot-32.png",
+}));
+vi.mock("@tauri-apps/api/image", () => ({
+  Image: {
+    fromPath: async (path: string) => {
+      if (path !== "/bundled/icons/badge-dot-32.png") throw new Error("wrong resource path");
+      return overlayImage;
+    },
+  },
+}));
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     setBadgeCount,
@@ -50,7 +62,7 @@ it("Windows 上走 setOverlayIcon 而不是 setBadgeCount（平台不支持后�
   vi.resetModules();
   const { applyBadge } = await import("../tray");
   await applyBadge(4);
-  expect(setOverlayIcon).toHaveBeenCalled();
+  expect(setOverlayIcon).toHaveBeenCalledWith(overlayImage);
   expect(setBadgeCount).not.toHaveBeenCalled();
 });
 
@@ -60,6 +72,33 @@ it("Windows 上未读为 0 时清 overlay（传 undefined）", async () => {
   const { applyBadge } = await import("../tray");
   await applyBadge(0);
   expect(setOverlayIcon).toHaveBeenCalledWith(undefined);
+});
+
+it("未读清零后，迟到的红点资源不能重新覆盖已清除的 overlay", async () => {
+  let finish!: (image: typeof overlayImage) => void;
+  let entered!: () => void;
+  const loading = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  vi.doMock("@tauri-apps/plugin-os", () => ({ platform: () => "windows" }));
+  vi.doMock("@tauri-apps/api/image", () => ({
+    Image: {
+      fromPath: async () => {
+        entered();
+        return new Promise<typeof overlayImage>((resolve) => {
+          finish = resolve;
+        });
+      },
+    },
+  }));
+  vi.resetModules();
+  const { applyBadge } = await import("../tray");
+  const pending = applyBadge(4);
+  await loading;
+  await applyBadge(0);
+  finish(overlayImage);
+  await pending;
+  expect(setOverlayIcon.mock.calls[setOverlayIcon.mock.calls.length - 1]).toEqual([undefined]);
 });
 
 // StrictMode 双跑 effect 时创建/卸载挤在一起：若各实例共用一个托盘 id，
@@ -111,4 +150,67 @@ it("并发 installTray 各得唯一 id，卸载只关自己的", async () => {
   d2();
   await new Promise((r) => setTimeout(r, 0));
   expect(closed.sort()).toEqual([...created].sort());
+});
+
+it.each(["image", "menu"])("未读清零后迟到的 %s 不能把托盘文案写回旧数值", async (delay) => {
+  let finish!: () => void;
+  const setTooltip = vi.fn().mockResolvedValue(undefined);
+  const setText = vi.fn().mockResolvedValue(undefined);
+  const item = { setText };
+  const get = vi.fn().mockResolvedValue(item);
+  const fromPath = vi.fn().mockResolvedValue(overlayImage);
+  vi.doMock("@tauri-apps/plugin-os", () => ({ platform: () => "windows" }));
+  vi.doMock("@tauri-apps/api/image", () => ({ Image: { fromPath } }));
+  vi.doMock("@tauri-apps/api/tray", () => ({
+    TrayIcon: { new: async () => ({ setTooltip, close: async () => {} }) },
+  }));
+  vi.doMock("@tauri-apps/api/menu", () => ({ Menu: { new: async () => ({ get }) } }));
+  vi.doMock("@tauri-apps/api/app", () => ({ defaultWindowIcon: async () => null }));
+  vi.doMock("@tauri-apps/plugin-process", () => ({ exit: vi.fn() }));
+  vi.resetModules();
+  const { installTray } = await import("../tray");
+  const { useConversationStore } = await import("@yuanchat/shared");
+  const { default: i18n } = await import("i18next");
+  useConversationStore.setState({ conversations: [] });
+  const dispose = await installTray({ onOpenConversation: () => {} });
+  try {
+    await vi.waitFor(() => expect(setText).toHaveBeenCalledTimes(1));
+    if (delay === "image") {
+      fromPath.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = () => resolve(overlayImage);
+          }),
+      );
+    } else {
+      get.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = () => resolve(item);
+          }),
+      );
+    }
+    useConversationStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          name: "未读会话",
+          type: "private",
+          unreadCount: 4,
+          isMuted: false,
+        },
+      ],
+    });
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    useConversationStore.setState({ conversations: [] });
+    await vi.waitFor(() => expect(setText).toHaveBeenCalledTimes(2));
+    finish();
+    // 放行的原生 Promise 链需先收尾，才能检查最终留下的 tooltip/menu 文案。
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(setOverlayIcon).toHaveBeenLastCalledWith(undefined);
+    expect(setTooltip).toHaveBeenLastCalledWith(i18n.t("tray.tooltip"));
+    expect(setText).toHaveBeenLastCalledWith(i18n.t("tray.noUnread"));
+  } finally {
+    dispose();
+  }
 });

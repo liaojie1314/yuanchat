@@ -119,6 +119,9 @@ pub fn run() {
         open_external,
         local_file::open_local_file,
         local_file::install_apk,
+        local_file::get_download_directory,
+        local_file::choose_download_directory,
+        local_file::reset_download_directory,
         native_rtc::native_rtc_available,
         native_rtc::native_rtc_video_available,
         native_rtc::native_rtc_video_url,
@@ -137,7 +140,10 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         open_external,
         local_file::open_local_file,
-        local_file::install_apk
+        local_file::install_apk,
+        local_file::get_download_directory,
+        local_file::choose_download_directory,
+        local_file::reset_download_directory
     ]);
 
     builder

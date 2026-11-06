@@ -13,10 +13,16 @@
  * 权限说明（permissionNote）刻意常驻可见：系统安装器首次会要求
  * 「允许安装未知应用」，不提前讲清，用户会以为应用在越权做什么。
  */
-import { useState } from "react";
-import { CheckCircle2, Download, RefreshCw, ShieldAlert } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { Download, RefreshCw, ShieldAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { OTA_SHA256_MISMATCH, useDownloadStore, type AndroidUpdate } from "@yuanchat/shared";
+import {
+  captureException,
+  OTA_SHA256_MISMATCH,
+  useDownloadStore,
+  type AndroidUpdate,
+} from "@yuanchat/shared";
 import { FileProgressBar } from "../chat/FileProgressBar";
 
 /** 卡片状态机：检查 → 可更新 → 下载 → 校验/安装（或各种失败回落） */
@@ -39,8 +45,11 @@ interface Props {
   install: (update: AndroidUpdate) => Promise<void>;
 }
 
+/** 应用内更新卡；系统安装器返回仅代表已唤起，不能当作安装完成。 */
 export function AndroidUpdateCard({ currentVersion, check, install }: Props) {
   const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const busyRef = useRef(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [update, setUpdate] = useState<AndroidUpdate | null>(null);
   const [error, setError] = useState("");
@@ -51,7 +60,9 @@ export function AndroidUpdateCard({ currentVersion, check, install }: Props) {
   // saving 是字节收齐后落盘/校验的窗口期，此时文案换成「正在校验」
   const verifying = entry?.phase === "saving";
 
-  const handleCheck = async () => {
+  const handleCheck = useCallback(async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setPhase("checking");
     setError("");
     try {
@@ -63,17 +74,31 @@ export function AndroidUpdateCard({ currentVersion, check, install }: Props) {
         setPhase("upToDate");
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      captureException(e, { context: "androidUpdate" });
+      setError(t("update.failed"));
       setPhase("error");
+    } finally {
+      busyRef.current = false;
     }
-  };
+  }, [check, currentVersion, t]);
+
+  useEffect(() => {
+    if (searchParams.get("checkUpdate") !== "1") return;
+    // 与桌面入口共用一次性深链；消费后重渲染不重查，同步闩锁挡住 StrictMode 重入。
+    const next = new URLSearchParams(searchParams);
+    next.delete("checkUpdate");
+    setSearchParams(next, { replace: true });
+    void handleCheck();
+  }, [searchParams, setSearchParams, handleCheck]);
 
   const handleInstall = async () => {
-    if (!update) return;
+    if (!update || busyRef.current) return;
+    busyRef.current = true;
     setPhase("downloading");
     setError("");
     try {
       await install(update);
+      // 唤起安装器不代表安装完成；保留重试按钮，用户取消后可再次安装。
       setPhase("installing");
     } catch (e) {
       if (e instanceof Error && e.message === OTA_SHA256_MISMATCH) {
@@ -81,8 +106,11 @@ export function AndroidUpdateCard({ currentVersion, check, install }: Props) {
         setPhase("verifyFailed");
         return;
       }
-      setError(e instanceof Error ? e.message : String(e));
+      captureException(e, { context: "androidUpdate" });
+      setError(t("update.failed"));
       setPhase("error");
+    } finally {
+      busyRef.current = false;
     }
   };
 
@@ -92,7 +120,7 @@ export function AndroidUpdateCard({ currentVersion, check, install }: Props) {
     setPhase("idle");
   };
 
-  const busy = phase === "checking" || phase === "downloading" || phase === "installing";
+  const busy = phase === "checking" || phase === "downloading";
 
   return (
     <div className="border-outline-variant bg-surface-container-low mb-6 rounded-lg border p-4">
@@ -100,12 +128,7 @@ export function AndroidUpdateCard({ currentVersion, check, install }: Props) {
       <div className="flex items-center justify-between gap-3">
         <p className="text-body-md text-on-surface font-medium">{t("ota.android.title")}</p>
 
-        {phase === "installing" ? (
-          <span className="text-label-lg text-primary inline-flex shrink-0 items-center gap-1.5">
-            <CheckCircle2 size={16} />
-            {t("ota.android.installing")}
-          </span>
-        ) : phase === "available" ? (
+        {phase === "available" || phase === "installing" ? (
           <button
             onClick={() => void handleInstall()}
             className="bg-primary text-primary-on text-label-lg inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 font-medium"
@@ -132,6 +155,7 @@ export function AndroidUpdateCard({ currentVersion, check, install }: Props) {
         {phase === "upToDate" && t("ota.android.upToDate")}
         {phase === "error" && (error || t("update.failed"))}
         {phase === "available" && update && `v${update.version}`}
+        {phase === "installing" && t("ota.android.installing")}
         {phase === "verifyFailed" && (
           <span className="text-error inline-flex items-center gap-1">
             <ShieldAlert size={14} />
@@ -141,7 +165,7 @@ export function AndroidUpdateCard({ currentVersion, check, install }: Props) {
       </p>
 
       {/* 更新说明：服务端下发的 notes 是内容不是界面文案，直接展示不进 i18n */}
-      {phase === "available" && update && (
+      {(phase === "available" || phase === "installing") && update && (
         <div className="mt-3">
           {update.notes.trim() !== "" && (
             <>

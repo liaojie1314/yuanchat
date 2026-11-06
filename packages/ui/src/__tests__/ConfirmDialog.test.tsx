@@ -28,6 +28,29 @@ const cancelBtn = () => screen.getByRole("button", { name: "Cancel" });
 const confirmBtn = () => screen.getByRole("button", { name: "Confirm" });
 
 describe("ConfirmDialog", () => {
+  it("informational dialogs show one close button and keep keyboard focus inside", () => {
+    const close = vi.fn();
+    render(
+      <ConfirmDialog
+        open
+        title="Saved location"
+        message="Downloads / a.pdf"
+        confirmLabel="Close"
+        hideCancel
+        onConfirm={close}
+        onCancel={close}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "Close" });
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(document.activeElement).toBe(button);
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(button);
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(button);
+    fireEvent.click(button);
+    expect(close).toHaveBeenCalledOnce();
+  });
   it("exposes dialog semantics labelled by its title", () => {
     setup();
     const dialog = screen.getByRole("dialog");

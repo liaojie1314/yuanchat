@@ -64,6 +64,7 @@ import {
   showToast,
   splitFileName,
   startDownload,
+  revealDownload,
   useDownloadStore,
 } from "@yuanchat/shared";
 import type { ChatMessage } from "@yuanchat/shared";
@@ -174,6 +175,7 @@ export function MessageBubble({
   const downloadEntries = useDownloadStore((s) => s.entries);
   // 气泡内联操作菜单（右键 / 长按弹出，点外部关闭）
   const [menuOpen, setMenuOpen] = useState(false);
+  const [savedLocation, setSavedLocation] = useState<string | null>(null);
   // 撤回项是否在 2 分钟窗口内——在打开菜单的事件里用 Date.now() 求值并存下，
   // 避免在 render 里调用 Date.now()（不纯，react-hooks/purity 禁止）
   const [recallInWindow, setRecallInWindow] = useState(false);
@@ -557,7 +559,7 @@ export function MessageBubble({
                 </div>
                 {(() => {
                   // 下载按钮按阶段分流：downloading/saving → 取消；failed → 重试；
-                  // done 且拿得到落盘路径 → 打开（web 实现没有 reveal，也不会进这个态）；
+                  // done 且拿得到保存结果 → 打开或查看保存位置；
                   // 其余（未开始 / done 但拿不到路径）→ 下载
                   const entry = downloadEntries[msg.id];
                   const phase = entry?.phase;
@@ -571,11 +573,20 @@ export function MessageBubble({
                       return;
                     }
                     if (phase === "done" && entry?.savedPath) {
-                      const reveal = getFileSink().reveal;
-                      // web 实现没有 reveal：浏览器自己的下载目录不由我们管
-                      if (reveal)
-                        void reveal(entry.savedPath).catch(() =>
-                          showToast("error", t("chat.file.openFailed")),
+                      void revealDownload(msg.id, key, name)
+                        .then((path) => {
+                          if (path) setSavedLocation(path);
+                        })
+                        .catch((error: unknown) =>
+                          showToast(
+                            "error",
+                            t(
+                              error instanceof Error &&
+                                error.message === "download.directoryPermissionRequired"
+                                ? "download.directoryPermissionRequired"
+                                : "chat.file.openFailed",
+                            ),
+                          ),
                         );
                       return;
                     }
@@ -604,7 +615,11 @@ export function MessageBubble({
                           : phase === "failed"
                             ? "common.retry"
                             : phase === "done" && entry?.savedPath
-                              ? "chat.file.open"
+                              ? getFileSink().revealTarget === "location"
+                                ? "chat.file.viewLocation"
+                                : getFileSink().revealTarget === "folder"
+                                  ? "chat.file.openFolder"
+                                  : "chat.file.open"
                               : "file.download",
                       )}
                       onClick={onClick}
@@ -818,7 +833,13 @@ export function MessageBubble({
         {/* 下载进度条：挂在气泡行之后（与气泡行同级），不放气泡内 ——
             进度条有最小宽度诉求，放里面会向上贡献 min-content，
             再踩一次「气泡顶穿父列」那个坑（见上方 w-full 的长注释） */}
-        {msg.kind === "file" && <FileProgressBar messageId={msg.id} />}
+        {msg.kind === "file" && (
+          <FileProgressBar
+            messageId={msg.id}
+            location={savedLocation}
+            onCloseLocation={() => setSavedLocation(null)}
+          />
+        )}
 
         {/* 表情回应：点击气泡 toggle 自己的参与态 */}
         {msg.reactions && msg.reactions.length > 0 && (

@@ -23,7 +23,7 @@
  * @example
  * <MainLayout />
  */
-import { Link, useLocation, Outlet } from "react-router-dom";
+import { Link, useLocation, useNavigate, Outlet } from "react-router-dom";
 import { Sun, Moon, LogOut, Download } from "lucide-react";
 import {
   useThemeStore,
@@ -35,6 +35,8 @@ import {
   useMomentsStore,
   useBreakpoint,
   useIsDesktop,
+  useShortcutStore,
+  matchesSearchShortcut,
 } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { useTranslation } from "react-i18next";
@@ -42,7 +44,7 @@ import { type ReactNode, useState, useEffect } from "react";
 import { Avatar } from "../primitives/Avatar";
 import { CallHost } from "../call/CallHost";
 import { CommandPalette } from "../palette/CommandPalette";
-import { launchSearchWindow } from "../palette/searchWindowActions";
+import { launchSearchWindow, SEARCH_OPEN_EVENT } from "../palette/searchWindowActions";
 import { DownloadPanel } from "../download/DownloadPanel";
 import { ToastHost } from "../primitives/Toast";
 import { NetworkBanner } from "./NetworkBanner";
@@ -68,6 +70,7 @@ export function MainLayout({
   callMode?: "overlay" | "window";
 }) {
   const location = useLocation();
+  const navigate = useNavigate();
   // 新 API: mode("light"/"dark"), toggleMode()
   const { mode, toggleMode } = useThemeStore();
   const isDark = mode === "dark";
@@ -75,24 +78,48 @@ export function MainLayout({
   const { t } = useTranslation();
   const bp = useBreakpoint();
   const [showSearch, setShowSearch] = useState(false);
+  const [searchConversationId, setSearchConversationId] = useState<string>();
   // 仅 web 构建显示下载入口 —— 桌面 app 与安卓 app 里已经装好了，再给是噪音
   const isDesktopApp = useIsDesktop();
   const [showDownload, setShowDownload] = useState(false);
+  const searchShortcut = useShortcutStore((state) => state.searchShortcut);
 
   useEffect(() => {
+    /** 会话内搜索优先交原生宿主；手机走路由，其余搜索留在本布局内弹窗。 */
+    const open = (conversationId?: string) => {
+      if (launchSearchWindow(conversationId)) return;
+      if (bp === "mobile") {
+        const search = conversationId
+          ? `?conversation_id=${encodeURIComponent(conversationId)}`
+          : "";
+        const alreadySearching = location.pathname === "/search";
+        navigate(`/search${search}`, {
+          replace: alreadySearching,
+          state: alreadySearching
+            ? location.state
+            : { searchReturnTo: location.pathname + location.search },
+        });
+        return;
+      }
+      setSearchConversationId(conversationId);
+      setShowSearch(true);
+    };
+    const requested = (event: Event) => open((event as CustomEvent<string | undefined>).detail);
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+      if (e.defaultPrevented) return;
+      if (matchesSearchShortcut(e, searchShortcut)) {
         e.preventDefault();
-        // 桌面 app 宿主注入了搜索窗口承载器 → 开/聚焦独立原生窗口，面板不出；
-        // web / 移动端没有宿主注入（返回 false），保持浮层面板形态
-        if (launchSearchWindow()) return;
-        setShowSearch((v) => !v);
+        open();
       }
       if (e.key === "Escape") setShowSearch(false);
     };
     window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
+    window.addEventListener(SEARCH_OPEN_EVENT, requested);
+    return () => {
+      window.removeEventListener("keydown", handler);
+      window.removeEventListener(SEARCH_OPEN_EVENT, requested);
+    };
+  }, [searchShortcut, bp, navigate, location]);
 
   // 数据源接线：WS 连接挂在布局层，切页（聊天↔通讯录↔设置）不断连，
   // presence/消息帧全程可达；登出（布局卸载）时断开
@@ -121,7 +148,9 @@ export function MainLayout({
 
   // 手机端：聊天视图打开时隐藏底部导航，让消息流占满全屏
   const isMobile = bp === "mobile";
-  const hideMobileNav = isMobile && location.pathname.startsWith("/chat") && !!activeConvId;
+  const hideMobileNav =
+    isMobile &&
+    (location.pathname === "/search" || (location.pathname.startsWith("/chat") && !!activeConvId));
 
   /**
    * 桌面侧栏的一个导航项。
@@ -159,7 +188,6 @@ export function MainLayout({
         <ToastHost />
         <NetworkBanner />
         {callMode === "overlay" ? <CallHost /> : null}
-        <CommandPalette show={showSearch} onClose={() => setShowSearch(false)} />
         {titleBar}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <Outlet />
@@ -217,7 +245,11 @@ export function MainLayout({
       <ToastHost />
       <NetworkBanner />
       {callMode === "overlay" ? <CallHost /> : null}
-      <CommandPalette show={showSearch} onClose={() => setShowSearch(false)} />
+      <CommandPalette
+        show={showSearch}
+        conversationId={searchConversationId}
+        onClose={() => setShowSearch(false)}
+      />
       {showDownload && <DownloadPanel onClose={() => setShowDownload(false)} />}
       {/* 左侧品牌色导航栏 — 渐变背景 */}
       <nav className="nav-gradient shadow-elevation-2 z-20 flex w-16 shrink-0 flex-col items-center gap-1 py-3 text-white">

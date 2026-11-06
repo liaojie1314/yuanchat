@@ -7,7 +7,7 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
-import { MainLayout, AppErrorBoundary, CloseBehaviorDialog } from "@yuanchat/ui";
+import { MainLayout, AppErrorBoundary, CloseBehaviorDialog, SearchPage } from "@yuanchat/ui";
 import {
   setNotifier,
   setUrlOpener,
@@ -16,18 +16,19 @@ import {
   useDesktopStore,
   useIsDesktop,
   useKeyboardAwareViewport,
-  useMessageStore,
 } from "@yuanchat/shared";
 import { TitleBar } from "./components/TitleBar";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { useCallWindow } from "./hooks/useCallWindow";
 import {
   SEARCH_NAVIGATE_EVENT,
+  applySearchNavigation,
   useSearchWindow,
   type SearchNavigatePayload,
 } from "./hooks/useSearchWindow";
 import { EXIT_CONFIRM_MS, useAndroidBack } from "./hooks/useAndroidBack";
 import { ExitHint } from "./components/ExitHint";
+import { windowSizing } from "./window/windowSizing";
 
 const ChatPage = lazy(() => import("./pages/ChatPage").then((m) => ({ default: m.ChatPage })));
 const ContactsPage = lazy(() =>
@@ -108,6 +109,7 @@ void (async () => {
   }
 })();
 
+/** 桌面/移动端应用外壳，统一管理主窗口尺寸、托盘和跨窗口导航。 */
 function App() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   // 安卓系统返回键交由前端决定语义，见 useAndroidBack 的说明
@@ -169,23 +171,29 @@ function App() {
   useEffect(() => {
     // 独立窗口（通话/搜索）不吃这套尺寸复位：label 检查在下面已兜底，
     // 这里显式挡掉是表明意图 —— 它们的尺寸归各自的宿主逻辑管
-    if (isStandaloneWindow) return;
+    if (isStandaloneWindow || isMobile || !isDesktop) return;
+    let cancelled = false;
     const resize = async () => {
       try {
-        const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
+        const { getCurrentWindow, LogicalSize, currentMonitor } =
+          await import("@tauri-apps/api/window");
+        const { platform } = await import("@tauri-apps/plugin-os");
         const win = getCurrentWindow();
-        // 注册/忘记密码等子窗口跑的是同一个 SPA，此逻辑只归主窗口管，
-        // 否则未登录分支会把子窗口压回 540×600（覆盖 openAuthWindow 指定的尺寸）
         if (win.label !== "main") return;
+        const family = platform();
+        if (family === "android" || family === "ios") return;
+        const monitor = family === "windows" ? await currentMonitor().catch(() => null) : null;
+        const sizes = windowSizing(family, monitor);
+        // 登录态在异步加载平台信息期间可能改变，旧请求不能再复位主窗口。
+        if (cancelled) return;
+        await win.setMinSize(undefined);
         if (isAuthenticated) {
-          await win.setSize(new LogicalSize(1200, 800));
+          await win.setSize(new LogicalSize(sizes.main.width, sizes.main.height));
           await win.setResizable(true);
-          await win.setMinSize(new LogicalSize(900, 600));
+          await win.setMinSize(new LogicalSize(sizes.minimum.width, sizes.minimum.height));
         } else {
-          // 先清最小尺寸并退出最大化，否则 900×600 的 minSize 会卡住缩不回登录窗
           await win.unmaximize();
-          await win.setMinSize(undefined);
-          await win.setSize(new LogicalSize(540, 640));
+          await win.setSize(new LogicalSize(sizes.login.width, sizes.login.height));
           await win.setResizable(false);
         }
         await win.center();
@@ -194,7 +202,10 @@ function App() {
       }
     };
     void resize();
-  }, [isAuthenticated, isStandaloneWindow]);
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, isStandaloneWindow, isDesktop, isMobile]);
 
   // navigate 的函数身份随导航变化；进 effect 依赖会让每次切路由都卸装一次托盘
   // （顶栏短暂出现第二个图标）。走 ref 取最新值，effect 只认装/不装的条件。
@@ -222,14 +233,7 @@ function App() {
         if (cancelled || getCurrentWindow().label !== "main") return;
         const { listen } = await import("@tauri-apps/api/event");
         const unlisten = await listen<SearchNavigatePayload>(SEARCH_NAVIGATE_EVENT, (e) => {
-          const { path, conversationId, seek } = e.payload;
-          if (conversationId) useConversationStore.getState().setActive(conversationId);
-          if (seek) {
-            void useMessageStore
-              .getState()
-              .seekToMessage(seek.conversationId, seek.messageId, seek.seq);
-          }
-          navigateRef.current(path);
+          applySearchNavigation(e.payload, navigateRef.current);
           // 搜索窗口关了自己之后焦点不一定自动回落（视窗口管理器而定），显式带回主窗口
           void getCurrentWindow()
             .setFocus()
@@ -330,6 +334,7 @@ function App() {
               />
             }
           >
+            <Route path="/search" element={<SearchPage />} />
             <Route path="/chat" element={<ChatPage />} />
             <Route path="/chat/:conversationId" element={<ChatPage />} />
             <Route path="/contacts" element={<ContactsPage />} />

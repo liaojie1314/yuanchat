@@ -65,7 +65,7 @@ import { E2EEIndicator } from "../e2ee/E2EEIndicator";
 import { SafetyNumberDialog } from "../e2ee/SafetyNumberDialog";
 import { ImageLightbox } from "./ImageLightbox";
 import { ConversationMediaView } from "./ConversationMediaView";
-import { InConversationSearch } from "./InConversationSearch";
+import { requestSearch } from "../palette/searchWindowActions";
 import { MessageBubble, TypingIndicator } from "./MessageBubble";
 import { MessageEditHistoryDialog } from "./MessageEditHistoryDialog";
 
@@ -108,8 +108,6 @@ export function ChatWindow({
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   // 转发弹窗当前源消息 ID（null 表示关闭）
   const [forwardMsgId, setForwardMsgId] = useState<string | null>(null);
-  // 会话内搜索面板开关
-  const [showSearch, setShowSearch] = useState(false);
   // 安全指纹校验弹窗开关（E2EE，仅单聊）
   const [showSafetyNumber, setShowSafetyNumber] = useState(false);
   // 群公告全文弹层开关
@@ -463,7 +461,7 @@ export function ChatWindow({
           <Video size={19} />
         </button>
         <button
-          onClick={() => setShowSearch((v) => !v)}
+          onClick={() => requestSearch(conv.id)}
           className="md3-icon-btn text-on-surface-variant hidden sm:grid"
           title={t("chat.searchHistory")}
           aria-label={t("chat.searchHistory")}
@@ -490,11 +488,6 @@ export function ChatWindow({
           </button>
         )}
       </header>
-
-      {/* 会话内搜索面板 */}
-      {showSearch && activeId && (
-        <InConversationSearch conversationId={activeId} onClose={() => setShowSearch(false)} />
-      )}
 
       {/* 通话中横幅：本端不是这一路的参与者（群里其他成员）时显示「加入」。
           横幅由 call.state 帧驱动，通话终结时随 banner 置空自动消失 */}
@@ -731,6 +724,7 @@ export function ChatWindow({
         onSend={handleSend}
         compact={compactComposer}
         onOpenMedia={() => setShowMedia(true)}
+        onOpenSearch={() => requestSearch(conv.id)}
         onOpenCall={openCall}
         editingMessageId={editingId}
         onCancelEdit={exitEditing}

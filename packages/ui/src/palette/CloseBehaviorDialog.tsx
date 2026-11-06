@@ -118,7 +118,7 @@ export function CloseBehaviorDialog({
             ref={trayRef}
             type="button"
             className={cn(
-              "text-label-lg text-on-primary-container bg-primary-container hover:bg-primary-container/80 border-primary/50 focus-visible:ring-primary flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 font-medium transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent focus-visible:outline-none",
+              "text-label-lg text-primary-on-container bg-primary-container hover:bg-primary-container/80 border-primary/50 focus-visible:ring-primary flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 font-medium transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent focus-visible:outline-none",
             )}
             onClick={() => onPick("tray", remember)}
           >

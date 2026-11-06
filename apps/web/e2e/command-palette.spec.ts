@@ -11,8 +11,8 @@
  * 打开面板改用 evaluate 派发合成 KeyboardEvent，直接触发 MainLayout 里
  * window.addEventListener("keydown") 的回调，等价于用户真实按键的组件层效果。
  *
- * 查询词用「季度报告」：面板与后端同口径，≥3 个字符才打服务端
- * （GIN 索引下限）；MSW 的 mockSearchResults 对任意非关键词返回
+ * 查询词用「季度报告」：任意非空词都会请求服务端；
+ * MSW 的 mockSearchResults 对任意非关键词返回
  * text/file/image 三类结果，足以验证分组与筛选。
  */
 
@@ -39,7 +39,12 @@ async function dispatchKey(
 async function openPalette(page: Page): Promise<void> {
   await expect(async () => {
     await dispatchKey(page, { key: "k", ctrlKey: true });
-    await expect(page.getByRole("dialog")).toBeVisible({ timeout: 500 });
+    if ((page.viewportSize()?.width ?? 1280) < 768) {
+      await expect(page).toHaveURL(/\/search(?:\?|$)/, { timeout: 500 });
+      await expect(page.getByRole("combobox")).toBeVisible({ timeout: 500 });
+    } else {
+      await expect(page.getByRole("dialog")).toBeVisible({ timeout: 500 });
+    }
   }).toPass({ timeout: 5000 });
 }
 
@@ -83,7 +88,47 @@ test.describe("命令面板", () => {
     await expect(page.getByRole("combobox")).toHaveCount(0);
   });
 
-  test("桌面视口下面板明显宽于手机视口（K18 的「窄弹窗」抱怨）", async ({ page }) => {
+  test("Web 会话内搜索是 dialog，真实请求带当前会话范围", async ({ page }) => {
+    await page.getByRole("button", { name: /产品研发群/ }).click();
+    await page.getByRole("button", { name: "搜索聊天记录" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page.getByRole("option")).toHaveCount(0);
+    const request = page.waitForRequest((r) => r.url().includes("/messages/search?"));
+    await page.getByRole("combobox").fill("季度报告");
+    const qs = new URL((await request).url()).searchParams;
+    expect(qs.get("conversation_id")).toBeTruthy();
+    await page.keyboard.press("Escape");
+    await openPalette(page);
+    await expect(page.getByRole("option").first()).toBeVisible();
+  });
+
+  test("手机全局搜索走独立路由，返回和结果导航不互相覆盖", async ({ page }) => {
+    await page.setViewportSize({ width: 412, height: 915 });
+    await page.getByRole("button", { name: "搜索", exact: true }).click();
+    await expect(page).toHaveURL(/\/search$/);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.getByRole("button", { name: "返回", exact: true }).click();
+    await expect(page).toHaveURL(/\/chat$/);
+    await openPalette(page);
+    await page.getByRole("combobox").fill("季度报告");
+    await page.getByRole("option", { name: /季度报告写完了/ }).click();
+    await expect(page).toHaveURL(/\/chat\/conv_001$/);
+    await expect(page.getByRole("combobox")).toHaveCount(0);
+  });
+
+  test("手机会话内搜索从更多打开带 scope 的路由", async ({ page }) => {
+    await page.setViewportSize({ width: 412, height: 915 });
+    await page.getByRole("button", { name: /产品研发群/ }).click();
+    await page.getByRole("button", { name: "更多", exact: true }).click();
+    await page.getByRole("button", { name: "搜索聊天记录", exact: true }).click();
+    await expect(page).toHaveURL(/\/search\?conversation_id=.+/);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("option")).toHaveCount(0);
+    await page.getByRole("button", { name: "返回", exact: true }).click();
+    await expect(page).toHaveURL(/\/chat$/);
+  });
+
+  test("桌面视口下面板明显宽于手机搜索页", async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 1080 });
     await openPalette(page);
     const listbox = page.getByRole("listbox");

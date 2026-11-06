@@ -26,6 +26,8 @@
  * 唯一 id 让每次 close 只关自己，天然免竞争，也不需要串行链。
  */
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { resolveResource } from "@tauri-apps/api/path";
+import { Image } from "@tauri-apps/api/image";
 import { platform } from "@tauri-apps/plugin-os";
 import { TrayIcon, type TrayIconEvent } from "@tauri-apps/api/tray";
 import { Menu } from "@tauri-apps/api/menu";
@@ -34,11 +36,13 @@ import { exit } from "@tauri-apps/plugin-process";
 import i18next from "i18next";
 import { useConversationStore, selectTotalUnread, selectFirstUnreadId } from "@yuanchat/shared";
 
-/** Windows 任务栏叠加图标：静态红点（bundle.icon 已登记，否则运行时找不到文件） */
+/** Windows 任务栏红点以 bundle.resources 打包，运行时必须先解析资源路径。 */
 const BADGE_DOT_ICON = "icons/badge-dot-32.png";
 
 /** 已装实例的序号，拼进托盘 id 保证唯一 */
 let traySeq = 0;
+/** 作废迟到的图标加载，未读清零后不能重新挂上红点。 */
+let badgeRevision = 0;
 
 /**
  * 把未读数反映到系统角标上。
@@ -47,12 +51,22 @@ let traySeq = 0;
  * LauncherEntry DBus，未装 `.desktop` 时会抛；角标是增强，失败了应用照常用。
  */
 export async function applyBadge(count: number): Promise<void> {
+  const revision = ++badgeRevision;
   const win = getCurrentWindow();
   try {
     if (platform() === "windows") {
       // Windows 不支持 setBadgeCount，只能用任务栏 overlay 图标。
       // 静态红点两态：有未读/无未读，计数在 tooltip 与菜单里
-      await win.setOverlayIcon(count > 0 ? BADGE_DOT_ICON : undefined);
+      if (count <= 0) {
+        await win.setOverlayIcon(undefined);
+        return;
+      }
+      const image = await Image.fromPath(await resolveResource(BADGE_DOT_ICON));
+      try {
+        if (revision === badgeRevision) await win.setOverlayIcon(image);
+      } finally {
+        await image.close();
+      }
       return;
     }
     // 0 要传 undefined 而不是 0 —— Tauri 用 None 表示「移除角标」
@@ -135,10 +149,14 @@ export async function installTray(opts: {
 
   // 未读数同步：角标 + tooltip + 菜单项三处一起更；last 去重避免无谓的系统调用
   let last = -1;
+  let syncRevision = 0;
   const sync = async (count: number) => {
     if (count === last) return;
     last = count;
+    const revision = ++syncRevision;
     await applyBadge(count);
+    // 图标与菜单查询都可能晚于下一次未读变化，只让最新同步继续写文案。
+    if (revision !== syncRevision) return;
     try {
       await tray.setTooltip(
         count > 0
@@ -146,6 +164,7 @@ export async function installTray(opts: {
           : i18next.t("tray.tooltip"),
       );
       const item = await menu.get("tray-unread");
+      if (revision !== syncRevision) return;
       // Menu.get 返回的是基类，带 setText 的是 MenuItem；取不到就跳过
       if (item && "setText" in item)
         await (item as { setText(t: string): Promise<void> }).setText(unreadLabel(count));
@@ -160,6 +179,7 @@ export async function installTray(opts: {
   );
 
   return () => {
+    syncRevision += 1;
     unsub();
     void applyBadge(0);
     // fire-and-forget：id 唯一，即使与下一轮的创建乱序也只关自己

@@ -10,6 +10,7 @@ import { useAuthStore } from "./authStore";
 import { useConversationStore } from "./conversationStore";
 import { reconcileConversation } from "./messageLocalSync";
 import { useMessageStore } from "./messageStore";
+import { restoreDownloads } from "../download/downloadStore";
 
 /**
  * 登录后打开本地库，并把上次没发出去的消息恢复成 `failed` 气泡。
@@ -21,6 +22,7 @@ import { useMessageStore } from "./messageStore";
  */
 export async function startLocalStore(userId: string): Promise<boolean> {
   const ok = await initLocalStore(userId);
+  await restoreDownloads();
   if (!ok) return false;
   const pending = await restoreOutbox();
   if (pending.length === 0) return true;

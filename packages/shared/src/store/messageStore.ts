@@ -565,8 +565,9 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
 
     // 发送前把压缩后的字节落一份到应用私有目录：安卓重启后 blob URL 必然失效，
     // 届时「重试」全靠这份磁盘副本（web 没有磁盘 sink，stageOutboxFile 内部直接跳过）。
-    // 落盘失败不阻塞发送 —— 最坏结果只是重启后这条没法重试，与改动前一致
-    void stageOutboxFile(
+    // 等待落盘结束再上传/发帧，防止 ack 先清理、后台写盘后留下孤儿文件。
+    // 落盘失败仍按既有最佳努力策略发送；Web 无磁盘时直接跳过。
+    await stageOutboxFile(
       clientMsgId,
       new Uint8Array(await blob.arrayBuffer()),
       STAGED_IMAGE_NAME,
@@ -606,8 +607,8 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     }
 
     // 发送前落一份磁盘副本（键带 clientMsgId 前缀，文件名里的路径分隔符已替换），
-    // 重启后 blob 失效时重试从这里读回；失败不阻塞发送
-    void stageOutboxFile(
+    // 重启后 blob 失效时重试从这里读回；必须等写盘结束才允许服务端 ack 清理。
+    await stageOutboxFile(
       clientMsgId,
       new Uint8Array(await file.arrayBuffer()),
       file.name,
@@ -646,7 +647,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     }
 
     // 发送前落一份磁盘副本（语音 ≤60s，体积小）：重启后重试从这里读回
-    void stageOutboxFile(
+    await stageOutboxFile(
       clientMsgId,
       new Uint8Array(await blob.arrayBuffer()),
       STAGED_VOICE_NAME,

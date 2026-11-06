@@ -33,9 +33,8 @@ export interface PaletteContext {
   /**
    * 打开桌面端更新检查。
    *
-   * @remarks 由宿主注入（桌面端 UpdateChecker 持有 updater 插件句柄）；
-   * 未注入时「检查更新」动作执行为空操作 —— 动作的出现只看 isDesktopApp，
-   * 是否能真正干活由宿主决定，避免 ui 包反向依赖 tauri 插件。
+   * @remarks 可由宿主直接注入；未注入则导航到关于页的检查深链，
+   * 由桌面 UpdateChecker 接管，避免 ui 包反向依赖 updater 插件。
    */
   checkUpdate?: () => void;
 }
@@ -76,11 +75,11 @@ export function buildPaletteActions(
   const actions: PaletteAction[] = [
     {
       id: "new-group",
-      labelKey: "chat.group.create",
+      labelKey: "chat.menu.newGroup",
       icon: UserPlus,
       keywords: ["group", "qun", "新建群聊"],
       windowSafe: true,
-      run: (c) => c.navigate("/contacts?new=group"),
+      run: (c) => c.navigate("/chat?new=group"),
     },
     {
       id: "go-chat",
@@ -147,14 +146,17 @@ export function buildPaletteActions(
   ];
 
   // 更新检查只有桌面端有（移动端无 updater 插件，web 端无从谈起）；
-  // 宿主未注入 checkUpdate 时动作仍在（见 PaletteContext.checkUpdate 备注），执行为空操作
+  // 未注入回调时用关于页深链接管检查，不能留下一个空动作。
   if (ctx.isDesktopApp) {
     actions.push({
       id: "check-update",
       labelKey: "update.check",
       icon: RefreshCw,
       keywords: ["update", "upgrade", "version"],
-      run: (c) => c.checkUpdate?.(),
+      run: (c) => {
+        if (c.checkUpdate) c.checkUpdate();
+        else c.navigate("/settings?section=about&checkUpdate=1");
+      },
     });
   }
   // 独立搜索窗口只留导航类：改上下文的动作在错误窗口执行（见 windowSafe 备注）

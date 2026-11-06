@@ -83,4 +83,31 @@ test.describe("Global Command Palette (Cmd/Ctrl+K)", () => {
     // 空输入是命令模式：渲染动作注册表而非搜索提示
     await expect(page.getByRole("option").first()).toBeVisible();
   });
+
+  test("任意非空关键词都会请求消息搜索，包含单字、emoji 和字面量通配符", async ({ page }) => {
+    await openSearch(page);
+    for (const query of ["托", "托盘", "🙂", "%", "_"]) {
+      const response = page.waitForResponse((r) => {
+        const url = new URL(r.url());
+        return url.pathname.endsWith("/messages/search") && url.searchParams.get("q") === query;
+      });
+      await page.getByRole("combobox").fill(` ${query} `);
+      expect((await response).status()).toBe(200);
+      await expect(page.getByRole("option").first()).toBeVisible();
+    }
+  });
+
+  test("空白输入保留快捷动作，不发搜索请求", async ({ page }) => {
+    await openSearch(page);
+    const requests: string[] = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname.endsWith("/messages/search"))
+        requests.push(request.url());
+    });
+    await page.getByRole("combobox").fill(" \u3000 ");
+    await expect(page.getByRole("option").first()).toBeVisible();
+    // 越过 300ms 防抖窗口，证明空白输入没有排入延迟请求。
+    await page.waitForTimeout(400);
+    expect(requests).toEqual([]);
+  });
 });

@@ -260,14 +260,14 @@ function LanguageSegmented() {
   );
 }
 
-/** 外观：主题双卡 + 语言分段 */
+/** 通用设置的标题与外观选项：主题双卡 + 语言分段。 */
 export function AppearanceSection() {
   const { t } = useTranslation();
 
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <SectionHeader title={t("settings.appearance")} desc={t("settings.appearanceDesc")} />
+        <SectionHeader title={t("settings.general")} desc={t("settings.generalDesc")} />
       </div>
       <div>
         <h3 className="text-title-sm text-on-surface mb-3 font-semibold">{t("settings.theme")}</h3>
