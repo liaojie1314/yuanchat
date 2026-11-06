@@ -504,6 +504,39 @@ input[type="submit"] {
 **验证**：`adb shell input swipe x y x y 700`（同点位、时长 700ms）可模拟长按；
 菜单是否在视口内用 CDP 读 `getBoundingClientRect()` 核对。
 
+### 附件上传失败后重启丢气泡或重试 MIME 错误
+
+只保存原生字节副本不能恢复上传前的失败消息；若草稿没写进 outbox，冷启动没有可恢复
+的气泡，重建 File 时没带原 MIME 还会退成错误类型。原生持久化可用时应在上传前先保存
+字节，再写入带 `uploadMimeType` 的 IDB 草稿；`payload=null` 表示尚未上传，自动补发
+必须跳过。重启恢复失败气泡，由用户重试上传，真实 ACK 后清理该出站行及副本。
+
+2026-11-07 的 `e0181c7` 已在 Android 验证：上传失败 → force-stop → 重启恢复气泡和
+`image/png` MIME → 手动重试 → `seq=19` ACK，IDB 记录与原生副本清空。
+
+### Android 普通附件被交给无关处理器
+
+`Intent.ACTION_VIEW` 的 MIME 使用 `*/*` 会让图片等附件匹配到无关接收者。普通附件
+应在通配 MIME 时通过 `contentResolver.getType(uri)` 识别类型；调用者明确指定的 MIME
+仍优先，尤其保留 APK 安装类型，并通过 FileProvider 临时授予读取权限。
+
+2026-11-07 的 `95f0b95` 已验证重启后已有 PNG 下载直接由 Google Photos 打开，原生
+Intent 为 `image/png` 和 `content://` URI，临时 `readUriPermissions` 存在。证据为本地
+`final-acceptance-20261107/android-file-open-green.xml`、`android-file-open-green-activities.txt`
+及已通过的 `android-file-open-check.py`；不能由 PNG 用例推断其他文件类型；完整 OTA 验收另见 `native-acceptance.json`。
+
+### 大文件保存阶段应用退出
+
+先区分网络下载、原生写入与读回校验阶段。大字节数组一次跨 Android IPC 会放大复制
+内存，不能仅靠 JS 侧已有一个缓冲判断开销。`97ab133` 把原生文件读写限制为单次
+1 MiB，并处理短写、提前 EOF、读期间增长和句柄关闭；JS 仍有完整文件缓冲，总内存不恒定。
+
+2026-11-07 的 43,866,277 字节坏 SHA APK 已完成下载、保存与读回，随后拒装并删文件，
+应用保持运行。比较前后退出记录时应检查是否新增 OOM，不能把保留的历史 OOM 当成
+本次失败。证据为本地 `final-acceptance-20261107/ota-bad-sha-green.json` 与
+`ota-exit-info-{before,after}.txt`；该坏 SHA 用例只证明拒装分支，合法 APK 升级另见同目录
+`native-acceptance.json`。
+
 ## 跨端前端问题（web / desktop / android 同源）
 
 ### 切换语言后重开应用又变回系统语言，进设置页才恢复

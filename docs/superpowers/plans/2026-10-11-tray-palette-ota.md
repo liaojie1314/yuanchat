@@ -12,7 +12,63 @@
 
 ## 执行进度
 
-### 2026-11-06 当前状态：本轮截图、修复与本地检查已收口
+### 2026-11-07 功能核对与验收记录
+
+MASTER_PLAN 已按证据勾选 K3/K12/K18/K19、手机号移除与 Web 客户端下载入口，清单只写
+功能本身，验证结果与平台边界独立记录。O1 已完成 Android 模拟器真实安装验证并勾选，
+对应系统安装证据、设备范围与夹具清理见下方记录。
+
+2026-11-07 新增缺陷已有真实修复证据：
+
+- `97ab133` 将原生文件读写 IPC 限制为单次 1 MiB。43,866,277 字节坏 SHA APK 完成
+  下载、保存与读回后拒装并删除，应用保持运行，退出记录无新增 OOM；JS 仍保留完整文件
+  缓冲，不能据此声称总内存恒定。
+- `e0181c7` 在附件上传前保存原生副本、IDB 草稿与原 MIME；未上传草稿 `payload=null`
+  不自动发 WS。Android force-stop 后恢复失败文件气泡和 `image/png` MIME，点重试收到
+  `seq=19` 的真实 ACK，该出站行与原生副本均清空。
+- 证据在本地 `final-acceptance-20261107/`：`ota-bad-sha-green.json`、
+  `ota-exit-info-{before,after}.txt`、`outbox-green-{before,after-restart,ack}.json`。
+- `95f0b95` 的普通附件 MIME 修订已验证：重启后已有 PNG 下载由 Google Photos 打开，
+  原生 Intent 为 `image/png`、`content://` FileProvider URI，临时 `readUriPermissions`
+  存在。同目录 `android-file-open-green.xml`、`android-file-open-green-activities.txt`
+  和 `android-file-open-check.py`（assert PASS）记录结果。
+- 合法 OTA 安装已验证：在首处系统未知来源安装提示点 Cancel 后回到应用，仍显示
+  0.6.0 与“已打开系统安装器；若取消安装，可再次点击更新。”；再次立即更新、允许本应用
+  来源后，由系统安装器完成升级。取消证据只包含首处未知来源提示，不含第二处安装确认取消。
+  `package-after-upgrade.txt` 记录 0.6.1 / versionCode 6001、安装器
+  `com.google.android.packageinstaller`、来源 `com.yuanchat.desktop.debug`、更新时间
+  2026-11-07 01:31:15；`exit-info-after-upgrade.txt` 为 `PACKAGE UPDATED`，无新增 OOM。
+  重开运行打包资源 `assets/index-Cd-MyGbC.js`，`ota-installed-about.xml/txt` 显示 0.6.1
+  且再次检查为“已是最新版本”。首处取消后的应用状态见 `ota-permission-cancel.xml`。
+- 目标 APK 为同 debug 签名、43,866,277 字节，SHA-256 为
+  `a83eed0f10d19147f7d957930bf20b47b8547c2d9176f107dc0b1979d14ebb56`。设备是 Android 35 /
+  x86_64 模拟器，更新目录使用 `android/aarch64` 测试槽，不证明 ARM 实机通过。
+  Windows/macOS 无硬件验证；测试版本不算正式发版，设备范围不作为产品技术债。
+- 统一证据索引为 `final-acceptance-20261107/native-acceptance.json`。五条本地 QA release
+  已全部 rolled_back（含旧 0.99.0 Android 和 0.8.1-test.1 Linux），0.6.0 查询返回 204，
+  两个本轮 MinIO APK 对象已删除；模拟器恢复 0.6.0 / 6000、关闭来源安装权限后停机。
+  本轮 APK 与生成 icon 已清理，编译缓存保留；用户 `/home/liaojie1314/test` 未修改。
+- `03cd4cb` 修复托盘唤回绕过会话列表清未读的问题，`tray.activate` 复用共享
+  `clearUnread`；菜单/左键新增 2 项回归与原 9 项共 11 项通过，全包类型门禁通过。
+  最新源码完整重启后未再修改源文件：记住最小化选择跨重启保持，隐藏时收取真实
+  `seq=22` 消息，托盘未读 1、Unity `count=1`；实际“打开”菜单唤回目标会话后，
+  托盘无未读、Unity `count=0/count-visible=false`，REST 回读
+  `my_last_read_seq=22/unread_count=0`。托盘退出移除原生进程和 SNI 项。
+  `final-acceptance-20261107/linux-acceptance.json` 索引所有关联证据；本机
+  GNOME/libayatana 无 Activate 方法，因此原生实测覆盖菜单唤回，左键路径由回归验证。
+  本次未把 HMR 运行状态作为验收，也不外推 Windows/macOS 或 dev/远端 CI 结果。
+
+用户已明确授权：完成验收与文档后合入 `dev`，在 `dev` 执行完整本地 CI，全绿后推送远端
+`dev` 并确认远端 CI，无需再次询问。`main`、tag 和正式发版不在本次授权范围。
+
+**Git 与 CI 记录**：文档与截图提交为 `ea127b8`，追加修复提交见上方验证条目。合并、
+`dev` 完整本地 CI 和远端 CI 以对应提交和独立运行记录登记；下方 2026-11-06 的 feature
+测试数只作为历史证据，不代表后续提交或分支门禁已通过。
+
+用户追加的小改进只在 MASTER_PLAN“未做清单总览”按等级登记，不进入核心功能清单，
+本次不实施。当前切目录只影响后续下载，旧文件保留原位，Android SAF 另存为仍未实现。
+
+### 2026-11-06 已验证快照：截图、修复与本地检查
 
 用户已确认文件下载实测没有问题，本轮沿用该验证结果；核心页面截图、已知问题修复与
 本地检查已完成。已有本地提交 `3d09993`（文档与此前六张新图）、
@@ -61,7 +117,7 @@
   全绿，耗时 3.7 分钟、无重试；运行环境与模拟器均已关闭，开发端口已清。
 - 本轮工作已收口，不等于整套正式发版验收完成：最新 APK 的完整 OTA 安装本轮未重跑，
   Windows/macOS 无实机验收，SAF 另存为未实现。未合并、推送、打 tag 或发版；后续合
-  `dev` 仍须当次确认。
+  `dev` 的授权已于 2026-11-07 更新，以上方当前状态为准。
 
 ### 2026-11-05 历史暂停快照
 
@@ -4647,7 +4703,6 @@ Unity LauncherEntry 需要已安装 `yuanchat.desktop`；本机已有
 | 级别 | 条目                                                                                              |
 | ---- | ------------------------------------------------------------------------------------------------- |
 | ⚪   | **Web 默认下载回落**：无目录/不支持时交浏览器保存，应用不能确认其最终落盘；授权目录直写不受此限制 |
-| ⚪   | **Windows / macOS 的托盘与角标未实测**：无设备                                                    |
 | ⚪   | **安卓「另存到」公共目录**（`ACTION_CREATE_DOCUMENT`）：按 T5 不做                                |
 | ⚪   | **本地库离线搜索**：只抽了 `searchSource` 接口层，实现仍只有服务端                                |
 | ⚪   | **命令面板无拼音首字母匹配**                                                                      |

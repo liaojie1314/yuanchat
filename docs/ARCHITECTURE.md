@@ -442,6 +442,11 @@ web                — 前端静态资源 :3000
   - 桌面 / 安卓：Tauri plugin-fs 落盘，原生实现先于 React 挂载完成注入。桌面允许选择、
     持久化及恢复默认下载目录，完成后打开所在文件夹；安卓落在 **app 私有 external
     Download 目录**并打开文件——零存储权限、文件管理器不可见、卸载即删（隐私取舍）。
+    Android 仅在调用者 MIME 为 `*/*` 时经 `contentResolver.getType(uri)` 识别普通附件，
+    显式 MIME（包括 APK 安装类型）保持优先，FileProvider URI 只临时授予读取权限。
+    下载与 outbox 副本的原生文件读写每次 IPC 最多传 1 MiB，处理短写、提前 EOF 与读取时
+    文件增长，句柄最终关闭。这限制了原生桥接的单次复制放大；JS 仍持有完整下载/读回
+    缓冲，不能据此宣称总内存恒定。
 - **完成记录**：`downloadStore` 在账号本地库的 meta 中按服务器和消息保存历史候选，
   每项包含实际落盘路径（或 Web 文件引用）与原始字节的 SHA-256。登录恢复和目录切换时
   校验当前目录身份、文件存在及内容，点击完成操作时再次核验。切回旧目录可复用有效的
@@ -451,9 +456,12 @@ web                — 前端静态资源 :3000
 - **原生目录边界**：`download-directory.json` 存在 Tauri app config 目录，记录当前
   目录及原生选择器授权过的目录；恢复默认保留历史授权与文件。`open_local_file` 将目标
   canonicalize 后只放行应用目录、默认下载目录及历史授权目录，不能由前端提交任意根路径。
-- **outbox 磁盘副本**：图片/文件/语音消息在发送前把字节
-  落一份 appdata 磁盘副本，重试从磁盘读、服务端 ack 即删——收掉「安卓重启后
-  IndexedDB 里的 blob URL 失效、离线队列永远发不出去」的债。
+- **outbox 持久草稿**：原生持久化可用时，图片/文件/语音在上传前先落 appdata 字节副本，
+  再把去掉 `localUrl` 的消息快照及原 `uploadMimeType` 写入账号 IDB outbox。未上传记录
+  的 `payload=null`，自动补发必须跳过，不能发出缺少对象 key 的 WS 帧。冷启动恢复为
+  `failed` 气泡，用户重试时从磁盘重建带原 MIME 的 File/Blob；上传成功后才保存可补发
+  payload，并继续保留草稿供 ACK 清理。真实 ACK 后删除该 outbox 行及磁盘副本。
+  Web appdata 仍为 no-op；旧无草稿的媒体行沿用原 payload 补发路径，不伪装成空文本。
 
 ### 7.2 OTA 更新分发链路（自建）
 

@@ -168,7 +168,6 @@ PATH 里遮住系统版本，用 `gst-inspect-1.0` 会得到「元件全部缺�
 - `POST /api/v1/auth/login` — 账号（邮箱/元聊号）+ 密码登录（密码 `wrong` 测试错误）
 - `POST /api/v1/auth/register/otp` + `POST /api/v1/auth/register` — 邮箱验证码 + 密码 + 昵称注册
 - `POST /api/v1/auth/logout` — 登出（始终返回成功，300ms 延迟）
-- `GET /api/v1/captcha` — SVG 验证码
 
 **聊天数据的 Mock**：会话列表与消息不走 MSW，而是由 `useChatBootstrap` 在
 Mock 模式下直接注入 demo 数据（`packages/shared/src/mocks/demoData.ts`），
@@ -871,7 +870,7 @@ CI 会把覆盖率报告上传为 artifact（`backend-coverage`：`server/covera
 | 测试文件                            | 覆盖内容                                                                        |
 | ----------------------------------- | ------------------------------------------------------------------------------- |
 | `e2e/login.spec.ts`                 | 登录成功/失败、表单校验错误、API 错误、Enter 快捷键                             |
-| `e2e/register.spec.ts`              | 注册成功/失败、表单校验、验证码加载/刷新、Enter 快捷键                          |
+| `e2e/register.spec.ts`              | 注册成功/失败、表单校验、邮箱验证码发送/冷却、Enter 快捷键                      |
 | `e2e/logout.spec.ts`                | 登出跳转、localStorage 清除、登出后路由守卫                                     |
 | `e2e/route-guards.spec.ts`          | 未登录重定向（/ → /login）、已登录重定向（/login → /chat）                      |
 | `e2e/navigation.spec.ts`            | 登录/注册页间跳转、表单状态独立                                                 |
@@ -1049,8 +1048,19 @@ IndexedDB + Web Locks**；缺任一能力时不提供选目录入口，继续浏
 检查后打开所在文件夹，仅允许应用目录、默认下载目录和已授权目录；不接受前端任意
 指定授权根。Android 保持应用私有 external Download 目录和 FileProvider 打开文件，
 系统文件管理器不可见、卸载即删，不要求广泛存储权限。
+普通附件 MIME 为 `*/*` 时由 `contentResolver.getType(uri)` 识别，显式 APK MIME 保持
+优先。`95f0b95` 已在重启后的 PNG 下载上验证 Google Photos 打开、`image/png` Intent
+和 FileProvider 临时读取授权；合法 OTA 安装记录见下方 Android 验收说明。
+
+原生文件读写（含 outbox 副本）每次 IPC 限制为 1 MiB，避免大字节数组在 Android 桥接中
+被复制放大；JS 仍持有完整文件缓冲，并非恒定总内存。2026-11-07 的 43,866,277 字节
+测试 APK 已完成下载、保存与读回，错误 SHA 被拒绝并删除文件，退出记录无新增 OOM。
+附件上传前须在原生持久化可用时保存字节副本及带 MIME 的 IDB 草稿；`payload=null`
+草稿不能自动发 WS。重启恢复失败气泡，由用户重试上传，真实 ACK 后清理记录及副本。
 
 完成记录按账号/服务器存入本地库，保留每次实际路径（含同名避让后缀）与 SHA-256。
+当前改目录只影响后续保存，不移动旧文件；相关小改进债务统一在 MASTER_PLAN 的
+“未做清单总览”分级登记，不进入核心功能清单。
 恢复、切换目录和点击完成操作时核验当前目录及字节；切回旧目录可复用有效副本。
 原路径改名/丢失或内容改变时可重新下载，仍避让现有文件，不扫描任意重命名。目录读取
 或权限错误须提示处理，不能当成文件丢失。下载产物不随登出、恢复默认或 LRU 清理而删除。
@@ -1070,11 +1080,17 @@ sha256 校验通过后才经 FileProvider 调系统安装器。调试 APK 的签
 目标测试一致；仅改 OTA 登记版本不能证明应用升级成功。接口详见 [CHAT_API](CHAT_API.md#三点六更新分发ota免鉴权)。
 
 2026-11-06 Android 35 模拟器已验证命令「检查更新」自动触发检查并消费 `checkUpdate=1`，
-真实本机测试版本 `0.99.0` 出现；该结果只覆盖检查入口，本轮未重跑最新 APK 的 OTA 安装流程。
+真实本机测试版本 `0.99.0` 出现；该历史结果只覆盖检查入口。
+2026-11-07 已补齐合法 OTA：取消首处未知来源提示后重试，由系统安装器完成 0.6.0 →
+测试版 0.6.1 / 6001 升级；重开打包页面显示新版本，再检查为“已是最新版本”，无新增 OOM。
+范围仅 Android 35/x86_64 模拟器，更新目录的 `android/aarch64` 测试槽不证明 ARM 实机。
+五条测试发布记录已回滚，设备恢复 0.6.0 / 6000 并关闭来源安装权限；APK/生成 icon 与
+本轮 MinIO 对象已清理、编译缓存保留。详见本地 `final-acceptance-20261107/native-acceptance.json`。
 
-本轮指定链路实测、README 核心截图与本地检查已完成，最终 Chromium E2E 119 / 119
+2026-11-06 指定链路实测、README 核心截图与本地检查已完成，当时 Chromium E2E 119 / 119
 通过（3.7 分钟、无重试）；运行环境已关闭、开发端口已清。源码已提交至 `a21c63d`，
-范围与未覆盖的正式发版/设备验收见[实施计划](superpowers/plans/2026-10-11-tray-palette-ota.md#执行进度)。
+这是历史记录，后续 IPC/outbox 修订的真实验证和普通文件打开/OTA 安装进度见
+[实施计划](superpowers/plans/2026-10-11-tray-palette-ota.md#执行进度)，不能沿用旧 CI 结果。
 
 ## 十三、文档更新规则
 
