@@ -619,6 +619,16 @@ node 测试环境没有 `window` 时 persist **静默降级成不持久化**，�
 this.loginButton = page.getByRole("button", { name: /^(登\s*录|登录中…)$/ });
 ```
 
+### 单测通过，但 Coverage gate 的 IndexedDB 边界用例超时
+
+`messageReplay.test.ts` 的保留窗口用例需要真实写入 502 行，再验证只保留最新 500 行。
+远端 coverage 曾在 5,083ms 触发默认 5 秒超时；普通单测通过不能证明该时限足够。
+`pruneOnLeave` 又是异步发起、分两段事务淘汰，固定等待 20ms 不能确认删除已提交。
+
+这条大数据用例沿用 `localdb.retention.test.ts` 的 60 秒预算，通过 `vi.waitFor` 等待
+应淘汰的行消失后，再检查剩余条数及首尾序号。保留真实边界数据、断言和覆盖率门槛，
+不统一延长所有测试，也不通过减少行数绕过边界。
+
 ### 已下载附件重新显示下载按钮
 
 完成记录只复用当前下载目录中、原路径仍存在且 SHA-256 一致的副本。修改内容、改名或
