@@ -53,7 +53,7 @@ async function seedConv(maxSeq = 0): Promise<void> {
   ]);
 }
 
-/** 等 fire-and-forget 的回放落盘 */
+/** 仅给无状态变化的 no-op 一次调度机会；实际回放落盘须等待可观测结果。 */
 async function settled(): Promise<void> {
   await new Promise((r) => setTimeout(r, 20));
 }
@@ -76,11 +76,14 @@ describe("replayRecall —— 撤回即访问撤销", () => {
     expect(await mediaBytesTotal(localDb()!)).toBe(4096);
 
     replayRecall("m1");
-    await settled();
-
-    expect(await listMessagesDesc(localDb()!, CONV, 0, 10)).toHaveLength(0);
-    expect(await getMedia(localDb()!, "img-1")).toBeNull();
-    expect(await mediaBytesTotal(localDb()!)).toBe(0);
+    await vi.waitFor(
+      async () => {
+        expect(await listMessagesDesc(localDb()!, CONV, 0, 10)).toHaveLength(0);
+        expect(await getMedia(localDb()!, "img-1")).toBeNull();
+        expect(await mediaBytesTotal(localDb()!)).toBe(0);
+      },
+      { timeout: 3_000 },
+    );
   });
 
   it("撤回一条已被保留窗口淘汰的消息：no-op 不抛错", async () => {
@@ -92,8 +95,12 @@ describe("replayRecall —— 撤回即访问撤销", () => {
   it("不留占位行（留行而不删 blob 就等于断网还能看已撤回的图）", async () => {
     await putMessages(localDb()!, [localRowOf(text(1)), localRowOf(text(2))]);
     replayRecall("m1");
-    await settled();
-    expect((await listMessagesDesc(localDb()!, CONV, 0, 10)).map((r) => r.id)).toEqual(["m2"]);
+    await vi.waitFor(
+      async () => {
+        expect((await listMessagesDesc(localDb()!, CONV, 0, 10)).map((r) => r.id)).toEqual(["m2"]);
+      },
+      { timeout: 3_000 },
+    );
   });
 
   it("降级模式下不抛错", async () => {
@@ -108,15 +115,18 @@ describe("replayEdit —— 就地改 dto", () => {
     await putMessages(localDb()!, [localRowOf(text(7))]);
 
     replayEdit("m7", "改过的正文", 3);
-    await settled();
-
-    const rows = await listMessagesDesc(localDb()!, CONV, 0, 10);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].seq).toBe(7);
-    const dto = rows[0].dto as ChatMessage;
-    expect(dto.text).toBe("改过的正文");
-    expect(dto.edited).toBe(true);
-    expect(dto.editCount).toBe(3);
+    await vi.waitFor(
+      async () => {
+        const rows = await listMessagesDesc(localDb()!, CONV, 0, 10);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].seq).toBe(7);
+        const dto = rows[0].dto as ChatMessage;
+        expect(dto.text).toBe("改过的正文");
+        expect(dto.edited).toBe(true);
+        expect(dto.editCount).toBe(3);
+      },
+      { timeout: 3_000 },
+    );
   });
 
   it("消息不在本地时 no-op 不抛错，也不凭空造行", async () => {
@@ -143,12 +153,15 @@ describe("replayClear —— 删行 + 推水位两步必做", () => {
     ]);
 
     replayClear(CONV);
-    await settled();
-
-    expect(await listMessagesDesc(localDb()!, CONV, 0, 10)).toHaveLength(0);
-    expect(await getMedia(localDb()!, "img-3")).toBeNull();
-    expect(await mediaBytesTotal(localDb()!)).toBe(0);
-    expect((await getConversation(localDb()!, CONV))!.clearedBeforeSeq).toBe(3);
+    await vi.waitFor(
+      async () => {
+        expect(await listMessagesDesc(localDb()!, CONV, 0, 10)).toHaveLength(0);
+        expect(await getMedia(localDb()!, "img-3")).toBeNull();
+        expect(await mediaBytesTotal(localDb()!)).toBe(0);
+        expect((await getConversation(localDb()!, CONV))!.clearedBeforeSeq).toBe(3);
+      },
+      { timeout: 3_000 },
+    );
   });
 
   it("清空后再 reconcile 不会把已清空的消息拉回来（游标从水位起算）", async () => {
@@ -156,7 +169,14 @@ describe("replayClear —— 删行 + 推水位两步必做", () => {
     await putMessages(localDb()!, [localRowOf(text(1)), localRowOf(text(2)), localRowOf(text(3))]);
 
     replayClear(CONV);
-    await settled();
+    // 清空会先删消息再推进水位，两步都落盘后才验证后续 reconcile。
+    await vi.waitFor(
+      async () => {
+        expect(await listMessagesDesc(localDb()!, CONV, 0, 10)).toHaveLength(0);
+        expect((await getConversation(localDb()!, CONV))!.clearedBeforeSeq).toBe(3);
+      },
+      { timeout: 3_000 },
+    );
 
     // 服务端同样已把本人水位推到 3，after_seq=3 之后没有新消息
     fetchAfter.mockResolvedValueOnce({ messages: [], hasMore: false });
@@ -170,8 +190,12 @@ describe("replayClear —— 删行 + 推水位两步必做", () => {
   it("本地没有消息时也推进水位（未开过会话就清空，不能留残渣）", async () => {
     await seedConv(9);
     replayClear(CONV);
-    await settled();
-    expect((await getConversation(localDb()!, CONV))!.clearedBeforeSeq).toBe(9);
+    await vi.waitFor(
+      async () => {
+        expect((await getConversation(localDb()!, CONV))!.clearedBeforeSeq).toBe(9);
+      },
+      { timeout: 3_000 },
+    );
   });
 
   it("降级模式下不抛错", async () => {
