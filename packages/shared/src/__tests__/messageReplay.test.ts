@@ -7,6 +7,7 @@ import {
   putConversations,
   getConversation,
   putMessages,
+  getMessage,
   putMedia,
   getMedia,
   listMessagesDesc,
@@ -181,17 +182,24 @@ describe("replayClear —— 删行 + 推水位两步必做", () => {
 });
 
 describe("pruneOnLeave —— 淘汰时机是会话关闭", () => {
+  // 502 行真实 IDB 边界在 coverage runner 上会超过 5s，沿用 retention 用例的时间预算。
   it("超出保留窗口的最老消息被淘汰，窗口内的留着", async () => {
     const rows = Array.from({ length: RETENTION_PER_CONV + 2 }, (_, i) => localRowOf(text(i + 1)));
     await putMessages(localDb()!, rows);
 
     pruneOnLeave(CONV);
-    await settled();
-
+    // 淘汰分两段事务异步完成，固定睡眠不能代表最终落盘结果。
+    await vi.waitFor(
+      async () => {
+        expect(await getMessage(localDb()!, rows[1].id)).toBeNull();
+      },
+      { timeout: 30_000 },
+    );
     const left = await listMessagesDesc(localDb()!, CONV, 0, RETENTION_PER_CONV + 10);
     expect(left).toHaveLength(RETENTION_PER_CONV);
     expect(left[0].seq).toBe(3);
-  });
+    expect(left[RETENTION_PER_CONV - 1].seq).toBe(RETENTION_PER_CONV + 2);
+  }, 60_000);
 
   it("未超窗口时不动任何行", async () => {
     await putMessages(localDb()!, [localRowOf(text(1))]);
