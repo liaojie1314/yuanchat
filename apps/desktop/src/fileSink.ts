@@ -13,15 +13,7 @@
  * 所以这里用 `@tauri-apps/api/path` 的 `downloadDir()` / `appLocalDataDir()`
  * 拿到基目录，再 `join` 出与 Rust 侧 `ensure_app_owned` 对得上的绝对路径。
  */
-import {
-  BaseDirectory,
-  exists,
-  mkdir,
-  open,
-  readFile,
-  remove,
-  writeFile,
-} from "@tauri-apps/plugin-fs";
+import { BaseDirectory, exists, mkdir, open, remove, type FileHandle } from "@tauri-apps/plugin-fs";
 import {
   appLocalDataDir,
   dirname,
@@ -45,6 +37,51 @@ const DIRS: Record<SinkDir, { base: BaseDirectory; sub: string }> = {
   downloads: { base: BaseDirectory.Download, sub: "" },
   appdata: { base: BaseDirectory.AppLocalData, sub: "outbox" },
 };
+
+/** Android 的原生 IPC 会放大字节数组内存，单次只传 1 MiB。 */
+const IPC_CHUNK_BYTES = 1024 * 1024;
+
+/** 分块写完并关闭句柄，短写不能被当成成功。 */
+async function writeAndClose(handle: FileHandle, bytes: Uint8Array): Promise<void> {
+  try {
+    let offset = 0;
+    do {
+      const chunk = bytes.subarray(offset, offset + IPC_CHUNK_BYTES);
+      const n = await handle.write(chunk);
+      if (bytes.byteLength === 0) break;
+      if (!Number.isInteger(n) || n <= 0 || n > chunk.byteLength) {
+        throw new Error("invalid file write length");
+      }
+      offset += n;
+    } while (offset < bytes.byteLength);
+  } finally {
+    await handle.close();
+  }
+}
+
+/** 以有界 IPC 读回完整文件，读取期间发生截断或增长时拒绝用于完整性校验。 */
+async function readChunks(path: string, options?: { baseDir: BaseDirectory }): Promise<Uint8Array> {
+  const handle = await open(path, { ...options, read: true });
+  try {
+    const { size } = await handle.stat();
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    while (offset < size) {
+      const chunk = bytes.subarray(offset, offset + IPC_CHUNK_BYTES);
+      const n = await handle.read(chunk);
+      if (n === null || !Number.isInteger(n) || n <= 0 || n > chunk.byteLength) {
+        throw new Error("incomplete file read");
+      }
+      offset += n;
+    }
+    if ((await handle.read(new Uint8Array(1))) !== null) {
+      throw new Error("file changed while reading");
+    }
+    return bytes;
+  } finally {
+    await handle.close();
+  }
+}
 
 /** 相对 baseDir 的写入路径（子目录拼在文件名前） */
 function pathOf(dir: SinkDir, fileName: string): string {
@@ -90,7 +127,7 @@ export function installFileSink(): void {
       const directory = dir === "downloads" ? await downloadDirectory?.get() : undefined;
       const options = directory?.custom ? undefined : { baseDir: base };
       if (sub) {
-        // writeFile 不会建父目录，outbox 首次落盘前必须先 mkdir
+        // open 不会建父目录，outbox 首次落盘前必须先 mkdir
         await mkdir(sub, { baseDir: base, recursive: true });
       }
 
@@ -113,20 +150,7 @@ export function installFileSink(): void {
             continue;
           }
           try {
-            try {
-              let offset = 0;
-              // 原生 write 可能短写，必须写完全部字节才算成功；空文件仍是合法下载。
-              do {
-                const n = await handle.write(bytes.subarray(offset));
-                if (bytes.byteLength === 0) break;
-                if (!Number.isInteger(n) || n <= 0 || n > bytes.byteLength - offset) {
-                  throw new Error("invalid file write length");
-                }
-                offset += n;
-              } while (offset < bytes.byteLength);
-            } finally {
-              await handle.close();
-            }
+            await writeAndClose(handle, bytes);
           } catch (err) {
             // 只删本次原子占名得到的产物，不能碰其他窗口或用户已有文件。
             await remove(target, options).catch((cleanupError) => {
@@ -139,7 +163,21 @@ export function installFileSink(): void {
         }
         if (!saved) throw new Error("no available download filename");
       } else {
-        await writeFile(pathOf(dir, finalName), bytes, { baseDir: base });
+        const target = pathOf(dir, finalName);
+        const handle = await open(target, {
+          ...options,
+          write: true,
+          create: true,
+          truncate: true,
+        });
+        try {
+          await writeAndClose(handle, bytes);
+        } catch (err) {
+          await remove(target, options).catch((cleanupError) => {
+            captureException(cleanupError, { context: "fileSink.cleanup" });
+          });
+          throw err;
+        }
       }
 
       // 绝对路径要用 path 插件拼：baseDir 在不同平台解析到不同位置，
@@ -153,11 +191,11 @@ export function installFileSink(): void {
       const { base } = DIRS[dir];
       if (dir === "downloads" && downloadDirectory) {
         const directory = await downloadDirectory.get();
-        return readFile(
+        return readChunks(
           (await isAbsolute(fileName)) ? fileName : await join(directory.path, fileName),
         );
       }
-      return readFile(pathOf(dir, fileName), { baseDir: base });
+      return readChunks(pathOf(dir, fileName), { baseDir: base });
     },
 
     async remove(fileName, dir) {

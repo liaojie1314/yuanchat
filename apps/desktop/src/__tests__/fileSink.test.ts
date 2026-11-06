@@ -21,39 +21,63 @@ const existing = new Set<string>();
 const disk = new Map<string, Uint8Array>();
 let chunkLimit = Infinity;
 let failAfter = Infinity;
+let ipcLimit = Infinity;
+let sizeAdjustment = 0;
 
 vi.mock("@tauri-apps/plugin-fs", () => ({
   BaseDirectory: { Download: "DOWNLOAD", AppLocalData: "APPLOCALDATA" },
   writeFile: vi.fn(async (path: string, data: Uint8Array, opts?: unknown) => {
+    if (data.byteLength > ipcLimit) throw new Error("IPC payload too large");
     existing.add(path);
     disk.set(path, data.slice());
     fsCalls.push({ cmd: "writeFile", path, opts });
   }),
-  open: vi.fn(async (path: string, opts: { createNew?: boolean; baseDir?: string }) => {
-    if (opts.createNew && existing.has(path)) throw new Error("EEXIST");
-    existing.add(path);
-    disk.set(path, new Uint8Array());
-    let writes = 0;
-    return {
-      write: async (data: Uint8Array) => {
-        if (writes++ >= failAfter) throw new Error("disk full");
-        const n = Math.min(chunkLimit, data.byteLength);
-        const old = disk.get(path)!;
-        const next = new Uint8Array(old.byteLength + n);
-        next.set(old);
-        next.set(data.subarray(0, n), old.byteLength);
-        disk.set(path, next);
-        fsCalls.push({ cmd: "writeFile", path, opts: { baseDir: opts.baseDir } });
-        return n;
-      },
-      close: async () => {
-        fsCalls.push({ cmd: "close", path });
-      },
-    };
-  }),
+  open: vi.fn(
+    async (path: string, opts: { createNew?: boolean; read?: boolean; baseDir?: string }) => {
+      if (opts.createNew && existing.has(path)) throw new Error("EEXIST");
+      if (opts.read) {
+        if (!disk.has(path)) throw new Error("ENOENT");
+        fsCalls.push({ cmd: "readFile", path, opts: { baseDir: opts.baseDir } });
+      } else {
+        existing.add(path);
+        disk.set(path, new Uint8Array());
+      }
+      let writes = 0;
+      let readOffset = 0;
+      return {
+        write: async (data: Uint8Array) => {
+          if (data.byteLength > ipcLimit) throw new Error("IPC payload too large");
+          if (writes++ >= failAfter) throw new Error("disk full");
+          const n = Math.min(chunkLimit, data.byteLength);
+          const old = disk.get(path)!;
+          const next = new Uint8Array(old.byteLength + n);
+          next.set(old);
+          next.set(data.subarray(0, n), old.byteLength);
+          disk.set(path, next);
+          fsCalls.push({ cmd: "writeFile", path, opts: { baseDir: opts.baseDir } });
+          return n;
+        },
+        stat: async () => ({ size: disk.get(path)!.byteLength + sizeAdjustment }),
+        read: async (buffer: Uint8Array) => {
+          if (buffer.byteLength > ipcLimit) throw new Error("IPC payload too large");
+          const bytes = disk.get(path)!;
+          if (readOffset === bytes.byteLength) return null;
+          const n = Math.min(chunkLimit, buffer.byteLength, bytes.byteLength - readOffset);
+          buffer.set(bytes.subarray(readOffset, readOffset + n));
+          readOffset += n;
+          return n;
+        },
+        close: async () => {
+          fsCalls.push({ cmd: "close", path });
+        },
+      };
+    },
+  ),
   readFile: vi.fn(async (path: string, opts?: unknown) => {
     fsCalls.push({ cmd: "readFile", path, opts });
-    return new Uint8Array([1]);
+    if (!disk.has(path)) throw new Error("ENOENT");
+    if (disk.get(path)!.byteLength > ipcLimit) throw new Error("IPC payload too large");
+    return disk.get(path)!.slice();
   }),
   remove: vi.fn(async (path: string, opts?: unknown) => {
     disk.delete(path);
@@ -98,6 +122,8 @@ beforeEach(() => {
   disk.clear();
   chunkLimit = Infinity;
   failAfter = Infinity;
+  ipcLimit = Infinity;
+  sizeAdjustment = 0;
   __resetFileSink();
   installFileSink();
 });
@@ -218,6 +244,7 @@ describe("read / remove / reveal", () => {
 
   it("read 与 remove 透传到 plugin-fs 并带对应 baseDir", async () => {
     const sink = getFileSink();
+    disk.set("outbox/c-1-a.pdf", new Uint8Array([1]));
     await sink.read!("c-1-a.pdf", "appdata");
     expect(fsCalls.find((c) => c.cmd === "readFile")?.opts).toEqual({ baseDir: "APPLOCALDATA" });
 
@@ -260,5 +287,53 @@ it("写到一半失败关闭句柄并删除本次半成品，不留下损坏下�
     getFileSink().save(new Uint8Array([1, 2, 3, 4]), "failed.bin", "application/octet-stream"),
   ).rejects.toThrow("disk full");
   expect(disk.has("failed.bin")).toBe(false);
+  expect(fsCalls.some((call) => call.cmd === "close")).toBe(true);
+});
+
+it.each(["downloads", "appdata"] as const)(
+  "%s 大文件以有界 IPC 写完，保留短写后的全部字节",
+  async (dir) => {
+    ipcLimit = 1024 * 1024;
+    chunkLimit = 512 * 1024;
+    const bytes = Uint8Array.from({ length: 2 * ipcLimit + 17 }, (_, i) => i % 251);
+    await getFileSink().save(bytes, "large.bin", "application/octet-stream", dir);
+    const stored = disk.get(dir === "appdata" ? "outbox/large.bin" : "large.bin")!;
+    expect(Buffer.from(stored).equals(Buffer.from(bytes))).toBe(true);
+    expect(fsCalls.filter((call) => call.cmd === "close")).toHaveLength(1);
+  },
+);
+
+it.each(["downloads", "appdata"] as const)(
+  "%s 大文件通过有界 IPC 读回，短读不截断内容",
+  async (dir) => {
+    ipcLimit = 1024 * 1024;
+    chunkLimit = 512 * 1024;
+    const bytes = Uint8Array.from({ length: 2 * ipcLimit + 17 }, (_, i) => i % 251);
+    disk.set(dir === "appdata" ? "outbox/large.bin" : "/home/u/Downloads/large.bin", bytes);
+    const result = await getFileSink().read!("large.bin", dir);
+    expect(Buffer.from(result).equals(Buffer.from(bytes))).toBe(true);
+    expect(fsCalls.filter((call) => call.cmd === "close")).toHaveLength(1);
+  },
+);
+
+it.each([-1, 1])("读取期间文件长度变化 %s 时拒绝返回截断内容并关闭句柄", async (adjustment) => {
+  disk.set("outbox/changed.bin", new Uint8Array([1, 2, 3]));
+  sizeAdjustment = adjustment;
+  await expect(getFileSink().read!("changed.bin", "appdata")).rejects.toThrow();
+  expect(fsCalls.some((call) => call.cmd === "close")).toBe(true);
+});
+
+it("出站副本短写失败也关闭句柄并清除半成品", async () => {
+  chunkLimit = 2;
+  failAfter = 1;
+  await expect(
+    getFileSink().save(
+      new Uint8Array([1, 2, 3, 4]),
+      "failed.bin",
+      "application/octet-stream",
+      "appdata",
+    ),
+  ).rejects.toThrow("disk full");
+  expect(disk.has("outbox/failed.bin")).toBe(false);
   expect(fsCalls.some((call) => call.cmd === "close")).toBe(true);
 });
