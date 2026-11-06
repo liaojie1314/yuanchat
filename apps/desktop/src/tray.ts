@@ -122,7 +122,10 @@ export async function installTray(opts: {
         console.warn(`[tray] 激活窗口失败：${name}`, e);
       }
     }
-    opts.onOpenConversation(selectFirstUnreadId(useConversationStore.getState().conversations));
+    const id = selectFirstUnreadId(useConversationStore.getState().conversations);
+    opts.onOpenConversation(id);
+    // 托盘导航不经过会话列表，也要推进共享已读水位并同步系统角标。
+    if (id) useConversationStore.getState().clearUnread(id);
   };
 
   const menu = await Menu.new({

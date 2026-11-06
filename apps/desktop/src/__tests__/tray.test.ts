@@ -214,3 +214,80 @@ it.each(["image", "menu"])("未读清零后迟到的 %s 不能把托盘文案写
     dispose();
   }
 });
+
+it.each(["menu", "click"])(
+  "托盘 %s 唤回会话后只清除该会话未读，并同步剩余系统角标",
+  async (entry) => {
+    let open!: () => void;
+    let click!: (event: { type: string; button: string; buttonState: string }) => void;
+    vi.doMock("@tauri-apps/plugin-os", () => ({ platform: () => "linux" }));
+    vi.doMock("@tauri-apps/api/window", () => ({
+      getCurrentWindow: () => ({
+        setBadgeCount,
+        show: vi.fn(),
+        unminimize: vi.fn(),
+        setFocus: vi.fn(),
+        setAlwaysOnTop: vi.fn(),
+        center: vi.fn(),
+      }),
+    }));
+    vi.doMock("@tauri-apps/api/menu", () => ({
+      Menu: {
+        new: async ({ items }: { items: Array<{ id: string; action?: () => void }> }) => {
+          open = items.find((item) => item.id === "tray-open")!.action!;
+          return { get: async () => undefined };
+        },
+      },
+    }));
+    vi.doMock("@tauri-apps/api/tray", () => ({
+      TrayIcon: {
+        new: async ({ action }: { action: typeof click }) => {
+          click = action;
+          return { setTooltip: async () => {}, close: async () => {} };
+        },
+      },
+    }));
+    vi.doMock("@tauri-apps/api/app", () => ({ defaultWindowIcon: async () => null }));
+    vi.doMock("@tauri-apps/plugin-process", () => ({ exit: vi.fn() }));
+    vi.resetModules();
+    const { installTray } = await import("../tray");
+    const { useConversationStore } = await import("@yuanchat/shared");
+    useConversationStore.setState({
+      conversations: [
+        {
+          id: "first",
+          name: "一",
+          type: "private",
+          isMuted: false,
+          unreadCount: 2,
+          lastSeq: 8,
+          myLastReadSeq: 6,
+        },
+        {
+          id: "second",
+          name: "二",
+          type: "private",
+          isMuted: false,
+          unreadCount: 3,
+          lastSeq: 3,
+          myLastReadSeq: 0,
+        },
+      ],
+    });
+    const navigate = vi.fn();
+    const dispose = await installTray({ onOpenConversation: navigate });
+    try {
+      if (entry === "menu") open();
+      else click({ type: "Click", button: "Left", buttonState: "Down" });
+      await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith("first"));
+      expect(useConversationStore.getState().conversations.map((c) => c.unreadCount)).toEqual([
+        0, 3,
+      ]);
+      expect(useConversationStore.getState().conversations[0].myLastReadSeq).toBe(8);
+      expect(setBadgeCount).toHaveBeenLastCalledWith(3);
+    } finally {
+      dispose();
+      useConversationStore.setState({ conversations: [] });
+    }
+  },
+);
