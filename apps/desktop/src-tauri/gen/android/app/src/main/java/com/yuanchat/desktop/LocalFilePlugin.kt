@@ -24,12 +24,13 @@ import java.io.File
  */
 @TauriPlugin
 class LocalFilePlugin(private val activity: Activity) : Plugin(activity) {
+  /** 普通附件由 FileProvider 识别类型，APK 安装保留调用者指定的类型。 */
   @Command
   fun openLocalFile(invoke: Invoke) {
     try {
       val args = invoke.getArgs()
       val path = args.getString("path")
-      val mime = args.getString("mime", "*/*")
+      val requestedMime = args.getString("mime", "*/*")
       if (path.isEmpty()) {
         invoke.reject("path is empty")
         return
@@ -38,6 +39,10 @@ class LocalFilePlugin(private val activity: Activity) : Plugin(activity) {
       // 用 packageName 而不是写死包名，debug 构建的 .debug 后缀也能对上
       val uri =
         FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", File(path))
+      // 通配类型会把图片交给文件管理器等无关接收者，无法直接预览。
+      val mime = if (requestedMime == "*/*") {
+        activity.contentResolver.getType(uri) ?: requestedMime
+      } else requestedMime
       val intent =
         Intent(Intent.ACTION_VIEW).apply {
           setDataAndType(uri, mime)
