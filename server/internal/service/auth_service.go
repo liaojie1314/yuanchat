@@ -292,9 +292,9 @@ func randomToken(n int) (string, error) {
 // ErrOldPasswordWrong 表示改密时提供的当前密码不正确。
 var ErrOldPasswordWrong = errors.New("old password is incorrect")
 
-// ChangePassword 校验当前密码后改密（登录态直接改，不走短信验证码）。
+// ChangePassword 校验当前密码后改密（登录态直接改，不走邮箱验证码）。
 //
-// 与三段式重置的区别只在凭据来源：那条链路用短信验证码证明手机号归属，
+// 与三段式重置的区别只在凭据来源：那条链路用邮箱验证码证明邮箱归属，
 // 这条用当前密码证明本人在场。收尾完全一致 —— 同样递增 token_version，
 // 因此改密后该用户所有设备（含当前设备）的既有令牌立即失效，调用方需要重新登录。
 //

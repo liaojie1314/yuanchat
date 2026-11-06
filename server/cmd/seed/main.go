@@ -6,7 +6,7 @@
 //	好友申请：carol → alice 一条 pending（演示"新的朋友"角标）
 //	每个会话若干条历史消息（正确维护 seq / last_seq / last_read_seq）
 //
-// 幂等：按手机号查重，已存在的用户/会话/关系不会重复创建。
+// 幂等：按邮箱查重，已存在的用户/会话/关系不会重复创建。
 //
 // 运行：go run ./cmd/seed
 package main

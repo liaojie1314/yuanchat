@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -422,6 +424,37 @@ func TestSearchEmptyTypesMeansNoFilter(t *testing.T) {
 	} {
 		if w := doSearch(t, r, target); w.Code != http.StatusOK {
 			t.Fatalf("%s status = %d, want 200, body=%s", target, w.Code, w.Body.String())
+		}
+	}
+}
+
+// TestSearchNonemptyQuery 单字、非 BMP 字符和通配符均走完整检索，仅空白请求无效。
+func TestSearchNonemptyQuery(t *testing.T) {
+	db := packTestDB(t)
+	u := newPackTestUser(t, db, "非空搜索")
+	conv := &model.Conversation{Type: model.ConversationTypeGroup}
+	if err := db.Create(conv).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ConversationMember{ConversationID: conv.ID, UserID: u.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	msg := &model.Message{ConversationID: conv.ID, SenderID: u.ID, Seq: 1,
+		MessageType: model.MessageTypeText, Status: model.MessageStatusNormal, Content: `{"text":"托盘 AI 🙂A 50%_done"}`}
+	if err := db.Create(msg).Error; err != nil {
+		t.Fatal(err)
+	}
+	r := newSearchEngine(db, u.ID)
+	for _, q := range []string{"托", "托盘", " A ", "🙂", "%", "_"} {
+		w := doSearch(t, r, "/api/v1/messages/search?q="+url.QueryEscape(q)+"&conversation_id="+conv.ID.String())
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), msg.ID.String()) {
+			t.Fatalf("query=%q status=%d body=%s", q, w.Code, w.Body.String())
+		}
+	}
+	for _, q := range []string{"", " ", "\u3000\t"} {
+		w := doSearch(t, r, "/api/v1/messages/search?q="+url.QueryEscape(q))
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "q is required") {
+			t.Fatalf("query=%q status=%d body=%s", q, w.Code, w.Body.String())
 		}
 	}
 }

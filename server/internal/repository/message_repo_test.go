@@ -539,6 +539,31 @@ func seedE2EEMessage(t *testing.T, db *gorm.DB, conv *model.Conversation, u *mod
 	return seedSearchMessage(t, db, conv, u, model.MessageTypeE2EE, `{"cipher":"xxx","name":"aaa.pdf"}`)
 }
 
+// TestSearch_ExcludesDeletedConversations 解散后的成员记录不能继续暴露正文或文件名。
+func TestSearch_ExcludesDeletedConversations(t *testing.T) {
+	db := testDB(t)
+	repo := NewMessageRepository(db)
+	ctx := context.Background()
+	u, conv := seedSearchFixture(t, db)
+	seedTextMessage(t, db, conv, u, "dissolved 正文")
+	seedFileMessage(t, db, conv, u, "dissolved-file.pdf")
+	if got, err := repo.Search(ctx, u.ID, "dissolved", nil, nil, nil, 20); err != nil || len(got) != 2 {
+		t.Fatalf("解散前应命中两条消息: got=%v err=%v", got, err)
+	}
+	// 群主与管理端解散都只软删会话，成员记录仍然存在。
+	if err := db.Delete(conv).Error; err != nil {
+		t.Fatalf("解散会话: %v", err)
+	}
+	for _, scope := range []*uuid.UUID{nil, &conv.ID} {
+		for _, types := range [][]int16{nil, {model.MessageTypeText}, {model.MessageTypeFile}} {
+			got, err := repo.Search(ctx, u.ID, "dissolved", scope, types, nil, 20)
+			if err != nil || len(got) != 0 {
+				t.Errorf("解散后不应命中正文或文件名: scope=%v types=%v got=%v err=%v", scope, types, got, err)
+			}
+		}
+	}
+}
+
 // TestSearch_LikeWildcardsAreLiteral LIKE 通配符必须按字面量搜。
 //
 // 用户输入直接拼进 ILIKE 模式时，搜一个 % 就等于 ILIKE '%%%' —— 整张表被捞出来。
@@ -652,5 +677,57 @@ func TestSearch_E2EEStillExcludedWithTypeFilter(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("E2EE 消息必须始终排除，实际命中 %d 条", len(got))
+	}
+}
+
+// TestSearch_RespectsClearHistoryWatermark 正文和文件名搜索须遵守每位成员自己的清空水位。
+func TestSearch_RespectsClearHistoryWatermark(t *testing.T) {
+	db := testDB(t)
+	repo := NewMessageRepository(db)
+	ctx := context.Background()
+	u, conv := seedSearchFixture(t, db)
+	peer := newTestUser(t, db, "search-peer")
+	if err := db.Create(&model.ConversationMember{ConversationID: conv.ID, UserID: peer.ID}).Error; err != nil {
+		t.Fatalf("创建另一成员: %v", err)
+	}
+	seedTextMessage(t, db, conv, u, "watermark 旧正文")
+	oldFile := seedFileMessage(t, db, conv, u, "watermark-old.pdf")
+	seedTextMessage(t, db, conv, u, "watermark 新正文")
+	seedFileMessage(t, db, conv, u, "watermark-new.pdf")
+	if err := db.Model(&model.ConversationMember{}).
+		Where("conversation_id = ? AND user_id = ?", conv.ID, u.ID).
+		Update("cleared_before_seq", oldFile.Seq).Error; err != nil {
+		t.Fatalf("推进清空水位: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		userID uuid.UUID
+		convID *uuid.UUID
+		types  []int16
+		want   int
+	}{
+		{"全局", u.ID, nil, nil, 2},
+		{"会话", u.ID, &conv.ID, nil, 2},
+		{"正文类型", u.ID, nil, []int16{model.MessageTypeText}, 1},
+		{"文件类型", u.ID, &conv.ID, []int16{model.MessageTypeFile}, 1},
+		{"另一成员不受影响", peer.ID, &conv.ID, nil, 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := repo.Search(ctx, tc.userID, "watermark", tc.convID, tc.types, nil, 20)
+			if err != nil {
+				t.Fatalf("Search: %v", err)
+			}
+			if len(got) != tc.want {
+				t.Fatalf("搜索命中 %d 条，期望 %d 条", len(got), tc.want)
+			}
+			if tc.userID == u.ID {
+				for _, row := range got {
+					if row.Seq <= oldFile.Seq {
+						t.Errorf("搜索返回已清空消息 seq=%d", row.Seq)
+					}
+				}
+			}
+		})
 	}
 }

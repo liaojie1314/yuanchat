@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -116,7 +117,8 @@ func (h *UpdateHandler) Catalog(c *gin.Context) {
 //	@Param			arch		path	string	true	"x86_64 / aarch64 / universal / ..."
 //	@Param			version		query	string	true	"客户端当前版本"
 //	@Param			channel		query	string	false	"stable（默认）/ beta"
-//	@Param			device		query	string	false	"设备标识，用于稳定灰度"
+//	@Param			device		query	string	false	"设备标识，用于稳定灰度，优先于匿名桶"
+//	@Param			X-YuanChat-Update-Cohort	header	int	false	"匿名灰度桶（0..99），仅无 device 时使用"
 //	@Success		200	"扁平的 dynamic 格式更新体"
 //	@Success		204	"无可用更新"
 //	@Router			/api/v1/updates/{platform}/{arch} [get]
@@ -126,17 +128,21 @@ func (h *UpdateHandler) Check(c *gin.Context) {
 		return
 	}
 
-	// 灰度键：优先用客户端给的 device。缺失时回落 ClientIP ——
-	// 必须保证同一台机器的判定稳定，否则用户会在新旧版之间来回跳。
-	// 回落到 IP 的稳定性弱于 device（换网会变），但远好于随机。
+	// 显式 device 优先；匿名桶只用于稳定放量，无效或缺失时沿用 IP 哈希。
+	// 桶仅有 100 个值，不是设备唯一标识，也不能作为身份或权限凭据。
 	deviceKey := c.Query("device")
+	var cohort *int
 	if deviceKey == "" {
 		deviceKey = c.ClientIP()
+		if bucket, err := strconv.ParseUint(c.GetHeader("X-YuanChat-Update-Cohort"), 10, 8); err == nil && bucket < 100 {
+			value := int(bucket)
+			cohort = &value
+		}
 	}
 
 	res, err := h.svc.Resolve(c.Request.Context(),
 		c.Param("platform"), c.Param("arch"),
-		c.Query("channel"), c.Query("version"), deviceKey)
+		c.Query("channel"), c.Query("version"), deviceKey, cohort)
 	if err != nil {
 		// 自身故障必须是 5xx：updater 收到 204 会直接 return Ok(None) 而**不再**
 		// 试下一个 endpoint，只有 5xx 才会落到 GitHub 兜底。

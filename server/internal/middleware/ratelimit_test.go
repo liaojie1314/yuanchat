@@ -43,20 +43,32 @@ func TestRedisTokenBucketAllowRejectBoundary(t *testing.T) {
 	}
 }
 
+// TestRedisTokenBucketRefill 用显式时戳验证回填，避免网络调度跨过 10ms 令牌窗口。
 func TestRedisTokenBucketRefill(t *testing.T) {
 	rdb, _ := useRedisBackend(t)
-	rl := NewRateLimiter(100, 1) // 100 token/s，容量 1
+	allowAt := func(now int64) bool {
+		t.Helper()
+		allowed, err := rateLimitScript.Run(t.Context(), rdb,
+			[]string{"yuanchat:rl:refill"}, 100, 1, now, 10,
+		).Int()
+		if err != nil {
+			t.Fatalf("run token bucket script: %v", err)
+		}
+		return allowed == 1
+	}
 
-	if !rl.allow("a") || rl.allow("a") {
+	if !allowAt(1000) || allowAt(1000) {
 		t.Fatal("first allow, second reject expected")
 	}
-
-	// 真实等待 30ms，应回填约 3 个令牌（容量封顶 1），必然足够再放行一次
-	time.Sleep(30 * time.Millisecond)
-	if !rl.allow("a") {
+	if allowAt(1005) {
+		t.Fatal("half a token should not allow a request")
+	}
+	if !allowAt(1010) {
 		t.Fatal("token should refill over time")
 	}
-	_ = rdb
+	if !allowAt(1040) || allowAt(1040) {
+		t.Fatal("refill should be capped at bucket capacity")
+	}
 }
 
 func TestRedisTokenBucketKeyTTL(t *testing.T) {

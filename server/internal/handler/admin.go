@@ -62,7 +62,7 @@ func pageParams(c *gin.Context) (int, int) {
 //	@Summary		管理端：用户列表 / 搜索
 //	@Tags			admin
 //	@Security		BearerAuth
-//	@Param			q		query	string	false	"昵称 / 手机号 / 邮箱模糊匹配"
+//	@Param			q		query	string	false	"昵称 / 邮箱 / 用户ID模糊匹配"
 //	@Param			page	query	int		false	"页码（从 1 开始）"
 //	@Param			size	query	int		false	"每页条数（上限 100）"
 //	@Success		200	{object}	Response

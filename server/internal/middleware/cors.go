@@ -21,7 +21,7 @@ type CORSOptions struct {
 // preflight 阶段就被拦死，服务端日志里连请求都看不到（X-Qr-Poll-Secret 就是这么
 // 被漏掉过一次：Go 单测走 httptest 不做预检，MSW 也在网络层之前拦截，
 // 只有真浏览器打真后端才会暴露）。
-const corsAllowHeaders = "Origin, Content-Type, Accept, Authorization, X-Request-ID, X-Qr-Poll-Secret"
+const corsAllowHeaders = "Origin, Content-Type, Accept, Authorization, X-Request-ID, X-Qr-Poll-Secret, X-YuanChat-Update-Cohort"
 
 // CORS 跨域中间件。
 //

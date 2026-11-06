@@ -147,6 +147,53 @@ func TestAdminReleases_RolloutOutOfRange400(t *testing.T) {
 	}
 }
 
+// TestAdminReleases_InvalidVersions400 版本和最低版本必须可解析，拒绝时不写版本或审计记录。
+func TestAdminReleases_InvalidVersions400(t *testing.T) {
+	db := packTestDB(t)
+	r, _ := newAdminReleaseRouter(t, db)
+	before := countAuditLogs(t, db)
+	for _, tc := range []struct{ version, minimum string }{
+		{"not-semver", ""},
+		{"1.2.3-01", ""},
+		{"1.2.3", "later"},
+		{"1.2.4", "1.2.3-01"},
+	} {
+		w, resp := doPackJSON(t, r, "POST", "/api/v1/admin/releases", map[string]any{
+			"platform": "linux", "arch": "x86_64", "version": tc.version,
+			"min_version": tc.minimum, "object_key": "releases/test", "rollout": 100,
+		})
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("version=%q min_version=%q status=%d，期望400，resp=%v", tc.version, tc.minimum, w.Code, resp)
+		}
+	}
+	var count int64
+	if err := db.Model(&model.AppRelease{}).Count(&count).Error; err != nil || count != 0 {
+		t.Errorf("非法版本不应落库: count=%d err=%v", count, err)
+	}
+	if countAuditLogs(t, db) != before {
+		t.Error("拒绝非法版本时不应写审计记录")
+	}
+}
+
+// TestAdminReleases_VersionCompatibility 保留短版本、v 前缀及标准预发布和构建元数据。
+func TestAdminReleases_VersionCompatibility(t *testing.T) {
+	db := packTestDB(t)
+	r, _ := newAdminReleaseRouter(t, db)
+	for _, version := range []string{"1", "v1.2", "1.2.3-rc.2+build.7"} {
+		w, resp := doPackJSON(t, r, "POST", "/api/v1/admin/releases", map[string]any{
+			"platform": "linux", "arch": "x86_64", "version": version,
+			"min_version": "v0.8", "object_key": "releases/test", "rollout": 100,
+		})
+		if w.Code != http.StatusOK {
+			t.Fatalf("兼容版本%q不应被拒绝: status=%d resp=%v", version, w.Code, resp)
+		}
+		data, _ := resp["data"].(map[string]any)
+		if data["version"] != version || data["min_version"] != "v0.8" {
+			t.Fatalf("版本身份不应被改写: resp=%v", resp)
+		}
+	}
+}
+
 // TestAdminReleases_DuplicateVersion409 重复登记同一版是运营误操作，
 // 要挡住而非产出两条互相覆盖的记录。
 func TestAdminReleases_DuplicateVersion409(t *testing.T) {

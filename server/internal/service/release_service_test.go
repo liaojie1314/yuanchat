@@ -81,6 +81,7 @@ func TestInRollout_MonotonicInRollout(t *testing.T) {
 // 版本比较
 // ========================================
 
+// TestCompareVersions 钉住更新检查使用的版本优先级。
 func TestCompareVersions(t *testing.T) {
 	cases := []struct {
 		a, b string
@@ -91,14 +92,19 @@ func TestCompareVersions(t *testing.T) {
 		{"0.8.0", "0.7.0", 1},
 		{"0.7.1", "0.7.0", 1},
 		{"1.0.0", "0.9.9", 1},
+		{"v1.0.0", "1.0.0", 0},
 		// 段数不等按缺位补 0：0.7 等价 0.7.0
 		{"0.7", "0.7.0", 0},
 		{"0.7", "0.7.1", -1},
 		// 两位数段不能按字典序比：10 > 9
 		{"0.10.0", "0.9.0", 1},
-		// 预发布后缀只影响后缀所在段的数字部分之后，整体按主段比
-		{"0.8.0-beta.1", "0.8.0", 0},
+		// 同号稳定版高于预发布，预发布编号必须按数值比较。
+		{"0.8.0-beta.1", "0.8.0", -1},
 		{"0.8.0-beta.1", "0.7.0", 1},
+		{"0.8.0-beta.2", "0.8.0-beta.11", -1},
+		{"0.8.0-beta.999999999999999999999", "0.8.0-beta.1000000000000000000000", -1},
+		{"0.8.0-1", "0.8.0-alpha", -1},
+		{"0.8.0+build.1", "0.8.0+build.2", 0},
 		// 垃圾输入当 0 处理，不 panic
 		{"", "0.0.0", 0},
 		{"abc", "0.0.1", -1},
@@ -155,12 +161,54 @@ func setMinVersion(t *testing.T, db *gorm.DB, id uuid.UUID, minVersion string) {
 	}
 }
 
+// TestResolve_CohortIndependentOfDeviceKey 匿名灰度桶直接按比例放量，不受设备键或换网影响。
+func TestResolve_CohortIndependentOfDeviceKey(t *testing.T) {
+	db := testDB(t)
+	svc := newTestReleaseService(t, db)
+	rel := seedRelease(t, db, "linux", "x86_64", "0.8.0", "stable", 50, model.ReleaseStatusPublished)
+	ctx := context.Background()
+	for _, rollout := range []int16{0, 50, 100} {
+		if err := db.Model(rel).Update("rollout", rollout).Error; err != nil {
+			t.Fatalf("更新灰度比例: %v", err)
+		}
+		for _, cohort := range []int{0, 49, 50, 99} {
+			for _, device := range []string{"203.0.113.1", "203.0.113.2"} {
+				got, err := svc.Resolve(ctx, "linux", "x86_64", "stable", "0.7.0", device, &cohort)
+				if err != nil {
+					t.Fatalf("Resolve: %v", err)
+				}
+				if (got != nil) != (cohort < int(rollout)) {
+					t.Errorf("cohort=%d rollout=%d device=%s，实际放量=%v", cohort, rollout, device, got != nil)
+				}
+			}
+		}
+	}
+}
+
+// TestResolve_InvalidCohortFallsBack 无效匿名桶保持既有设备键哈希语义。
+func TestResolve_InvalidCohortFallsBack(t *testing.T) {
+	db := testDB(t)
+	svc := newTestReleaseService(t, db)
+	seedRelease(t, db, "linux", "x86_64", "0.8.0", "stable", 50, model.ReleaseStatusPublished)
+	for _, cohort := range []int{-1, 100} {
+		for _, device := range []string{"203.0.113.1", "203.0.113.2"} {
+			got, err := svc.Resolve(context.Background(), "linux", "x86_64", "stable", "0.7.0", device, &cohort)
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if (got != nil) != InRollout(device, 50) {
+				t.Errorf("cohort=%d device=%s，无效桶改变了原有灰度结果", cohort, device)
+			}
+		}
+	}
+}
+
 func TestResolve_NoUpdateWhenAlreadyLatest(t *testing.T) {
 	db := testDB(t)
 	svc := newTestReleaseService(t, db)
 	seedRelease(t, db, "linux", "x86_64", "0.7.0", "stable", 100, model.ReleaseStatusPublished)
 
-	res, err := svc.Resolve(context.Background(), "linux", "x86_64", "stable", "0.7.0", "dev-1")
+	res, err := svc.Resolve(context.Background(), "linux", "x86_64", "stable", "0.7.0", "dev-1", nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -176,7 +224,7 @@ func TestResolve_SkipsDraftAndRolledBack(t *testing.T) {
 	seedRelease(t, db, "linux", "x86_64", "0.9.0", "stable", 100, model.ReleaseStatusRolledBack)
 	seedRelease(t, db, "linux", "x86_64", "0.7.0", "stable", 100, model.ReleaseStatusPublished)
 
-	res, err := svc.Resolve(context.Background(), "linux", "x86_64", "stable", "0.6.0", "dev-1")
+	res, err := svc.Resolve(context.Background(), "linux", "x86_64", "stable", "0.6.0", "dev-1", nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -195,7 +243,7 @@ func TestResolve_MandatoryWhenBelowMinVersion(t *testing.T) {
 	setMinVersion(t, db, r.ID, "0.7.0")
 	ctx := context.Background()
 
-	res, err := svc.Resolve(ctx, "linux", "x86_64", "stable", "0.6.0", "dev-1")
+	res, err := svc.Resolve(ctx, "linux", "x86_64", "stable", "0.6.0", "dev-1", nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -203,7 +251,7 @@ func TestResolve_MandatoryWhenBelowMinVersion(t *testing.T) {
 		t.Fatal("低于 min_version 必须判强制更新")
 	}
 
-	res, err = svc.Resolve(ctx, "linux", "x86_64", "stable", "0.7.5", "dev-1")
+	res, err = svc.Resolve(ctx, "linux", "x86_64", "stable", "0.7.5", "dev-1", nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -219,7 +267,7 @@ func TestResolve_RolloutZeroMeansPaused(t *testing.T) {
 	svc := newTestReleaseService(t, db)
 	seedRelease(t, db, "linux", "x86_64", "0.8.0", "stable", 0, model.ReleaseStatusPublished)
 
-	res, err := svc.Resolve(context.Background(), "linux", "x86_64", "stable", "0.7.0", "dev-1")
+	res, err := svc.Resolve(context.Background(), "linux", "x86_64", "stable", "0.7.0", "dev-1", nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -234,7 +282,7 @@ func TestResolve_ChannelIsolated(t *testing.T) {
 	svc := newTestReleaseService(t, db)
 	seedRelease(t, db, "linux", "x86_64", "0.9.0", "beta", 100, model.ReleaseStatusPublished)
 
-	res, err := svc.Resolve(context.Background(), "linux", "x86_64", "stable", "0.7.0", "dev-1")
+	res, err := svc.Resolve(context.Background(), "linux", "x86_64", "stable", "0.7.0", "dev-1", nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -248,7 +296,7 @@ func TestResolve_UnknownPlatformIsNoUpdate(t *testing.T) {
 	db := testDB(t)
 	svc := newTestReleaseService(t, db)
 
-	res, err := svc.Resolve(context.Background(), "solaris", "sparc", "stable", "0.1.0", "dev-1")
+	res, err := svc.Resolve(context.Background(), "solaris", "sparc", "stable", "0.1.0", "dev-1", nil)
 	if err != nil {
 		t.Fatalf("未知平台不该报错: %v", err)
 	}
@@ -281,5 +329,38 @@ func TestCatalogLatest_OnlyPublished(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("已发布的 windows 版本未出现在目录里: %+v", rows)
+	}
+}
+
+// TestSemVerPrecedence 标准预发布序列在升级与降级两个方向保持一致。
+func TestSemVerPrecedence(t *testing.T) {
+	versions := []string{"1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0"}
+	for i := 1; i < len(versions); i++ {
+		if compareVersions(versions[i-1], versions[i]) != -1 || compareVersions(versions[i], versions[i-1]) != 1 {
+			t.Errorf("优先级错误: %s < %s", versions[i-1], versions[i])
+		}
+	}
+}
+
+// TestResolve_PreReleaseUpgrade 预发布客户端可收到同号稳定版，不能被误判为最新。
+func TestResolve_PreReleaseUpgrade(t *testing.T) {
+	db := testDB(t)
+	svc := newTestReleaseService(t, db)
+	seedRelease(t, db, "linux", "x86_64", "0.8.0", "stable", 100, model.ReleaseStatusPublished)
+	got, err := svc.Resolve(context.Background(), "linux", "x86_64", "stable", "0.8.0-beta.2", "device", nil)
+	if err != nil || got == nil {
+		t.Fatalf("同号稳定版必须可升级: result=%v err=%v", got, err)
+	}
+}
+
+// TestResolve_PreReleaseBelowMinimum 稳定版最低要求不能被同号预发布版本绕过。
+func TestResolve_PreReleaseBelowMinimum(t *testing.T) {
+	db := testDB(t)
+	svc := newTestReleaseService(t, db)
+	rel := seedRelease(t, db, "linux", "x86_64", "0.9.0", "stable", 100, model.ReleaseStatusPublished)
+	setMinVersion(t, db, rel.ID, "0.8.0")
+	got, err := svc.Resolve(context.Background(), "linux", "x86_64", "stable", "0.8.0-rc.1", "device", nil)
+	if err != nil || got == nil || !got.Mandatory {
+		t.Fatalf("预发布必须低于稳定最低版本: result=%v err=%v", got, err)
 	}
 }

@@ -239,7 +239,7 @@ func (s *UserService) bumpLoginFailure(ctx context.Context, key string) {
 	}
 }
 
-// Login 用「手机号 / 邮箱 + 密码」认证用户并返回 JWT 令牌。
+// Login 用「邮箱 / 元聊号 + 密码」认证用户并返回 JWT 令牌。
 //
 // 连续失败达 loginFailMax 次的账号在 loginFailTTL 内一律拒绝，登录成功则清零计数。
 func (s *UserService) Login(ctx context.Context, req LoginRequest) (*AuthResult, error) {
@@ -247,9 +247,10 @@ func (s *UserService) Login(ctx context.Context, req LoginRequest) (*AuthResult,
 	// 攻击者换 IP 即可对同一账号无限撞密码。判断排在查库与密码校验之前——
 	// bcrypt 故意很慢，锁定期还去跑它等于替攻击者承担 CPU 开销。
 	failKey := loginFailKey(req.Account)
-	fails, err := s.rdb.Get(ctx, failKey).Int()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		return nil, fmt.Errorf("read login fail counter: %w", err)
+	// 计数键不存在是正常首登，不应把 redis.Nil 带入后面的用户查找分支。
+	fails, counterErr := s.rdb.Get(ctx, failKey).Int()
+	if counterErr != nil && !errors.Is(counterErr, redis.Nil) {
+		return nil, fmt.Errorf("read login fail counter: %w", counterErr)
 	}
 	if fails >= loginFailMax {
 		s.logger.Warn("账号连续登录失败已达上限，拒绝登录", zap.Int("fails", fails))
@@ -259,6 +260,7 @@ func (s *UserService) Login(ctx context.Context, req LoginRequest) (*AuthResult,
 	// 按邮箱或元聊号查用户。手机号已彻底移除（见迁移 021）：
 	// 含 @ 即邮箱，否则按元聊号解析 —— 登录框标的就是「邮箱 / 元聊号」。
 	var user *model.User
+	var err error
 
 	if strings.Contains(req.Account, "@") {
 		user, err = s.repo.FindByEmail(ctx, req.Account)

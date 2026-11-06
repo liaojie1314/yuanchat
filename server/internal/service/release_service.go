@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
-	"strconv"
 	"strings"
 
 	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/repository"
 	"go.uber.org/zap"
+	"golang.org/x/mod/semver"
 )
 
 // ReleaseService 把版本表读写包成「该不该给这台设备下发更新」这一个判断。
@@ -53,61 +53,21 @@ func InRollout(deviceKey string, rollout int) bool {
 	return int(h.Sum32()%100) < rollout
 }
 
-// compareVersions 比较两个版本号，返回 -1 / 0 / 1。
+// compareVersions 按 SemVer 比较优先级，返回 -1 / 0 / 1。
 //
-// 自己写而不引 semver 库：本仓的 go.sum 里没有任何 semver 包，为三行比较
-// 新增一个直接依赖不值当。规则刻意从简：
-//
-//   - 逐段按十进制整数比，段数不等按缺位补 0（故 "0.7" 等价 "0.7.0"）
-//   - 预发布/构建后缀整段丢掉（"0.8.0-beta.1" 按 0.8.0 比）——
-//     预发布版本只走 beta 渠道，渠道本身已经把它和 stable 隔开了，
-//     不需要再在版本号层面区分 pre-release 的先后。
-//     必须在分段**之前**截断：否则 "-beta.1" 里的点会多切出一段，
-//     把 0.8.0-beta.1 比成「比 0.8.0 大」
-//   - 解析不出数字的段当 0，不报错不 panic：版本号是运营手填的，
-//     一个错字不该让整条更新检查 500
+// 保留 v 前缀与短版本兼容，预发布低于同号稳定版，构建元数据不影响排序。
+// 非法输入按 0.0.0 处理，不能让客户端版本错字导致更新检查返回 500。
 func compareVersions(a, b string) int {
-	as, bs := strings.Split(trimVersionSuffix(a), "."), strings.Split(trimVersionSuffix(b), ".")
-	n := len(as)
-	if len(bs) > n {
-		n = len(bs)
-	}
-	for i := 0; i < n; i++ {
-		x, y := versionSegment(as, i), versionSegment(bs, i)
-		if x != y {
-			if x < y {
-				return -1
-			}
-			return 1
-		}
-	}
-	return 0
+	return semver.Compare(normalizeVersion(a), normalizeVersion(b))
 }
 
-// trimVersionSuffix 砍掉 semver 的预发布（-）与构建元数据（+）后缀。
-func trimVersionSuffix(v string) string {
-	if i := strings.IndexAny(v, "-+"); i >= 0 {
-		return v[:i]
+// normalizeVersion 补齐 SemVer 包要求的 v 前缀；非法版本保守回落到零版本。
+func normalizeVersion(v string) string {
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
 	}
-	return v
-}
-
-// versionSegment 取第 i 段的数字值；越界或非数字前缀为空时返回 0。
-func versionSegment(parts []string, i int) int {
-	if i >= len(parts) {
-		return 0
-	}
-	s := parts[i]
-	end := 0
-	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
-		end++
-	}
-	if end == 0 {
-		return 0
-	}
-	v, err := strconv.Atoi(s[:end])
-	if err != nil {
-		return 0
+	if !semver.IsValid(v) {
+		return "v0.0.0"
 	}
 	return v
 }
@@ -118,11 +78,13 @@ func versionSegment(parts []string, i int) int {
 // 客户端版本不低于最新版、灰度未命中。它们对客户端是同一件事 ——
 // 「我确定你现在没有可装的更新」。
 //
-// deviceKey 必须由调用方保证同一台机器稳定（handler 优先取 device 查询参数，
-// 缺失时回落 ClientIP），否则灰度判定会在请求之间抖动。
+// cohort 为 0..99 的匿名桶时直接按桶 < rollout 放量；nil 或非法值保留 deviceKey 哈希语义。
+// deviceKey 必须由调用方保证稳定，handler 显式 device 查询优先于匿名桶，最后回落 ClientIP。
+// 匿名桶可由客户端伪造，只作放量、不参与鉴权。
 func (s *ReleaseService) Resolve(
 	ctx context.Context,
 	platform, arch, channel, currentVersion, deviceKey string,
+	cohort *int,
 ) (*ResolveResult, error) {
 	if channel == "" {
 		channel = model.ReleaseChannelStable
@@ -142,7 +104,11 @@ func (s *ReleaseService) Resolve(
 		return nil, nil
 	}
 
-	if !InRollout(deviceKey, int(rel.Rollout)) {
+	inRollout := InRollout(deviceKey, int(rel.Rollout))
+	if cohort != nil && *cohort >= 0 && *cohort < 100 {
+		inRollout = *cohort < int(rel.Rollout)
+	}
+	if !inRollout {
 		return nil, nil
 	}
 

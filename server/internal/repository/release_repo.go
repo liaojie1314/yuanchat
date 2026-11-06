@@ -27,6 +27,7 @@ func NewReleaseRepository(db *gorm.DB) *ReleaseRepository {
 }
 
 // LatestPublished 取某平台/架构/渠道下最新已发布的版本；没有则返回 (nil, nil)。
+// macOS 的 x86_64/aarch64 优先精确包，仅未命中时回落 universal；其他平台不回落。
 //
 // 排序用 published_at DESC 而不是 version DESC：版本号是字符串，
 // 字典序会把 0.9.0 排在 0.10.0 之后。发布时间才是单调的，
@@ -43,6 +44,10 @@ func (r *ReleaseRepository) LatestPublished(
 		Order("published_at DESC").
 		First(&rel).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// 通用包只兼容 macOS 双架构；换成 universal 后不再满足条件，最多回落一次。
+		if platform == "darwin" && (arch == "x86_64" || arch == "aarch64") {
+			return r.LatestPublished(ctx, platform, "universal", channel)
+		}
 		return nil, nil
 	}
 	if err != nil {

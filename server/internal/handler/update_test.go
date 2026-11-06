@@ -280,6 +280,58 @@ func TestCatalog_EmptyIsEmptyArrayNotNull(t *testing.T) {
 	}
 }
 
+// TestUpdates_CohortHeaderStableAcrossIPs 有效匿名桶独立于 IP；非法桶回落 IP，显式 device 优先。
+func TestUpdates_CohortHeaderStableAcrossIPs(t *testing.T) {
+	db := packTestDB(t)
+	rel := seedRel(t, db, model.AppRelease{
+		Platform: "linux", Arch: "x86_64", Version: "0.8.0",
+		Status: model.ReleaseStatusPublished, Rollout: 50, Signature: "sig",
+	})
+	r := newUpdateEngine(db, &stubPresigner{url: "https://cdn.example/app"})
+	const target = "/api/v1/updates/linux/x86_64?version=0.7.0"
+	check := func(ip, header, device string, want int) {
+		t.Helper()
+		url := target
+		if device != "" {
+			url += "&device=" + device
+		}
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		req.RemoteAddr = ip + ":12345"
+		req.Header.Set("X-YuanChat-Update-Cohort", header)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != want {
+			t.Errorf("ip=%s cohort=%q device=%q：status=%d，期望 %d", ip, header, device, w.Code, want)
+		}
+	}
+	// 这两个 IP 的旧哈希桶分别是 50 与 31，作为相反的旧路径对照。
+	for _, ip := range []string{"203.0.113.1", "203.0.113.2"} {
+		check(ip, "0", "", http.StatusOK)
+		check(ip, "49", "", http.StatusOK)
+		check(ip, "50", "", http.StatusNoContent)
+		check(ip, "99", "", http.StatusNoContent)
+		check(ip, "99", "device-fixed", http.StatusOK)
+		check(ip, "0", "device-1", http.StatusNoContent)
+	}
+	for _, header := range []string{"", "-1", "100", "abc", "1.5", "+1", " 1", "999999999999999999999999999"} {
+		check("203.0.113.1", header, "", http.StatusNoContent)
+		check("203.0.113.2", header, "", http.StatusOK)
+	}
+	for _, rollout := range []int16{0, 100} {
+		if err := db.Model(rel).Update("rollout", rollout).Error; err != nil {
+			t.Fatalf("更新灰度比例: %v", err)
+		}
+		want := http.StatusNoContent
+		if rollout == 100 {
+			want = http.StatusOK
+		}
+		for _, ip := range []string{"203.0.113.1", "203.0.113.2"} {
+			check(ip, "0", "", want)
+			check(ip, "99", "", want)
+		}
+	}
+}
+
 // TestUpdates_503WhenStorageUnavailable st 为 nil（MinIO 不可达）时降级 503。
 //
 // 刻意不降级成 204：204 会让 Tauri updater 直接认定「确定没有更新」从此不问

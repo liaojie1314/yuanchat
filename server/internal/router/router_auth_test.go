@@ -330,3 +330,20 @@ func TestLoginLocksAccountAfterFiveFailures(t *testing.T) {
 		t.Fatalf("message = %q, want auth.accountLocked", locked.Message)
 	}
 }
+
+// TestLoginMalformedAccountReturns401Then429 真实路由须把非法账号视为凭据错误，并执行账号级锁定。
+func TestLoginMalformedAccountReturns401Then429(t *testing.T) {
+	rdb, _ := testutil.NewRedis(t)
+	// 当前登录路由没有图形验证码中间件；真实 Setup 接线而非复刻 handler 链路。
+	r, _ := Setup(nil, rdb, nil, authTestConfig(), zap.NewNop(), &recordingSender{})
+	for i := 1; i <= 6; i++ {
+		w := postJSON(r, "/api/v1/auth/login", `{"account":"not-an-account","password":"Wrongpass99"}`)
+		want := http.StatusUnauthorized
+		if i == 6 {
+			want = http.StatusTooManyRequests
+		}
+		if w.Code != want {
+			t.Fatalf("第 %d 次 status=%d，期望 %d，body=%s", i, w.Code, want, w.Body.String())
+		}
+	}
+}

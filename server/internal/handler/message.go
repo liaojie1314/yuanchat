@@ -405,7 +405,7 @@ var searchTypeNames = map[string]int16{
 //	@Summary		搜索消息
 //	@Tags			chat
 //	@Security		BearerAuth
-//	@Param			q				query	string	true	"搜索关键词（至少 3 字）"
+//	@Param			q				query	string	true	"搜索关键词（去除首尾空白后非空）"
 //	@Param			conversation_id	query	string	false	"限定在该会话内搜索"
 //	@Param			types			query	string	false	"类型过滤（逗号分隔：text,image,file,voice,video,sticker）"
 //	@Param			before			query	string	false	"分页游标（RFC3339）"
@@ -455,8 +455,8 @@ func (h *MessageHandler) Search(c *gin.Context) {
 	)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrSearchQueryTooShort):
-			BadRequest(c, "search query must be at least 3 characters")
+		case errors.Is(err, service.ErrSearchQueryEmpty):
+			BadRequest(c, "q is required")
 		default:
 			h.logger.Error("message search failed", zap.Error(err))
 			InternalError(c, "search failed")

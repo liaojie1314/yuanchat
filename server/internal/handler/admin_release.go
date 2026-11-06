@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -11,6 +12,7 @@ import (
 	"github.com/yuanchat/server/internal/repository"
 	"github.com/yuanchat/server/internal/service"
 	"go.uber.org/zap"
+	"golang.org/x/mod/semver"
 )
 
 // registerAdminReleaseRoutes 把版本分发五端点挂到 admin 组上。
@@ -104,6 +106,13 @@ func (h *AdminHandler) CreateRelease(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, err.Error())
 		return
+	}
+	// 两个版本字段都必须可解析，保留短版本与 v 前缀，避免错误登记后永远不能下发。
+	for _, version := range []string{req.Version, req.MinVersion} {
+		if version != "" && !semver.IsValid("v"+strings.TrimPrefix(version, "v")) {
+			BadRequest(c, "invalid release version")
+			return
+		}
 	}
 
 	// 缺省灰度取 100：登记完还要显式点一次「发布」才会下发，

@@ -18,8 +18,8 @@ import (
 // ErrNotMember 用户不是会话成员。
 var ErrNotMember = errors.New("not a conversation member")
 
-// ErrSearchQueryTooShort 搜索关键词少于 3 个字符。
-var ErrSearchQueryTooShort = errors.New("search query too short")
+// ErrSearchQueryEmpty 去除首尾空白后搜索词为空。
+var ErrSearchQueryEmpty = errors.New("q is required")
 
 // 撤回相关错误。
 var (
@@ -748,8 +748,9 @@ func (s *MessageService) Search(
 	beforeStr string,
 	limit int,
 ) ([]MessageSearchResult, bool, error) {
-	if len([]rune(query)) < 3 {
-		return nil, false, ErrSearchQueryTooShort
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, false, ErrSearchQueryEmpty
 	}
 	if limit <= 0 || limit > 50 {
 		limit = 20

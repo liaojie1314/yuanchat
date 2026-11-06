@@ -554,15 +554,21 @@ E2EE 密文服务端无法解读其对象键。
 消息全文搜索（全局 + 会话内）。基于 PostgreSQL `pg_trgm` GIN 索引：
 `idx_messages_text_trgm`（`content->>'text'`，迁移 003）与 `idx_messages_name_trgm`
 （`content->>'name'`，迁移 022），后者把检索范围扩展到图片/文件/视频的原始文件名。
-只命中当前用户有权访问的会话，并遵循本人「清空聊天记录」水位。IP 限流 20/40。
+只命中当前用户有权访问的会话，并遵循本人「清空聊天记录」水位：全局/会话内搜索及
+`types` 筛选统一限制 `m.seq > cm.cleared_before_seq`，旧正文和旧文件名都不再命中，
+其他成员的搜索不受影响；软删消息与已解散（软删）会话同样排除。IP 限流 20/40。
 
-| Query 参数        | 说明                                                                                   |
-| ----------------- | -------------------------------------------------------------------------------------- |
-| `q`               | 搜索关键词，必填，至少 3 字符（否则 `400 search query must be at least 3 characters`） |
-| `conversation_id` | 选填，限定在该会话内搜索                                                               |
-| `types`           | 选填，逗号分隔的类型名：`text,image,file,voice,video,sticker`；空 = 不过滤             |
-| `before`          | 选填，分页游标（RFC3339）                                                              |
-| `limit`           | 每页条数，默认 20                                                                      |
+| Query 参数        | 说明                                                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `q`               | 搜索关键词，去除首尾空白后须非空，否则 `400 q is required`；无最低字数限制，支持单字、单个 emoji，`%` / `_` 按字面量匹配 |
+| `conversation_id` | 选填，限定在该会话内搜索                                                                                                 |
+| `types`           | 选填，逗号分隔的类型名：`text,image,file,voice,video,sticker`；空 = 不过滤                                               |
+| `before`          | 选填，分页游标（RFC3339）                                                                                                |
+| `limit`           | 每页条数，默认 20                                                                                                        |
+
+单个汉字、英文字母或 emoji 均可检索；空白输入在客户端保留快捷动作，在接口返回 `400 q is required`。
+短词不保证能由 trigram 索引缩小范围，可能沿时间/会话索引扫描候选记录；`limit` 限制返回条数，不限制扫描量。
+2026-11-05 本机独立 PostgreSQL 测试库（5 万条消息、单个可见会话、每页 20 条）中，单字/双字中文、emoji 与字面量 `%` / `_` 的查询均值约 10–13ms，未命中查询约 24–27ms；这是当前样本的测量，不作为更大库或冷缓存的延迟保证。
 
 ```json
 {
@@ -887,8 +893,8 @@ E2EE 密文服务端无法解读其对象键。
 `avatars/` 前缀直接放行（桶策略本就是匿名公共读，签与不签都能取）；**其余前缀逐个校验归属**，
 命中任一条即放行，否则 `403`（`object not accessible`）：
 
-1. 该 key 出现在某条**未撤回**消息的 `content.key` **或 `content.thumb_key`** 里
-   （后者是视频消息的缩略图，K6 起），且请求者是该会话成员，
+1. 该 key 出现在某条**未撤回且未软删**消息的 `content.key` **或 `content.thumb_key`** 里
+   （后者是视频消息的缩略图，K6 起），会话未解散（软删），且请求者是该会话成员，
    且该消息未被请求者自己的「清空聊天记录」水位过滤；
 2. 该 key 属于请求者的**收藏贴纸**，或属于一个**当前可用的表情包**：包未下架
    （`taken_down=false`）、未被敏感词打标（`flagged=false`），且为官方包
@@ -898,6 +904,7 @@ E2EE 密文服务端无法解读其对象键。
 
 - **撤回即撤销**：撤回把 `content` 置 `{}`，key（含视频 `thumb_key`）随之从判定中消失，此后签不出新 URL。
 - **清空即对本人撤销**：本人水位推进后本人失效，其他成员不受影响。
+- **软删即停止重新签名**：删除消息或解散会话后，该引用不能再取得新 URL；其他有效引用仍独立判定。
 - **退群/被踢即失效**：不再是会话成员 → 该会话的媒体一律签不出（本地已缓存的图不受影响）。
 - 已签发的 URL **无法追回**，因此 TTL 从 24h 收到 **2h**——TTL 就是撤销的最坏延迟。
 - 授权判定失败（查库出错）→ `500`；服务端漏接线（未注入 ACL）→ `500` 而非放行（fail closed）。
@@ -911,8 +918,9 @@ E2EE 密文服务端无法解读其对象键。
 > 换取零签名开销与可长期缓存。
 >
 > **对象字节的回收**独立于本授权模型：业务路径从不删对象（撤回只清 content、清空只推水位、
-> 删贴纸只删表行），由离线作业 `go run ./cmd/gc` 回收「宽限期外且无人引用」的对象，
-> 见 `docs/DEVELOPMENT.md` 的「对象存储 GC」。
+> 删贴纸只删表行），由离线作业 `go run ./cmd/gc` 回收「宽限期外且无人引用」的对象。
+> `app_releases.object_key` 也计入引用：草稿、已发布、回滚版本只要仍登记都保留安装包，
+> 避免回滚后再次发布时对象已被回收。见 `docs/DEVELOPMENT.md` 的「对象存储 GC」。
 
 ### GET /api/v1/sticker-packs（v0.4 H1）
 
@@ -1238,8 +1246,9 @@ friend_requests_week, otp_today, otp_week}, "runtime": {online_connections}}`。
 - `GET /api/v1/admin/releases?platform=&channel=&status=&page=&size=` — 分页检索
   版本记录。`status` ∈ `draft|published|rolled_back`。只读，不写审计。
 - `POST /api/v1/admin/releases` — 登记新版本（`status=draft`）：body 含
-  `platform/arch/version/channel?/notes/object_key/sha256/size/min_version?/mandatory?/rollout?`。
-  重复登记 → `409`。审计 action=`create_release`。
+  `platform/arch/version/channel?/notes/object_key/signature?/sha256?/size/min_version?/mandatory?/rollout?`。
+  `version` 与非空 `min_version` 必须是合法 SemVer（兼容短版本与 `v` 前缀），非法返回
+  `400` 且不落库；重复登记 → `409`。审计 action=`create_release`。
 - `PATCH /api/v1/admin/releases/:id` — 调整 `rollout`（0-100 灰度，0 = 暂停下发）/
   `mandatory` / `notes`。平台/架构/版本号/对象键刻意不可改（改它们等于换一条记录，
   该走「新建 + 回滚旧的」）。审计 action=`update_release`。
@@ -1417,13 +1426,26 @@ friend_requests_week, otp_today, otp_week}, "runtime": {online_connections}}`。
 
 检查更新（桌面 Tauri updater 与安卓自建更新链路共用）。
 
-| 参数       | 位置  | 说明                                                                   |
-| ---------- | ----- | ---------------------------------------------------------------------- |
-| `platform` | path  | `darwin` / `linux` / `windows` / `android`                             |
-| `arch`     | path  | `x86_64` / `aarch64` / `universal` / …                                 |
-| `version`  | query | 客户端当前版本（必填）                                                 |
-| `channel`  | query | `stable`（默认）/ `beta`                                               |
-| `device`   | query | 设备标识，用于稳定灰度判定；缺失回落 ClientIP（换网会变，弱于 device） |
+| 参数                       | 位置   | 说明                                                               |
+| -------------------------- | ------ | ------------------------------------------------------------------ |
+| `platform`                 | path   | `darwin` / `linux` / `windows` / `android`                         |
+| `arch`                     | path   | `x86_64` / `aarch64` / `universal` / …                             |
+| `version`                  | query  | 客户端当前版本（必填）                                             |
+| `channel`                  | query  | `stable`（默认）/ `beta`                                           |
+| `device`                   | query  | 显式设备标识，优先于匿名桶头；按 FNV-1a 32 位哈希取模 100 判定灰度 |
+| `X-YuanChat-Update-Cohort` | header | 可选匿名灰度桶，十进制整数 `0..99`；仅无显式 `device` 时使用       |
+
+- 灰度优先级：非空 `device` 查询参数 → 有效匿名桶头 → ClientIP 的 FNV-1a 哈希桶。
+  匿名桶以 `bucket < rollout` 放量，换网不改变结果；客户端同样使用 UTF-8 编码后的
+  FNV-1a 32 位哈希 `% 100` 计算桶，只传桶而非设备唯一标识。非法桶（越界、负数、
+  非整数等）沿用 IP 路径；`rollout=0` 全部暂停，`rollout=100` 全部放量。
+  **匿名桶仅作放量，不作鉴权**：客户端可以自选桶，更新端点仍免 JWT，并保留 IP 限流。
+- macOS（`darwin`）的 `x86_64` / `aarch64` 请求优先选精确架构已发布包，仅不存在时
+  回落同渠道 `universal` 已发布包；其他平台及未知架构不回落。精确包即使发布时间
+  比通用包早也优先，草稿与回滚记录都不下发。
+- 当前版本与候选版本、最低版本均按 SemVer 优先级比较：预发布低于同号稳定版，
+  数字预发布标识按数值比较，构建元数据不影响顺序。客户端非法版本按 `0.0.0` 处理；
+  管理端登记仍严格拒绝非法版本。
 
 - **无更新 / 未中灰度 / 未知平台一律 `204` 空体**。返 200 带同版本号会让 updater
   当成有更新、把同一个包再装一遍；204 的语义就是「确定没有」。
@@ -1473,7 +1495,7 @@ friend_requests_week, otp_today, otp_week}, "runtime": {online_connections}}`。
 ```
 
 - `items` 为空时是 `[]` 而非 `null`（服务端显式保证，前端空态靠它渲染）。
-- 单条预签名失败只跳过该条，不让整页 500——下载页有五端包，一个对象缺失不该把其余的也藏起来。
+- 单条预签名失败只跳过该条，不让整页 500；一个对象缺失不应隐藏其他平台/架构的包。
 
 ## 四、seq 与已读机制
 
