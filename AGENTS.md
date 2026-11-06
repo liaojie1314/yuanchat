@@ -18,7 +18,7 @@
 10. **JSDoc/注释**：所有导出函数/组件/Store/Hook 必须写 JSDoc。Go 所有导出函数/包必须写 godoc。关键并发/事务/错误分支必须注释。先写注释再写代码。
 11. **浏览器/WebView 兼容适配**：前端代码必须兼容低版本 WebView。`vite.config.ts` 的 `build.target` 须为 `es2019`（转译 `?.`/`??` 等 ES2020+ 语法），不得使用 `chrome105`/`es2020`，否则旧 Android System WebView（如 Chrome 74）解析期 SyntaxError → 白屏。新增 JS 语法/Web API 前须确认目标 WebView 支持，或确保已被转译/polyfill。详见 `docs/DEVELOPMENT.md`、`docs/TROUBLESHOOTING.md`。
 12. **i18n 国际化适配**：所有用户可见文案**禁止硬编码**，必须通过 `react-i18next`（`useTranslation` / `t()`）引用，并在 `packages/design-system/src/i18n/locales/`（`zh-CN`、`en-US`、`ja-JP`、`ko-KR`）补齐对应 key。新增/修改 UI 文案时必须同步维护四种语言的翻译条目，`node scripts/check-i18n.mjs`（CI 门禁）会挡下漏翻、写错 key 与死键。
-13. **推送前本地 CI 门禁**：推送到远程 `dev` 之前，必须先在本地跑通 CI 的全部检查并全绿，禁止「先推上去让 CI 跑」。CI 实际执行的是 `node scripts/check-i18n.mjs`、`pnpm test`、`apps/web` 与 `apps/desktop` 各自的 `npx tsc --noEmit`、`pnpm --filter @yuanchat/web test:e2e`（Playwright chromium），以及 `server/` 下的 `go vet ./...`、`go test ./...`、`go test -race ./internal/ws/`。本地跑前端测试必须把语言环境对齐 runner（`LANG=C.UTF-8 pnpm test`，runner 没有中文 locale）—— Node 21 起 `navigator.language` 取自宿主 ICU 语言环境，中文机器上报 `zh-CN`、runner 上报 `en-US`，依赖它的用例会「本地全绿、远程报错」。理由：CI 失败要等远程跑完才知道，而失败的 commit 已经落在共享分支上，别人拉下来就是坏的。
+13. **推送前本地 CI 门禁**：推送到远程 `dev` 之前，必须先在本地跑通 CI 的全部检查并全绿，禁止「先推上去让 CI 跑」。CI 实际执行的是 `node scripts/check-i18n.mjs`、`pnpm test`、`pnpm test:coverage`、`apps/web` 与 `apps/desktop` 各自的 `npx tsc --noEmit`、`pnpm --filter @yuanchat/web test:e2e`（Playwright chromium），以及 `server/` 下的 `go vet ./...`、`go test ./... -coverprofile=coverage.out -covermode=atomic`、`go test -race ./internal/ws/`；后端覆盖率用根目录的 `node scripts/check-coverage.mjs 40 server/coverage.out` 校验。本地跑前端测试与覆盖率必须把语言环境对齐 runner（`LANG=C.UTF-8 pnpm test` / `LANG=C.UTF-8 pnpm test:coverage`，runner 没有中文 locale）—— Node 21 起 `navigator.language` 取自宿主 ICU 语言环境，中文机器上报 `zh-CN`、runner 上报 `en-US`，依赖它的用例会「本地全绿、远程报错」。理由：CI 失败要等远程跑完才知道，而失败的 commit 已经落在共享分支上，别人拉下来就是坏的。
 14. **发版前本地打包门禁**：打 tag / 触发 release 之前，必须先在本地完整打包一遍并成功 —— `pnpm build:pkg`（web + tsc + tauri build）与 Android aarch64 APK 构建。理由：release 流水线跨 macOS/Windows/Linux/Android 多个 runner，任一平台失败整条发版作废，还可能留下半个 GitHub Release。
 
 ## 技术栈速查
@@ -38,6 +38,10 @@
 
 已实现的能力（代码路径与协议细节见 `docs/CHAT_API.md`、`docs/ARCHITECTURE.md`）：
 
+本批续接状态（2026-11-05）：搜索/下载/托盘/OTA 的修订已落代码，真实三端验收与最终 CI
+仍在进行；见 `docs/superpowers/plans/2026-10-11-tray-palette-ota.md`。合 `dev` 前须当次询问，
+当前尚未合并、推送、合 `main`、打 tag 或发版。
+
 - 认证：注册/登录（邮箱/元聊号 + 密码 + SVG 验证码）、JWT 双 Token、
   token 静默刷新（滑动会话轮换 + 401 兜底重试，`api/tokenManager.ts`）
 - 聊天核心闭环：会话列表、文本消息 WebSocket 实时收发、已读回执、
@@ -46,9 +50,10 @@
   同意/拒绝 → 同意即原子建单聊 + 打招呼消息 → 字母分组好友列表
   （`ContactsScreen.tsx` 三端编排）；删好友（双向软删，幂等）+ 黑名单
   （单聊发送拦截 403 `BLOCKED`，群聊不受影响）
-- 三端响应式聊天主界面（`packages/ui/src/ChatScreen.tsx` 编排）
+- 三端响应式聊天主界面（`packages/ui/src/chat/ChatScreen.tsx` 编排）
 - 设置页 / 个人资料：昵称/签名/性别编辑 + 头像上传（512px 中心裁方 → MinIO
-  `avatars/` 公开 URL，落库持久化，`PUT /users/me`）
+  `avatars/` 公开 URL，落库持久化，`PUT /users/me`）；「通用设置」集中主题、语言、
+  文件下载目录与搜索快捷键，目录卡复用 `Button` 并显示目录名/授权状态
 - 群聊：好友多选建群（校验全员互为好友）→ 系统消息 + `conversation.created` 实时推送；
   群管理改名 / 邀请 / 踢人 / 退群 / 解散（软删）；任命与撤销管理员、转让群主
   （`conversation.role_changed` 帧推群内全员）；群公告、群内昵称、清空聊天记录
@@ -68,12 +73,17 @@
 - 消息搜索：全局 + 会话内，`GET /messages/search`，PostgreSQL `pg_trgm` GIN 索引
   （文本 + 文件名两条 trgm 索引，迁移 003/022），`types` 类型过滤（未知类型 400），
   只命中当前用户有权访问的会话
-- 命令面板：Ctrl+K（`CommandPalette`，替代已删除的 SearchModal）；空输入 =
+- 命令面板：默认 Ctrl/Cmd+K（`CommandPalette`，替代已删除的 SearchModal）；空输入 =
   动作注册表 + 最近会话，有输入 = 联系人/群聊/消息/文件与媒体四分组 +
-  类型筛选 + 40×40 媒体缩略图骨架占位；桌面 720×560 大面板
-- 应用内下载：`downloadStore` + `fileSink` 注入抽象（Web `<a download>`；
+  类型筛选 + 40×40 媒体缩略图骨架占位；桌面全局面板为主窗内弹窗，仅会话内搜索使用
+  独立窗口；手机走 `/search` 路由页、Web 大屏为弹窗。会话内始终带 `conversation_id`；自定义搜索组合在
+  `shortcutStore` 本机持久化，保留系统/编辑键，IME 选字不触发结果。搜索子窗不建 WS，
+  登出/换号关闭旧窗，主窗拒绝旧账号迟到导航
+- 应用内下载：`downloadStore` + `fileSink` 注入抽象（Web 优先写用户授权目录；
   桌面/安卓 plugin-fs 落盘，安卓落 app 私有 external 目录零权限、卸载即删）；
-  文件气泡下方确定性进度条、按钮按阶段分流（下载/取消/重试/打开）；
+  Web 目录句柄存独立 IDB，需安全上下文 + File System Access + Web Locks；写入并 close
+  后才完成，失权提示到「设置 → 通用设置 → 文件下载」重新授权。未设置/不支持时交浏览器
+  保存，取消（含加载目录偏好期间）不得触发保存；文件气泡显示进度与下载/取消/重试/打开；
   `open_local_file` 把路径卡在应用自有目录内；outbox 发送前落 appdata 磁盘副本、
   重试从磁盘读、ack 即删（收掉「安卓重启后 blob 失效」债）
 - Presence 在线状态：Hub 首连/末连回调 → 广播给在线好友；`GET /presence` 快照
@@ -97,7 +107,8 @@
   GitHub latest.json 兜底在后；Android 自建自动更新（sha256 校验不过即删文件拒装，
   install_apk 走 FileProvider）
 - Web 下载入口：侧栏（桌面 web）+ 设置页（手机 web）的 DownloadPanel，
-  按 userAgentData/UA 识别平台高亮推荐包，走 `/updates/catalog`，
+  按 userAgentData/UA 识别系统与架构推荐包，走 `/updates/catalog`；「当前系统 / 其他平台」
+  紧凑行完整展示四个平台，无包保留不可用行，列表内部滚动；
   空态给 GitHub Releases 兜底链接
 - 语音/视频通话：信令走 WS 8 帧，房间态存 Redis，服务端不碰媒体字节；mesh 全连接、
   房间上限 4 人；TURN 走 coturn + HMAC 临时凭据（`GET /calls/ice-servers`）。

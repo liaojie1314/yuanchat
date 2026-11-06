@@ -4,13 +4,73 @@
 
 **Goal:** 在一个分支上交付六条工作流 —— 手机号完全移除、应用内文件下载进度条、命令面板与搜索重做、桌面托盘与系统未读角标、自建 OTA 分发（含 Android 自动更新）、Web 端下载入口。
 
-**Architecture:** 共用件先立后用。Stage B 的下载器（`downloadStore` + `fileSink` 注入抽象 + Rust `open_local_file`）同时被 Stage E 的 Android OTA 与 Stage F 的下载页消费，所以排在前面；Stage A（手机号移除）与其余工作流零耦合，排第一以便早早把破坏性变更合进去。前端新代码一律落在 `packages/shared` / `packages/ui` 的领域子目录里，三端 app 只做注入与接线。
+**Architecture:** 共用件先立后用。Stage B 的下载器（`downloadStore` + `fileSink` 注入抽象 + Rust `open_local_file`）被 Stage E 的 Android OTA 复用；Stage F 查询 catalog 后直接交浏览器下载安装包。Stage A（手机号移除）与其余工作流零耦合。前端新代码一律落在 `packages/shared` / `packages/ui` 的领域子目录里，三端 app 只做注入与接线。
 
-**Tech Stack:** Go 1.22（Gin + GORM + goose 迁移）、PostgreSQL 16（`pg_trgm`）、React 19 + TypeScript + Zustand、Tauri 2.11.2（`@tauri-apps/api` 的 tray / window / image + `plugin-fs`）、react-i18next、Vitest、Playwright。
+**Tech Stack:** Go 1.25.7（Gin + GORM + goose 迁移）、PostgreSQL 16（`pg_trgm`）、React 19 + TypeScript + Zustand、Tauri 2.11.2（`@tauri-apps/api` 的 tray / window / image + `plugin-fs`）、react-i18next、Vitest、Playwright。
 
 **Spec:** [`docs/superpowers/specs/2026-10-11-tray-palette-ota-design.md`](../specs/2026-10-11-tray-palette-ota-design.md)
 
 ## 执行进度
+
+### 2026-11-06 当前状态：继续验收与文档收尾
+
+- 桌面全局 Ctrl/Cmd+K 命令面板在主窗口内弹出，仅会话内搜索开独立窗口；手机仍走
+  `/search`，Web 大屏使用弹窗。本文下方原任务代码与旧进度仅作历史记录，以本段和 spec
+  §1.2 / §4.4 的最新入口分工为准。
+- fresh Linux Tauri 已复核暗色首次开会话搜索、已有窗 light/dark 同步、全窗背景和
+  会话范围切换；相关回归 19 / 19 通过。移除临时诊断后再次完整重启并确认主题正常。
+  上轮主题异常未复现；HMR 曾未重新执行已挂载 effect，只能作为候选原因，不能认定
+  历史根因。证据在本地 `.superpowers/sdd/2026-10-11-tray-palette-ota/theme-fix-20261106/REPORT.md`。
+- 桌面下载正按用户最新意见补齐：可选择/持久化/恢复默认目录，完成后打开所在文件夹，
+  本地文件删除后再次点击重新下载；Android 保持私有目录和系统打开文件，Web 仍可重复
+  下载。新下载行为仍待真实复验，不能标记全批完成。
+- README 保留既有图片，统一同端展示宽度与原始比例，已加入 Web 命令面板/通用设置/
+  文件下载/客户端下载、管理端版本分发及 Linux 会话内搜索图；桌面通用设置与 Android
+  新图仍待补齐。其余真实验收、最终 CI 和文档最终结果继续回填。
+- 本批尚未提交、合并、推送、打 tag 或发版；全绿后合 `dev` 仍须当次确认。
+
+### 2026-11-05 历史暂停快照
+
+用户最新确认：**桌面全局命令面板使用主窗口内弹窗，只有会话内搜索使用独立窗口**；
+手机继续使用 `/search` 路由。该约定覆盖下文旧版「全局/会话内都开桌面独立窗口」描述。
+入口修订已经落地，相关 31 项回归通过，Linux Ctrl+K 已确认主窗口内弹窗。
+
+搜索子窗口的主题同步**仍未完成**：已尝试通过现有范围事件同步 `skinId`，并把宿主
+改为 `app-screen` 铺满窗口；19 项桥接回归通过，但用户随后真实截图仍显示主窗暗色、
+搜索窗亮色。不得凭单测标记修复，恢复后优先复现并检查真实跨窗口同步链路。
+
+本轮已按用户要求关停开发链路并保留未提交改动。`.playwright-cli/` 已加入 `.gitignore`；
+README 同端截图等宽及新增截图、Linux/Android 剩余验收、最终 CI 与文档一致性仍待完成。
+未提交、合并、推送、打 tag 或发版；合 `dev` 仍须当次确认。
+
+### 2026-11-05 此前状态（历史验收快照）
+
+分支仍为 `feature/tray-palette-ota`；下方旧日期的进度、测试数与暂停清单仅是当时快照。
+本段记录 2026-11-05 当时修订，原任务步骤与代码示例保留，不逐条补勾。
+
+- 设置分组已按用户追加意见调整：移除独立「文件下载」导航，「外观」改为「通用设置」，
+  主题、语言、下载目录、搜索快捷键同页；目录卡复用 `Button`，显示目录名与授权状态，四语同步。
+- 全局/会话内搜索均已接三端承载：桌面独立窗口、手机 `/search` 路由页、Web 大屏弹窗；
+  旧会话内条已删除。独立窗口切范围、登出/换号清理与旧账号迟到导航拒绝已补回归；
+  IME Enter 选字不触发结果。
+- Web 默认目录通过 File System Access API 与独立 IDB 保存授权句柄，Web Locks 避让
+  同名，写入并 close 后才完成。无目录/不支持时保留浏览器保存；权限失效提示到
+  「设置 → 通用设置 → 文件下载」重新授权。等待 IDB 期间取消也不会落回 `<a download>`。
+- Web 部分真实验收已完成：用户在 Chrome 原生目录框手动完成首次授权，确认附件保存到
+  所选 `test` 目录，刷新后目录持久化已验证。随后确认进度条显隐会推动下方消息；固定
+  进度空间的修复与全状态回归正在进行，尚不能声明零 CLS。真实 RED：同一文件消息列
+  高度 `85.75 → 117.25 → 85.75 px`，出现/取消进度时位移 `31.5 px`；GREEN 待回填。
+- 托盘异步同步已加代次，拒绝图标/菜单迟到结果回写旧未读数；Android「检查更新」已消费
+  `checkUpdate=1` 并自动检查，沿用忙碌锁防重入。回归证据在工作目录的
+  `frontend-review-20261105/REPORT.md`，不代替原生验收。
+- 已跑通一次覆盖率、i18n、Web/桌面/管理端 tsc 与新增回归；覆盖率早于后续修复，本轮真实 Web/Linux/Android
+  验收、完整 Chromium E2E 与最终 CI **仍在进行**，最终数值、日志与 README 图清单待回填。
+  CI E2E 须新启 MSW 实例，不能复用真实 `:5173`；每次切端先停前一条 dev 链路。
+- 本批尚未完成。收尾仍需汇总真实验收和截图、清理临时测试产物与 coverage provider 改动，
+  再做完整工作点的 Conventional Commit。全绿后须当次询问合 `dev`；尚未合并、推送、
+  合 `main`、打 tag 或发版，Windows/macOS 不宣称真机通过。
+
+### 历史进度快照（2026-10-14）
 
 截至 2026-10-14，分支 `feature/tray-palette-ota`。工作区干净，本地已验：
 `go vet ./...` / `go build ./...` / `node scripts/check-i18n.mjs`（803 key × 4 语）全绿，
@@ -33,6 +93,52 @@ OTA 与搜索相关的 service / handler / repository 测试全绿。
 
 **下次从 Task 4 继续**（Stage B 应用内下载），前端系列为 Task 4-8、11-15、19-20，
 收口为 Task 21。
+
+### 2026-11-02 审查后继续执行
+
+旧进度表是 2026-10-14 的快照，不代表当前实现状态；六条工作流已有实现，当前在同一 feature 分支补缺陷与验收，不重复搭建。
+
+- [x] 下载/落盘回归：并发同名与超过一百份不覆盖；写盘取消后清理产物；file/image/voice 副本完成后才发帧。新增 6 个回归先 RED 后 GREEN，整套前端测试 1195 项通过。
+- [x] 命令面板回归：导航关闭、建群入口、旧请求作废、本地数据异步到达后的刷新。建群复用 ChatScreen 的 CreateGroupModal，导航指令改为 `/chat?new=group`，关闭时消费 query；跨窗口桥与测试同步维护。
+- [x] 自定义搜索快捷键与持久化、保留键/冲突提示（仅搜索组合，不宣称完整 J3）。
+- [x] OTA/后端审查问题与 Web 推荐架构修复，补回归；Go vet/test/coverage/race 已独立通过。
+- [x] Windows 窗口尺寸/右侧白边代码适配与策略/资源测试；Win/macOS 无实机，未声明真机通过。
+- [ ] 全量本地 CI、真实后端与设备验收、文档/README 截图收尾。
+
+### 2026-11-03 用户反馈补齐（历史快照）
+
+- [x] 下载推荐改紧凑行，四个平台完整列出，无包标不可用；固定高度与内部滚动；真实后端浏览器 RED→GREEN 和完整前端回归通过。
+- [ ] 搜索全局与会话内统一承载：桌面独立原生窗口、手机独立路由页、Web 桌面弹窗；当前旧会话内条不能算完成。
+- [ ] 完整 CI 最终复跑、Linux 桌面与 Android 实测，以及文档/README 真图收尾。
+
+Web 默认目录已补浏览器授权流程，详见下方暂停记录；支持的浏览器直接写入所选目录，未设置目录或不支持时使用浏览器保存方式。真实浏览器验收尚未完成。
+
+E2EE 本地安全存储只登记到 MASTER_PLAN，尚未修复，不纳入本次产品重构。合 dev、推送、合 main、tag/发版仍须当次征询；当前没有执行这些操作。
+
+### 2026-11-05 用户要求暂停：历史续接检查点
+
+用户明确要求「先停止，明天继续」。子 agent 已停止，`pnpm dev:stop` 已完成；开发端口和应用进程已清零。既有本机 registry 与全局 Claude 转发服务保留。分支仍为 `feature/tray-palette-ota`，HEAD `26517f2`；遗留改动与本次改动均保留，尚未提交、合并、推送或发版。
+
+原 Claude 会话为 `/home/liaojie1314/.claude/projects/-home-liaojie1314-code-project-yuanchat/1c9ed62d-a180-4a62-88dd-21065cafa14b.jsonl`；记忆在同目录 `memory/`。方案已确认，无需重做 brainstorming；继续遵守本计划 Global Constraints 及用户后续修订。
+
+- [x] Web 默认目录实现与回归：`packages/shared/src/download/browserDirectory.ts` 持久化授权句柄；`fileSink.ts` 直接写盘、Web Locks 避让同名、关闭后完成、写盘失败或取消清理；授权失效明确提示重新授权。设置页新增「文件下载」，可选择、重新授权和恢复默认；四语齐全。原生端继续直接保存默认目录。
+- [x] `LANG=C.UTF-8 pnpm test`：1294 项通过，8 个 Turbo 任务成功；日志 `.superpowers/sdd/2026-10-11-tray-palette-ota/codex-frontend-test.log`。目录保存与权限撤销等回归已确认 RED→GREEN；不据此替代浏览器/设备实测。
+- [x] i18n 门禁通过（882 keys）；Web 类型检查已通过，但其后还有极小错误分支调整，最终类型检查仍需复跑。
+- [x] 后端补齐软删作用域：解散会话不可搜，软删消息或会话撤销媒体签名授权；GC 仍保留版本包引用。OTA 登记拒绝非法 SemVer，返回 400 且不落库，保留短版本/v 前缀兼容。`go.mod` 无意外降级，仅新增现有依赖图版本 `x/mod v0.37.0`。
+- [x] 后端完整 CI：build/vet、完整 atomic coverage 测试、40% 覆盖率门禁（实际 49.53%）、WS race、部署脚本自检均退出 0；737 项执行，736 项通过，唯一 SMTP live 用例缺外部凭据跳过，PG/MinIO 用例均实际执行。日志在 `.superpowers/sdd/2026-10-11-tray-palette-ota/codex-backend-20261104/`；隔离 Go 根为 `/home/liaojie1314/env/go-ci-1.25.7.JZqu3p`，运行必须同时设置 PATH/GOROOT/GOPATH，避免 covdata 子进程找不到 go。
+- [x] Claude API 400 的本机恢复层已修并重载：仅上游明确拒绝 Azure 资源绑定推理项且尚未交付内容时，清理本次请求副本中的绑定推理块后重试一次。32 项离线测试及语法检查通过；未发付费模型探针。代码与恢复文档在 `/home/liaojie1314/env/claude-api-retry/`，全局地址保护仍为 15722。
+- [x] Playwright CLI 已安装在 `/home/liaojie1314/env/playwright-cli/npm-cache`，帮助输出在工作日志 `playwright-cli-help.log`；尚未启动真实浏览器验收。
+- [x] Android 工具预检完成：AVD `Medium_Phone`、Android 35/x86_64、1080×2400、KVM、JDK17/NDK29/Gradle/Rust targets 可用；尚未启动模拟器。证据捕获脚本在工作目录 `android/capture.py`。旧 OTA 夹具 `android/ota-fixture.apk` 已核 SHA256 与 debug 签名，但登记 0.99.0、包内实际 0.6.0，只能证明下载/校验/安装器取消重试，不能声称版本升级成功。
+
+暂停时留下的续接清单（进展以上方「当前状态」为准）：
+
+1. 用真实后端与 Playwright CLI 验证 Web 目录首次授权、刷新持久化、写盘进度、同名避让、取消及权限失效；补对应可复跑浏览器回归。
+2. 完成全局/会话内搜索、快捷键、下载入口的真实 Web 验收，再依次 Linux Tauri 与 Android 模拟器验收搜索/下载/打开/OTA；切端必须先停前一条 dev 链路。无 Windows/macOS 硬件，不能标真机通过。
+3. 完成被暂停的前端/桌面整体只读 review；可复用 `/root/backend_gate`，Android 可复用 `/root/relay_recovery`，最多两个子 agent，避免重复实施。
+4. 完成剩余本地 CI：coverage、最终各端 tsc、完整 Playwright Chromium E2E。CI E2E 必须新起 MSW 实例，不能复用真实 5173。根 `package.json`/`pnpm-lock.yaml` 仍有此前临时 coverage provider 改动，跑完后仅撤回这部分，不覆盖其他工作。
+5. 同步 spec/MASTER_PLAN/ARCHITECTURE/DEVELOPMENT/CHAT_API/README 等文档与真实截图，清理测试产物，再完成完整工作点的 Conventional Commit。全绿后按用户要求当次询问合 dev；不可自动 merge/push/tag/release。
+
+当前任务尚未完成，真实三端验收、最终前端 CI 与文档收尾均未结束。
 
 ### Task 1 结论对后续任务的修正（务必先读研究文档）
 
@@ -63,14 +169,14 @@ OTA 与搜索相关的 service / handler / repository 测试全绿。
 - **注释**：全部用中文。所有导出函数/组件/Store/Hook 写 JSDoc，Go 导出函数/包写 godoc。关键并发/事务/错误分支必须注释。**先写注释再写代码。** 注释里禁止写进度/批次号。
 - **骨架屏**：所有图片用 Skeleton 占位（固定宽高），列表加载有骨架屏，**CLS 必须为零**。
 - **MSW**：所有前端 API 调用必须有 Mock 覆盖**正常/空/错误/加载**四种状态。
-- **权限申请一律应用内自绘**，不使用原生弹窗。
+- **权限说明与操作入口应用内自绘**；Web 目录选择/重新授权与 Android 安装器使用平台安全流程，由用户动作触发。
 - **Tauri 权限标识符禁猜**：从 `apps/desktop/src-tauri/gen/schemas/desktop-schema.json`（或 `mobile-schema.json`）核实，并按平台放进正确的 capability 文件。
 - **源码目录禁平铺**：新增前端文件按领域放进子目录（`packages/shared/src/download/`、`packages/ui/src/palette/` 等）。
 - **测试门禁**：测试未通过 = 功能未完成。不允许在未通过测试时开始下一个 Task。
 - **测试禁止依赖宿主语言环境**：本地跑 `LANG=C.UTF-8 pnpm test` 对齐 CI runner。要固定语言就在 `vi.hoisted()` 里打 `navigator` 桩。
 - **新增自定义请求头必须同步 CORS**：`server/internal/middleware/cors.go` 的 `Allow-Headers` 要逐个列出，浏览器预检不接受通配。
 - **WS 帧演进**：新字段尾部追加指针 + `omitempty`；新增服务端帧必须同时登记进 `contracts/server-frames.golden.json` 与 `ws/golden_server_frames_test.go` 的 `payloadPrototypes`。（本批预期不新增 WS 帧，若新增则照此办。）
-- **推送前本地 CI 全绿**（见 Stage G，Task 21）。禁止「先推上去让 CI 跑」。
+- **推送前本地 CI 全绿**（见 AGENTS 第 13 条及 Stage G，Task 21，含前后端覆盖率）。禁止「先推上去让 CI 跑」。
 
 ## Review Focus
 
@@ -1450,7 +1556,12 @@ install_apk 复用同一个 Intent，只换 mime type。"
 **Interfaces:**
 
 - Consumes: Task 4 的 `useDownloadStore` / `startDownload` / `cancelDownload`、Task 5 的 `getFileSink`
-- Produces: `<FileProgressBar messageId={string} />` —— 无进度条目时渲染 `null`
+- Produces: `<FileProgressBar messageId={string} />` —— 全状态保留固定进度空间
+
+**2026-11-05 修订**：以下 Step 1 / Step 3 是旧实现蓝本，空态/完成态返回 `null` 的方案
+已作废；它会在下载开始和结束时改变消息行高。当前修复须让 idle、downloading、saving、
+failed、canceled、done 共用固定占位，并在真实浏览器比较后续消息的位置，不以空 DOM 断言零 CLS。
+实际行为以当前 `FileProgressBar.tsx`、`FileProgressBar.test.tsx` 与 `download-progress.spec.ts` 回归为准。
 
 - [ ] **Step 1: 写组件单测**
 
@@ -1467,7 +1578,7 @@ function entry(e: Partial<{ phase: string; received: number; total: number }>) {
   return { phase: "downloading", received: 0, total: 0, ...e } as never;
 }
 
-it("无进度条目时不渲染任何东西（零 CLS：气泡高度不因它跳动）", () => {
+it("历史空态示例（已由 2026-11-05 固定占位修订替代）", () => {
   useDownloadStore.setState({ entries: {} });
   const { container } = render(<FileProgressBar messageId="none" />);
   expect(container).toBeEmptyDOMElement();
@@ -1538,7 +1649,7 @@ export function FileProgressBar({ messageId }: { messageId: string }) {
   const { t } = useTranslation();
   const entry = useDownloadStore((s) => s.entries[messageId]);
 
-  // 没有进度就什么都不渲染 —— 占一行空高度会让气泡在下载开始时跳一下（CLS）
+  // 历史示例已作废：这些 return null 会改变行高，当前实现须保留同一固定占位。
   if (!entry) return null;
   if (entry.phase === "done" || entry.phase === "canceled") return null;
 
@@ -2477,7 +2588,7 @@ export function buildPaletteActions(ctx: PaletteContext): PaletteAction[] {
       labelKey: "chat.group.create",
       icon: UserPlus,
       keywords: ["group", "qun", "新建群聊"],
-      run: (c) => c.navigate("/contacts?new=group"),
+      run: (c) => c.navigate("/chat?new=group"),
     },
     {
       id: "go-chat",
@@ -2583,10 +2694,8 @@ export function filterActions(
  * 一旦输入就进搜索（三源并发 + 分组结果 + 类型筛选）。
  * K3 与 K18 合并实现 —— 两者都要改这个组件，分两次做第二次得先拆掉第一次的结构。
  *
- * 桌面端刻意**不开独立原生窗口**而是放大面板：Tauri 每个 WebviewWindow 是独立
- * JS 上下文，store 不共享，联系人与会话列表得重新拉，每个快捷动作还要一轮跨窗口
- * RPC；而面板的全部价值在于对主窗口做事。用户的抱怨是「屏幕再大也只有一个窄弹窗」，
- * 那是宽度问题，断点就能解。详见设计文档 §1.2。
+ * 当前承载按设计文档 §1.2：桌面全局主窗弹窗、会话内原生窗口，手机路由页、Web 大屏弹窗。
+ * 原生窗口自行拉本地源并经主窗事件桥执行动作，不另建 WS。
  *
  * 断点形态：mobile 全屏 / tablet 560px / desktop 720×560。
  * 断点一律内部 useBreakpoint() 推导，不接 isDesktop prop（沿用裁决 D1）。
@@ -2672,8 +2781,7 @@ K3 与 K18 合并实现：两者都要改同一个组件，分两次做第二次
 （固定 40×40 + Skeleton，零 CLS）。三源用 allSettled 并发 ——
 服务端挂了不该把本地联系人结果也一起丢掉。
 
-桌面端用断点放大面板而非开独立原生窗口：WebviewWindow 是独立 JS 上下文，
-store 不共享，而面板的全部价值在于对主窗口做事。详见设计文档 §1.2。"
+全局与会话内复用同一组件；三端承载及窗口事件桥见设计文档 §1.2。"
 ```
 
 ### Task 12: 面板接入三端 + 桌面断点形态 + E2E
@@ -4461,24 +4569,13 @@ VITE_ENABLE_MOCK=false pnpm dev:web
 
 - 托盘图标出现、左键聚焦并跳未读、右键菜单三项、tooltip 未读数
 - 关窗弹窗两条分支 + 「记住我的选择」+ 设置页能改回
-- 命令面板在 1920px 下是大面板（不是窄弹窗）
+- 全局面板在主窗内弹出，仅会话内搜索开独立原生窗口；重复唤起更新会话范围与主题，结果交主窗定位
 
-- [ ] **Step 3: 装 .deb 验 Linux 角标**
+- [ ] **Step 3: 核对桌面入口并验 Linux 角标**
 
-```bash
-pnpm build:pkg
-sudo dpkg -i apps/desktop/src-tauri/target/release/bundle/deb/*.deb
-# 从应用菜单启动（不是 tauri dev）—— Unity LauncherEntry 要 yuanchat.desktop 已安装
-```
-
-有未读时看 Ubuntu Dock 图标上有没有数字。**没有也不算失败** ——
-这条路径依赖桌面环境支持，记录实际结果即可。验完卸载：
-
-```bash
-sudo dpkg -r yuanchat
-# 打包产物立刻清掉
-rm -rf apps/desktop/src-tauri/target/release/bundle
-```
+Unity LauncherEntry 需要已安装 `yuanchat.desktop`；本机已有
+`/usr/share/applications/yuanchat.desktop`，无需重打/安装 `.deb`，也不要卸载既有应用。
+有未读时检查 Ubuntu Dock 数字，桌面环境不支持时如实记录限制；同时验证菜单未读数。
 
 - [ ] **Step 4: Android 真机/模拟器实测**
 
@@ -4494,34 +4591,34 @@ rm -rf apps/desktop/src-tauri/target/release/bundle
 
 - [ ] **Step 5: 回写 MASTER_PLAN「未做清单总览」**
 
-把这些条目的状态改掉：
+仅在完整测试与真实验收通过后回填下表；当前保留「验收中」，不预先补勾。旧行号仅用于定位。
 
 | 位置                        | 改动                                                                                                                            |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | 阶段三 `:271`               | `- [ ] 桌面托盘 + 系统未读角标` → `- [x]`，括注改为「Tauri tray + setBadgeCount/overlay，左键直达第一个未读；Win/macOS 未实测」 |
-| 阶段三 `:272`               | `- [ ] 命令面板` → `- [x]`，括注「一个组件两种模式；桌面改大面板而非独立窗口，见 spec §1.2」                                    |
+| 阶段三 `:272`               | 通过后勾选，括注「一个组件两种模式；桌面全局主窗弹窗、会话内原生窗口 / 手机路由页 / Web 弹窗，见 spec §1.2」                    |
 | 阶段三 `:273-274`           | `- [ ] 应用内文件下载 + 进度条` → `- [x]`                                                                                       |
-| 阶段三 `:275-276`           | `- [ ] 搜索体验重做` → `- [x]`，补「桌面独立窗口未做，改大面板」                                                                |
+| 阶段三 `:275-276`           | 通过后勾选，记录全局/会话内三端承载与搜索快捷键自定义                                                                           |
 | 阶段四 `:299-300`           | `- [ ] 自建 OTA 更新服务` → `- [x]`                                                                                             |
 | K 泳道表 `:911,920,926,927` | K3 / K12 / K18 / K19 的「已排 vX」改 ✅ + 日期                                                                                  |
 | 版本排布表 `:897-905`       | K12 从 v0.8.0、O1 从 v1.0.0 **移出**；`feature/a11y-ux` 与 `feature/multi-device-ota` 的范围相应缩减（后者剩 K13/K15/K17）      |
 | §3 债表 `:796`              | 「手机号要完全移除」🟡 → ✅ + 实施摘要                                                                                          |
 | §2.12 债表 `:775`           | 「文件下载应在应用内完成并显示进度」🟡 → ✅                                                                                     |
 | §2.12 债表 `:778`           | 「安卓 blob 重启失效」⚪ → ✅（Task 8 收口）                                                                                    |
-| 第 10 / 11 / 13 节          | 立项小节标题加「✅ 已完成 2026-10-11」+ 分支名 + 实际交付摘要                                                                   |
+| 第 10 / 11 / 13 节          | 验收后更新状态 + 实际通过日期 + 分支名 + 实际交付摘要                                                                           |
 
 **新增一个批次小节**记录本批（含 spec/plan 链接、分支、迁移号 021/022/023、
 决策表摘要、实测结论），并新登记本批留债：
 
-| 级别 | 条目                                                                                                     |
-| ---- | -------------------------------------------------------------------------------------------------------- |
-| ⚪   | **桌面独立搜索窗口**：按决策 T8 改为响应式大面板（spec §1.2）。要做需先解决独立 JS 上下文下 store 不共享 |
-| ⚪   | **Windows / macOS 的托盘与角标未实测**：无设备                                                           |
-| ⚪   | **安卓「另存到」公共目录**（`ACTION_CREATE_DOCUMENT`）：按 T5 不做                                       |
-| ⚪   | **本地库离线搜索**：只抽了 `searchSource` 接口层，实现仍只有服务端                                       |
-| ⚪   | **命令面板无拼音首字母匹配**                                                                             |
-| ⚪   | **Web 端下载入口**（本批新增条目，已完成，登记以备日后查范围）                                           |
-| +    | Task 1 的 pre-flight 若命中降级方案，把对应降级登记为债                                                  |
+| 级别 | 条目                                                                                              |
+| ---- | ------------------------------------------------------------------------------------------------- |
+| ⚪   | **Web 默认下载回落**：无目录/不支持时交浏览器保存，应用不能确认其最终落盘；授权目录直写不受此限制 |
+| ⚪   | **Windows / macOS 的托盘与角标未实测**：无设备                                                    |
+| ⚪   | **安卓「另存到」公共目录**（`ACTION_CREATE_DOCUMENT`）：按 T5 不做                                |
+| ⚪   | **本地库离线搜索**：只抽了 `searchSource` 接口层，实现仍只有服务端                                |
+| ⚪   | **命令面板无拼音首字母匹配**                                                                      |
+| ⚪   | **Web 端下载入口**（本批新增条目，已完成，登记以备日后查范围）                                    |
+| +    | Task 1 的 pre-flight 若命中降级方案，把对应降级登记为债                                           |
 
 - [ ] **Step 6: 同步其余文档**
 
@@ -4530,7 +4627,7 @@ rm -rf apps/desktop/src-tauri/target/release/bundle
 | `docs/DB_SCHEMA.md`                  | users 去 phone 列与索引；新增 `app_releases` 表；新增 `idx_messages_name_trgm`                                                         |
 | `docs/CHAT_API.md`                   | `/messages/search` 的 `types` 参数；`/updates/catalog` 与 `/updates/:platform/:arch`；`/admin/releases` 五端点                         |
 | `docs/ARCHITECTURE.md`               | 下载器与 `fileSink` 注入层；OTA 分发链路；托盘与角标                                                                                   |
-| `docs/DEVELOPMENT.md`                | 无新增启动命令则只补「装 .deb 才能验 Linux 角标」一条                                                                                  |
+| `docs/DEVELOPMENT.md`                | 同步浏览器目录能力与回落、三端搜索、托盘资源/桌面入口、OTA 检查及测试环境                                                              |
 | `docs/deploy/self-hosted.md`         | `ADMIN_PHONE` → `ADMIN_EMAIL`（含 `:335/351/359`）；**删掉 `:401-407` 那段「为什么还是手机号」**；升级既有部署时要改 `.env` 的那条提示 |
 | `docs/deploy/my-deployment.local.md` | `:71` 账号来源改 `ADMIN_EMAIL`                                                                                                         |
 | `README.md`                          | 功能清单加托盘/角标、命令面板、应用内下载、OTA、下载入口；换/补四端截图                                                                |
@@ -4550,13 +4647,12 @@ cd server && go vet ./... && go test ./... && cd ..
 
 ```bash
 git add docs README.md AGENTS.md
-git commit -m "docs: 回写未做清单与四端文档，登记本批留债
+git commit -m "docs(tray-palette-ota): 同步本批功能、验收与平台边界
 
 K3/K12/K18/K19/O1 与手机号移除六项全部改为已完成；K12 从 v0.8.0、
 O1 从 v1.0.0 移出版本排布表。新增本批小节记录决策与实测结论。
 
-新登记留债六条，其中「桌面独立搜索窗口」是对 K18 原立项结论的有意偏离
-（改大面板，理由见 spec §1.2），单列一条以免日后误以为漏做。"
+记录三端搜索承载、通用设置和下载目录授权，以及平台限制与真实验收结果。"
 ```
 
 - [ ] **Step 9: 合回 dev（需用户确认推送）**

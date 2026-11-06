@@ -2,7 +2,10 @@
 
 即时通讯软件 — 从零构建的现代 IM 解决方案。
 
-**当前状态**：v0.4.0（Web + Desktop 三平台 + Android APK 由 GitHub Actions 自动打包）。
+**当前代码版本**：v0.6.0（Web + Desktop 三平台 + Android APK 由 GitHub Actions 自动打包）。
+
+搜索、下载、托盘与 OTA 本批改动正在做真实三端验收和最终 CI，尚未合并或发版；
+当前进度见[实施计划](docs/superpowers/plans/2026-10-11-tray-palette-ota.md#执行进度)。
 
 ## 在线体验
 
@@ -36,40 +39,119 @@
 
 截图均来自本机真实运行（真实后端 `:8085`/`:8086`，非 Mock）。Web 端与管理后台视口 1920×1080；
 桌面端与安卓端按应用/设备自身尺寸（Tauri 窗口由应用控制：登录 540×640、主界面 1200×800）。
+同端预览统一宽度、保留原始比例；离线页展示断网整页重载后由本地消息库恢复的内容。
 
 ### Web 端
 
-| 登录                                        | 会话列表                                            |
-| ------------------------------------------- | --------------------------------------------------- |
-| ![Web 登录](docs/screenshots/web-login.png) | ![Web 会话列表](docs/screenshots/web-chat-list.png) |
-
-| 聊天窗口                                              | 通讯录                                           |
-| ----------------------------------------------------- | ------------------------------------------------ |
-| ![Web 聊天窗口](docs/screenshots/web-chat-detail.png) | ![Web 通讯录](docs/screenshots/web-contacts.png) |
-
-| 朋友圈                                          | 离线可用（断网整页重载后由本地库渲染）        |
-| ----------------------------------------------- | --------------------------------------------- |
-| ![Web 朋友圈](docs/screenshots/web-moments.png) | ![Web 离线](docs/screenshots/web-offline.png) |
+<table width="100%">
+  <tr>
+    <td width="50%" valign="top">
+      登录<br />
+      <img src="docs/screenshots/web-login.png" width="480" alt="Web 登录" />
+    </td>
+    <td width="50%" valign="top">
+      会话列表<br />
+      <img src="docs/screenshots/web-chat-list.png" width="480" alt="Web 会话列表" />
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      聊天窗口<br />
+      <img src="docs/screenshots/web-chat-detail.png" width="480" alt="Web 聊天窗口" />
+    </td>
+    <td width="50%" valign="top">
+      通讯录<br />
+      <img src="docs/screenshots/web-contacts.png" width="480" alt="Web 通讯录" />
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      朋友圈<br />
+      <img src="docs/screenshots/web-moments.png" width="480" alt="Web 朋友圈" />
+    </td>
+    <td width="50%" valign="top">
+      离线可用<br />
+      <img src="docs/screenshots/web-offline.png" width="480" alt="Web 离线整页重载" />
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      命令面板<br />
+      <img src="docs/screenshots/web-command-palette.png" width="480" alt="Web 命令面板" />
+    </td>
+    <td width="50%" valign="top">
+      通用设置<br />
+      <img src="docs/screenshots/web-general-settings.png" width="480" alt="Web 通用设置" />
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      文件下载<br />
+      <img src="docs/screenshots/web-file-download.png" width="480" alt="Web 文件下载" />
+    </td>
+    <td width="50%" valign="top">
+      客户端下载<br />
+      <img src="docs/screenshots/web-download-entry.png" width="480" alt="Web 客户端下载入口" />
+    </td>
+  </tr>
+</table>
 
 ### 桌面端
 
-| 登录                                              | 会话列表                                                  |
-| ------------------------------------------------- | --------------------------------------------------------- |
-| ![桌面端登录](docs/screenshots/desktop-login.png) | ![桌面端会话列表](docs/screenshots/desktop-chat-list.png) |
-
-| 聊天窗口                                                    | 朋友圈                                                |
-| ----------------------------------------------------------- | ----------------------------------------------------- |
-| ![桌面端聊天窗口](docs/screenshots/desktop-chat-detail.png) | ![桌面端朋友圈](docs/screenshots/desktop-moments.png) |
+<table width="100%">
+  <tr>
+    <td width="50%" valign="top">
+      登录<br />
+      <img src="docs/screenshots/desktop-login.png" width="480" alt="桌面端登录" />
+    </td>
+    <td width="50%" valign="top">
+      会话列表<br />
+      <img src="docs/screenshots/desktop-chat-list.png" width="480" alt="桌面端会话列表" />
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      聊天窗口<br />
+      <img src="docs/screenshots/desktop-chat-detail.png" width="480" alt="桌面端聊天窗口" />
+    </td>
+    <td width="50%" valign="top">
+      朋友圈<br />
+      <img src="docs/screenshots/desktop-moments.png" width="480" alt="桌面端朋友圈" />
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      会话内搜索<br />
+      <img src="docs/screenshots/desktop-conversation-search.png" width="480" alt="桌面端会话内搜索" />
+    </td>
+    <td width="50%"></td>
+  </tr>
+</table>
 
 ### 管理后台
 
-| 登录                                              | 运营概览                                         |
-| ------------------------------------------------- | ------------------------------------------------ |
-| ![管理后台登录](docs/screenshots/admin-login.png) | ![运营概览](docs/screenshots/admin-overview.png) |
-
-内容审核：
-
-![内容审核](docs/screenshots/admin-moderation.png)
+<table width="100%">
+  <tr>
+    <td width="50%" valign="top">
+      登录<br />
+      <img src="docs/screenshots/admin-login.png" width="480" alt="管理后台登录" />
+    </td>
+    <td width="50%" valign="top">
+      运营概览<br />
+      <img src="docs/screenshots/admin-overview.png" width="480" alt="运营概览" />
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      内容审核<br />
+      <img src="docs/screenshots/admin-moderation.png" width="480" alt="内容审核" />
+    </td>
+    <td width="50%" valign="top">
+      版本分发<br />
+      <img src="docs/screenshots/admin-releases.png" width="480" alt="管理后台版本分发" />
+    </td>
+  </tr>
+</table>
 
 ### 安卓端
 
@@ -84,7 +166,7 @@
 
 ### 认证与用户体系
 
-- 邮箱/元聊号 + 密码注册登录、SVG 图形验证码
+- 邮箱注册、邮箱/元聊号 + 密码登录、SVG 图形验证码；手机号字段与登录入口已移除
 - JWT 双 Token 静默刷新（滑动会话轮换 + 401 兜底重试）
 - 个人资料（昵称/头像/签名/性别），512px 中心裁方头像上传至 MinIO
 
@@ -114,8 +196,8 @@
 - **消息收藏**：任意消息加入收藏夹（`POST/GET/DELETE /favorites`），收藏列表分页浏览
 - **消息搜索**：全局搜索 + 会话内搜索，基于 PostgreSQL `pg_trgm` GIN 索引（`GET /messages/search`，仅命中当前用户有权访问的会话）
 - **会话维护**：清空聊天记录、群公告（横幅 + 全文弹层）、群内昵称
-- **命令面板**：Ctrl/Cmd+K 唤起；空输入显示动作注册表 + 最近会话，输入后按联系人/群聊/消息/文件与媒体四分组搜索，支持类型筛选，媒体结果带缩略图骨架占位（桌面端 720×560 大面板）
-- **应用内文件下载**：文件气泡下方确定性进度条，按钮按阶段分流（下载/取消/重试/打开）；Web 走浏览器下载，桌面/安卓落盘本地（安卓落 app 私有目录，零权限、卸载即删）；outbox 待发消息发送前落磁盘副本、重试从磁盘读、ack 即删
+- **命令面板**：默认 Ctrl/Cmd+K 唤起，可在通用设置自定义；空输入显示动作与最近会话，输入后按联系人/群聊/消息/文件与媒体分组，支持类型筛选与缩略图骨架占位。桌面客户端的全局面板在主窗口内弹出，仅会话内搜索使用独立窗口；手机使用 `/search` 搜索页，Web 大屏使用居中弹窗；会话内只查当前会话
+- **应用内文件下载**：文件气泡下方显示传输与保存进度，支持取消、失败重试；Web 可授权默认目录并直接写盘，未设置或浏览器不支持时使用浏览器保存。桌面/安卓落盘后可打开（安卓落 app 私有目录，零权限、卸载即删）；图片/文件/语音发送前落磁盘副本、重试从磁盘读、ack 即删
 
 ### 群管理
 
@@ -160,10 +242,11 @@
 
 - **i18n**：zh-CN / en-US / ja-JP / ko-KR 四语全量覆盖（`react-i18next`，扁平 key，`pnpm check:i18n` 门禁挡漏翻/写错 key/死键），语言选择持久化，重开应用即生效。首次启动**默认简体中文**（仅系统语言为 ja/ko 时自动跟随），英文等其他设备也先给中文，用户可在设置页自行切换
 - **主题**：三套皮肤（`yuan` / `ocean` / `forest`，各含亮暗两版）+ 字体缩放（`pnpm check:theme` 校验颜色工具类都在色板里）
+- **通用设置**：主题、语言、文件下载目录与搜索快捷键集中一页；目录卡显示名称和授权状态，支持重新授权及恢复浏览器默认保存
 - **端到端加密 E2EE**：X3DH 协商 + Double Ratchet 棘轮（`packages/shared/src/crypto/`），设置页内按用户开关，仅单聊；对方未启用时自动降级明文，支持密钥备份/恢复
 - **PWA**：生产构建注入自定义 Service Worker（app shell 预缓存 + Web Push 监听），可安装到桌面/主屏
 - **应用内更新（自建 OTA）**：`app_releases` 版本登记 / 灰度（0-100%，按设备稳定判定）/ 回滚，管理端 Releases 页管理；桌面端走 Tauri updater（自有域名在前、GitHub latest.json 兜底），Android 应用内自动更新（自绘更新卡 + 下载进度 + sha256 校验 + FileProvider 拉起系统安装器）
-- **Web 端客户端下载入口**：侧栏（桌面 web）与设置页（手机 web）的 DownloadPanel 按 userAgent 识别平台并高亮推荐安装包，走 `/updates/catalog`；无可用包时给 GitHub Releases 兜底链接
+- **Web 端客户端下载入口**：侧栏（桌面 web）与设置页（手机 web）按系统和架构推荐安装包，走 `/updates/catalog`；「当前系统 / 其他平台」以紧凑行完整展示四个平台，缺包保留不可用行，列表内部滚动；无可用包时给 GitHub Releases 兜底链接
 - **离线本地消息库**：IndexedDB 五 store（`messages`/`conversations`/`media`/`outbox`/`meta`），登录开库、登出清库；冷启动先渲染本地再后台按 `seq` 水位增量对账，撤回/编辑/清空同步回放本地副本；媒体内容寻址 + 配额 LRU 缓存；断网期间文本消息入 `outbox`，上线串行补发（依赖既有幂等索引）。断网整页重载后会话列表与历史消息仍可浏览
 - **网络态反馈**：`useNetworkStatus` 三态（`online`/`connecting`/`offline`）+ 全局顶部横幅，仅在真实断网恢复后提示「已连接」并 2 秒自动收起；七个主列表支持下拉刷新，回前台 30 秒节流静默对账
 - **可观测性**：Sentry 前端错误上报（仅 production + 配了 DSN 时启用）+ Prometheus 指标（独立 `:9090/metrics`，HTTP/WS/消息计数与耗时）+ zap 结构化日志
@@ -182,7 +265,7 @@
 - **后端**：Go 1.25 + Gin + GORM + gorilla/websocket + MinIO SDK（单进程双端口：REST :8085 + WS :8086，另有 Prometheus :9090）
 - **存储**：PostgreSQL 16 + Redis 7 + MinIO（S3 兼容，用于图片/文件/语音/视频/头像）
 - **通话**：WebRTC（mesh）+ coturn（STUN/TURN，HMAC 临时凭据）；Linux 桌面端为 GStreamer `webrtcbin` 原生后端
-- **测试**：vitest（前端 727）+ go test（13 包，集成测试 -race）+ Playwright E2E（95）
+- **测试**：Vitest + Testing Library、Go 单元/集成与竞态测试、Playwright Chromium E2E；本批结果见[实施计划](docs/superpowers/plans/2026-10-11-tray-palette-ota.md#执行进度)
 - **发版**：release-it + GitHub Actions（tag 触发 5 平台并行打包）
 
 ## 快速开始
@@ -259,7 +342,7 @@ pnpm release:dry        # 模拟运行，看会做什么
 - **分支策略**：详见 [`AGENTS.md`](AGENTS.md)
 - **CI 门禁**：push 到 `dev` 分支、以及目标为 `dev` 的 PR 触发 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
   （i18n 完整性门禁 + 前端 test + web/desktop 双端 tsc、Playwright E2E（mock 模式）、后端 go vet/test + `internal/ws` 的 -race）
-- **推远程前先本地跑通 CI**：同一批检查在本地全绿才推 `dev`，前端测试用 `LANG=C.UTF-8 pnpm test` 对齐 runner 语言环境（详见 [`AGENTS.md`](AGENTS.md) 第 14 条）
+- **推远程前先本地跑通 CI**：同一批检查（含前后端覆盖率门禁）在本地全绿才推 `dev`，前端测试用 `LANG=C.UTF-8 pnpm test` 对齐 runner 语言环境（详见 [`AGENTS.md`](AGENTS.md) 第 13 条）
 
 ## License
 

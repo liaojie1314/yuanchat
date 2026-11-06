@@ -426,16 +426,22 @@ web                — 前端静态资源 :3000
 
 ### 7.1 应用内文件下载（downloadStore + fileSink 注入层）
 
-- **downloadStore** 是下载状态的唯一真源：按 `message_id` 记录阶段（idle / downloading /
-  done / failed / cancelled）与进度；文件气泡下方的进度条是**确定性**的（由下载字节数驱动，
-  不用无限动画），按钮按阶段分流：下载 → 取消 → 失败重试 → 完成后打开。
+- **downloadStore** 是下载状态的唯一真源：按 `message_id` 记录阶段（downloading /
+  saving / done / failed / canceled）与进度；有总字节数时显示确定性进度，无总量时用不确定态。
+  保存完成才进入 done，下载/保存期间可取消，失败可重试，原生端完成后可打开。
+  进度区须在 idle、传输、保存、失败、取消与完成全程预留固定空间；2026-11-05 实测发现
+  显隐会推移后续消息，当前正在修复与复验，不能把空态 `return null` 当作零 CLS。
 - **fileSink** 是「字节落到哪里」的注入抽象，三端各给一个实现，UI 层零平台分支：
-  - Web：`<a download>` 触发浏览器下载；
+  - Web：优先写用户授权的目录，句柄由 `browserDirectory.ts` 存入独立的
+    `yuanchat-download-preferences` IDB；File System Access 与 Web Locks 仅在支持的安全
+    上下文启用。Web Locks 串行占名，写入并 close 成功后完成；失败/取消清理本次产物。
+    失权明确提示重新授权，不静默换保存位置；未设置目录时用 `<a download>`，这一回落
+    无法确认浏览器的最终落盘。两条路径均检查取消，包括等待 IDB 期间的取消；
   - 桌面 / 安卓：Tauri plugin-fs 落盘；安卓落在 **app 私有 external Download 目录**
     ——零存储权限、文件管理器不可见、卸载即删（隐私取舍）。
 - `open_local_file` 命令把可打开的路径**卡在应用自有目录内**，防止拼接任意路径打开
   用户私钥之类的文件。
-- **outbox 磁盘副本**：断网 outbox 里的待发消息（图片/文件等 blob）在发送前把字节
+- **outbox 磁盘副本**：图片/文件/语音消息在发送前把字节
   落一份 appdata 磁盘副本，重试从磁盘读、服务端 ack 即删——收掉「安卓重启后
   IndexedDB 里的 blob URL 失效、离线队列永远发不出去」的债。
 
@@ -446,7 +452,7 @@ web                — 前端静态资源 :3000
         │ 登记 draft → publish（rollout 0-100 灰度）
         ▼
 app_releases 表（UNIQUE(platform, arch, version, channel)，status: draft→published→rolled_back）
-        │ 灰度判定：hash(device) < rollout%（device 缺失回落 ClientIP，同机判定稳定）
+        │ 灰度判定：device 哈希桶 → 匿名 cohort 桶 → ClientIP 哈希桶，bucket < rollout
         ▼
 GET /updates/:platform/:arch —— 200 扁平 dynamic 格式（预签名 URL，TTL 6h）/ 204 无更新
         │
@@ -458,18 +464,32 @@ GET /updates/:platform/:arch —— 200 扁平 dynamic 格式（预签名 URL，
 ```
 
 回滚 = 状态翻 `rolled_back`，对外端点即刻止发（204）；已下载到本地的包不受影响。
+客户端只传 `X-YuanChat-Update-Cohort: 0..99`，服务端仍兼容显式 `device`；桶只作灰度，
+不作鉴权。版本按 SemVer 比较，拒绝非法登记；macOS 精确架构缺包时才回落 universal。
+GC 保留全部已登记的 `app_releases.object_key`，包括草稿和回滚包。
 
 ### 7.3 桌面端系统集成与命令面板
 
 - **托盘**：托盘图标 + 右键菜单（未读数 / 打开 / 退出）+ 左键直达第一个未读会话。
 - **未读角标**：macOS / Linux 走 `setBadgeCount`；Windows `setOverlayIcon` 静态红点
-  （Windows 没有数字角标 API，overlay 是唯一手段）。
+  （Windows 没有数字角标 API，overlay 是唯一手段）。整轮同步按代次拒绝图标/菜单异步
+  查询后的旧值写回，避免未读已清零但 tooltip、菜单或 overlay 又被旧轮覆盖。
 - **关窗二选一**：点关闭按钮弹「最小化到托盘 / 退出」选择框，可记住选择；
   之后在设置页可改（三选：每次询问 / 最小化 / 退出）。
-- **命令面板**（`CommandPalette`，Ctrl+K，替代已删除的 SearchModal）：
+- **命令面板**（`CommandPalette`，默认 Ctrl/Cmd+K，替代已删除的 SearchModal）：
   空输入 = 动作注册表 + 最近会话；有输入 = 联系人 / 群聊 / 消息 / 文件与媒体四分组
   搜索 + 类型筛选，媒体结果带 40×40 缩略图（骨架占位防 CLS）。
-  桌面端用 720×560 大面板形态，Web/移动端为常规弹层。
+  Tauri 桌面全局面板在主窗口内弹出，仅会话内搜索使用独立 `search` 窗口（880×620）；
+  手机使用 `/search` 路由页，Web 大屏使用居中面板（720×560）。会话内只查询带
+  `conversation_id` 的消息/文件，
+  不显示全局动作与联系人；返回复原来源页，选择结果导航并定位消息。
+- **跨窗边界**：搜索窗自行拉取会话/联系人，不另建 WS；`search:ready` / `search:scope`
+  同步最新会话范围与 `skinId`，已有子窗跟随主窗主题；`search:navigate` 交主窗执行导航。
+  子窗宿主使用 `app-screen` 铺满背景。开窗串行去重，登出或换号
+  作废排队请求并关闭旧窗，导航载荷的账号须与主窗当前账号一致。
+- **通用设置**：主题、语言、`DownloadDirectorySection`、`ShortcutSection` 与桌面关窗
+  行为集中一页。目录卡显示名称和授权状态；搜索组合存 `shortcutStore`，校验保留键，
+  忽略 IME 组合输入与长按重复事件，结果列表 Enter 选字不触发导航。
 
 ---
 

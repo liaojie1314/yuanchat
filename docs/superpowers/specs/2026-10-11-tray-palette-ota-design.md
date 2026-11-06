@@ -6,13 +6,17 @@
 | 批次     | K12 + K3 + K18 + K19 + O1 + 手机号移除 + Web 下载入口                       |
 | 分支     | `feature/tray-palette-ota`（自 `dev` 切出，`--no-ff` 合回）                 |
 | 迁移号   | **021**（删 phone）、**022**（文件名 trgm 索引）、**023**（`app_releases`） |
-| 目标版本 | 本批不发版，只合回 `dev`。K12 从 v0.8.0、O1 从 v1.0.0 提前到本批            |
+| 目标版本 | 本批不发版；全绿后当次询问合 `dev`。K12 从 v0.8.0、O1 从 v1.0.0 提前到本批  |
 | 执行计划 | `docs/superpowers/plans/2026-10-11-tray-palette-ota.md`                     |
 
 ## 0. 背景与范围
 
-六条工作流，一个分支，按依赖串行。W5 / W6 复用 W2 的下载器，W2 / W5 复用同一个
-Rust 文件打开命令，因此拆成多个分支只会让共用件在半空中悬着。
+六条工作流，一个分支，按依赖串行。W5 的 Android 更新复用 W2 的下载器与文件能力；
+W6 查询 catalog 后直接交浏览器下载安装包，不使用聊天文件的默认目录。
+
+**2026-11-06 状态**：桌面全局面板/会话搜索分工已修订，fresh Linux 主题与范围复核通过；
+桌面下载目录和完成后操作正在补齐，真实三端验收、最终 CI 和 README 真图仍在进行。
+本批尚未合并、推送或发版，最新证据见实施计划头部。
 
 | 代号 | 工作流                                      | 来源                                         |
 | ---- | ------------------------------------------- | -------------------------------------------- |
@@ -37,9 +41,9 @@ Rust 文件打开命令，因此拆成多个分支只会让共用件在半空中
 | T5   | 安卓下载落**应用私有 Download 目录**，不做「另存到」公共目录                                            | 零权限、零原生弹窗（符合 `no-native-permission-dialogs` 约定）。`ACTION_CREATE_DOCUMENT` 虽非权限弹窗，但本批已有六条工作流，要做另立项 |
 | T6   | 下载产物**不进** L1 的媒体 LRU 配额                                                                     | 缓存可重签 URL 取回，下载产物不可再生；用户显式要求保留的文件被 LRU 清掉很意外                                                          |
 | T7   | W6 下载入口的数据源是 `app_releases`，**不硬编码 GitHub Releases**                                      | 否则同一份版本信息两处维护，迟早漂                                                                                                      |
-| T8   | 桌面搜索**不开独立原生窗口**，改响应式大面板                                                            | 见 §1.2 —— 这是对 MASTER_PLAN K18 立项结论的有意偏离                                                                                    |
+| T8   | 桌面全局面板用主窗内弹窗，仅会话内搜索用原生窗口；手机路由页、Web 大屏弹窗                              | 见 §1.2；2026-11-05 用户最新确认，覆盖此前桌面全局/会话内都开独立窗的方案                                                               |
 | T9   | 未读角标**不生成数字图标**：`setBadgeCount` 交系统画，Windows 用静态红点 PNG，数字走托盘 tooltip 与菜单 | 见 §1.3                                                                                                                                 |
-| T10  | 本批**不发版**，只合回 `dev`。合 main / 打 tag 另行征询                                                 | 项目约定：合 main 与打 tag 每次必须当次征询                                                                                             |
+| T10  | 本批**不发版**；全绿后当次询问合 `dev`，push / main / tag / release 未执行                              | 用户本批明确要求；不可凭旧授权自动收口                                                                                                  |
 | T11  | OTA 对外端点收敛成**两条**：`/updates/catalog`（静态段）+ `/updates/:platform/:arch`（两段，安卓共用）  | 原构想的 `/updates/android` 与 `/updates/downloads` 都是单段路径，在 Gin 里同层注册静态段与通配段会打架                                 |
 
 ### 1.1 T3 的事实依据（2026-10-11 查生产库 `yuanyuan.blog`）
@@ -59,32 +63,35 @@ DELETE FROM users WHERE short_id = 10000;                                  -- �
 UPDATE users SET email = 'admin@yuanyuan.blog' WHERE short_id = 10006;     -- 管理员补邮箱
 ```
 
-现状：4 个用户，**全部有邮箱，零手机号专属账号**。迁移删列已无任何前置条件。
+2026-10-11 处置后：4 个用户，**全部有邮箱，零手机号专属账号**，据此执行迁移删列；此处是当时快照。
 
 > ⚠️ 部署时必须同步把服务器 `deploy/.env` 的 `ADMIN_PHONE=13900000001` 换成
 > `ADMIN_EMAIL=admin@yuanyuan.blog` —— `bootstrap-admin` 的去重键改成 email 之后，
 > 两者不一致会让下次 `install.sh` **再建一个管理员账号**。
+> 证书联系邮箱另用 `LE_EMAIL`，已有部署重跑安装脚本前手工补齐；`ADMIN_EMAIL` 只保留一条账号键。
 
-### 1.2 T8 为什么偏离立项结论
+### 1.2 搜索与设置承载修订（2026-11-05 确认，2026-11-06 复核）
 
-MASTER_PLAN §10 写的是「桌面端独立搜索窗口，本仓已有现成先例可抄 —— 通话就是用
-`MainLayout` 的 `callMode: "window"` 开 Tauri 独立原生窗口承载的」。本设计不照抄，
-因为那个先例的成立条件在搜索上不成立：
+以 2026-11-05 用户最后确认的入口分工为准，覆盖早期承载方案：
 
-`useCallWindow.ts` 的文件头自己写明「Tauri 每个 `WebviewWindow` 是独立 JS 上下文」。
-通话**必须**独立窗口 —— `MediaStream` 只能活在渲染它的那个上下文里。
-而命令面板的全部价值在于**对主窗口做事**：跳会话、切主题、建群、登出、打开设置。
-搬进独立窗口的代价是：
+- 桌面客户端：全局 Ctrl/Cmd+K 命令面板在主窗口内弹出；只有会话内搜索使用独立 Tauri
+  原生窗口，已存在窗口须能切换会话范围。
+- 手机端（Android 与手机 Web）：独立路由搜索页面；返回回到原页面，选结果直接落到目标会话。
+- Web 桌面端：居中弹窗。
 
-- Zustand store 不共享 → 联系人与会话列表拿不到，得在新窗口里重新拉一遍
-- 每个快捷动作都要一轮跨窗口 event RPC
-- 两个上下文各自判断登录态与 WS 连接
+全局搜索与聊天标题栏的会话内搜索共用 `CommandPalette` 内容，按上述入口分工承载，
+旧内嵌搜索条不再保留。
+会话内查询始终传 `conversation_id`，不混入全局动作、好友和其他会话结果。
+独立窗口只拉自己的本地检索源，不另建 WS；导航与消息定位经已有桥交主窗口执行，
+`search:ready` / `search:scope` 同步范围与 `skinId`，宿主 `app-screen` 铺满背景。
+上述三条路径均已实现；开窗串行去重，登出/换号关闭旧窗并拒绝旧账号迟到导航。
+2026-11-06 fresh Linux 已验证暗色首次开窗、已有窗主题切换、全窗背景与会话范围切换，
+19 项相关回归通过。上轮主题异常没有复现；HMR 未重跑既有 effect 是候选解释，历史
+根因尚未确认。本轮其余真实验收仍在进行，不能沿用早期面板验收结论。
 
-换来的只有「面板可脱离应用单独摆着」，这条从未有人要求。
-用户的原始抱怨是「桌面也复用移动端的模态框，屏幕再大也只有一个窄弹窗」——
-那是**宽度**问题，用 CSS 断点解决即可（桌面 ~720×560 居中面板，移动端保持全屏）。
-
-「桌面独立搜索窗口」作为 ⚪ 债登记回 MASTER_PLAN，需要时再做。
+设置按 2026-11-05 用户意见合并为「通用设置」：主题、语言、文件下载目录与搜索快捷键
+同页，不保留独立「文件下载」导航。共享目录卡显示目录名/授权状态，操作复用 `Button`；
+目录选择和重新授权由用户点击后调用浏览器安全流程。
 
 ### 1.3 T9 为什么不画数字角标
 
@@ -99,19 +106,20 @@ Windows overlay icon 两处复用。放弃，因为：
 在永远测不到的平台上押一个不确定的编码格式，等于写了行不通也不会被发现的代码。
 改为：
 
-| 平台          | 角标实现                                                                                            |
-| ------------- | --------------------------------------------------------------------------------------------------- |
-| macOS / Linux | `getCurrentWindow().setBadgeCount(n)` —— 数字由系统绘制                                             |
-| Windows       | `setOverlayIcon('icons/badge-dot.png')` 静态红点两态，走 `core:image:allow-from-path`（语义无歧义） |
-| 托盘图标      | 静态，不随未读变化                                                                                  |
-| 数字信息      | 托盘 tooltip（`元聊 — 未读 12 条`）+ 托盘菜单首项                                                   |
+| 平台          | 角标实现                                                                                                    |
+| ------------- | ----------------------------------------------------------------------------------------------------------- |
+| macOS / Linux | `getCurrentWindow().setBadgeCount(n)` —— 数字由系统绘制                                                     |
+| Windows       | `resolveResource` → `Image.fromPath` → `setOverlayIcon(image)`；静态红点两态，图标作为 bundle resource 分发 |
+| 托盘图标      | 静态，不随未读变化                                                                                          |
+| 数字信息      | 托盘 tooltip（`元聊 — 未读 12 条`）+ 托盘菜单首项                                                           |
 
 数字信息零损失，不确定的编码路径被完全移除。
 
 > Linux 实测边界（已核实本机）：`libayatana-appindicator3` 与 GNOME
 > `ubuntu-appindicators` 扩展都在 → **托盘可真机实测**。但 `setBadgeCount` 在 Linux
 > 走 Unity LauncherEntry DBus，需要 `yuanchat.desktop` 已安装（Tauri 传的是
-> `{package_name}.desktop`）→ `tauri dev` 下看不到，**必须装 .deb 才能验**。
+> `{package_name}.desktop`）。本机已有 `/usr/share/applications/yuanchat.desktop`，
+> 可直接复验；缺少该条目的环境先安装桌面入口，无需为已有条目重打 `.deb`。
 
 ---
 
@@ -199,7 +207,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users (phone);
 
 ## 3. W2 — K19 应用内文件下载 + 进度条
 
-### 3.1 现状与根因
+### 3.1 立项时的现状与根因（2026-10-11）
 
 `MessageBubble.tsx:546-560` 签出预签名 URL 后交给 `openExternal`：桌面与安卓跳出应用
 到系统浏览器/下载管理器，Web 端在新标签页里预览。用户要的是「点下载 → 气泡下方
@@ -216,7 +224,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users (phone);
 
 ### 3.2 新增 `packages/shared/src/download/`
 
-两个文件，按 `frontend-src-foldering` 约定独立成目录。
+下载状态、落盘与浏览器目录偏好按 `frontend-src-foldering` 约定独立成目录。
 
 **`downloadStore.ts`** — Zustand store，按 `messageId` 建条目：
 
@@ -250,31 +258,48 @@ type SinkDir = "downloads" | "appdata";
 
 interface FileSink {
   /** 返回可展示给用户的落盘位置描述（web 实现返回 null） */
-  save(bytes: Uint8Array, fileName: string, mime: string, dir?: SinkDir): Promise<string | null>;
+  save(
+    bytes: Uint8Array,
+    fileName: string,
+    mime: string,
+    dir?: SinkDir,
+    signal?: AbortSignal,
+  ): Promise<string | null>;
   /** 读回已落盘的字节（outbox 重试用）；web 实现为 undefined */
   read?(fileName: string, dir: SinkDir): Promise<Uint8Array>;
   /** 删除已落盘的文件（outbox 发送成功后清理）；web 实现为 undefined */
   remove?(fileName: string, dir: SinkDir): Promise<void>;
-  /** 打开已落盘的文件；web 实现为 undefined（浏览器下载目录不由我们管） */
+  /** 打开已落盘的文件；web 无系统打开能力，仍为 undefined */
   reveal?(path: string): Promise<void>;
 }
 ```
 
-- **Web 默认实现**（无需注入）：`new Blob([bytes], { type: mime })` →
-  `URL.createObjectURL` → 建 `<a download=fileName>` 点击 → `revokeObjectURL`。
-  返回 `null`，UI 显示「已下载」而不是具体路径
+- **Web 默认实现**（无需注入）：优先加载 `browserDirectory.ts` 在独立 IDB 中保存的
+  目录句柄，检查已有写权限 → Web Locks 占名 → 写入 → close → 完成。失败/取消清理本次
+  产物；失权提示到「设置 → 通用设置 → 文件下载」重新授权，不静默换保存位置。
+  安全上下文、目录选择 API、IDB、Web Locks 齐备才提供选目录入口；无目录时使用 Blob +
+  `<a download>` 浏览器保存，不能确认浏览器最终落盘。两条路径都在读取 IDB 后检查取消。
+  Web 不持有绝对路径，返回 `null`；恢复默认只清偏好，不删除文件
 - **桌面 / 安卓实现**（`apps/desktop/src/main.tsx` 注入，与既有 `setUrlOpener` /
   `setNotifier` 并列）：`@tauri-apps/plugin-fs` 的
-  `writeFile(fileName, bytes, { baseDir: BaseDirectory.Download })`。
+  创建文件并循环写入，处理短写、并发占名与失败/取消清理。
   安卓上 `BaseDirectory.Download` 落在应用私有 external files 目录，**无需任何权限**
   （决策 T5）。`reveal` 走 §8.1 的 `open_local_file`
 
 同名文件处理：`文件名 (2).pdf` 递增，不静默覆盖 —— 覆盖用户已有的下载是不可逆的。
 
+**2026-11-06 下载追加范围（实现与真实复验进行中）**：桌面提供下载目录选择、持久化和
+恢复默认；下载完成后打开所在文件夹，若本地文件已被删除则再次点击重新下载。Android
+继续使用应用私有目录和系统打开文件，Web 继续允许重复下载。恢复目录默认值不移动或
+删除已有文件；自选目录须纳入原生路径验证，不能放开任意路径。下文早期接口草案随最终
+实现回填，不以本段代替验收证据。
+
 ### 3.3 UI
 
 `MessageBubble` 文件气泡**下方**加一条进度条：
 
+- 所有状态预留同一固定进度空间，idle/done/canceled 也不移除占位；2026-11-05 真实使用
+  发现旧实现显隐会推动下方消息，修复与验收进行中，不能把 `return null` 当作零 CLS
 - 放气泡**外**而不是气泡内：气泡内会再踩一次 MASTER_PLAN §2.12 那个 `min-content` 顶穿
   （进度条有最小宽度诉求，会向上贡献 min-content）。进度条行用 `w-full`，
   宽度由父列正推为定值
@@ -308,7 +333,7 @@ interface FileSink {
 - `downloadStore` 单测：喂一个假 `ReadableStream`，断言进度单调递增、节流后更新次数
   有上界、abort 后 phase 进 `canceled`、重复 start 不起第二条请求、
   无 `content-length` 时 `total === 0`
-- `fileSink` web 实现单测：断言 `<a download>` 的 `download` 属性与 `revokeObjectURL` 被调
+- `fileSink` Web 回归：授权句柄持久化、失权、同名避让、close 失败、写盘/IDB 等待期间取消；无目录时验证浏览器保存回落
 - **E2E 量真实尺寸**：按 MASTER_PLAN §2.12 的测试教训（「凡宽度/溢出/换行类缺陷一律在 E2E 量真实
   `getBoundingClientRect()`，不要只断言类名」），在 412px 视口断言进度条宽度不超过
   气泡列宽
@@ -317,7 +342,7 @@ interface FileSink {
 
 ## 4. W3 — K3 命令面板 + K18 搜索体验重做
 
-### 4.1 「搜不到文件」的根因（已定位）
+### 4.1 「搜不到文件」的立项根因（2026-10-11）
 
 `message_repo.go:343` 的检索条件只有一句 `(m.content->>'text') ILIKE ?`。
 文件名存在 `content->>'name'` 里，**压根没进 WHERE**；迁移 003 的 trgm GIN 索引
@@ -340,6 +365,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_messages_name_trgm
   —— 两个 GIN 索引由 planner 走 BitmapOr 合并
 - 新增 `types []int` 参数 → `m.message_type IN (?)`；空切片表示不过滤
 - E2EE 排除与成员校验口径**完全不变**（不能因为加过滤顺手放宽可见性）
+- 全局/会话内与类型筛选均排除本人清空水位前的消息、软删消息与已解散会话
 
 **`handler/message.go`**：收 `types=file,image,video,voice` 逗号分隔列表，
 映射到 `model.MessageType*` 常量；出现未知值返 400（不静默忽略 —— 静默忽略会让
@@ -356,7 +382,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_messages_name_trgm
 
 **`paletteActions.ts`** —— `{ id, labelKey, icon, keywords, run }[]`，
 动作：新建群聊 / 打开设置 / 切换主题 / 退出登录 / 表情商城 / 我的收藏 /
-朋友圈 / 检查更新（仅桌面）。`keywords` 供模糊匹配（输入 "qh" 命中「切换主题」
+朋友圈 / 检查更新（原生桌面与 Android，直达关于页并触发检查）。`keywords` 供模糊匹配（输入 "qh" 命中「切换主题」
 这类拼音首字母**不做** —— 中文模糊匹配是个独立课题，YAGNI）。
 
 **搜索三源并发**：
@@ -366,28 +392,34 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_messages_name_trgm
 - 消息与文件：`searchMessages`（服务端，带 `types`）
 
 **结果分组**：`联系人 / 群聊 / 消息 / 文件与媒体`，空分组不渲染标题。
+会话内模式只查当前 `conversation_id` 的消息与文件，不混入全局动作、联系人或其他会话。
 
 **类型筛选条**：全部 / 消息 / 文件 / 图片 / 视频 / 语音 → 映射到后端 `types`。
 
 **媒体缩略图**：图片/视频命中走 `resolveObjectUrl(key)`。**固定宽高 + Skeleton 占位，
 CLS 必须为零**（AGENTS 第 9 条）。
 
-**键盘**：`↑` `↓` 移动选中、`Enter` 执行、`Esc` 关闭。不做 `Tab` 切分组（YAGNI）。
+**键盘**：`↑` `↓` 移动选中、`Enter` 执行、`Esc` 关闭；IME Enter 选字不执行结果。
+默认 Ctrl/Cmd+K 可在「通用设置」自定义，`shortcutStore` 本机持久化并拒绝保留键/冲突，
+忽略 IME 组合和长按重复事件。本批只做搜索组合，不等同完整 J3 快捷键体系。
 
 **`searchSource` 接口层**：按立项结论抽出来，只落服务端实现。
 本地库实现（离线可搜）挂后续，届时策略是「本地先出结果、服务端到了再合并」。
 
-### 4.4 桌面形态（决策 T8）
+### 4.4 三端形态（决策 T8）
 
-`MainLayout` 的面板宽度按断点推导，**不开独立原生窗口**：
+全局与会话内共用面板组件，桌面入口分别承载：
 
-| 断点    | 形态                                             |
-| ------- | ------------------------------------------------ |
-| mobile  | 全屏浮层（现状）                                 |
-| tablet  | 居中面板 ~560px                                  |
-| desktop | 居中面板 ~720×560，结果区可滚动，分组标题 sticky |
+| 平台               | 形态                                                       |
+| ------------------ | ---------------------------------------------------------- |
+| Tauri 桌面全局面板 | 主窗口内居中弹窗                                           |
+| Tauri 桌面会话搜索 | 独立 `search` 窗口，880×620；Windows 按逻辑工作区限幅      |
+| Android / 手机 Web | `/search` 独立路由页，返回来源页；选择结果后替换到目标会话 |
+| Web 大屏           | 居中面板，桌面约 720×560，结果区滚动                       |
 
-断点一律由组件内部 `useBreakpoint()` 推导，不接 `isDesktop` prop（沿用裁决 D1）。
+桌面会话搜索由 `search:ready` / `search:scope` 同步最新范围与主题，`search:navigate`
+把导航交主窗；全局面板直接使用主窗状态。
+旧 `InConversationSearch` 已移除；手机返回键由搜索页处理，不退出应用。
 
 ### 4.5 测试
 
@@ -440,12 +472,12 @@ TrayIcon.new({
 
 ### 5.4 角标（决策 T9）
 
-| 平台          | 实现                                                                        | 可测性                     |
-| ------------- | --------------------------------------------------------------------------- | -------------------------- |
-| macOS / Linux | `getCurrentWindow().setBadgeCount(n \|\| undefined)`                        | Linux 需装 .deb（见 §1.3） |
-| Windows       | `setOverlayIcon("icons/badge-dot.png")`（有未读）/ `setOverlayIcon()`（无） | **无设备，不实测**         |
-| 托盘 tooltip  | `元聊 — 未读 N 条` / 无未读时 `元聊`                                        | Linux 可测                 |
-| 托盘菜单首项  | `未读 N 条`（disabled 信息项，`setText` 更新）                              | Linux 可测                 |
+| 平台          | 实现                                                                       | 可测性                     |
+| ------------- | -------------------------------------------------------------------------- | -------------------------- |
+| macOS / Linux | `getCurrentWindow().setBadgeCount(n \|\| undefined)`                       | Linux 需装 .deb（见 §1.3） |
+| Windows       | `resolveResource` → `Image.fromPath` → `setOverlayIcon(image)`；无未读清空 | **无设备，不实测**         |
+| 托盘 tooltip  | `元聊 — 未读 N 条` / 无未读时 `元聊`                                       | Linux 可测                 |
+| 托盘菜单首项  | `未读 N 条`（disabled 信息项，`setText` 更新）                             | Linux 可测                 |
 
 所有角标调用**裹 try/catch 并只记 warn** —— 平台不支持时（如 Linux 未装 .desktop）
 抛错不能冒泡到 UI。角标是增强，失败了应用照常用。
@@ -549,9 +581,10 @@ core:image:allow-from-path
 安卓多带 `sha256` 与 `size`（APK 没有 minisign）。
 
 - **无更新 / 未中灰度 → 204 No Content**（Tauri updater 的约定）
-- **灰度**：`hash(device) % 100 < rollout`。`device` 缺失时回落 IP 哈希
-  —— 必须保证**同一设备判定稳定**，否则用户会在新旧版之间来回跳
+- **灰度**：显式 `device` 的 FNV-1a 哈希桶优先，其次 `X-YuanChat-Update-Cohort: 0..99`，
+  最后 IP 哈希桶；以 `bucket < rollout` 放量。客户端只传稳定匿名桶，非法桶回落 IP；桶不作鉴权
 - `min_version` 命中 → 响应里带强制更新标记
+- 版本/最低版本按 SemVer 比较；非法登记返回 400。macOS 精确架构无已发布包时回落 universal
 
 > plan 的 pre-flight 要对着 `~/.cargo` 里装好的 `tauri-plugin-updater` 源码核实
 > 扁平格式的确切字段名与 204 语义，**不照记忆写**。
@@ -561,12 +594,13 @@ core:image:allow-from-path
 `tauri.conf.json` 的 `plugins.updater.endpoints` 改成两个，按序回退：
 
 ```
-["https://api.yuanyuan.blog/api/v1/updates/{{target}}/{{arch}}",
+["https://api.yuanyuan.blog/api/v1/updates/{{target}}/{{arch}}?version={{current_version}}",
  "https://github.com/liaojie1314/yuanchat/releases/latest/download/latest.json"]
 ```
 
 自有端点在前、GitHub 兜底在后 —— 这正是 O1 立项时点名的「国内直连 GitHub
-Releases 不稳，更新检查超时、用户永远停在旧版」。`UpdateChecker.tsx` 零改动。
+Releases 不稳，更新检查超时、用户永远停在旧版」。`UpdateChecker.tsx` 发送匿名 cohort 桶，
+并消费命令面板传来的检查动作；204 停止回落，服务错误才尝试 GitHub。
 
 ### 6.4 管理端
 
@@ -580,6 +614,7 @@ Releases 不稳，更新检查超时、用户永远停在旧版」。`UpdateChec
 
 全部写 `admin_action_logs`（沿用既有审计约定）。
 前端 `apps/admin/src/pages/Releases.tsx` + `AdminLayout` 侧栏入口。
+登记校验 SemVer，重复返回 409；编辑只改灰度/强制/说明，不改记录身份与对象。
 
 > 🔴 **签名私钥不入库、不进管理端进程**（O1 立项硬要求）。`.sig` 仍由 release
 > 流水线的 `TAURI_SIGNING_PRIVATE_KEY` 产出，管理端**只做登记**。
@@ -597,11 +632,9 @@ Tauri updater 不支持 Android，自建一条：
    `FLAG_GRANT_READ_URI_PERMISSION`
 6. `AndroidManifest.xml` 加 `REQUEST_INSTALL_PACKAGES`
 
-> ⚠️ **本批最大未知**：Tauri 2 的 `gen/android` 模板是否已带 FileProvider、
-> manifest 的注入点在哪（`gen/android` 是生成目录，直接改会被覆盖）。
-> **plan 的第一个 Task 是 pre-flight 核实**，不猜 —— `tauri-permission-naming`
-> 那条记忆就是猜出来的教训。核不通就当次把结论登记进 MASTER_PLAN 并降级为
-> 「下载完交系统安装器打开」（仍比现状的「完全没有更新路径」好）。
+FileProvider 的 manifest 与 `file_paths.xml` 已由 pre-flight 核实并纳入版本控制；
+安装 APK 前须校验 sha256。真实验收还须核对包内版本与签名，仅把 OTA 登记写成新版
+不能证明应用升级成功。
 
 ### 6.6 测试
 
@@ -637,7 +670,9 @@ Tauri updater 不支持 Android，自建一条：
 
 - 环境检测：`navigator.userAgentData?.platform` 优先，回落 UA 字符串
   （`userAgentData` 在旧 WebView 不存在，必须有回落）
-- 高亮当前系统的推荐包，其余折叠进「其他平台」—— 就是一般官网的做法
+- 按系统与架构推荐；「当前系统 / 其他平台」两组完整展示 Windows/macOS/Linux/Android，
+  同系统其他架构归当前系统。56px 紧凑行，缺包保留不可用行，不折叠；298px 内部列表视口
+  与同结构骨架稳定高度，内容超出后内部滚动
 - 点击走浏览器原生下载（`<a href download>`），**不走 W2 的应用内下载**
   —— Web 端装包本来就该交给浏览器
 - 空态：表里没有 published release 时显示「暂无可用安装包」+ GitHub Releases 兜底链接
@@ -700,9 +735,11 @@ fn open_local_file(app: AppHandle, path: String, mime: Option<String>) -> Result
 ```
 node scripts/check-i18n.mjs
 LANG=C.UTF-8 pnpm test            # 必须对齐 runner 的语言环境
+LANG=C.UTF-8 pnpm test:coverage   # provider 与阈值见 DEVELOPMENT
 npx tsc --noEmit                  # apps/web 与 apps/desktop 各自
 pnpm --filter @yuanchat/web test:e2e
-cd server && go vet ./... && go test ./... && go test -race ./internal/ws/
+(cd server && go vet ./... && go test ./... -coverprofile=coverage.out -covermode=atomic && go test -race ./internal/ws/)
+node scripts/check-coverage.mjs 40 server/coverage.out
 ```
 
 `LANG=C.UTF-8` 不是可选的：Node 21 起 `navigator.language` 取自宿主 ICU 语言环境，
@@ -713,12 +750,12 @@ cd server && go vet ./... && go test ./... && go test -race ./internal/ws/
 Mock 下的「通过」是假阳性（`real-backend-not-mock-for-verification`）。
 全部实测走真实后端 `:8085` / `:8086` + 真实 MinIO。
 
-| 端     | 方式                                             | 覆盖                                                       |
-| ------ | ------------------------------------------------ | ---------------------------------------------------------- |
-| Web    | playwright-cli                                   | 命令面板、搜索分组与筛选、下载进度条、侧边下载入口         |
-| 桌面   | playwright-cli + Tauri 窗口                      | 托盘、关窗弹窗两分支、角标（装 .deb）、命令面板大面板形态  |
-| 安卓   | 模拟器/真机 + adb（**需要连 USB 时当次叫用户**） | 下载落盘与「打开」、OTA 检查到安装全链路、命令面板移动形态 |
-| 管理端 | playwright-cli                                   | Releases 页五个操作 + 审计日志留痕                         |
+| 端     | 方式                                             | 覆盖                                                                                  |
+| ------ | ------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| Web    | playwright-cli                                   | 搜索分组/筛选与手机路由、目录授权/持久化/取消/失权、下载进度固定占位、客户端入口      |
+| 桌面   | Tauri 原生窗口与 WebView 检查                    | 托盘/关窗/角标（核对已有桌面入口）、主窗全局面板/独立会话搜索窗、主题同步与旧账号清理 |
+| 安卓   | 模拟器/真机 + adb（**需要连 USB 时当次叫用户**） | 搜索路由与返回、下载落盘/打开、检查更新动作与 OTA 下载/校验/安装链路                  |
+| 管理端 | playwright-cli                                   | Releases 页五个操作 + 审计日志留痕                                                    |
 
 ### 9.3 实测后收尾
 
@@ -731,7 +768,7 @@ Mock 下的「通过」是假阳性（`real-backend-not-mock-for-verification`�
 
 | 级别 | 条目                                                                                                                                                     |
 | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ⚪   | **桌面独立搜索窗口**：按决策 T8 改为响应式大面板。真要「可脱离应用摆着」的搜索窗口，需先解决独立 JS 上下文下 store 不共享的问题                          |
+| 🟡   | **最终验收进行中**：全局/会话内三端承载、通用设置与目录授权已实现，真实三端验收、最终 CI 与 README 真图未收口                                            |
 | ⚪   | **Windows / macOS 的托盘与角标未实测**：无设备（`project-charter`）。`setOverlayIcon` 的静态 PNG 路径与 `setBadgeCount` 在这两个平台上只有代码、没有实测 |
 | ⚪   | **安卓「另存到」公共目录**（`ACTION_CREATE_DOCUMENT`）：按 T5 不做，下载只落应用私有目录                                                                 |
 | ⚪   | **本地库离线搜索**：按立项结论只抽 `searchSource` 接口层、只落服务端实现                                                                                 |
@@ -751,7 +788,7 @@ Mock 下的「通过」是假阳性（`real-backend-not-mock-for-verification`�
 | persist store 范式                                                   | `themeStore.ts`、`authStore.ts`                                  |
 | `ConfirmDialog` 已有 role/aria-modal/Esc/焦点陷阱                    | `packages/ui/src/primitives/ConfirmDialog.tsx`（L1 批次补齐）    |
 | 搜索只检索 `content->>'text'`，trgm 索引同样只建在它上面             | `message_repo.go:343`、迁移 `003`                                |
-| 登录非 `@` 分支是「先手机号后元聊号」                                | `user_service.go:262-274`                                        |
+| 登录非 `@` 分支仅走元聊号，手机号分支与数据列已移除                  | `user_service.go`、迁移 021                                      |
 | 生产库 4 个用户全部有邮箱、零手机号专属账号                          | 2026-10-11 实查并处置，见 §1.1                                   |
 | `auth.accountPlaceholder` 已是「邮箱 / 元聊号」                      | `zh-CN.json:176`                                                 |
 | 下一个可用迁移号是 **021**                                           | `migrations/` 最大为 `020_idempotent_send.sql`                   |
