@@ -1,5 +1,7 @@
 # 元聊 YuanChat — UI/UX 设计规范导航
 
+> **时效说明（2026-11-05）**：本目录保留历史原型；手机号功能已移除，旧设置分组已由「通用设置」方案取代，当前行为以实现及[本批 spec](../superpowers/specs/2026-10-11-tray-palette-ota-design.md)为准。
+
 > 本目录包含元聊所有界面的完整设计规范，供 OpenDesign 等设计工具制作原型图。
 > 设计基于 **Material Design 3**（Aurora 主题），品牌渐变 `#5B9BD5 → #7EC8E3 → #A8CFFF`，支持亮/暗双色主题。
 > 版本: v1.1 / 最后更新: 2026-07-06

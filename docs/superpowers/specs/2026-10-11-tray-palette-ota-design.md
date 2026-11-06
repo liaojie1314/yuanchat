@@ -14,8 +14,10 @@
 六条工作流，一个分支，按依赖串行。W5 的 Android 更新复用 W2 的下载器与文件能力；
 W6 查询 catalog 后直接交浏览器下载安装包，不使用聊天文件的默认目录。
 
-**2026-11-06 状态**：桌面全局面板/会话搜索分工已修订，fresh Linux 主题与范围复核通过；
-桌面下载目录和完成后操作正在补齐，真实三端验收、最终 CI 和 README 真图仍在进行。
+**2026-11-06 状态**：本轮指定链路修订、核心页面截图与本地检查已完成，源码已提交至
+`a21c63d`，最终 Chromium E2E 119 / 119 全绿（3.7 分钟、无重试），运行环境已关闭。
+尚未合并或发版；本轮未重跑最新 APK 完整 OTA 安装、无 Windows/macOS 实机验收，
+SAF 另存为未实现。测量范围与具体结果见实施计划当前状态。
 本批尚未合并、推送或发版，最新证据见实施计划头部。
 
 | 代号 | 工作流                                      | 来源                                         |
@@ -87,10 +89,13 @@ UPDATE users SET email = 'admin@yuanyuan.blog' WHERE short_id = 10006;     -- �
 上述三条路径均已实现；开窗串行去重，登出/换号关闭旧窗并拒绝旧账号迟到导航。
 2026-11-06 fresh Linux 已验证暗色首次开窗、已有窗主题切换、全窗背景与会话范围切换，
 19 项相关回归通过。上轮主题异常没有复现；HMR 未重跑既有 effect 是候选解释，历史
-根因尚未确认。本轮其余真实验收仍在进行，不能沿用早期面板验收结论。
+根因尚未确认。本轮各链路的实测范围与限制见实施计划当前状态。
 
 设置按 2026-11-05 用户意见合并为「通用设置」：主题、语言、文件下载目录与搜索快捷键
-同页，不保留独立「文件下载」导航。共享目录卡显示目录名/授权状态，操作复用 `Button`；
+同页，不保留独立「文件下载」导航；2026-11-06 追加：快捷键设置只在非手机布局展示，
+复用 `SettingsScreen` 的 `isMobile` 隐藏手机入口，桌面/平板保留，已保存组合不变。
+手机入口副文案四语使用 `settings.generalDescMobile`（中文「外观与下载」），桌面保留原描述。
+共享目录卡显示目录名/授权状态，操作复用 `Button`；
 目录选择和重新授权由用户点击后调用浏览器安全流程。
 
 ### 1.3 T9 为什么不画数字角标
@@ -252,62 +257,53 @@ interface DownloadEntry {
 **`fileSink.ts`** — 落盘抽象，与 `openExternal.ts` / `notify.ts` 同一套注入模式
 （UI 层不能直接 `import @tauri-apps/*`，否则 web 构建把桌面依赖拖进去）：
 
-```ts
-/** 落盘目标目录。下载产物进 downloads，发送前的 outbox 副本进 appdata（见 §3.4） */
-type SinkDir = "downloads" | "appdata";
-
-interface FileSink {
-  /** 返回可展示给用户的落盘位置描述（web 实现返回 null） */
-  save(
-    bytes: Uint8Array,
-    fileName: string,
-    mime: string,
-    dir?: SinkDir,
-    signal?: AbortSignal,
-  ): Promise<string | null>;
-  /** 读回已落盘的字节（outbox 重试用）；web 实现为 undefined */
-  read?(fileName: string, dir: SinkDir): Promise<Uint8Array>;
-  /** 删除已落盘的文件（outbox 发送成功后清理）；web 实现为 undefined */
-  remove?(fileName: string, dir: SinkDir): Promise<void>;
-  /** 打开已落盘的文件；web 无系统打开能力，仍为 undefined */
-  reveal?(path: string): Promise<void>;
-}
-```
+接口以 `packages/shared/src/download/fileSink.ts` 导出的 `FileSink` 为准：`save` 返回
+原生绝对路径、Web 授权文件引用或 `null`（默认浏览器下载）；`read` / `exists` /
+`isCurrentDirectory` 支持核验完成记录，`remove` 清理本次产物或 outbox 副本。
+`revealTarget` 区分文件夹、文件和保存位置，`reveal` 执行原生打开或返回 Web 可读位置，
+`describe` 将 Web 内部引用转成目录名与文件名。桌面额外注入 `downloadDirectory` 的
+`get` / `choose` / `reset`，移动端不暴露选择目录能力。Web 的 `appdata` 保存/删除仍为
+no-op、读取仍拒绝，不能因新增下载读回能力而触发 outbox 附件下载。
 
 - **Web 默认实现**（无需注入）：优先加载 `browserDirectory.ts` 在独立 IDB 中保存的
   目录句柄，检查已有写权限 → Web Locks 占名 → 写入 → close → 完成。失败/取消清理本次
   产物；失权提示到「设置 → 通用设置 → 文件下载」重新授权，不静默换保存位置。
   安全上下文、目录选择 API、IDB、Web Locks 齐备才提供选目录入口；无目录时使用 Blob +
   `<a download>` 浏览器保存，不能确认浏览器最终落盘。两条路径都在读取 IDB 后检查取消。
-  Web 不持有绝对路径，返回 `null`；恢复默认只清偏好，不删除文件
+  Web 不持有绝对路径；授权目录保存成功返回内部文件引用，目录/文件句柄及实际文件名
+  存账号本地库的 meta 并按服务器隔离。恢复默认只清目录偏好，不删除文件。
 - **桌面 / 安卓实现**（`apps/desktop/src/main.tsx` 注入，与既有 `setUrlOpener` /
   `setNotifier` 并列）：`@tauri-apps/plugin-fs` 的
   创建文件并循环写入，处理短写、并发占名与失败/取消清理。
   安卓上 `BaseDirectory.Download` 落在应用私有 external files 目录，**无需任何权限**
-  （决策 T5）。`reveal` 走 §8.1 的 `open_local_file`
+  （决策 T5）。桌面由原生选择器设置下载目录，原生 JSON 持久化当前目录及历史授权；
+  重启先恢复文件系统范围，恢复默认仍保留历史授权。`reveal` 走 §8.1 的 `open_local_file`
 
 同名文件处理：`文件名 (2).pdf` 递增，不静默覆盖 —— 覆盖用户已有的下载是不可逆的。
 
-**2026-11-06 下载追加范围（实现与真实复验进行中）**：桌面提供下载目录选择、持久化和
-恢复默认；下载完成后打开所在文件夹，若本地文件已被删除则再次点击重新下载。Android
-继续使用应用私有目录和系统打开文件，Web 继续允许重复下载。恢复目录默认值不移动或
-删除已有文件；自选目录须纳入原生路径验证，不能放开任意路径。下文早期接口草案随最终
-实现回填，不以本段代替验收证据。
+**2026-11-06 完成记录与复用**：已落盘结果在账号本地库中按服务器隔离，保存原始字节的
+SHA-256 和实际路径（含同名后缀）历史候选。登录恢复、目录切换以及点击完成操作时核验
+当前目录身份、原路径存在及内容；A→B→A 切回可复用旧目录中的有效副本。原路径改名、
+丢失或内容修改时重新下载并避让现有文件，不扫描任意重命名、不删除用户修改的文件；
+失权或读取错误须提示处理，不能误判成文件丢失。默认浏览器下载没有可核验路径，不保留
+完成记录；登出清内存并中止在途下载，不删除已下载文件。用户已确认下载实测没有问题，
+本轮指定 Android 链路与本地检查已完成，未重跑最新 APK 的完整 OTA 安装流程。
 
 ### 3.3 UI
 
 `MessageBubble` 文件气泡**下方**加一条进度条：
 
 - 所有状态预留同一固定进度空间，idle/done/canceled 也不移除占位；2026-11-05 真实使用
-  发现旧实现显隐会推动下方消息，修复与验收进行中，不能把 `return null` 当作零 CLS
+  发现旧实现显隐会推动下方消息，不能把 `return null` 当作零 CLS
 - 放气泡**外**而不是气泡内：气泡内会再踩一次 MASTER_PLAN §2.12 那个 `min-content` 顶穿
   （进度条有最小宽度诉求，会向上贡献 min-content）。进度条行用 `w-full`，
   宽度由父列正推为定值
 - 样式语言复用 `UpdateChecker.tsx:117-124` 的既有进度条
   （`h-1.5 rounded-full bg-surface-container-highest` + `bg-primary` 填充），
   不另造一套
-- `downloading` 态下载按钮变 `X`（取消）；`failed` 态变重试；`done` 态变「打开」
-  （桌面/安卓走 `reveal`，Web 不显示）
+- `downloading` 态下载按钮变 `X`（取消）；`failed` 态变重试；有效 `done` 态按能力显示
+  桌面「打开所在文件夹」、Android「打开文件」、Web「查看保存位置」。Web 位置弹窗复用
+  `ConfirmDialog`，仅有一个关闭按钮；默认浏览器下载仍显示下载入口
 - `total === 0` 时进度条走不确定态动画（无 `width` 百分比）
 
 `ConversationMediaView.tsx:199` 的下载同步接上同一套 store。
@@ -334,6 +330,8 @@ interface FileSink {
   有上界、abort 后 phase 进 `canceled`、重复 start 不起第二条请求、
   无 `content-length` 时 `total === 0`
 - `fileSink` Web 回归：授权句柄持久化、失权、同名避让、close 失败、写盘/IDB 等待期间取消；无目录时验证浏览器保存回落
+- 完成记录回归：刷新恢复、账号/服务器隔离、同大小内容修改、原路径丢失、带后缀文件、
+  A→B→A 目录切回；目录选择取消/恢复默认保留已有文件，Web `appdata` 保持原 no-op 行为
 - **E2E 量真实尺寸**：按 MASTER_PLAN §2.12 的测试教训（「凡宽度/溢出/换行类缺陷一律在 E2E 量真实
   `getBoundingClientRect()`，不要只断言类名」），在 412px 视口断言进度条宽度不超过
   气泡列宽
@@ -400,7 +398,8 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_messages_name_trgm
 CLS 必须为零**（AGENTS 第 9 条）。
 
 **键盘**：`↑` `↓` 移动选中、`Enter` 执行、`Esc` 关闭；IME Enter 选字不执行结果。
-默认 Ctrl/Cmd+K 可在「通用设置」自定义，`shortcutStore` 本机持久化并拒绝保留键/冲突，
+默认 Ctrl/Cmd+K 可在非手机布局的「通用设置」自定义，手机不展示该设置；
+`shortcutStore` 本机持久化并拒绝保留键/冲突，
 忽略 IME 组合和长按重复事件。本批只做搜索组合，不等同完整 J3 快捷键体系。
 
 **`searchSource` 接口层**：按立项结论抽出来，只落服务端实现。
@@ -697,26 +696,26 @@ FileProvider 的 manifest 与 `file_paths.xml` 已由 pre-flight 核实并纳入
 
 ### 8.1 `open_local_file` / `install_apk`（Rust，W2 与 W5 共用）
 
-W2 的「下载完打开文件」与 W5 的「调系统安装器装 APK」是**同一个 Intent，
-只换 mime type**。合成一处：
+Android 的 W2「下载完打开文件」与 W5「调系统安装器装 APK」共用 Intent 实现，
+只换 mime type；桌面的下载完成操作打开所在文件夹：
 
 ```rust
 #[tauri::command]
 fn open_local_file(app: AppHandle, path: String, mime: Option<String>) -> Result<(), String>
 ```
 
-- 桌面：`opener`/`shell` 打开路径
+- 桌面：`shell` 打开已保存文件的父目录
 - 安卓：`Intent.ACTION_VIEW` + FileProvider URI + `FLAG_GRANT_READ_URI_PERMISSION`
-- 路径必须**校验在应用自有目录之下**（Download / AppLocalData / Cache），
-  否则等于把任意 `file://` 打开能力交给 WebView 里的代码 ——
-  现有 `open_external`（`lib.rs:74-85`）把 scheme 卡死在 http(s) 就是同一个顾虑
+- 路径 canonicalize 后必须位于应用目录、默认下载目录或桌面原生选择器授权过的目录，
+  防止 `..` / 符号链接绕过边界；前端不能直接传入任意授权根。目录偏好保存在 Tauri
+  app config 下的 `download-directory.json`，恢复默认不清历史授权或文件
 
 一份 FileProvider 配置，pre-flight 一次核实两处受益。
 
 ### 8.2 `fileSink` 注入点
 
-`apps/desktop/src/main.tsx` 已有 `setUrlOpener` / `setNotifier` 的注入先例
-（`main.tsx:34` 的 `__TAURI_INTERNALS__` 判断），`setFileSink` 并列加入。
+`apps/desktop/src/main.tsx` 的 `bootstrap` 在 `__TAURI_INTERNALS__` 存在时先等待
+`installFileSink` 导入并注入，再挂载 React，确保设置首屏与下载记录恢复看到原生能力。
 
 ### 8.3 i18n
 
@@ -768,7 +767,7 @@ Mock 下的「通过」是假阳性（`real-backend-not-mock-for-verification`�
 
 | 级别 | 条目                                                                                                                                                     |
 | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 🟡   | **最终验收进行中**：全局/会话内三端承载、通用设置与目录授权已实现，真实三端验收、最终 CI 与 README 真图未收口                                            |
+| 🟡   | **正式发版验收边界**：本轮核心截图、修复及本地检查已完成，未合并/发版；完整 OTA 安装本轮未重跑，设备边界见下项                                           |
 | ⚪   | **Windows / macOS 的托盘与角标未实测**：无设备（`project-charter`）。`setOverlayIcon` 的静态 PNG 路径与 `setBadgeCount` 在这两个平台上只有代码、没有实测 |
 | ⚪   | **安卓「另存到」公共目录**（`ACTION_CREATE_DOCUMENT`）：按 T5 不做，下载只落应用私有目录                                                                 |
 | ⚪   | **本地库离线搜索**：按立项结论只抽 `searchSource` 接口层、只落服务端实现                                                                                 |

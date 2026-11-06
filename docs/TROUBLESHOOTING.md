@@ -1,6 +1,6 @@
 # 元聊 YuanChat — 常见问题排查
 
-> AI 上下文文件，与 `doc/DEVELOPMENT.md` 并行维护。新问题追加到对应平台章节末尾。
+> AI 上下文文件，与 `docs/DEVELOPMENT.md` 并行维护。新问题追加到对应平台章节末尾。
 
 ## Windows
 
@@ -80,6 +80,14 @@ export JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))
   "core:event:allow-listen"
 ]
 ```
+
+### 下载目录未恢复或设置首屏没有选择按钮
+
+确认 `main.tsx` 在 React 挂载前完成 `installFileSink` 注入；原生目录偏好位于 Tauri
+app config 下的 `download-directory.json`，Linux 默认为
+`~/.config/com.yuanchat.desktop/download-directory.json`。配置保存当前目录与历史授权，
+读取损坏/失权应显示错误，不能静默切回默认目录。通过「设置 → 通用设置 → 文件下载」
+选择或恢复默认；恢复默认不移动文件，也不清历史授权。勿为复测直接删用户目录或偏好。
 
 ## Android / 移动端
 
@@ -216,24 +224,22 @@ server: {
 
 **解决（原生 + 前端联动）**：
 
-- **原生**：`MainActivity.kt` 注册 `WindowInsets` 监听，把 IME 高度作为底部 padding 应用到
-  `android.R.id.content`，使内容区真正变矮 → WebView 的 `visualViewport` 随之收缩：
-  ```kotlin
-  ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
-    val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
-    val nav = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom
-    view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, maxOf(ime, nav))
-    insets
-  }
-  ```
+- **原生**：API 30+ 的 `MainActivity.kt` 将 `max(IME, systemBars.bottom)` 作为
+  `android.R.id.content` 的底部 padding，使 WebView 的 `visualViewport` 随内容区收缩。
+  API 29 及以下不启用 edge-to-edge，保留系统 `adjustResize`。2026-11-06 新增的
+  `WindowInsetsAnimationCompat` 修订在 `onPrepare` 标记 IME 动画，阻止静态 inset
+  监听提前套用终态 padding；`onProgress` 跟随当前动画值，`onEnd` 在所有重叠 IME 动画
+  结束后重新读取 inset。该原生修订已通过本机 Android 35 模拟器的开合与快速中断复核。
 - **前端**：`useKeyboardAwareViewport`（`packages/shared`）监听 `visualViewport` resize，
-  把可见高度写入 CSS 变量 `--app-height`；全屏容器改用 `.app-screen { height: var(--app-height) }`
+  在事件内同步写入 `--app-height` 与 `--keyboard-inset`，不能把高度写入延迟到 rAF，
+  否则 WebView 多画一帧旧高度；聚焦滚动仍由 rAF 合并并防抖。
+  全屏容器用 `.app-screen { height: var(--app-height) }`
   （替代 `h-screen`），并对登录/注册表单用 `flex-col + overflow-y-auto + 卡片 m-auto`，
   键盘弹起时表单可滚动、聚焦字段 `scrollIntoView` 到可见区。
 
 **关键点**：`gen/android/` 的 `MainActivity.kt` 是 Tauri **只生成一次、不会覆盖**的用户扩展点
 （被覆盖的是 `generated/TauriActivity.kt`），必须纳入版本控制——见
-[`doc/DEVELOPMENT.md`](../doc/DEVELOPMENT.md) 关于 `gen/android` 的提交约定。
+[`DEVELOPMENT.md`](DEVELOPMENT.md) 关于 `gen/android` 的提交约定。
 
 **CDP 验证手法**（标准 Chrome 不把 JS 控制台写进 logcat，需用 DevTools 协议）：
 
@@ -250,6 +256,21 @@ curl -s http://localhost:9222/json   # 取 webSocketDebuggerUrl
 
 （已在 `Medium_Phone` API 35 / Chrome 124 实测：键盘弹起 `visualViewport` 891→578、
 `--app-height` 同步、底部「验证码答案」字段滚入可见区。）
+
+**2026-11-06 切页与键盘闪动复核**：应区分 JS 高度滞后、错误视图首挂和原生白帧，
+不能只检查键盘展开后的静态截图。
+
+- JS：修复前 4 轮、8 次 resize 均多留一帧旧高度；同步写入后滞后帧为 0，3600 帧采样
+  高度保持同步。聚焦滚动的防抖与可见性判断保留。
+- 设置：`SettingsScreen` 的 view 初值按 mobile 断点及 `section=about` 直接初始化，
+  不再先挂载 profile 再由 effect 切页。Profiler 回归中错误 profile 首挂由 1 次降为 0；
+  视口与设置两项共 15 项回归通过。
+- 原生：以 `pnpm dev:android` 重新构建并安装，覆盖 4 轮正常开合及 2 轮 150ms 中断。
+  144 次 visualViewport resize、3595 个 rAF 帧的高度差均为 0；原生录屏实际解码 325 帧，
+  固定下部区域纯白帧为 0，修复前 4 轮的 186 帧中有 8 帧。抽帧目视确认旧整块白区消失。
+  结论限本机 Android 35 模拟器；JS、Profiler 与录屏分别验证不同层，不能相互替代。
+  本地证据在 `.superpowers/sdd/2026-10-11-tray-palette-ota/android/qa-20261105/` 的
+  `native-layout-after-20261106.json`、`native-insets-{before,after}-20261106.json/mp4`。
 
 ---
 
@@ -565,6 +586,13 @@ node 测试环境没有 `window` 时 persist **静默降级成不持久化**，�
 this.loginButton = page.getByRole("button", { name: /^(登\s*录|登录中…)$/ });
 ```
 
+### 已下载附件重新显示下载按钮
+
+完成记录只复用当前下载目录中、原路径仍存在且 SHA-256 一致的副本。修改内容、改名或
+删除文件后重新显示下载入口属于预期；重下会避让已有文件，不覆盖用户改过的文件。
+切换目录后可重新下载，切回旧目录会核验并复用旧副本，包括带 `(2)` 等后缀的文件。
+应用不扫描磁盘追踪任意重命名；目录权限错误则应提示重新授权，不能当成文件丢失。
+
 ## Web 端
 
 ### `pnpm dev` 启动后页面空白
@@ -586,6 +614,14 @@ pnpm build          # 或单独构建共享包
 
 1. 确认后端已启动：`curl http://localhost:8080/api/v1/health`
 2. 检查 `VITE_API_BASE_URL` 环境变量
+
+### 下载完成后不能打开系统文件夹
+
+浏览器不提供通用的系统文件夹打开能力。授权目录下载完成后使用「查看保存位置」，
+弹窗显示目录名和实际文件名，仅有关闭按钮；刷新后的记录仍需目录授权有效。
+如果使用浏览器默认下载，应用无法知道路径或最终保存是否成功，仍保留下载入口，
+需到浏览器下载记录中查看。没有目录选择入口时，核对安全上下文、File System Access、
+IndexedDB 与 Web Locks；授权失效可到「设置 → 通用设置 → 文件下载」重新授权。
 
 ## 后端 (Go)
 

@@ -4,7 +4,7 @@
 
 **当前代码版本**：v0.6.0（Web + Desktop 三平台 + Android APK 由 GitHub Actions 自动打包）。
 
-搜索、下载、托盘与 OTA 本批改动正在做真实三端验收和最终 CI，尚未合并或发版；
+搜索、下载、托盘与 OTA 本轮修订已在本地提交，核心页面截图与本地检查已完成，尚未合并或发版；
 当前进度见[实施计划](docs/superpowers/plans/2026-10-11-tray-palette-ota.md#执行进度)。
 
 ## 在线体验
@@ -121,10 +121,23 @@
   </tr>
   <tr>
     <td width="50%" valign="top">
+      命令面板<br />
+      <img src="docs/screenshots/desktop-command-palette.png" width="480" alt="桌面端主窗口命令面板" />
+    </td>
+    <td width="50%" valign="top">
       会话内搜索<br />
       <img src="docs/screenshots/desktop-conversation-search.png" width="480" alt="桌面端会话内搜索" />
     </td>
-    <td width="50%"></td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      文件下载<br />
+      <img src="docs/screenshots/desktop-file-download.png" width="480" alt="桌面端文件下载与打开所在文件夹" />
+    </td>
+    <td width="50%" valign="top">
+      通用设置<br />
+      <img src="docs/screenshots/desktop-general-settings.png" width="480" alt="桌面端通用设置与自定义下载目录" />
+    </td>
   </tr>
 </table>
 
@@ -160,6 +173,8 @@
   <img src="docs/screenshots/android-chat-list.png" width="240" alt="安卓端会话列表" />
   <img src="docs/screenshots/android-chat-detail.png" width="240" alt="安卓端聊天窗口" />
   <img src="docs/screenshots/android-moments.png" width="240" alt="安卓端朋友圈" />
+  <img src="docs/screenshots/android-search.png" width="240" alt="安卓端消息搜索" />
+  <img src="docs/screenshots/android-general-settings.png" width="240" alt="安卓端通用设置" />
 </p>
 
 ## 已实现功能
@@ -196,8 +211,9 @@
 - **消息收藏**：任意消息加入收藏夹（`POST/GET/DELETE /favorites`），收藏列表分页浏览
 - **消息搜索**：全局搜索 + 会话内搜索，基于 PostgreSQL `pg_trgm` GIN 索引（`GET /messages/search`，仅命中当前用户有权访问的会话）
 - **会话维护**：清空聊天记录、群公告（横幅 + 全文弹层）、群内昵称
-- **命令面板**：默认 Ctrl/Cmd+K 唤起，可在通用设置自定义；空输入显示动作与最近会话，输入后按联系人/群聊/消息/文件与媒体分组，支持类型筛选与缩略图骨架占位。桌面客户端的全局面板在主窗口内弹出，仅会话内搜索使用独立窗口；手机使用 `/search` 搜索页，Web 大屏使用居中弹窗；会话内只查当前会话
-- **应用内文件下载**：文件气泡下方显示传输与保存进度，支持取消、失败重试；Web 可授权默认目录并直接写盘，未设置或浏览器不支持时使用浏览器保存。桌面/安卓落盘后可打开（安卓落 app 私有目录，零权限、卸载即删）；图片/文件/语音发送前落磁盘副本、重试从磁盘读、ack 即删
+- **命令面板**：默认 Ctrl/Cmd+K 唤起，非手机布局可在通用设置自定义；空输入显示动作与最近会话，输入后按联系人/群聊/消息/文件与媒体分组，支持类型筛选与缩略图骨架占位。桌面客户端的全局面板在主窗口内弹出，仅会话内搜索使用独立窗口；手机使用 `/search` 搜索页，Web 大屏使用居中弹窗；会话内只查当前会话
+- **应用内文件下载**：文件气泡下方显示传输与保存进度，支持取消、失败重试。桌面可选择、记住及恢复默认下载目录，完成后打开所在文件夹；Web 授权目录可直接写盘并查看保存位置，未设置或浏览器不支持时交浏览器保存，应用无法确认最终保存状态；安卓落 app 私有目录并可打开文件，零权限、卸载即删。可核验的完成记录按账号和服务器保留，校验当前目录、实际文件名与 SHA-256；文件改名、修改或丢失后可重新下载且不覆盖现有文件，切回旧目录可复用有效副本
+- **发送磁盘副本**：图片/文件/语音发送前落磁盘副本、重试从磁盘读、ack 即删
 
 ### 群管理
 
@@ -242,7 +258,7 @@
 
 - **i18n**：zh-CN / en-US / ja-JP / ko-KR 四语全量覆盖（`react-i18next`，扁平 key，`pnpm check:i18n` 门禁挡漏翻/写错 key/死键），语言选择持久化，重开应用即生效。首次启动**默认简体中文**（仅系统语言为 ja/ko 时自动跟随），英文等其他设备也先给中文，用户可在设置页自行切换
 - **主题**：三套皮肤（`yuan` / `ocean` / `forest`，各含亮暗两版）+ 字体缩放（`pnpm check:theme` 校验颜色工具类都在色板里）
-- **通用设置**：主题、语言、文件下载目录与搜索快捷键集中一页；目录卡显示名称和授权状态，支持重新授权及恢复浏览器默认保存
+- **通用设置**：主题、语言与文件下载目录集中一页，搜索快捷键设置仅在桌面/平板等非手机布局展示；目录卡显示名称和授权状态，支持重新授权及恢复浏览器默认保存
 - **端到端加密 E2EE**：X3DH 协商 + Double Ratchet 棘轮（`packages/shared/src/crypto/`），设置页内按用户开关，仅单聊；对方未启用时自动降级明文，支持密钥备份/恢复
 - **PWA**：生产构建注入自定义 Service Worker（app shell 预缓存 + Web Push 监听），可安装到桌面/主屏
 - **应用内更新（自建 OTA）**：`app_releases` 版本登记 / 灰度（0-100%，按设备稳定判定）/ 回滚，管理端 Releases 页管理；桌面端走 Tauri updater（自有域名在前、GitHub latest.json 兜底），Android 应用内自动更新（自绘更新卡 + 下载进度 + sha256 校验 + FileProvider 拉起系统安装器）

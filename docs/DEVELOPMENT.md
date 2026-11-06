@@ -1,6 +1,6 @@
 # 元聊 YuanChat — 开发与打包指南
 
-> **最后更新**：2026-11-06（同步桌面全局面板/会话搜索分工与主题复核；本批验收仍在进行）
+> **最后更新**：2026-11-06（同步下载/设置与 Android 键盘修订；本轮本地检查与截图收尾完成，未发版）
 >
 > ⚠️ **文档维护规则**：任何 `package.json` scripts、Tauri 配置、环境变量、workflow 的变更，**必须同步更新本文档**。此规则对所有会话生效。
 
@@ -347,9 +347,11 @@ pnpm --filter @yuanchat/desktop tauri android build
 `apps/desktop/src-tauri/gen/android` **纳入版本控制**（不整体忽略），因为它含手改源码：
 
 - `app/src/main/java/.../MainActivity.kt` — 用户扩展点，Tauri **只生成一次、构建不覆盖**
-  （被覆盖的是 `generated/TauriActivity.kt`）。当前含**软键盘适配**的 `WindowInsets` 监听，
-  软键盘弹起时把 IME 高度作为 padding 应用到内容区（详见 `docs/TROUBLESHOOTING.md`
-  「软键盘遮挡输入框」）。
+  （被覆盖的是 `generated/TauriActivity.kt`）。当前含**软键盘适配**：API 30+ 用 IME inset
+  调整内容区 padding，并通过 `WindowInsetsAnimationCompat` 跟随动画，避免提前套用
+  终态；旧系统保留 `adjustResize`。共享 `useKeyboardAwareViewport` 在 resize 同步写
+  CSS 高度，rAF 仅合并聚焦滚动。原生动画修订已通过本机 Android 35 模拟器复核，详见
+  [TROUBLESHOOTING「软键盘遮挡输入框」](TROUBLESHOOTING.md#软键盘遮挡输入框--点输入框内容不上移)。
 - `app/src/main/AndroidManifest.xml`、`build.gradle.kts`、`res/`、Gradle Wrapper 等。
 
 构建产物（`build/`、`.gradle/`、`.cxx/`、`jniLibs/**/*.so`、`generated/`）由 Tauri 内置于
@@ -1010,7 +1012,10 @@ Android WebView 会把「滚动时才浮现的覆盖式滚动条」换成**常�
 
 ## 十二、搜索、下载与 OTA 联调
 
-「设置 → 通用设置」集中主题、语言、文件下载目录与搜索快捷键，桌面端还显示关窗行为。
+「设置 → 通用设置」集中主题、语言与文件下载目录。搜索快捷键设置只在非手机布局展示，
+`SettingsScreen` 复用 `isMobile` 隐藏手机 Web/Android 的 `ShortcutSection`，桌面/平板
+保留；手机入口副文案使用四语 `settings.generalDescMobile`（中文「外观与下载」），桌面
+沿用原描述，已保存组合不变。桌面端还显示关窗行为。
 原「外观」与独立「文件下载」导航已合并；共享 `DownloadDirectorySection` 用目录名、授权
 状态与操作按钮组成紧凑卡片。默认搜索组合为 Ctrl/Cmd+K，自定义组合在本机持久化，
 保留浏览器/编辑快捷键，不响应 IME 组合输入或重复按键。
@@ -1032,10 +1037,23 @@ IndexedDB + Web Locks**；缺任一能力时不提供选目录入口，继续浏
 已授权时直接写盘并以 `close()` 成功作为完成；同名递增避让，失败/取消清理本次产物。
 权限失效提示到「设置 → 通用设置 → 文件下载」重新授权；未设置目录时交浏览器保存，
 应用无法确认或取消浏览器接管后的最终保存。恢复默认只清目录偏好，不删除已有文件。
+授权目录下载完成后可「查看保存位置」：显示目录名和实际文件名，单关闭按钮；不尝试
+打开系统文件夹。已保存文件的句柄另存账号本地库并按服务器隔离，刷新后可恢复。
 旧 WebView 保持 `build.target=es2019` 与上述能力回落，不注入伪造的文件系统支持。
 
-桌面/Android 由 `apps/desktop/src/fileSink.ts` 注入 plugin-fs 落盘；Android 是应用私有
-external Download 目录，系统文件管理器不可见、卸载即删，不要求广泛存储权限。
+桌面/Android 由 `apps/desktop/src/fileSink.ts` 注入 plugin-fs 落盘，`main.tsx` 必须先
+完成注入再挂载 React，以便设置首屏读取目录能力。桌面通过原生选择器选择目录，取消
+保留原设置；偏好存 Tauri app config 下的 `download-directory.json`（Linux 默认
+`~/.config/com.yuanchat.desktop/download-directory.json`），保存当前目录和历史授权。
+恢复默认只影响后续下载，保留历史授权与已有文件。`open_local_file` 在 canonical 路径
+检查后打开所在文件夹，仅允许应用目录、默认下载目录和已授权目录；不接受前端任意
+指定授权根。Android 保持应用私有 external Download 目录和 FileProvider 打开文件，
+系统文件管理器不可见、卸载即删，不要求广泛存储权限。
+
+完成记录按账号/服务器存入本地库，保留每次实际路径（含同名避让后缀）与 SHA-256。
+恢复、切换目录和点击完成操作时核验当前目录及字节；切回旧目录可复用有效副本。
+原路径改名/丢失或内容改变时可重新下载，仍避让现有文件，不扫描任意重命名。目录读取
+或权限错误须提示处理，不能当成文件丢失。下载产物不随登出、恢复默认或 LRU 清理而删除。
 Web 客户端安装包列表直接使用 catalog URL 交浏览器下载，不经过聊天文件的目录设置。
 
 桌面托盘资源 `icons/badge-dot-32.png` 必须同时登记在 `tauri.conf.json` 的
@@ -1051,8 +1069,12 @@ OTA 管理页可登记、发布、改灰度与回滚；非法版本号返回 400
 sha256 校验通过后才经 FileProvider 调系统安装器。调试 APK 的签名和包内版本必须与
 目标测试一致；仅改 OTA 登记版本不能证明应用升级成功。接口详见 [CHAT_API](CHAT_API.md#三点六更新分发ota免鉴权)。
 
-本批真实三端验收、最终 CI 与 README 截图状态统一记在
-[实施计划](superpowers/plans/2026-10-11-tray-palette-ota.md#执行进度)，尚未收口。
+2026-11-06 Android 35 模拟器已验证命令「检查更新」自动触发检查并消费 `checkUpdate=1`，
+真实本机测试版本 `0.99.0` 出现；该结果只覆盖检查入口，本轮未重跑最新 APK 的 OTA 安装流程。
+
+本轮指定链路实测、README 核心截图与本地检查已完成，最终 Chromium E2E 119 / 119
+通过（3.7 分钟、无重试）；运行环境已关闭、开发端口已清。源码已提交至 `a21c63d`，
+范围与未覆盖的正式发版/设备验收见[实施计划](superpowers/plans/2026-10-11-tray-palette-ota.md#执行进度)。
 
 ## 十三、文档更新规则
 
