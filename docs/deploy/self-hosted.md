@@ -162,12 +162,21 @@ vim deploy/.env
 ./deploy/install.sh
 ```
 
-`deploy/.env` 里**必须手工填**的是五个域名、`ADMIN_EMAIL`，以及 `PUBLIC_IP`
+`deploy/.env` 里**必须手工填**的是五个域名、`LE_EMAIL`（证书联系邮箱），以及 `PUBLIC_IP`
 （本机**外网** IP，`curl -s https://api.ipify.org` 可查）。`PUBLIC_IP` 没法由脚本自动探测 ——
 NAT / 云主机里 `ip addr` 看到的是内网地址，填错等于没填：coturn 会把内网地址写进
 relay candidate，跨 NAT 的通话就卡在「连接中」。留空时 `install.sh` 会直接报错退出。
 
 其余凭据（含 `TURN_SECRET`）留空即可，脚本自动生成并写回 `.env`。
+`ADMIN_EMAIL` 独立表示管理后台登录账号，需引导管理员时填写；留空会告警并跳过引导，
+不影响 `LE_EMAIL` 的证书签发。两个邮箱可以相同，但不得再写两条 `ADMIN_EMAIL`。
+
+既有部署重跑新 `install.sh` 前，请在 `.env` 手工新增 `LE_EMAIL=<证书联系邮箱>`，
+并保留原 `ADMIN_EMAIL=<既有管理员邮箱>`；若旧文件含重复 `ADMIN_EMAIL`，合并成唯一的
+管理员账号键。脚本不会推断或覆盖旧配置，也不会重置既有管理员密码。
+
+配置回归可运行 `bash deploy/install.test.sh`：在临时目录执行安装脚本，Docker、证书
+签发与网络均用隔离替身，验证首次生成、重跑读取及管理员留空三种路径，不触碰实际部署。
 
 脚本按序完成：
 

@@ -34,7 +34,7 @@ command -v openssl >/dev/null 2>&1 || die "缺少 openssl（用于生成随机�
 #   2) 预先用环境变量喂进来 → 一条命令装完，不需要中途编辑文件：
 #        DOMAIN_CHAT=chat.x.com DOMAIN_API=api.x.com ... ./deploy/install.sh
 # 第二种是「真一键」的关键：CI / 重装脚本里没法交互式编辑文件。
-REQUIRED_VARS="DOMAIN_CHAT DOMAIN_API DOMAIN_WS DOMAIN_ADMIN DOMAIN_STORAGE ADMIN_EMAIL"
+REQUIRED_VARS="DOMAIN_CHAT DOMAIN_API DOMAIN_WS DOMAIN_ADMIN DOMAIN_STORAGE LE_EMAIL"
 
 if [ ! -f .env ]; then
   info "创建 .env（从 .env.prod.example）"
@@ -73,7 +73,8 @@ fi
 # shellcheck disable=SC1091
 set -a; source .env; set +a
 
-for var in DOMAIN_CHAT DOMAIN_API DOMAIN_WS DOMAIN_ADMIN DOMAIN_STORAGE ADMIN_EMAIL; do
+# 证书联系邮箱必填；管理员登录邮箱独立，可留空并跳过引导。
+for var in $REQUIRED_VARS; do
   value="${!var:-}"
   [ -n "$value" ] || die ".env 缺少 $var"
   case "$value" in
@@ -189,7 +190,7 @@ if ! docker volume inspect yuanchat_certbot_conf >/dev/null 2>&1 || \
              "/etc/letsencrypt/renewal/$domain.conf"
     docker compose -f docker-compose.prod.yml run --rm --entrypoint certbot certbot \
       certonly --webroot -w /var/www/certbot \
-      --email "$ADMIN_EMAIL" --agree-tos --no-eff-email \
+      --email "$LE_EMAIL" --agree-tos --no-eff-email \
       --cert-name "$domain" -d "$domain" \
       || die "证书签发失败：确认 $domain 已解析到本机公网 IP 且 80 端口可达"
   done
