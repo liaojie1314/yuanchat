@@ -4,8 +4,12 @@
 // `UPDATE users SET role = 1`，等于把运维锁在门外。本命令由
 // deploy/install.sh 在迁移之后调用一次，凭据取自 deploy/.env：
 //
-//	YUANCHAT_BOOTSTRAP_ADMIN_PHONE     管理员手机号（11 位）
+//	YUANCHAT_BOOTSTRAP_ADMIN_EMAIL     管理员邮箱
 //	YUANCHAT_BOOTSTRAP_ADMIN_PASSWORD  初始密码
+//
+// 引导键是邮箱而非手机号：手机号已于迁移 021 从库里移除，而且用邮箱引导出来的
+// 管理员自带联系方式、走得通忘记密码 —— 先前用手机号引导出的账号没有邮箱，
+// 密码忘了就无路可走。
 //
 // 幂等：库里已存在任一管理员时直接跳过并退出 0，**不会**改动既有账号的密码。
 // 这条很重要 —— 否则每次 `install.sh` 重跑都把线上管理员密码重置回 .env 里那个值，
@@ -34,13 +38,13 @@ import (
 )
 
 func main() {
-	phone := strings.TrimSpace(os.Getenv("YUANCHAT_BOOTSTRAP_ADMIN_PHONE"))
+	email := strings.TrimSpace(os.Getenv("YUANCHAT_BOOTSTRAP_ADMIN_EMAIL"))
 	pass := os.Getenv("YUANCHAT_BOOTSTRAP_ADMIN_PASSWORD")
 
-	if phone == "" || pass == "" {
+	if email == "" || pass == "" {
 		// 缺凭据时不算失败：允许用户自行建号后手工提权，
 		// 但要明确说出来，不能让人以为已经建好了。
-		fmt.Println("跳过：未设置 YUANCHAT_BOOTSTRAP_ADMIN_PHONE / _PASSWORD")
+		fmt.Println("跳过：未设置 YUANCHAT_BOOTSTRAP_ADMIN_EMAIL / _PASSWORD")
 		return
 	}
 
@@ -72,16 +76,16 @@ func main() {
 		log.Fatalf("哈希密码失败: %v", err)
 	}
 
-	// 手机号已被占用时提权而非新建：首次部署常有人先在 Web 端注册了再跑这条命令，
-	// 此时新建会撞 phone 唯一索引直接失败。
+	// 邮箱已被占用时提权而非新建：首次部署常有人先在 Web 端注册了再跑这条命令，
+	// 此时新建会撞 email 唯一索引直接失败。
 	var existing model.User
-	err = db.WithContext(ctx).Where("phone = ?", phone).First(&existing).Error
+	err = db.WithContext(ctx).Where("email = ?", email).First(&existing).Error
 	if err == nil {
 		if err := db.WithContext(ctx).Model(&existing).
 			Update("role", model.RoleAdmin).Error; err != nil {
 			log.Fatalf("提权失败: %v", err)
 		}
-		fmt.Printf("已将既有账号 %s 提权为管理员（密码保持原样，未改动）\n", phone)
+		fmt.Printf("已将既有账号 %s 提权为管理员（密码保持原样，未改动）\n", email)
 		return
 	}
 
@@ -93,7 +97,7 @@ func main() {
 	user := &model.User{
 		ID:           uuid.New(),
 		ShortID:      shortID,
-		Phone:        &phone,
+		Email:        &email,
 		PasswordHash: hash,
 		Nickname:     "管理员",
 		Role:         model.RoleAdmin,
@@ -103,5 +107,5 @@ func main() {
 		log.Fatalf("创建管理员失败: %v", err)
 	}
 
-	fmt.Printf("已创建管理员账号：手机号 %s，元聊号 %d\n", phone, shortID)
+	fmt.Printf("已创建管理员账号：邮箱 %s，元聊号 %d\n", email, shortID)
 }

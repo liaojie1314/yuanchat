@@ -11,14 +11,14 @@
 3. **Tag 与分支同步**：需要打 tag 时及时打 tag（如 release 分支合并前），tag 打完后必须同步到 `main` 分支，确保 `main` 始终包含最新版本标记。
 4. **UI 独立性**：不要照搬 QQ/微信/钉钉/Telegram 的 UI 设计。追求北欧简约风格 — 干净线条、充足留白、柔和阴影。
 5. **跨平台思维**：代码设计需考虑 Web/Desktop/Mobile 三端复用。
-6. **文档同步**：所有文档统一放在 `docs/` 目录下。架构变更、API 变更、重要设计决策需同步更新对应文档。启动/打包命令变更必须同步更新 `docs/DEVELOPMENT.md`。
+6. **文档同步**：所有文档统一放在 `docs/` 目录下。架构变更、API 变更、重要设计决策需同步更新对应文档。启动/打包命令变更必须同步更新 `docs/DEVELOPMENT.md`。MASTER_PLAN 核心清单只列产品能力，条目不加粗、不写阶段进度；小改进与技术债只在“未做清单总览”按等级登记。
 7. **测试门禁**：每个功能必须先通过测试（单元/集成/E2E）才能标记完成。测试未通过 = 功能未完成。不允许在未通过测试时开始下一个功能。
 8. **前端 Mock**：所有前端 API 调用必须有 MSW Mock 覆盖正常/空/错误/加载四种状态。
 9. **骨架屏**：所有图片必须用 Skeleton 占位（固定宽高），列表加载必须有骨架屏，CLS 必须为零。
 10. **JSDoc/注释**：所有导出函数/组件/Store/Hook 必须写 JSDoc。Go 所有导出函数/包必须写 godoc。关键并发/事务/错误分支必须注释。先写注释再写代码。
 11. **浏览器/WebView 兼容适配**：前端代码必须兼容低版本 WebView。`vite.config.ts` 的 `build.target` 须为 `es2019`（转译 `?.`/`??` 等 ES2020+ 语法），不得使用 `chrome105`/`es2020`，否则旧 Android System WebView（如 Chrome 74）解析期 SyntaxError → 白屏。新增 JS 语法/Web API 前须确认目标 WebView 支持，或确保已被转译/polyfill。详见 `docs/DEVELOPMENT.md`、`docs/TROUBLESHOOTING.md`。
 12. **i18n 国际化适配**：所有用户可见文案**禁止硬编码**，必须通过 `react-i18next`（`useTranslation` / `t()`）引用，并在 `packages/design-system/src/i18n/locales/`（`zh-CN`、`en-US`、`ja-JP`、`ko-KR`）补齐对应 key。新增/修改 UI 文案时必须同步维护四种语言的翻译条目，`node scripts/check-i18n.mjs`（CI 门禁）会挡下漏翻、写错 key 与死键。
-13. **推送前本地 CI 门禁**：推送到远程 `dev` 之前，必须先在本地跑通 CI 的全部检查并全绿，禁止「先推上去让 CI 跑」。CI 实际执行的是 `node scripts/check-i18n.mjs`、`pnpm test`、`apps/web` 与 `apps/desktop` 各自的 `npx tsc --noEmit`、`pnpm --filter @yuanchat/web test:e2e`（Playwright chromium），以及 `server/` 下的 `go vet ./...`、`go test ./...`、`go test -race ./internal/ws/`。本地跑前端测试必须把语言环境对齐 runner（`LANG=C.UTF-8 pnpm test`，runner 没有中文 locale）—— Node 21 起 `navigator.language` 取自宿主 ICU 语言环境，中文机器上报 `zh-CN`、runner 上报 `en-US`，依赖它的用例会「本地全绿、远程报错」。理由：CI 失败要等远程跑完才知道，而失败的 commit 已经落在共享分支上，别人拉下来就是坏的。
+13. **推送前本地 CI 门禁**：推送到远程 `dev` 之前，必须先在本地跑通 CI 的全部检查并全绿，禁止「先推上去让 CI 跑」。CI 实际执行的是 `node scripts/check-i18n.mjs`、`pnpm test`、`pnpm test:coverage`、`apps/web` 与 `apps/desktop` 各自的 `npx tsc --noEmit`、`pnpm --filter @yuanchat/web test:e2e`（Playwright chromium），以及 `server/` 下的 `go vet ./...`、`go test ./... -coverprofile=coverage.out -covermode=atomic`、`go test -race ./internal/ws/`；后端覆盖率用根目录的 `node scripts/check-coverage.mjs 40 server/coverage.out` 校验。本地跑前端测试与覆盖率必须把语言环境对齐 runner（`LANG=C.UTF-8 pnpm test` / `LANG=C.UTF-8 pnpm test:coverage`，runner 没有中文 locale）—— Node 21 起 `navigator.language` 取自宿主 ICU 语言环境，中文机器上报 `zh-CN`、runner 上报 `en-US`，依赖它的用例会「本地全绿、远程报错」。理由：CI 失败要等远程跑完才知道，而失败的 commit 已经落在共享分支上，别人拉下来就是坏的。
 14. **发版前本地打包门禁**：打 tag / 触发 release 之前，必须先在本地完整打包一遍并成功 —— `pnpm build:pkg`（web + tsc + tauri build）与 Android aarch64 APK 构建。理由：release 流水线跨 macOS/Windows/Linux/Android 多个 runner，任一平台失败整条发版作废，还可能留下半个 GitHub Release。
 
 ## 技术栈速查
@@ -38,17 +38,48 @@
 
 已实现的能力（代码路径与协议细节见 `docs/CHAT_API.md`、`docs/ARCHITECTURE.md`）：
 
-- 认证：注册/登录（手机号/邮箱 + 密码 + SVG 验证码）、JWT 双 Token、
+文档与验收约定（2026-11-07）：核心清单使用正向产品能力描述，邮箱/元聊号登录归入认证；
+O1 已按 Android 模拟器真实安装证据勾选，检查入口不能代替安装结果。小改进债务仅在 MASTER_PLAN
+“未做清单总览”分级登记；当前改目录不移动旧文件，Android SAF 另存为仍未实现。
+新增真实缺陷已修复并验证：`97ab133` 将原生文件读写 IPC 限为每次 1 MiB，43,866,277
+字节坏 SHA APK 完成保存/读回后拒装并删除，无新增 OOM；JS 仍保留完整文件缓冲。
+`e0181c7` 在上传前持久化草稿与 MIME，Android 强停重启恢复失败气泡，重试收到真实
+ACK `seq=19`，该 IDB 出站行与原生副本清理。`95f0b95` 的普通附件 MIME 修订已实测：
+重启后 PNG 下载由 Google Photos 打开，Intent 为 `image/png` + FileProvider 临时读授权。
+合法 OTA 已验证首处未知来源提示取消后重试、系统安装器升级至测试版 0.6.1 / 6001，
+重开打包页面显示新版本和“已是最新版本”，无新增 OOM。范围为 Android 35/x86_64
+模拟器，`android/aarch64` 为测试目录槽，不证明 ARM 实机或 Windows/macOS 通过。
+夹具已回滚，设备恢复 0.6.0 / 6000 并关闭来源安装权限后停机；统一记录见
+`final-acceptance-20261107/native-acceptance.json`。临时测试版不是正式发版，旧全量测试数不能作为新改动的 CI 结果。
+用户已授权验收完成后合 `dev`、在 `dev` 跑完整本地 CI、全绿后推送并确认远端 CI，
+无需再次询问；Git 合并、本地 CI 和远端 CI 状态以提交及独立验收记录为准，不预报通过。
+合 `main`、打 tag、正式发版不在本次授权范围。
+
+已验证记录（2026-11-06）：搜索/下载/托盘/OTA 的修订已本地提交，用户已确认文件下载实测
+没有问题。追加 Android 切页/键盘闪动修复：视口高度在 resize 同步写入，设置首屏按断点与
+section 初始化，原生 padding 跟随 IME 动画；Android 35 模拟器正常开合与快速中断复核
+通过，325 个解码帧中底部纯白帧为 0，不外推其他设备。前端全量 1368 项、coverage
+1358 项通过；手机隐藏/桌面保留快捷键设置回归 10 项通过，后续手机入口副文案四语改为
+「外观与下载」后，`pnpm check`、888 key i18n、相关 UI 11 项及全 6 包类型检查通过。
+Android 核心页面截图已加入 README；真实搜索/返回/通用设置/更新检查入口已验，未重跑
+OTA 安装流程。最终 Chromium E2E 119 / 119 全绿（3.7 分钟、无重试），运行环境均已
+关闭、开发端口已清。源码已提交至 `a21c63d`，本轮截图/已知问题修复/本地检查已收口；
+不代表正式发版全平台验收，Windows/macOS 无实机，本批未实现 SAF 另存为。见
+`docs/superpowers/plans/2026-10-11-tray-palette-ota.md`。当前授权与执行状态以上方 2026-11-07 记录为准。
+
+- 认证：邮箱验证码注册、邮箱或元聊号 + 密码登录、JWT 双 Token、
   token 静默刷新（滑动会话轮换 + 401 兜底重试，`api/tokenManager.ts`）
 - 聊天核心闭环：会话列表、文本消息 WebSocket 实时收发、已读回执、
   正在输入、历史游标分页、断线重连、失败重试
-- 好友与关系：精确搜索（手机号/元聊号/邮箱）→ 发申请（WS 实时推送）→
+- 好友与关系：精确搜索（邮箱/元聊号）→ 发申请（WS 实时推送）→
   同意/拒绝 → 同意即原子建单聊 + 打招呼消息 → 字母分组好友列表
   （`ContactsScreen.tsx` 三端编排）；删好友（双向软删，幂等）+ 黑名单
   （单聊发送拦截 403 `BLOCKED`，群聊不受影响）
-- 三端响应式聊天主界面（`packages/ui/src/ChatScreen.tsx` 编排）
+- 三端响应式聊天主界面（`packages/ui/src/chat/ChatScreen.tsx` 编排）
 - 设置页 / 个人资料：昵称/签名/性别编辑 + 头像上传（512px 中心裁方 → MinIO
-  `avatars/` 公开 URL，落库持久化，`PUT /users/me`）
+  `avatars/` 公开 URL，落库持久化，`PUT /users/me`）；「通用设置」集中主题、语言、
+  文件下载目录；搜索快捷键设置仅非手机布局展示，按 `isMobile` 隐藏，桌面/平板保留。
+  目录卡复用 `Button` 并显示目录名/授权状态
 - 群聊：好友多选建群（校验全员互为好友）→ 系统消息 + `conversation.created` 实时推送；
   群管理改名 / 邀请 / 踢人 / 退群 / 解散（软删）；任命与撤销管理员、转让群主
   （`conversation.role_changed` 帧推群内全员）；群公告、群内昵称、清空聊天记录
@@ -65,18 +96,52 @@
   否则「先发干净文本再改成敏感词」可绕过审核）、引用回复、表情回应（`message.reaction` 帧
   实时 + 历史聚合回填，mine 相对请求者）、转发（一次最多 9 个会话）、
   `@` 提及（落 `mention_unread` → 会话列表角标）、收藏
-- 消息搜索：全局 + 会话内，`GET /messages/search`，PostgreSQL `pg_trgm` GIN 索引，
+- 消息搜索：全局 + 会话内，`GET /messages/search`，PostgreSQL `pg_trgm` GIN 索引
+  （文本 + 文件名两条 trgm 索引，迁移 003/022），`types` 类型过滤（未知类型 400），
   只命中当前用户有权访问的会话
+- 命令面板：默认 Ctrl/Cmd+K（`CommandPalette`，替代已删除的 SearchModal）；空输入 =
+  动作注册表 + 最近会话，有输入 = 联系人/群聊/消息/文件与媒体四分组 +
+  类型筛选 + 40×40 媒体缩略图骨架占位；桌面全局面板为主窗内弹窗，仅会话内搜索使用
+  独立窗口；手机走 `/search` 路由页、Web 大屏为弹窗。会话内始终带 `conversation_id`；自定义搜索组合在
+  `shortcutStore` 本机持久化，保留系统/编辑键，IME 选字不触发结果。搜索子窗不建 WS，
+  登出/换号关闭旧窗，主窗拒绝旧账号迟到导航
+- 应用内下载：`downloadStore` + `fileSink` 注入抽象（Web 优先写用户授权目录；
+  桌面/安卓 plugin-fs 落盘，安卓落 app 私有 external 目录零权限、卸载即删）；
+  Web 目录句柄存独立 IDB，需安全上下文 + File System Access + Web Locks；写入并 close
+  后才完成，失权提示到「设置 → 通用设置 → 文件下载」重新授权。Web 授权目录提供
+  「查看保存位置」单关闭按钮弹窗；未设置/不支持时交浏览器保存，应用无法确认最终保存，
+  取消（含加载目录偏好期间）不得触发保存。桌面可选择/持久化/恢复默认目录，完成后打开
+  所在文件夹，Android 仍打开文件；原生 sink 必须在 React 挂载前注入。完成记录存账号
+  本地库并按服务器隔离，保留实际路径（含避让后缀）和 SHA-256 历史候选；按当前目录与
+  内容校验复用，A→B→A 切回可用旧副本。原路径改名/丢失或内容修改可重下，不扫描任意
+  重命名、不覆盖用户文件。`open_local_file` 仅放行 canonical 校验后的应用目录、默认
+  下载目录及原生选择器授权过的目录；恢复默认不删除旧文件或历史授权。outbox 上传前落
+  appdata 副本并保存带 MIME 的 IDB 草稿，`payload=null` 不自动补发；重启恢复失败气泡，
+  重试读磁盘，ACK 清理记录和副本。原生读写 IPC 单次最多 1 MiB，JS 总缓冲仍随文件增长
 - Presence 在线状态：Hub 首连/末连回调 → 广播给在线好友；`GET /presence` 快照
   加 `presence` 帧增量；`applyPresence` 按 peerId 匹配单聊
 - 通知：桌面 Tauri notification plugin（注入 shared `notifyIncoming`，失焦 + 非免打扰时弹）；
   Web Push（VAPID + Service Worker，仅推离线收件人并过滤免打扰会话，未配 VAPID 密钥即关闭）
+- 桌面托盘与未读角标：托盘图标 + 右键菜单（未读数/打开/退出）+ 左键直达第一个未读；
+  角标 macOS/Linux `setBadgeCount`、Windows `setOverlayIcon` 静态红点；
+  关窗二选一弹窗（最小化到托盘/退出 + 记住选择）+ 设置页三选
 - 端到端加密：X3DH + Double Ratchet（`packages/shared/src/crypto/`），用户自行开启，
   仅单聊，对方未启用自动降级明文，支持密钥备份/恢复
 - 管理后台 `apps/admin`：用户封禁解封、会话解散、消息检索与删除、举报处理、审计日志；
   `/api/v1/admin/*` 走 JWT + `role=admin` 双重校验，写操作留审计日志；
   敏感词命中标记 `flagged=true` 进审核队列（不阻塞发送）
 - PWA：生产构建注入自定义 Service Worker（app shell 预缓存 + Web Push 监听）
+- 自建 OTA：迁移 023 `app_releases` 表（platform/arch/version/channel 唯一），
+  灰度 0-100% 按设备稳定判定、回滚后对外端点即刻止发；管理端 Releases 五端点
+  （`/admin/releases`，写操作留审计、重复登记 409）；对外免鉴权
+  `GET /updates/:platform/:arch`（无更新/未中灰度 204，200 为不包 `{data}` 的
+  dynamic 格式）与 `GET /updates/catalog`；桌面 updater endpoints 自有域名在前、
+  GitHub latest.json 兜底在后；Android 自建自动更新（sha256 校验不过即删文件拒装，
+  install_apk 走 FileProvider）
+- Web 下载入口：侧栏（桌面 web）+ 设置页（手机 web）的 DownloadPanel，
+  按 userAgentData/UA 识别系统与架构推荐包，走 `/updates/catalog`；「当前系统 / 其他平台」
+  紧凑行完整展示四个平台，无包保留不可用行，列表内部滚动；
+  空态给 GitHub Releases 兜底链接
 - 语音/视频通话：信令走 WS 8 帧，房间态存 Redis，服务端不碰媒体字节；mesh 全连接、
   房间上限 4 人；TURN 走 coturn + HMAC 临时凭据（`GET /calls/ice-servers`）。
   **Linux 桌面端没有 `RTCPeerConnection`**（WebKitGTK 未编进 GstWebRTC），媒体面在独立
@@ -87,7 +152,7 @@
 - 一键启动：`pnpm dev:web` / `dev:web:mock` / `dev:desktop` / `dev:android` /
   `dev:server` / `dev:stop`（`scripts/dev.mjs`，见 `docs/DEVELOPMENT.md` 第零章）
 
-未做：语音转文字、聊天机器人 / 开放 API、iOS 打包（需 Apple 开发者账户）。
+未做：Android SAF 另存为、语音转文字、聊天机器人 / 开放 API、iOS 打包（需 Apple 开发者账户）。
 
 后端单进程双端口：REST :8085 + WebSocket :8086（另有 Prometheus `:9090/metrics`）。
 消息分发是进程内 Hub（`Dispatcher` 接口，多实例需换分布式实现）；presence 可通过

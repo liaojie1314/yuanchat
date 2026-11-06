@@ -130,6 +130,38 @@ func TestObjectACLCanRead_RevokedByClearHistory(t *testing.T) {
 	}
 }
 
+// TestObjectACLCanRead_RevokedBySoftDelete 删除消息或解散会话后，主对象与封面均不可再签名。
+func TestObjectACLCanRead_RevokedBySoftDelete(t *testing.T) {
+	for _, target := range []string{"消息", "会话"} {
+		t.Run(target, func(t *testing.T) {
+			db := testDB(t)
+			repo := NewObjectACLRepository(db)
+			ctx := context.Background()
+			member := newTestUser(t, db, "acldeleted")
+			key := "files/" + uuid.NewString() + ".mp4"
+			thumbKey := "images/" + uuid.NewString() + ".jpg"
+			conv, msg := aclVideoFixture(t, db, key, thumbKey, member.ID)
+			for _, k := range []string{key, thumbKey} {
+				if ok, err := repo.CanRead(ctx, member.ID, k); err != nil || !ok {
+					t.Fatalf("删除前对象应可读: key=%s ok=%v err=%v", k, ok, err)
+				}
+			}
+			var deleted any = msg
+			if target == "会话" {
+				deleted = conv
+			}
+			if err := db.Delete(deleted).Error; err != nil {
+				t.Fatalf("软删%s: %v", target, err)
+			}
+			for _, k := range []string{key, thumbKey} {
+				if ok, err := repo.CanRead(ctx, member.ID, k); err != nil || ok {
+					t.Errorf("删除后不应再签出对象: key=%s ok=%v err=%v", k, ok, err)
+				}
+			}
+		})
+	}
+}
+
 // TestObjectACLCanRead_ViaSticker 收藏贴纸对本人可读、对他人不可读；表情包贴纸全员可读。
 func TestObjectACLCanRead_ViaSticker(t *testing.T) {
 	db := testDB(t)
@@ -541,5 +573,38 @@ func TestObjectACLReferencedKeys_Moment(t *testing.T) {
 	}
 	if _, ok := got[key]; !ok {
 		t.Fatal("软删帖的媒体被判成孤儿——软删可恢复，GC 删了对象就恢复不了")
+	}
+}
+
+// TestObjectACLReferencedKeys_Release 已登记安装包始终算引用，回滚或草稿不应被 GC 删除。
+func TestObjectACLReferencedKeys_Release(t *testing.T) {
+	db := testDB(t)
+	repo := NewObjectACLRepository(db)
+	ctx := context.Background()
+	keys := make([]string, 0, 4)
+	for i, status := range []string{model.ReleaseStatusDraft, model.ReleaseStatusPublished, model.ReleaseStatusRolledBack} {
+		key := "releases/" + uuid.NewString() + ".tar.gz"
+		rel := &model.AppRelease{
+			Platform: "linux", Arch: "x86_64", Version: fmt.Sprintf("0.8.%d", i), Channel: model.ReleaseChannelStable,
+			ObjectKey: key, Status: status,
+		}
+		if err := db.Create(rel).Error; err != nil {
+			t.Fatalf("创建版本: %v", err)
+		}
+		keys = append(keys, key)
+	}
+	orphan := "releases/" + uuid.NewString() + ".tar.gz"
+	keys = append(keys, orphan)
+	got, err := repo.ReferencedKeys(ctx, keys)
+	if err != nil {
+		t.Fatalf("ReferencedKeys: %v", err)
+	}
+	for _, key := range keys[:3] {
+		if _, ok := got[key]; !ok {
+			t.Errorf("已登记版本对象 %s 未被判为引用", key)
+		}
+	}
+	if _, ok := got[orphan]; ok {
+		t.Fatal("未登记安装包不应被判为引用")
 	}
 }

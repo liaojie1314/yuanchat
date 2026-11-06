@@ -9,6 +9,11 @@
     "barcode-scanner:allow-cancel",
     "barcode-scanner:allow-check-permissions",
     "barcode-scanner:allow-request-permissions",
-    "barcode-scanner:allow-open-app-settings"
+    "barcode-scanner:allow-open-app-settings",
+    "fs:allow-download-write-recursive",
+    "fs:allow-download-read-recursive",
+    "fs:allow-download-meta-recursive",
+    "fs:scope-download-recursive",
+    "fs:allow-applocaldata-write-recursive"
   ]
 }

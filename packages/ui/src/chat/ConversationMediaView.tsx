@@ -22,21 +22,26 @@
  * @param onClose - 关闭回调（返回箭头 / 关闭按钮 / Esc / 安卓返回键触发）
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowLeft, Download, ImageOff, Pause, Play, X } from "lucide-react";
+import { ArrowLeft, Download, FolderOpen, ImageOff, Pause, Play, RefreshCw, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
+  cancelDownload,
   fetchConversationMedia,
   formatFileMeta,
   formatListTime,
   formatMediaDuration,
   getDownloadUrl,
-  openExternal,
+  getFileSink,
   registerBackInterceptor,
   showToast,
+  startDownload,
+  revealDownload,
+  useDownloadStore,
 } from "@yuanchat/shared";
 import type { MediaItem } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { ImageLightbox } from "./ImageLightbox";
+import { FileProgressBar } from "./FileProgressBar";
 import { StickerImage } from "../stickers/StickerImage";
 import { VideoPlaybackOverlay } from "./VideoPlaybackOverlay";
 import { fileIconOf } from "../util/fileIcon";
@@ -185,48 +190,105 @@ function MediaStickerCard({ item }: { item: MediaItem }) {
   );
 }
 
-/** 文件行：类型徽标 + 文件名 + 大小/发送者/时间 + 下载 */
+/**
+ * 文件行：类型徽标 + 文件名 + 大小/发送者/时间 + 下载。
+ *
+ * 与 MessageBubble 的文件气泡同一套阶段分流（下载/取消/重试/打开），
+ * 进度条同样挂在行下方 —— 相册里下载大文件没有进度与「在气泡里点」一样难受。
+ */
 function MediaFileRow({ item }: { item: MediaItem }) {
   const { t } = useTranslation();
   const name = item.name ?? "";
   const meta = formatFileMeta(name, item.size ?? 0);
   const { Icon, bg } = fileIconOf(meta.ext);
+  const entry = useDownloadStore((s) => s.entries[item.messageId]);
+  const phase = entry?.phase;
+  const [savedLocation, setSavedLocation] = useState<string | null>(null);
 
   const handleDownload = () => {
-    // 第二个参数让服务端签出附件头 + 原始文件名，详见 MessageBubble 的下载按钮
-    void getDownloadUrl(item.key, name || undefined)
-      // 同 MessageBubble：Tauri WebView 不支持 window.open，交给原生 shell
-      .then((url) => openExternal(url))
-      .catch(() => showToast("error", t("chat.file.downloadFailed")));
+    if (!name) return; // 与气泡侧同口径：没有原始文件名就不发起（签不出附件头）
+    if (phase === "downloading" || phase === "saving") {
+      cancelDownload(item.messageId);
+      return;
+    }
+    if (phase === "done" && entry?.savedPath) {
+      void revealDownload(item.messageId, item.key, name)
+        .then((path) => {
+          if (path) setSavedLocation(path);
+        })
+        .catch((error: unknown) =>
+          showToast(
+            "error",
+            t(
+              error instanceof Error && error.message === "download.directoryPermissionRequired"
+                ? "download.directoryPermissionRequired"
+                : "chat.file.openFailed",
+            ),
+          ),
+        );
+      return;
+    }
+    // 文件名作第二参让服务端签出附件头 + 原始文件名，详见 MessageBubble 的下载按钮。
+    // 走应用内下载而非 openExternal：与气泡侧同一理由（跳出去看不到进度）
+    void startDownload(item.messageId, item.key, name);
   };
+
+  const ActionIcon =
+    phase === "downloading" || phase === "saving"
+      ? X
+      : phase === "failed"
+        ? RefreshCw
+        : phase === "done" && entry?.savedPath
+          ? FolderOpen
+          : Download;
 
   return (
     <div
       data-testid={"media-row-" + item.seq}
-      className="border-outline-variant flex items-center gap-3 border-b py-2.5 last:border-b-0"
+      className="border-outline-variant border-b py-2.5 last:border-b-0"
     >
-      <span
-        className={cn(
-          "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white",
-          bg,
-        )}
-      >
-        <Icon size={20} strokeWidth={1.75} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="text-body-md text-on-surface truncate font-medium">{name}</div>
-        <div className="text-label-sm text-on-surface-variant mt-0.5 truncate">
-          {meta.size} · {item.senderNickname} · {formatListTime(item.createdAt)}
+      <div className="flex items-center gap-3">
+        <span
+          className={cn(
+            "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white",
+            bg,
+          )}
+        >
+          <Icon size={20} strokeWidth={1.75} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-body-md text-on-surface truncate font-medium">{name}</div>
+          <div className="text-label-sm text-on-surface-variant mt-0.5 truncate">
+            {meta.size} · {item.senderNickname} · {formatListTime(item.createdAt)}
+          </div>
         </div>
+        <button
+          type="button"
+          onClick={handleDownload}
+          aria-label={t(
+            phase === "downloading" || phase === "saving"
+              ? "common.cancel"
+              : phase === "failed"
+                ? "common.retry"
+                : phase === "done" && entry?.savedPath
+                  ? getFileSink().revealTarget === "location"
+                    ? "chat.file.viewLocation"
+                    : getFileSink().revealTarget === "folder"
+                      ? "chat.file.openFolder"
+                      : "chat.file.open"
+                  : "file.download",
+          )}
+          className="md3-icon-btn text-on-surface-variant shrink-0"
+        >
+          <ActionIcon size={17} />
+        </button>
       </div>
-      <button
-        type="button"
-        onClick={handleDownload}
-        aria-label={t("media.fileDownload")}
-        className="md3-icon-btn text-on-surface-variant shrink-0"
-      >
-        <Download size={17} />
-      </button>
+      {/* 进度条挂在行内布局之下：行是 items-center 的横排，放里面会被压扁 */}
+      <FileProgressBar
+        messageId={item.messageId}
+        location={savedLocation}
+        onCloseLocation={() => setSavedLocation(null)}
+      />
     </div>
   );
 }

@@ -40,7 +40,16 @@ import {
   replayEdit,
   replayClear,
 } from "./messageLocalSync";
-import { enqueueSend, settleSend } from "./outboxSync";
+import {
+  clearStagedOutboxFile,
+  enqueueSend,
+  readStagedOutboxFile,
+  settleSend,
+  sniffImageMime,
+  stageOutboxFile,
+  STAGED_IMAGE_NAME,
+  STAGED_VOICE_NAME,
+} from "./outboxSync";
 import { showToast } from "./toastStore";
 
 /** 消息在气泡里呈现的内容类别 */
@@ -122,6 +131,8 @@ export interface ChatMessage {
   id: string;
   conversationId: string;
   kind: ChatMessageKind;
+  /** 本地附件的上传 MIME，随出站草稿保留，重试从磁盘重建时使用。 */
+  uploadMimeType?: string;
   /** 是否自己发送（决定气泡左右与配色） */
   isSelf: boolean;
   /** 发送者昵称（群聊接收方气泡上方显示） */
@@ -532,6 +543,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       id: clientMsgId,
       conversationId,
       kind: "image",
+      uploadMimeType: blob.type,
       isSelf: true,
       image: { width, height, localUrl },
       time: now(),
@@ -554,6 +566,18 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       return;
     }
 
+    // 发送前把压缩后的字节落一份到应用私有目录：安卓重启后 blob URL 必然失效，
+    // 届时「重试」全靠这份磁盘副本（web 没有磁盘 sink，stageOutboxFile 内部直接跳过）。
+    // 等待落盘结束再上传/发帧，防止 ack 先清理、后台写盘后留下孤儿文件。
+    // 落盘失败仍按既有最佳努力策略发送；Web 无磁盘时直接跳过。
+    await stageOutboxFile(
+      clientMsgId,
+      new Uint8Array(await blob.arrayBuffer()),
+      STAGED_IMAGE_NAME,
+      blob.type,
+      msg,
+    ).catch(() => {});
+
     // 3. 申请上传 URL → 直传 → WS image 帧（含对象 key），失败置 failed
     await dispatchImageSend(conversationId, blob, width, height, clientMsgId, get);
   },
@@ -565,6 +589,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       id: clientMsgId,
       conversationId,
       kind: "file",
+      uploadMimeType: file.type,
       isSelf: true,
       file: { name: file.name, ...formatFileMeta(file.name, file.size), localUrl },
       time: now(),
@@ -586,6 +611,16 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       return;
     }
 
+    // 发送前落一份磁盘副本（键带 clientMsgId 前缀，文件名里的路径分隔符已替换），
+    // 重启后 blob 失效时重试从这里读回；必须等写盘结束才允许服务端 ack 清理。
+    await stageOutboxFile(
+      clientMsgId,
+      new Uint8Array(await file.arrayBuffer()),
+      file.name,
+      file.type,
+      msg,
+    ).catch(() => {});
+
     await dispatchFileSend(conversationId, file, clientMsgId, get);
   },
 
@@ -596,6 +631,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       id: clientMsgId,
       conversationId,
       kind: "voice",
+      uploadMimeType: blob.type,
       isSelf: true,
       voice: { seconds: duration, wave: pseudoWave(duration), localUrl },
       time: now(),
@@ -616,6 +652,15 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       setTimeout(() => get().setStatus(conversationId, clientMsgId, "sent"), 700);
       return;
     }
+
+    // 发送前落一份磁盘副本（语音 ≤60s，体积小）：重启后重试从这里读回
+    await stageOutboxFile(
+      clientMsgId,
+      new Uint8Array(await blob.arrayBuffer()),
+      STAGED_VOICE_NAME,
+      blob.type,
+      msg,
+    ).catch(() => {});
 
     await dispatchVoiceSend(conversationId, blob, duration, clientMsgId, get);
   },
@@ -712,8 +757,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     // 图片：从本地 blob URL 重新取回压缩后的字节，整条流程（上传+发送）重跑
     if (msg.kind === "image") {
       const localUrl = msg.image?.localUrl;
-      // 无本地副本（如重进会话后的历史消息、整页跳转后 blob 失效）无法重传
-      if (!localUrl) {
+      if (!msg.image) {
         reportRetryUnavailable(conversationId, messageId, get);
         return;
       }
@@ -725,10 +769,29 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
       const clientMsgId = msg.clientMsgId ?? messageId;
       const w = msg.image?.width ?? 0;
       const h = msg.image?.height ?? 0;
+      // blob 取不回（应用重启后必然如此）时回落发送前落的磁盘副本：
+      // 优先用草稿里的 MIME，旧副本才按魔数嗅探；副本丢失则如实报「本地文件已失效」。
+      const retryFromStaged = () =>
+        readStagedOutboxFile(clientMsgId, STAGED_IMAGE_NAME)
+          .then((bytes) =>
+            dispatchImageSend(
+              conversationId,
+              new Blob([bytes], { type: msg.uploadMimeType || sniffImageMime(bytes) }),
+              w,
+              h,
+              clientMsgId,
+              get,
+            ),
+          )
+          .catch(() => reportRetryUnavailable(conversationId, messageId, get));
+      if (!localUrl) {
+        void retryFromStaged();
+        return;
+      }
       void fetch(localUrl)
         .then((r) => r.blob())
         .then((blob) => dispatchImageSend(conversationId, blob, w, h, clientMsgId, get))
-        .catch(() => reportRetryUnavailable(conversationId, messageId, get));
+        .catch(retryFromStaged);
       return;
     }
 
@@ -736,7 +799,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     if (msg.kind === "file") {
       const localUrl = msg.file?.localUrl;
       const fileName = msg.file?.name;
-      if (!localUrl || !fileName) {
+      if (!fileName) {
         reportRetryUnavailable(conversationId, messageId, get);
         return;
       }
@@ -746,17 +809,33 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
         return;
       }
       const clientMsgId = msg.clientMsgId ?? messageId;
+      // 磁盘副本只有字节，必须恢复首次选择的 MIME，不能退成后端拒绝的 octet-stream。
+      const retryFromStaged = () =>
+        readStagedOutboxFile(clientMsgId, fileName)
+          .then((bytes) =>
+            dispatchFileSend(
+              conversationId,
+              new File([bytes], fileName, { type: msg.uploadMimeType }),
+              clientMsgId,
+              get,
+            ),
+          )
+          .catch(() => reportRetryUnavailable(conversationId, messageId, get));
+      if (!localUrl) {
+        void retryFromStaged();
+        return;
+      }
       void fetch(localUrl)
         .then((r) => r.blob())
         .then((blob) =>
           dispatchFileSend(
             conversationId,
-            new File([blob], fileName, { type: blob.type }),
+            new File([blob], fileName, { type: msg.uploadMimeType || blob.type }),
             clientMsgId,
             get,
           ),
         )
-        .catch(() => reportRetryUnavailable(conversationId, messageId, get));
+        .catch(retryFromStaged);
       return;
     }
 
@@ -764,7 +843,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     if (msg.kind === "voice") {
       const localUrl = msg.voice?.localUrl;
       const duration = msg.voice?.seconds;
-      if (!localUrl || !duration) {
+      if (!duration) {
         reportRetryUnavailable(conversationId, messageId, get);
         return;
       }
@@ -774,10 +853,27 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
         return;
       }
       const clientMsgId = msg.clientMsgId ?? messageId;
+      // blob 取不回时回落磁盘副本，沿用原 MIME；旧副本按录音格式 webm 恢复。
+      const retryFromStaged = () =>
+        readStagedOutboxFile(clientMsgId, STAGED_VOICE_NAME)
+          .then((bytes) =>
+            dispatchVoiceSend(
+              conversationId,
+              new Blob([bytes], { type: msg.uploadMimeType || "audio/webm" }),
+              duration,
+              clientMsgId,
+              get,
+            ),
+          )
+          .catch(() => reportRetryUnavailable(conversationId, messageId, get));
+      if (!localUrl) {
+        void retryFromStaged();
+        return;
+      }
       void fetch(localUrl)
         .then((r) => r.blob())
         .then((blob) => dispatchVoiceSend(conversationId, blob, duration, clientMsgId, get))
-        .catch(() => reportRetryUnavailable(conversationId, messageId, get));
+        .catch(retryFromStaged);
       return;
     }
 
@@ -893,6 +989,7 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
             // 本地 client id 提升为服务端 message id：撤回/去重以服务端 id 为准，
             // clientMsgId 原样保留供 message.receive 自回显去重
             id: messageId,
+            uploadMimeType: undefined,
             status: "sent" as const,
             seq,
             time: formatMessageTime(new Date(timestamp).toISOString()),
@@ -909,7 +1006,20 @@ export const useMessageStore = create<MessageState>()((set, get) => ({
     // ack 到达后该消息才有 seq，此刻才能落进 messages store；
     // 出队与落库同事务完成，见 settleOutbox
     const confirmed = (get().messagesByConv[convId] ?? []).find((m) => m.id === messageId);
-    if (confirmed !== undefined) settleSend(clientMsgId, confirmed);
+    if (confirmed !== undefined) {
+      settleSend(clientMsgId, confirmed);
+      // 发送成功即清掉发送前的磁盘副本（清理失败已被吞掉，最坏只是多占一点空间）。
+      // 副本名必须与发送时 stageOutboxFile 的实参一致（见 sendImage/sendFile/sendVoice）
+      const stagedName =
+        confirmed.kind === "file"
+          ? confirmed.file?.name
+          : confirmed.kind === "voice"
+            ? STAGED_VOICE_NAME
+            : confirmed.kind === "image"
+              ? STAGED_IMAGE_NAME
+              : undefined;
+      if (stagedName) void clearStagedOutboxFile(clientMsgId, stagedName);
+    }
   },
 
   applyRead: (convId, seq) =>
@@ -1121,7 +1231,10 @@ async function maybeEncryptAndSend(
  * 会话与幂等 id 直接取自载荷本身，不另传参，避免两处对不上。
  */
 function sendWithOutbox(payload: ClientFrames["message.send"]): void {
-  enqueueSend(payload.conversation_id, payload.client_msg_id, payload);
+  const message = useMessageStore
+    .getState()
+    .messagesByConv[payload.conversation_id]?.find((m) => m.clientMsgId === payload.client_msg_id);
+  enqueueSend(payload.conversation_id, payload.client_msg_id, payload, message);
   chatSocket.send("message.send", payload);
 }
 

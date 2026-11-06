@@ -360,7 +360,7 @@ func TestEditUpdatesSearchIndex(t *testing.T) {
 		t.Fatalf("Edit: %v", err)
 	}
 
-	hits, _, err := f.svc.Search(ctx, f.senderID, "独特关键词", "", "", 10)
+	hits, _, err := f.svc.Search(ctx, f.senderID, "独特关键词", "", nil, "", 10)
 	if err != nil {
 		t.Fatalf("Search new text: %v", err)
 	}
@@ -368,7 +368,7 @@ func TestEditUpdatesSearchIndex(t *testing.T) {
 		t.Error("搜新文本命中 0 条，want ≥1")
 	}
 
-	stale, _, err := f.svc.Search(ctx, f.senderID, "原始文本", "", "", 10)
+	stale, _, err := f.svc.Search(ctx, f.senderID, "原始文本", "", nil, "", 10)
 	if err != nil {
 		t.Fatalf("Search old text: %v", err)
 	}

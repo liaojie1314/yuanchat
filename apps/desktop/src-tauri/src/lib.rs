@@ -1,3 +1,5 @@
+mod local_file;
+
 #[cfg(target_os = "linux")]
 mod native_rtc;
 
@@ -104,12 +106,22 @@ pub fn run() {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
 
+    // 安卓的本地文件打开走 gen/android 手写的 LocalFilePlugin（见 local_file 模块注释）
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(local_file::init());
+
     // Linux 的通话媒体面走进程内 GStreamer（WebKitGTK 没有 RTCPeerConnection），
     // 其余平台的 WebView 自带 WebRTC，不注册这组命令。
     // invoke_handler 只认最后一次调用，所以两个分支各自带上 open_external
+    // 与 local_file 的两个命令
     #[cfg(target_os = "linux")]
     let builder = builder.invoke_handler(tauri::generate_handler![
         open_external,
+        local_file::open_local_file,
+        local_file::install_apk,
+        local_file::get_download_directory,
+        local_file::choose_download_directory,
+        local_file::reset_download_directory,
         native_rtc::native_rtc_available,
         native_rtc::native_rtc_video_available,
         native_rtc::native_rtc_video_url,
@@ -125,7 +137,14 @@ pub fn run() {
     ]);
 
     #[cfg(not(target_os = "linux"))]
-    let builder = builder.invoke_handler(tauri::generate_handler![open_external]);
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        open_external,
+        local_file::open_local_file,
+        local_file::install_apk,
+        local_file::get_download_directory,
+        local_file::choose_download_directory,
+        local_file::reset_download_directory
+    ]);
 
     builder
         .setup(|app| {

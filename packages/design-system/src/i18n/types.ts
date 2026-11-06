@@ -29,7 +29,7 @@ export interface TranslationKeys {
   // ========== 设置 ==========
   "settings.title": string;
   "settings.general": string;
-  "settings.appearance": string;
+  "settings.generalDesc": string;
   "settings.language": string;
   "settings.fontSize": string;
   "settings.fontSize.small": string;

@@ -34,7 +34,7 @@ command -v openssl >/dev/null 2>&1 || die "缺少 openssl（用于生成随机�
 #   2) 预先用环境变量喂进来 → 一条命令装完，不需要中途编辑文件：
 #        DOMAIN_CHAT=chat.x.com DOMAIN_API=api.x.com ... ./deploy/install.sh
 # 第二种是「真一键」的关键：CI / 重装脚本里没法交互式编辑文件。
-REQUIRED_VARS="DOMAIN_CHAT DOMAIN_API DOMAIN_WS DOMAIN_ADMIN DOMAIN_STORAGE ADMIN_EMAIL"
+REQUIRED_VARS="DOMAIN_CHAT DOMAIN_API DOMAIN_WS DOMAIN_ADMIN DOMAIN_STORAGE LE_EMAIL"
 
 if [ ! -f .env ]; then
   info "创建 .env（从 .env.prod.example）"
@@ -42,7 +42,7 @@ if [ ! -f .env ]; then
 
   # 环境变量里已给的值直接写进去，省掉一轮手工编辑
   filled=0
-  for var in $REQUIRED_VARS ADMIN_PHONE PUBLIC_IP; do
+  for var in $REQUIRED_VARS ADMIN_EMAIL PUBLIC_IP; do
     value="$(eval "printf '%s' \"\${$var:-}\"")"
     if [ -n "$value" ]; then
       if grep -q "^${var}=" .env; then
@@ -73,7 +73,8 @@ fi
 # shellcheck disable=SC1091
 set -a; source .env; set +a
 
-for var in DOMAIN_CHAT DOMAIN_API DOMAIN_WS DOMAIN_ADMIN DOMAIN_STORAGE ADMIN_EMAIL; do
+# 证书联系邮箱必填；管理员登录邮箱独立，可留空并跳过引导。
+for var in $REQUIRED_VARS; do
   value="${!var:-}"
   [ -n "$value" ] || die ".env 缺少 $var"
   case "$value" in
@@ -133,13 +134,13 @@ gen_secret MINIO_SECRET_KEY 40
 gen_secret GRAFANA_PASSWORD 24
 # coturn 与后端共用这一个密钥（compose 里 YUANCHAT_TURN_STATIC_AUTH_SECRET 取的是同一个变量）
 gen_secret TURN_SECRET 48
-# 管理后台首个账号的初始密码（手机号要用户自己填，见下）
+# 管理后台首个账号的初始密码（邮箱要用户自己填，见下）
 gen_secret ADMIN_PASSWORD 20
 
 # 管理后台没有注册入口：没有管理员账号，装完谁都登不进 admin 子域。
-# 手机号无法自动编一个（它是登录账号，也是将来找回密码的凭据），必须用户填。
-if [ -z "${ADMIN_PHONE:-}" ]; then
-  warn "deploy/.env 的 ADMIN_PHONE 为空 —— 将跳过管理员引导"
+# 邮箱无法自动编一个（它是登录账号，也是将来找回密码的凭据），必须用户填。
+if [ -z "${ADMIN_EMAIL:-}" ]; then
+  warn "deploy/.env 的 ADMIN_EMAIL 为空 —— 将跳过管理员引导"
   warn "管理后台无注册入口，跳过后需自行注册账号再手工提权（见 docs/deploy/self-hosted.md）"
 fi
 
@@ -189,7 +190,7 @@ if ! docker volume inspect yuanchat_certbot_conf >/dev/null 2>&1 || \
              "/etc/letsencrypt/renewal/$domain.conf"
     docker compose -f docker-compose.prod.yml run --rm --entrypoint certbot certbot \
       certonly --webroot -w /var/www/certbot \
-      --email "$ADMIN_EMAIL" --agree-tos --no-eff-email \
+      --email "$LE_EMAIL" --agree-tos --no-eff-email \
       --cert-name "$domain" -d "$domain" \
       || die "证书签发失败：确认 $domain 已解析到本机公网 IP 且 80 端口可达"
   done
@@ -238,7 +239,7 @@ docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload 2>/dev/n
 # ---------- 6. 引导管理后台首个账号 ----------
 # 放在服务起好之后：这条命令要连库，而库的健康依赖在 compose 里。
 # 命令本身幂等 —— 已有管理员就跳过，不会把线上密码重置回 .env 里的值。
-if [ -n "${ADMIN_PHONE:-}" ]; then
+if [ -n "${ADMIN_EMAIL:-}" ]; then
   info "引导管理后台账号"
   docker compose -f docker-compose.prod.yml run --rm --no-deps \
     --entrypoint /app/bootstrap-admin yuanchat-server || warn "管理员引导失败，可稍后重跑本脚本"
@@ -249,9 +250,9 @@ info "部署完成"
 echo "  Web 端:     https://${DOMAIN_CHAT}"
 echo "  管理后台:   https://${DOMAIN_ADMIN}"
 echo "  API:        https://${DOMAIN_API}"
-if [ -n "${ADMIN_PHONE:-}" ]; then
+if [ -n "${ADMIN_EMAIL:-}" ]; then
   echo
-  echo "管理后台登录：账号 ${ADMIN_PHONE}，密码见 deploy/.env 的 ADMIN_PASSWORD"
+  echo "管理后台登录：账号 ${ADMIN_EMAIL}，密码见 deploy/.env 的 ADMIN_PASSWORD"
   echo "  首次登录后请在应用内改密（改密会吊销旧令牌），并从 .env 里清掉该密码"
 fi
 echo

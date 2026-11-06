@@ -9,7 +9,7 @@
  * i18n 在 setup 里钉死 en-US，故文案断言用英文。
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import i18n from "@yuanchat/design-system/i18n";
 import { ConversationMediaView } from "../chat/ConversationMediaView";
 import * as shared from "@yuanchat/shared";
@@ -94,6 +94,58 @@ function renderAlbum(onClose = vi.fn()) {
 describe("ConversationMediaView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("Web 文件行查看保存位置，权限撤销时提示重新授权而不重下载", async () => {
+    const save = vi.fn();
+    const exists = vi.fn().mockResolvedValue(true);
+    shared.setFileSink({
+      read: async () => new Uint8Array([1]),
+      save,
+      exists,
+      revealTarget: "location",
+      describe: () => "Downloads / spec.pdf",
+      reveal: async () => "Downloads / spec.pdf",
+    });
+    shared.useDownloadStore.setState({
+      entries: {
+        m8: {
+          phase: "done",
+          received: 1,
+          total: 1,
+          sha256: "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a",
+          savedPath: "browser-download:8",
+        },
+      },
+    });
+    mockedFetch().mockResolvedValue({ items: [fileItem(8)], hasMore: false });
+    try {
+      renderAlbum();
+      const action = await screen.findByRole("button", { name: label("chat.file.viewLocation") });
+      vi.mocked(shared.showToast).mockClear();
+      fireEvent.click(action);
+      expect(
+        await screen.findByRole("dialog", { name: label("chat.file.viewLocation") }),
+      ).toHaveTextContent("Downloads / spec.pdf");
+      fireEvent.click(
+        within(screen.getByRole("dialog", { name: label("chat.file.viewLocation") })).getByRole(
+          "button",
+          { name: label("common.close") },
+        ),
+      );
+      exists.mockRejectedValue(new Error("download.directoryPermissionRequired"));
+      fireEvent.click(action);
+      await waitFor(() =>
+        expect(shared.showToast).toHaveBeenCalledWith(
+          "error",
+          label("download.directoryPermissionRequired"),
+        ),
+      );
+      expect(save).not.toHaveBeenCalled();
+    } finally {
+      shared.__resetFileSink();
+      act(() => shared.useDownloadStore.setState({ entries: {} }));
+    }
   });
 
   it("首屏渲染类型 Tab 与图片网格（三张图 → 三个 img）", async () => {

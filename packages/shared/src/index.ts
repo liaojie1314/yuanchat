@@ -1,5 +1,7 @@
 export * from "./store/themeStore";
 export * from "./store/conversationStore";
+export * from "./store/selectors";
+export * from "./store/desktopStore";
 export * from "./store/messageStore";
 export * from "./store/messageLocalSync";
 export * from "./store/authStore";
@@ -18,6 +20,7 @@ export * from "./api/chat";
 export * from "./api/contacts";
 export * from "./api/users";
 export * from "./api/files";
+export * from "./api/releases";
 export * from "./api/groups";
 export * from "./api/presence";
 export * from "./api/search";
@@ -39,6 +42,28 @@ export * from "./crypto/keyBackup";
 export * from "./api/e2ee";
 export { setNotifier, notifyIncoming, __resetNotifier } from "./notify";
 export { setUrlOpener, openExternal, __resetUrlOpener } from "./openExternal";
+export {
+  setFileSink,
+  getFileSink,
+  __resetFileSink,
+  uniqueFileName,
+  type FileSink,
+  type DownloadDirectory,
+  type SinkDir,
+} from "./download/fileSink";
+export {
+  useDownloadStore,
+  startDownload,
+  revealDownload,
+  refreshDownloads,
+  startDownloadFromUrl,
+  cancelDownload,
+  clearDownload,
+  type DownloadEntry,
+  type DownloadPhase,
+} from "./download/downloadStore";
+export * from "./store/shortcutStore";
+export * from "./download/browserDirectory";
 export { applyConversationSetting } from "./conversationSettings";
 export {
   setRefreshHandler,

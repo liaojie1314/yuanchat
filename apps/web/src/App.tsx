@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import { MainLayout, AppErrorBoundary } from "@yuanchat/ui";
+import { MainLayout, AppErrorBoundary, SearchPage } from "@yuanchat/ui";
 import { useAuthStore, useKeyboardAwareViewport } from "@yuanchat/shared";
 
 const ChatPage = lazy(() => import("./pages/ChatPage").then((m) => ({ default: m.ChatPage })));
@@ -78,6 +78,7 @@ function App() {
       <Suspense fallback={null}>
         <Routes>
           <Route element={<MainLayout />}>
+            <Route path="/search" element={<SearchPage />} />
             <Route path="/chat" element={<ChatPage />} />
             <Route path="/chat/:conversationId" element={<ChatPage />} />
             <Route path="/contacts" element={<ContactsPage />} />

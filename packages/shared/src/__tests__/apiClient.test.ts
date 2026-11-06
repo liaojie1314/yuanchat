@@ -45,7 +45,7 @@ describe("doFetch 的 204 处理", () => {
   it("429 限流响应仍抛 ApiError 而不被 204 短路吞掉", async () => {
     mockEnvelopeOnce(429, { code: 429, message: "rate limit exceeded, please try again later" });
     await expect(
-      apiPost<void>("/api/v1/auth/password/otp", { phone: "13800138000" }),
+      apiPost<void>("/api/v1/auth/password/otp", { account: "a@example.com" }),
     ).rejects.toBeInstanceOf(ApiError);
   });
 

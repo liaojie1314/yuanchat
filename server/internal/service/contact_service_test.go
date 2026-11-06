@@ -25,10 +25,10 @@ func testDB(t *testing.T) *gorm.DB {
 // newTestUser 创建一次性测试用户（短号用时间戳避免冲突，用后删除）。
 func newTestUser(t *testing.T, db *gorm.DB, nick string) *model.User {
 	t.Helper()
-	phone := fmt.Sprintf("199%08d", time.Now().UnixNano()%100000000)
+	email := fmt.Sprintf("u%d@test.local", time.Now().UnixNano())
 	user := &model.User{
 		ID:           uuid.New(),
-		Phone:        &phone,
+		Email:        &email,
 		PasswordHash: "x",
 		ShortID:      time.Now().UnixNano()%1_000_000_000 + int64(len(nick)),
 		Nickname:     nick,
@@ -270,24 +270,24 @@ func TestSearchRelations(t *testing.T) {
 	ctx := context.Background()
 
 	// 自己
-	r, err := svc.Search(ctx, a.ID, *a.Phone)
+	r, err := svc.Search(ctx, a.ID, *a.Email)
 	if err != nil || r.Relation != "self" {
 		t.Fatalf("expected self, got %v / %v", r, err)
 	}
 
 	// 无关系
-	r, err = svc.Search(ctx, a.ID, *b.Phone)
+	r, err = svc.Search(ctx, a.ID, *b.Email)
 	if err != nil || r.Relation != "none" {
 		t.Fatalf("expected none, got %v / %v", r, err)
 	}
 
 	// 我发出的 / 我收到的待处理申请
 	req, _, _ := svc.SendRequest(ctx, a.ID, b.ID, "")
-	r, _ = svc.Search(ctx, a.ID, *b.Phone)
+	r, _ = svc.Search(ctx, a.ID, *b.Email)
 	if r.Relation != "pending_out" {
 		t.Fatalf("expected pending_out, got %s", r.Relation)
 	}
-	r, _ = svc.Search(ctx, b.ID, *a.Phone)
+	r, _ = svc.Search(ctx, b.ID, *a.Email)
 	if r.Relation != "pending_in" {
 		t.Fatalf("expected pending_in, got %s", r.Relation)
 	}
@@ -296,7 +296,7 @@ func TestSearchRelations(t *testing.T) {
 	if _, err := svc.Accept(ctx, b.ID, req.ID); err != nil {
 		t.Fatalf("accept: %v", err)
 	}
-	r, _ = svc.Search(ctx, a.ID, *b.Phone)
+	r, _ = svc.Search(ctx, a.ID, *b.Email)
 	if r.Relation != "friend" {
 		t.Fatalf("expected friend, got %s", r.Relation)
 	}
@@ -310,5 +310,32 @@ func TestSearchRelations(t *testing.T) {
 	// 未命中
 	if _, err := svc.Search(ctx, a.ID, "nonexistent-user"); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("expected ErrUserNotFound, got %v", err)
+	}
+}
+
+// TestSearchElevenDigitIsShortID 11 位纯数字不再被当手机号吞掉。
+//
+// 手机号移除前，精确搜索把「11 位纯数字」整段让给 FindByPhone，
+// 于是一个 11 位的元聊号压根搜不到。移除后数字一律按元聊号解析，
+// 留这条用例钉住它，否则日后有人「顺手」把 11 位分支加回来不会被发现。
+func TestSearchElevenDigitIsShortID(t *testing.T) {
+	db := testDB(t)
+	svc := newContactSvc(db)
+	ctx := context.Background()
+
+	a := newTestUser(t, db, "digit-a")
+	b := newTestUser(t, db, "digit-b")
+
+	const elevenDigits int64 = 13800138000
+	if err := db.Model(b).Update("short_id", elevenDigits).Error; err != nil {
+		t.Fatalf("set 11-digit short_id: %v", err)
+	}
+
+	r, err := svc.Search(ctx, a.ID, "13800138000")
+	if err != nil {
+		t.Fatalf("按 11 位元聊号搜索应命中: %v", err)
+	}
+	if r.User.ID != b.ID {
+		t.Fatalf("命中了错误的用户: got %s want %s", r.User.ID, b.ID)
 	}
 }

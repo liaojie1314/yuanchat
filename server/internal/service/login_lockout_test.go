@@ -10,6 +10,8 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/yuanchat/server/internal/pkg/password"
+	"github.com/yuanchat/server/internal/testutil"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -42,7 +44,7 @@ func newLoginFixture(t *testing.T) *loginFixture {
 	if err := db.Model(user).Update("password_hash", hash).Error; err != nil {
 		t.Fatalf("写入密码哈希: %v", err)
 	}
-	return &loginFixture{svc: svc, rdb: rdb, mr: mr, db: db, account: *user.Phone}
+	return &loginFixture{svc: svc, rdb: rdb, mr: mr, db: db, account: *user.Email}
 }
 
 // login 用给定密码尝试登录夹具里的账号。
@@ -187,6 +189,34 @@ func TestLoginUnknownAccountAlsoLocks(t *testing.T) {
 	}
 	if err := f.loginAs(t, unknown, lockoutWrongPassword); !errors.Is(err, ErrAccountLocked) {
 		t.Fatalf("err = %v, want ErrAccountLocked", err)
+	}
+}
+
+// TestLoginMalformedAccountCountsAndLocks 非邮箱、非元聊号账号不查数据库，但仍须按凭据错误计数并锁定。
+func TestLoginMalformedAccountCountsAndLocks(t *testing.T) {
+	for _, account := range []string{"not-an-account", "999999999999999999999999999"} {
+		t.Run(account, func(t *testing.T) {
+			rdb, mr := testutil.NewRedis(t)
+			// 查找分支不应触达数据库；nil 仓储会让误查直接失败，而不是给出假阳性。
+			svc := NewUserService(nil, nil, nil, rdb, zap.NewNop())
+			ctx := context.Background()
+			for i := 1; i <= loginFailMax; i++ {
+				result, err := svc.Login(ctx, LoginRequest{Account: account, Password: lockoutWrongPassword})
+				if !errors.Is(err, ErrUserNotFound) || result != nil {
+					t.Fatalf("第 %d 次 result=%v err=%v，期望 ErrUserNotFound", i, result, err)
+				}
+				if n, err := rdb.Get(ctx, loginFailKey(account)).Int(); err != nil || n != i {
+					t.Fatalf("失败计数=%d err=%v，期望 %d", n, err, i)
+				}
+			}
+			if _, err := svc.Login(ctx, LoginRequest{Account: account, Password: lockoutWrongPassword}); !errors.Is(err, ErrAccountLocked) {
+				t.Fatalf("第六次 err=%v，期望 ErrAccountLocked", err)
+			}
+			mr.FastForward(loginFailTTL + time.Second)
+			if _, err := svc.Login(ctx, LoginRequest{Account: account, Password: lockoutWrongPassword}); !errors.Is(err, ErrUserNotFound) {
+				t.Fatalf("锁定过期后 err=%v，期望 ErrUserNotFound", err)
+			}
+		})
 	}
 }
 

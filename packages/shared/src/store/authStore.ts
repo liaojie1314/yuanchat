@@ -39,7 +39,6 @@ interface User {
   id: string;
   nickname: string;
   avatarUrl?: string | null;
-  phone?: string;
   email?: string;
   /** QQ 号风格短号（元聊号） */
   shortId?: number;
@@ -58,7 +57,6 @@ interface UserDTO {
   id: string;
   nickname: string;
   avatar_url?: string | null;
-  phone?: string | null;
   email?: string | null;
   short_id?: number;
   bio?: string | null;
@@ -105,7 +103,6 @@ function mapUser(dto: UserDTO): User {
     id: dto.id,
     nickname: dto.nickname,
     avatarUrl: dto.avatar_url,
-    phone: dto.phone ?? undefined,
     email: dto.email ?? undefined,
     shortId: dto.short_id,
     bio: dto.bio ?? undefined,
@@ -159,8 +156,8 @@ export const useAuthStore = create<AuthState>()(
 
       /**
        * 账号 + 密码登录
-       * account 支持手机号 / 邮箱 / 元聊号（后端 LoginRequest.Account 按是否含 @ 分派，
-       * 纯数字先查手机号再查元聊号）
+       * account 支持邮箱 / 元聊号（后端 LoginRequest.Account 按是否含 @ 分派，
+       * 纯数字按元聊号解析；手机号已于迁移 021 移除）
        */
       loginWithPassword: async (account: string, password: string) => {
         const data = await apiPost<LoginResponse>("/api/v1/auth/login", {

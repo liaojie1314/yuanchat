@@ -17,19 +17,28 @@ import {
   ChevronRight,
   LogOut,
   ShieldCheck,
-  Palette,
+  SlidersHorizontal,
   Info,
   User,
   ArrowLeft,
+  Download,
   Sticker,
   Star,
   Smile,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
-import { registerBackInterceptor, useAuthStore, useBreakpoint } from "@yuanchat/shared";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import {
+  registerBackInterceptor,
+  useAuthStore,
+  useBreakpoint,
+  useDesktopStore,
+  useIsDesktop,
+  type CloseBehavior,
+} from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "../primitives/Avatar";
+import { DownloadPanel } from "../download/DownloadPanel";
 import { ProfileEditView } from "./ProfileEditView";
 import {
   AccountSection,
@@ -41,9 +50,11 @@ import { APP_VERSION } from "./settingsUtils";
 import { ConfirmDialog } from "../primitives/ConfirmDialog";
 import { ChangePasswordDialog } from "../auth/ChangePasswordDialog";
 import { UserStatusEditor } from "./UserStatusEditor";
+import { ShortcutSection } from "./ShortcutSection";
+import { DownloadDirectorySection } from "./DownloadDirectorySection";
 
 /** 设置内容区视图 */
-type SettingsView = "index" | "profile" | "account" | "appearance" | "favorites" | "about";
+type SettingsView = "index" | "profile" | "account" | "general" | "favorites" | "about";
 
 /** 设置页分组项：view 为设置页内部视图切换，route 为跳走的独立页面。 */
 type SettingsNavItem =
@@ -76,10 +87,10 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   },
   {
     kind: "view",
-    view: "appearance",
-    icon: Palette,
-    labelKey: "settings.appearance",
-    descKey: "settings.appearanceDesc",
+    view: "general",
+    icon: SlidersHorizontal,
+    labelKey: "settings.general",
+    descKey: "settings.generalDesc",
   },
   {
     kind: "route",
@@ -108,16 +119,24 @@ const SETTINGS_NAV: SettingsNavItem[] = [
 /** 列表 key：view 项用视图名，route 项用路由，两者不会撞 */
 const navKey = (item: SettingsNavItem) => (item.kind === "view" ? item.view : item.to);
 
+/** 三端设置编排，支持命令面板直接打开关于分区。 */
 export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedSection = searchParams.get("section");
   const bp = useBreakpoint();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
 
   const isMobile = bp === "mobile";
-  // 桌面/平板默认选中个人资料；移动端从 index 列表开始
-  const [view, setView] = useState<SettingsView>("profile");
+  // 下载客户端入口仅 web 构建渲染（手机 web；Tauri app 内已装好，再给是噪音）
+  const isDesktopApp = useIsDesktop();
+  const [showDownload, setShowDownload] = useState(false);
+  // 首次提交就匹配断点与深链，避免先挂载个人资料再由 effect 换页。
+  const [view, setView] = useState<SettingsView>(() =>
+    requestedSection === "about" ? "about" : isMobile ? "index" : "profile",
+  );
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [changePwdOpen, setChangePwdOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
@@ -158,8 +177,8 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
 
   // 移动端首屏应落在 index；断点切回桌面时确保有选中项
   useEffect(() => {
-    setView(isMobile ? "index" : "profile");
-  }, [isMobile]);
+    setView(requestedSection === "about" ? "about" : isMobile ? "index" : "profile");
+  }, [isMobile, requestedSection]);
 
   /** 右内容区：按 view 渲染对应子视图 */
   const renderContent = (onBack: () => void) => {
@@ -176,10 +195,16 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
             />
           </MobileHeader>
         );
-      case "appearance":
+      case "general":
         return (
-          <MobileHeader show={isMobile} title={t("settings.appearance")} onBack={onBack}>
-            <AppearanceSection />
+          <MobileHeader show={isMobile} title={t("settings.general")} onBack={onBack}>
+            <div className="flex flex-col gap-6">
+              <AppearanceSection />
+              <DownloadDirectorySection />
+              {!isMobile && <ShortcutSection />}
+              {/* 桌面 app 专属：关窗行为三选（内部自行判断平台，非桌面渲染 null） */}
+              <DesktopSection />
+            </div>
           </MobileHeader>
         );
       case "favorites":
@@ -334,10 +359,29 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
               key={navKey(item)}
               icon={item.icon}
               label={t(item.labelKey)}
-              desc={t(item.descKey)}
+              desc={t(
+                item.kind === "view" && item.view === "general"
+                  ? "settings.generalDescMobile"
+                  : item.descKey,
+              )}
               onClick={() => onNavClick(item)}
             />
           ))}
+          {/* 下载客户端：手机 web 独有的入口（桌面侧栏另有沉底按钮） */}
+          {!isDesktopApp && (
+            <button
+              onClick={() => setShowDownload(true)}
+              className="bg-surface-container hover:bg-surface-container-high flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors"
+            >
+              <span className="bg-primary-container/60 text-primary-on-container flex h-9 w-9 shrink-0 items-center justify-center rounded-lg">
+                <Download size={18} />
+              </span>
+              <span className="text-body-lg text-on-surface flex-1 truncate font-medium">
+                {t("download.title")}
+              </span>
+              <ChevronRight size={18} className="text-on-surface-variant shrink-0" />
+            </button>
+          )}
         </div>
         <div className="mb-4">{logoutBlock}</div>
         <p className="text-label-sm text-on-surface-variant mt-auto pt-4 text-center">
@@ -346,6 +390,7 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
         {logoutDialog}
         <ChangePasswordDialog open={changePwdOpen} onClose={() => setChangePwdOpen(false)} />
         <UserStatusEditor open={statusOpen} onClose={() => setStatusOpen(false)} />
+        {showDownload && <DownloadPanel onClose={() => setShowDownload(false)} />}
       </div>
     );
   }
@@ -399,6 +444,53 @@ export function SettingsScreen({ aboutExtra }: { aboutExtra?: ReactNode } = {}) 
         <div className="mx-auto max-w-2xl px-8 py-8">{renderContent(() => setView("profile"))}</div>
       </div>
       <UserStatusEditor open={statusOpen} onClose={() => setStatusOpen(false)} />
+    </div>
+  );
+}
+
+/**
+ * 桌面端专属设置：点关闭按钮的行为三选。
+ *
+ * 仅桌面 app 且非移动显示（web / 安卓 / iOS 没有托盘与关窗行为可言）。
+ * 必须有这一项 —— 关窗弹窗勾了「记住我的选择」之后，这里给得出回头路，
+ * 否则勾完就再也改不了。
+ */
+function DesktopSection() {
+  const { t } = useTranslation();
+  const bp = useBreakpoint();
+  const isDesktop = useIsDesktop();
+  const closeBehavior = useDesktopStore((s) => s.closeBehavior);
+  const setCloseBehavior = useDesktopStore((s) => s.setCloseBehavior);
+
+  if (!isDesktop || bp === "mobile") return null;
+
+  const options: Array<{ value: CloseBehavior; label: string }> = [
+    { value: "ask", label: t("desktop.closeBehaviorAsk") },
+    { value: "tray", label: t("desktop.closeToTray") },
+    { value: "quit", label: t("desktop.closeQuit") },
+  ];
+
+  return (
+    <div>
+      <h3 className="text-title-sm text-on-surface mb-3 font-semibold">
+        {t("desktop.closeBehavior")}
+      </h3>
+      <div className="bg-surface-container inline-flex w-full rounded-lg p-1">
+        {options.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => setCloseBehavior(opt.value)}
+            className={cn(
+              "text-label-lg flex-1 rounded-md py-2 font-medium transition-all",
+              closeBehavior === opt.value
+                ? "bg-surface shadow-elevation-1 text-on-surface"
+                : "text-on-surface-variant hover:text-on-surface",
+            )}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

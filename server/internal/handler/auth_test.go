@@ -72,12 +72,12 @@ func TestPasswordOtpRequiresAccount(t *testing.T) {
 	}
 }
 
-// TestPasswordOtpRejectsPhoneWith400 手机号必须是 400 而不是 500。
+// TestPasswordOtpRejectsNonEmailWith400 非邮箱账号必须是 400 而不是 500。
 //
-// 验证码通道是 SMTP，手机号收不到码。更要紧的是：若不在入口拒掉，已注册的手机号会
-// 一路走到发信才失败并回 500，而未注册的手机号静默回 204 —— 两种响应不同，接口就成了
-// 「这个手机号是否注册」的探测器。这里连带钉住错误码必须是客户端错误。
-func TestPasswordOtpRejectsPhoneWith400(t *testing.T) {
+// 验证码通道是 SMTP，非邮箱收不到码。更要紧的是：若不在入口拒掉，已注册的账号会
+// 一路走到发信才失败并回 500，而未注册的静默回 204 —— 两种响应不同，接口就成了
+// 「这个账号是否注册」的探测器。这里连带钉住错误码必须是客户端错误。
+func TestPasswordOtpRejectsNonEmailWith400(t *testing.T) {
 	r, _ := newPasswordResetEngine(t)
 
 	w, resp := doJSON(t, r, http.MethodPost, "/api/v1/auth/password/otp",

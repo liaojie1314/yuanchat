@@ -23,23 +23,29 @@
  * @example
  * <MainLayout />
  */
-import { Link, useLocation, Outlet } from "react-router-dom";
-import { Sun, Moon, LogOut } from "lucide-react";
+import { Link, useLocation, useNavigate, Outlet } from "react-router-dom";
+import { Sun, Moon, LogOut, Download } from "lucide-react";
 import {
   useThemeStore,
   useAuthStore,
   useChatBootstrap,
   useContactStore,
   useConversationStore,
+  selectTotalUnread,
   useMomentsStore,
   useBreakpoint,
+  useIsDesktop,
+  useShortcutStore,
+  matchesSearchShortcut,
 } from "@yuanchat/shared";
 import { cn } from "@yuanchat/shared/utils";
 import { useTranslation } from "react-i18next";
 import { type ReactNode, useState, useEffect } from "react";
 import { Avatar } from "../primitives/Avatar";
 import { CallHost } from "../call/CallHost";
-import { SearchModal } from "./SearchModal";
+import { CommandPalette } from "../palette/CommandPalette";
+import { launchSearchWindow, SEARCH_OPEN_EVENT } from "../palette/searchWindowActions";
+import { DownloadPanel } from "../download/DownloadPanel";
 import { ToastHost } from "../primitives/Toast";
 import { NetworkBanner } from "./NetworkBanner";
 import {
@@ -64,6 +70,7 @@ export function MainLayout({
   callMode?: "overlay" | "window";
 }) {
   const location = useLocation();
+  const navigate = useNavigate();
   // 新 API: mode("light"/"dark"), toggleMode()
   const { mode, toggleMode } = useThemeStore();
   const isDark = mode === "dark";
@@ -71,26 +78,55 @@ export function MainLayout({
   const { t } = useTranslation();
   const bp = useBreakpoint();
   const [showSearch, setShowSearch] = useState(false);
+  const [searchConversationId, setSearchConversationId] = useState<string>();
+  // 仅 web 构建显示下载入口 —— 桌面 app 与安卓 app 里已经装好了，再给是噪音
+  const isDesktopApp = useIsDesktop();
+  const [showDownload, setShowDownload] = useState(false);
+  const searchShortcut = useShortcutStore((state) => state.searchShortcut);
 
   useEffect(() => {
+    /** 会话内搜索优先交原生宿主；手机走路由，其余搜索留在本布局内弹窗。 */
+    const open = (conversationId?: string) => {
+      if (launchSearchWindow(conversationId)) return;
+      if (bp === "mobile") {
+        const search = conversationId
+          ? `?conversation_id=${encodeURIComponent(conversationId)}`
+          : "";
+        const alreadySearching = location.pathname === "/search";
+        navigate(`/search${search}`, {
+          replace: alreadySearching,
+          state: alreadySearching
+            ? location.state
+            : { searchReturnTo: location.pathname + location.search },
+        });
+        return;
+      }
+      setSearchConversationId(conversationId);
+      setShowSearch(true);
+    };
+    const requested = (event: Event) => open((event as CustomEvent<string | undefined>).detail);
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+      if (e.defaultPrevented) return;
+      if (matchesSearchShortcut(e, searchShortcut)) {
         e.preventDefault();
-        setShowSearch((v) => !v);
+        open();
       }
       if (e.key === "Escape") setShowSearch(false);
     };
     window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
+    window.addEventListener(SEARCH_OPEN_EVENT, requested);
+    return () => {
+      window.removeEventListener("keydown", handler);
+      window.removeEventListener(SEARCH_OPEN_EVENT, requested);
+    };
+  }, [searchShortcut, bp, navigate, location]);
 
   // 数据源接线：WS 连接挂在布局层，切页（聊天↔通讯录↔设置）不断连，
   // presence/消息帧全程可达；登出（布局卸载）时断开
   useChatBootstrap();
 
-  const totalUnread = useConversationStore((s) =>
-    s.conversations.reduce((sum, c) => sum + (c.isMuted ? 0 : c.unreadCount), 0),
-  );
+  // 未读口径唯一来源是 selectTotalUnread（托盘角标用同一个选择器，两处不漂移）
+  const totalUnread = useConversationStore((s) => selectTotalUnread(s.conversations));
   const pendingRequests = useContactStore(
     (s) => s.requests.filter((r) => r.direction === "in" && r.status === 0).length,
   );
@@ -112,7 +148,9 @@ export function MainLayout({
 
   // 手机端：聊天视图打开时隐藏底部导航，让消息流占满全屏
   const isMobile = bp === "mobile";
-  const hideMobileNav = isMobile && location.pathname.startsWith("/chat") && !!activeConvId;
+  const hideMobileNav =
+    isMobile &&
+    (location.pathname === "/search" || (location.pathname.startsWith("/chat") && !!activeConvId));
 
   /**
    * 桌面侧栏的一个导航项。
@@ -150,7 +188,6 @@ export function MainLayout({
         <ToastHost />
         <NetworkBanner />
         {callMode === "overlay" ? <CallHost /> : null}
-        <SearchModal show={showSearch} onClose={() => setShowSearch(false)} />
         {titleBar}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <Outlet />
@@ -208,7 +245,12 @@ export function MainLayout({
       <ToastHost />
       <NetworkBanner />
       {callMode === "overlay" ? <CallHost /> : null}
-      <SearchModal show={showSearch} onClose={() => setShowSearch(false)} />
+      <CommandPalette
+        show={showSearch}
+        conversationId={searchConversationId}
+        onClose={() => setShowSearch(false)}
+      />
+      {showDownload && <DownloadPanel onClose={() => setShowDownload(false)} />}
       {/* 左侧品牌色导航栏 — 渐变背景 */}
       <nav className="nav-gradient shadow-elevation-2 z-20 flex w-16 shrink-0 flex-col items-center gap-1 py-3 text-white">
         {/* 我的头像 + 在线状态 */}
@@ -223,6 +265,17 @@ export function MainLayout({
 
         {/* 设置沉底：与主题/登出同属「不常点但要随手够到」的一档 */}
         {renderNavItem(DESKTOP_SETTINGS_ITEM)}
+
+        {/* 下载客户端：仅 web（浏览器 / PWA），插在设置之下、主题切换之上 */}
+        {!isDesktopApp && (
+          <button
+            onClick={() => setShowDownload(true)}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white/70 transition-all duration-200 hover:bg-white/15 hover:text-white"
+            title={t("download.title")}
+          >
+            <Download size={20} />
+          </button>
+        )}
 
         {/* 主题切换 — M3 图标按钮 */}
         <button

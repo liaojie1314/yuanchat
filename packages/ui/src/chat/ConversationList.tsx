@@ -35,6 +35,7 @@ import { cn } from "@yuanchat/shared/utils";
 import { Avatar } from "../primitives/Avatar";
 import { GroupAvatar } from "../primitives/GroupAvatar";
 import { PullToRefresh } from "../primitives/PullToRefresh";
+import { requestSearch } from "../palette/searchWindowActions";
 import { useLongPress } from "../util/useLongPress";
 import type { UseLongPressResult } from "../util/useLongPress";
 
@@ -230,7 +231,15 @@ export function ConversationList({
       {!hideHeader && (
         <header className="flex h-14 shrink-0 items-center justify-between pr-2 pl-4">
           <h1 className="text-title-lg text-on-surface font-semibold">{t("chat.title")}</h1>
-          <div className="relative">
+          <div className="relative flex items-center">
+            <button
+              type="button"
+              className="md3-icon-btn text-on-surface-variant"
+              aria-label={t("common.search")}
+              onClick={() => requestSearch()}
+            >
+              <Search size={20} />
+            </button>
             <button
               className="md3-icon-btn text-on-surface-variant"
               aria-label={t("chat.newChat")}

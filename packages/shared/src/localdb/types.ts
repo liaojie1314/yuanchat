@@ -49,8 +49,10 @@ export interface OutboxRow {
   /** 客户端生成的幂等 id，即 keyPath；服务端据此去重 */
   clientMsgId: string;
   conversationId: string;
-  /** 原始 message.send 载荷，补发时原样重发（含 client_msg_id） */
+  /** 原始 message.send 载荷；null 表示附件尚未上传，不可自动补发。 */
   payload: unknown;
+  /** 可恢复的附件消息快照；保持 unknown，避免本地库反向依赖 store。 */
+  draft?: unknown;
   /** 入队时间（毫秒），对应 by_created 索引，补发按它串行 */
   createdAt: number;
   status: OutboxStatus;

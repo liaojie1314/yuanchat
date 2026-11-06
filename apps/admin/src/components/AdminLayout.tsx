@@ -9,6 +9,7 @@ import {
   ShieldAlert,
   Flag,
   Sticker,
+  PackageCheck,
   ScrollText,
   LogOut,
 } from "lucide-react";
@@ -23,6 +24,7 @@ const NAV = [
   { to: "/messages", icon: ShieldAlert, labelKey: "admin.nav.messages" },
   { to: "/moderation", icon: Flag, labelKey: "admin.nav.moderation" },
   { to: "/sticker-packs", icon: Sticker, labelKey: "admin.nav.stickerPacks" },
+  { to: "/releases", icon: PackageCheck, labelKey: "admin.nav.releases" },
   { to: "/audit-logs", icon: ScrollText, labelKey: "admin.nav.auditLogs" },
 ];
 

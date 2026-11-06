@@ -12,7 +12,8 @@
  *
  * - `primitives/` 无业务语义的原子组件：Button、Input、Avatar、GroupAvatar、Toast、
  *   ConfirmDialog、ResizeHandle、AppErrorBoundary
- * - `layout/` 页面框架与全局浮层：MainLayout（路由 Layout Route）、SearchModal
+ * - `layout/` 页面框架与全局浮层：MainLayout（路由 Layout Route）
+ * - `palette/` 命令面板：Cmd/Ctrl+K 的动作注册表 + 全局搜索（原 SearchModal 升维）
  * - `chat/` 会话与消息：会话列表、聊天窗口、消息气泡与各类消息体、输入区、
  *   表情面板、语音播放、图片/视频查看
  * - `call/` 音视频通话：通话窗口、邀请弹窗、发起/加入通话的动作层与时长格式化
@@ -45,6 +46,7 @@ export { ChatWindow } from "./chat/ChatWindow";
 export { MessageBubble, TypingIndicator } from "./chat/MessageBubble";
 export { MessageImage } from "./chat/MessageImage";
 export { MessageVideo } from "./chat/MessageVideo";
+export { FileProgressBar } from "./chat/FileProgressBar";
 export { StickerImage } from "./stickers/StickerImage";
 export { ImageLightbox } from "./chat/ImageLightbox";
 export { VideoPlaybackOverlay } from "./chat/VideoPlaybackOverlay";
@@ -115,15 +117,38 @@ export {
   ServerEndpointDialog,
   ServerSwitchLink,
 } from "./settings/ServerEndpointEditor";
+export { AndroidUpdateCard } from "./settings/AndroidUpdateCard";
+export { APP_VERSION } from "./settings/settingsUtils";
 
 // 布局组件
 export { MainLayout } from "./layout/MainLayout";
 export { TAB_ROOT_PATHS } from "./layout/navItems";
-export { SearchModal } from "./layout/SearchModal";
+
+// 命令面板
+export { CommandPalette } from "./palette/CommandPalette";
+export type { PaletteNavigateMeta } from "./palette/CommandPalette";
+export {
+  buildPaletteActions,
+  filterActions,
+  type PaletteAction,
+  type PaletteActionsOptions,
+  type PaletteContext,
+} from "./palette/paletteActions";
+// 独立搜索窗口（桌面 app）：承载组件 + 开窗承载器注册点（与 setCallLauncher 同一模式）
+export { SearchWindowHost } from "./palette/SearchWindowHost";
+export { SearchPage } from "./palette/SearchPage";
+export { launchSearchWindow, setSearchWindowLauncher } from "./palette/searchWindowActions";
+export type { SearchWindowLauncher } from "./palette/searchWindowActions";
+// 关窗二选一弹窗（桌面端托盘配套）
+export { CloseBehaviorDialog } from "./palette/CloseBehaviorDialog";
+
+// 下载面板（Web 端侧栏 / 手机设置项的客户端下载入口）
+export { DownloadPanel } from "./download/DownloadPanel";
+export { detectPlatform, type DetectedPlatform } from "./download/detectPlatform";
+
 export { E2EEIndicator } from "./e2ee/E2EEIndicator";
 export { SafetyNumberDialog } from "./e2ee/SafetyNumberDialog";
 export { E2EESection } from "./e2ee/E2EESection";
-export { InConversationSearch } from "./chat/InConversationSearch";
 
 // 认证组件
 export { ForgotPasswordScreen } from "./auth/ForgotPasswordScreen";

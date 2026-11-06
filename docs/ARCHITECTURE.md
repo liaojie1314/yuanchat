@@ -129,7 +129,7 @@
 
 ```
 功能：
-- 注册（手机号/邮箱 + 验证码）
+- 注册（邮箱 + 验证码）
 - 登录（密码 / 验证码 / 扫码）
 - JWT Token 签发与刷新
 - 用户资料 CRUD
@@ -416,6 +416,99 @@ minio              — :9000, :9001 (console)
 elasticsearch      — :9200
 web                — 前端静态资源 :3000
 ```
+
+---
+
+## 七、客户端架构与更新分发（实际实现）
+
+> 上面各节是立项时的目标微服务架构；本节记录**已落地**的客户端侧机制，
+> 与 `packages/shared`、`apps/desktop` 的当前实现对应。
+
+### 7.1 应用内文件下载（downloadStore + fileSink 注入层）
+
+- **downloadStore** 是下载状态的唯一真源：按 `message_id` 记录阶段（downloading /
+  saving / done / failed / canceled）与进度；有总字节数时显示确定性进度，无总量时用不确定态。
+  保存完成才进入 done，下载/保存期间可取消，失败可重试。
+  进度区须在 idle、传输、保存、失败、取消与完成全程预留固定空间；2026-11-05 实测发现
+  旧实现显隐会推移后续消息，不能把空态 `return null` 当作零 CLS。
+- **fileSink** 是「字节落到哪里」的注入抽象，三端各给一个实现，UI 层零平台分支：
+  - Web：优先写用户授权的目录，句柄由 `browserDirectory.ts` 存入独立的
+    `yuanchat-download-preferences` IDB；File System Access 与 Web Locks 仅在支持的安全
+    上下文启用。Web Locks 串行占名，写入并 close 成功后完成；失败/取消清理本次产物。
+    失权明确提示重新授权，不静默换保存位置；未设置目录时用 `<a download>`，这一回落
+    无法确认浏览器的最终落盘。两条路径均检查取消，包括等待 IDB 期间的取消；
+    完成后用保存的文件句柄提供「查看保存位置」，显示目录名与实际文件名，弹窗仅有关闭
+    按钮；浏览器无系统文件夹打开能力。文件句柄存在账号本地库的 meta 中，按服务器隔离；
+  - 桌面 / 安卓：Tauri plugin-fs 落盘，原生实现先于 React 挂载完成注入。桌面允许选择、
+    持久化及恢复默认下载目录，完成后打开所在文件夹；安卓落在 **app 私有 external
+    Download 目录**并打开文件——零存储权限、文件管理器不可见、卸载即删（隐私取舍）。
+    Android 仅在调用者 MIME 为 `*/*` 时经 `contentResolver.getType(uri)` 识别普通附件，
+    显式 MIME（包括 APK 安装类型）保持优先，FileProvider URI 只临时授予读取权限。
+    下载与 outbox 副本的原生文件读写每次 IPC 最多传 1 MiB，处理短写、提前 EOF 与读取时
+    文件增长，句柄最终关闭。这限制了原生桥接的单次复制放大；JS 仍持有完整下载/读回
+    缓冲，不能据此宣称总内存恒定。
+- **完成记录**：`downloadStore` 在账号本地库的 meta 中按服务器和消息保存历史候选，
+  每项包含实际落盘路径（或 Web 文件引用）与原始字节的 SHA-256。登录恢复和目录切换时
+  校验当前目录身份、文件存在及内容，点击完成操作时再次核验。切回旧目录可复用有效的
+  旧副本，包括同名避让后的文件；原路径改名/丢失或内容修改时回到下载入口，重新保存
+  继续同名避让，不扫描磁盘追踪重命名、不覆盖或删除用户改过的文件。登出只中止在途
+  下载并清内存；默认浏览器下载没有可核验路径，不写完成记录。
+- **原生目录边界**：`download-directory.json` 存在 Tauri app config 目录，记录当前
+  目录及原生选择器授权过的目录；恢复默认保留历史授权与文件。`open_local_file` 将目标
+  canonicalize 后只放行应用目录、默认下载目录及历史授权目录，不能由前端提交任意根路径。
+- **outbox 持久草稿**：原生持久化可用时，图片/文件/语音在上传前先落 appdata 字节副本，
+  再把去掉 `localUrl` 的消息快照及原 `uploadMimeType` 写入账号 IDB outbox。未上传记录
+  的 `payload=null`，自动补发必须跳过，不能发出缺少对象 key 的 WS 帧。冷启动恢复为
+  `failed` 气泡，用户重试时从磁盘重建带原 MIME 的 File/Blob；上传成功后才保存可补发
+  payload，并继续保留草稿供 ACK 清理。真实 ACK 后删除该 outbox 行及磁盘副本。
+  Web appdata 仍为 no-op；旧无草稿的媒体行沿用原 payload 补发路径，不伪装成空文本。
+
+### 7.2 OTA 更新分发链路（自建）
+
+```
+管理端 Releases 页（五端点：list/create/patch/publish/rollback，写操作留审计）
+        │ 登记 draft → publish（rollout 0-100 灰度）
+        ▼
+app_releases 表（UNIQUE(platform, arch, version, channel)，status: draft→published→rolled_back）
+        │ 灰度判定：device 哈希桶 → 匿名 cohort 桶 → ClientIP 哈希桶，bucket < rollout
+        ▼
+GET /updates/:platform/:arch —— 200 扁平 dynamic 格式（预签名 URL，TTL 6h）/ 204 无更新
+        │
+        ├── 桌面 Tauri updater：endpoints 自有域名（api.yuanyuan.blog）在前，
+        │   GitHub latest.json 兜底在后；5xx 才落兜底（204 会被当作「确定没有」而停试）
+        └── Android 自建链路：查端点 → 应用内自绘更新说明卡 → 下载进度条复用 7.1 的
+            downloadStore → sha256 校验不过即删文件拒装 → install_apk 走
+            FileProvider content:// 拉系统安装器（清单声明 REQUEST_INSTALL_PACKAGES）
+```
+
+回滚 = 状态翻 `rolled_back`，对外端点即刻止发（204）；已下载到本地的包不受影响。
+客户端只传 `X-YuanChat-Update-Cohort: 0..99`，服务端仍兼容显式 `device`；桶只作灰度，
+不作鉴权。版本按 SemVer 比较，拒绝非法登记；macOS 精确架构缺包时才回落 universal。
+GC 保留全部已登记的 `app_releases.object_key`，包括草稿和回滚包。
+
+### 7.3 桌面端系统集成与命令面板
+
+- **托盘**：托盘图标 + 右键菜单（未读数 / 打开 / 退出）+ 左键直达第一个未读会话。
+- **未读角标**：macOS / Linux 走 `setBadgeCount`；Windows `setOverlayIcon` 静态红点
+  （Windows 没有数字角标 API，overlay 是唯一手段）。整轮同步按代次拒绝图标/菜单异步
+  查询后的旧值写回，避免未读已清零但 tooltip、菜单或 overlay 又被旧轮覆盖。
+- **关窗二选一**：点关闭按钮弹「最小化到托盘 / 退出」选择框，可记住选择；
+  之后在设置页可改（三选：每次询问 / 最小化 / 退出）。
+- **命令面板**（`CommandPalette`，默认 Ctrl/Cmd+K，替代已删除的 SearchModal）：
+  空输入 = 动作注册表 + 最近会话；有输入 = 联系人 / 群聊 / 消息 / 文件与媒体四分组
+  搜索 + 类型筛选，媒体结果带 40×40 缩略图（骨架占位防 CLS）。
+  Tauri 桌面全局面板在主窗口内弹出，仅会话内搜索使用独立 `search` 窗口（880×620）；
+  手机使用 `/search` 路由页，Web 大屏使用居中面板（720×560）。会话内只查询带
+  `conversation_id` 的消息/文件，
+  不显示全局动作与联系人；返回复原来源页，选择结果导航并定位消息。
+- **跨窗边界**：搜索窗自行拉取会话/联系人，不另建 WS；`search:ready` / `search:scope`
+  同步最新会话范围与 `skinId`，已有子窗跟随主窗主题；`search:navigate` 交主窗执行导航。
+  子窗宿主使用 `app-screen` 铺满背景。开窗串行去重，登出或换号
+  作废排队请求并关闭旧窗，导航载荷的账号须与主窗当前账号一致。
+- **通用设置**：主题、语言、`DownloadDirectorySection`、`ShortcutSection` 与桌面关窗
+  行为集中一页；`ShortcutSection` 仅在 `!isMobile` 的桌面/平板布局渲染，手机布局隐藏。
+  目录卡显示名称和授权状态；搜索组合存 `shortcutStore`，校验保留键，
+  忽略 IME 组合输入与长按重复事件，结果列表 Enter 选字不触发导航。
 
 ---
 

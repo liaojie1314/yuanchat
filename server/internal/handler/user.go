@@ -282,7 +282,7 @@ func (h *UserHandler) GetPublicProfile(c *gin.Context) {
 //
 // 只收邮箱：Email 必填且必须通过 Code 验证 —— 验证码是发到邮箱里的，
 // 没有邮箱就无从验证归属；手机号拿不到码，所以注册链路不收它。
-// 老账号库里仍有 phone 列与按手机号登录，那是登录的事，与注册无关。
+// 注册与登录都只认邮箱，手机号已于迁移 021 移除。
 type RegisterRequest struct {
 	Email    string `json:"email" binding:"required,email"`
 	Code     string `json:"code" binding:"required,len=6"`

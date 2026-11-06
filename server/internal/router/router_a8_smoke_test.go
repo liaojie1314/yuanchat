@@ -147,13 +147,13 @@ func TestA8AuthEndpointsSmoke(t *testing.T) {
 		wantMessage string
 	}{
 		{
-			name: "发码缺手机号是 400", method: http.MethodPost,
+			name: "发码缺账号是 400", method: http.MethodPost,
 			target: "/api/v1/auth/password/otp", body: `{}`,
 			wantStatus: http.StatusBadRequest, wantCode: 400, wantMessage: "auth.otpRequired",
 		},
 		{
 			name: "校验码缺字段是 400", method: http.MethodPost,
-			target: "/api/v1/auth/password/verify", body: `{"phone":"13800138000"}`,
+			target: "/api/v1/auth/password/verify", body: `{"account":"someone@example.com"}`,
 			wantStatus: http.StatusBadRequest, wantCode: 400, wantMessage: "auth.otpRequired",
 		},
 		{
@@ -286,5 +286,64 @@ func TestA8QRSessionAndPollSmoke(t *testing.T) {
 	}
 	if got := decode(t, w); got.Message != "auth.qrFailed" {
 		t.Fatalf("message = %q, want auth.qrFailed", got.Message)
+	}
+}
+
+// TestUpdateEndpointsRegistered 两个对外更新端点必须免鉴权可达。
+//
+// 路由注册本身就是本条链路最容易漏的一环：Gin 在同一层同时注册静态段与通配段
+// 会直接 panic，而这个 panic 只在 Setup 真跑一遍时才暴露。
+// 测试环境 st 为 nil，故期望的是 503 降级（不是 404 —— 404 说明路由没挂上）。
+func TestUpdateEndpointsRegistered(t *testing.T) {
+	db := authTestDB(t)
+	cfg := authTestConfig()
+	r, _ := Setup(db, nil, nil, cfg, zap.NewNop(), &recordingSender{})
+
+	for _, target := range []string{
+		"/api/v1/updates/catalog",
+		"/api/v1/updates/linux/x86_64?version=0.7.0&device=d1",
+	} {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code == http.StatusNotFound {
+			t.Errorf("%s 返回 404，路由没挂上", target)
+		}
+		if w.Code == http.StatusUnauthorized {
+			t.Errorf("%s 返回 401，更新检查必须免鉴权 —— 登不进去的版本最需要收到更新", target)
+		}
+	}
+}
+
+// TestAdminReleaseEndpointsRequireAuth 版本分发五端点必须挂在 admin 组之下。
+//
+// 版本分发能把任意字节推给全部客户端，它的权限面比封号还大 ——
+// 漏挂鉴权等于把它开放给任何人。这里只验「无令牌必须 401」：
+// role=admin 的二次校验由 RequireAdmin 中间件统一兜住，与其余 admin 端点同一条路。
+func TestAdminReleaseEndpointsRequireAuth(t *testing.T) {
+	db := authTestDB(t)
+	cfg := authTestConfig()
+	r, _ := Setup(db, nil, nil, cfg, zap.NewNop(), &recordingSender{})
+
+	id := "11111111-1111-4111-8111-111111111111"
+	cases := []struct{ method, target string }{
+		{http.MethodGet, "/api/v1/admin/releases"},
+		{http.MethodPost, "/api/v1/admin/releases"},
+		{http.MethodPatch, "/api/v1/admin/releases/" + id},
+		{http.MethodPost, "/api/v1/admin/releases/" + id + "/publish"},
+		{http.MethodPost, "/api/v1/admin/releases/" + id + "/rollback"},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(tc.method, tc.target, strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code == http.StatusNotFound {
+			t.Errorf("%s %s 返回 404，路由没挂上", tc.method, tc.target)
+			continue
+		}
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s status = %d，want 401（无令牌必须被挡）", tc.method, tc.target, w.Code)
+		}
 	}
 }

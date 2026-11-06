@@ -8,9 +8,11 @@ import { usePresenceStore } from "./presenceStore";
 import { resetIceServersCache } from "../webrtc/iceServers";
 import { ringtone } from "../webrtc/ringtone";
 import { purgeLocalStore } from "../localdb";
+import { resetDownloads } from "../download/downloadStore";
 
 /** 登出/切换账号时调用：revoke 全部本地图片 blob 后清空聊天相关 store，防内存泄漏与跨账号数据残留 */
 export function resetChatStores(): void {
+  resetDownloads();
   revokeAllLocalPreviews();
   useMessageStore.setState({
     messagesByConv: {},

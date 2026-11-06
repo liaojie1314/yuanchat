@@ -18,6 +18,7 @@ import {
   useAuthStore,
   ensureFreshToken,
   forceRefresh,
+  apiPatch,
 } from "@yuanchat/shared";
 
 /**
@@ -71,9 +72,13 @@ function adminDelete<T>(path: string): Promise<T> {
   return guard(apiDelete<T>(path));
 }
 
+/** 写操作出口：shared apiPatch + 401 处置。 */
+function adminPatch<T>(path: string, body: unknown): Promise<T> {
+  return guard(apiPatch<T>(path, body));
+}
+
 export interface AdminUser {
   id: string;
-  phone?: string;
   email?: string;
   short_id: number;
   nickname: string;
@@ -444,4 +449,80 @@ export interface StatsTimeseriesResult {
 /** 拉取运营概览时间序列（7–90 天，空日后端已补零） */
 export function getTimeseries(days = 30) {
   return pagedGetSingle<StatsTimeseriesResult>(`/api/v1/admin/stats/timeseries${qs({ days })}`);
+}
+
+// ========================================
+// OTA 版本分发
+// ========================================
+
+/** 一条版本记录（对应后端 model.AppRelease）。 */
+export interface AdminRelease {
+  id: string;
+  platform: string;
+  arch: string;
+  version: string;
+  channel: string;
+  notes: string;
+  object_key: string;
+  signature: string;
+  sha256: string;
+  size: number;
+  min_version?: string;
+  mandatory: boolean;
+  /** 灰度比例 0-100。0 是「暂停下发」，100 是全量 */
+  rollout: number;
+  /** draft / published / rolled_back */
+  status: string;
+  published_at?: string;
+  created_at: string;
+}
+
+/** 登记新版本的入参。 */
+export interface CreateReleaseBody {
+  platform: string;
+  arch: string;
+  version: string;
+  channel?: string;
+  notes?: string;
+  object_key: string;
+  /** minisign .sig 文本内容（release 流水线产物）。服务端不接收签名私钥 */
+  signature?: string;
+  /** 安装包 sha256（安卓自装前校验用），64 位小写十六进制 */
+  sha256?: string;
+  size?: number;
+  min_version?: string;
+  mandatory?: boolean;
+  rollout?: number;
+}
+
+/** 分页列出版本记录（可按平台/渠道/状态筛选）。 */
+export function listReleases(
+  filters: { platform?: string; channel?: string; status?: string },
+  page: number,
+  size = 20,
+) {
+  return pagedGet<AdminRelease>(`/api/v1/admin/releases${qs({ ...filters, page, size })}`);
+}
+
+/** 登记一条新版本（draft 态，需再点「发布」才会下发）。 */
+export function createRelease(body: CreateReleaseBody) {
+  return adminPost<AdminRelease>("/api/v1/admin/releases", body);
+}
+
+/** 改灰度 / 强制更新 / 更新说明（平台、架构、版本号、对象键是身份，不可改）。 */
+export function updateRelease(
+  id: string,
+  patch: { rollout?: number; mandatory?: boolean; notes?: string },
+) {
+  return adminPatch<{ updated: boolean }>(`/api/v1/admin/releases/${id}`, patch);
+}
+
+/** 发布：对外更新端点随即开始下发该版本。 */
+export function publishRelease(id: string) {
+  return adminPost<{ status: string }>(`/api/v1/admin/releases/${id}/publish`, {});
+}
+
+/** 回滚：对外更新端点立刻停止下发该版本（坏版本唯一的收敛手段）。 */
+export function rollbackRelease(id: string) {
+  return adminPost<{ status: string }>(`/api/v1/admin/releases/${id}/rollback`, {});
 }

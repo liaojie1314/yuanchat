@@ -65,8 +65,11 @@ func NewContactService(
 	return &ContactService{repo: repo, userRepo: userRepo, logger: logger}
 }
 
-// Search 精确匹配查找用户：11 位纯数字按手机号，其余纯数字按元聊号（short_id），
-// 含 @ 按邮箱；其他形式一律视为未命中（不做模糊搜索，防用户枚举）。
+// Search 精确匹配查找用户：含 @ 按邮箱，纯数字按元聊号（short_id）；
+// 其他形式一律视为未命中（不做模糊搜索，防用户枚举）。
+//
+// 手机号已于迁移 021 移除，11 位纯数字不再被单独截走 —— 先前那一支
+// 会让一个 11 位的元聊号压根搜不到。
 func (s *ContactService) Search(ctx context.Context, selfID uuid.UUID, q string) (*SearchResult, error) {
 	q = strings.TrimSpace(q)
 
@@ -77,8 +80,6 @@ func (s *ContactService) Search(ctx context.Context, selfID uuid.UUID, q string)
 		return nil, ErrUserNotFound
 	case strings.Contains(q, "@"):
 		user, err = s.userRepo.FindByEmail(ctx, q)
-	case digitRe.MatchString(q) && len(q) == 11:
-		user, err = s.userRepo.FindByPhone(ctx, q)
 	case digitRe.MatchString(q):
 		sid, perr := strconv.ParseInt(q, 10, 64)
 		if perr != nil {

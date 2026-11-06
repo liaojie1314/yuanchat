@@ -4,5 +4,21 @@
   "description": "Desktop-only capabilities (updater/process are not compiled on mobile)",
   "platforms": ["macOS", "windows", "linux"],
   "windows": ["main"],
-  "permissions": ["updater:default", "process:default"]
+  "permissions": [
+    "updater:default",
+    "process:default",
+    "fs:allow-download-write-recursive",
+    "fs:allow-download-read-recursive",
+    "fs:allow-download-meta-recursive",
+    "fs:scope-download-recursive",
+    "fs:allow-applocaldata-write-recursive",
+    "core:tray:default",
+    "core:menu:default",
+    "core:window:allow-set-badge-count",
+    "core:window:allow-set-overlay-icon",
+    "core:window:allow-unminimize",
+    "core:image:allow-from-path",
+    "core:app:allow-default-window-icon",
+    "os:default"
+  ]
 }
