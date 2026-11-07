@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -95,6 +96,56 @@ func TestGCKeepsReferencedAndFreshObjects(t *testing.T) {
 	}
 	if stats.unreferencedBytes != 20 {
 		t.Fatalf("unreferencedBytes = %d, want 20", stats.unreferencedBytes)
+	}
+}
+
+// TestGCKeepsReleaseDistributionObjects 分发附件不依赖聊天引用，超过宽限期也不能被 GC 删除或列为孤儿。
+func TestGCKeepsReleaseDistributionObjects(t *testing.T) {
+	for _, tc := range []struct {
+		name, prefix string
+		doDelete     bool
+		wantOrphans  int
+		wantBytes    int64
+	}{
+		{"dry-run", "", false, 2, 96},
+		{"delete", "", true, 2, 96},
+		{"explicit release prefix", "releases/", true, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := &fakeStore{}
+			for _, key := range []string{
+				"releases/latest.json",
+				"releases/0.7.1/latest.json",
+				"releases/0.7.1/YuanChat.AppImage",
+				"releases/0.7.1/YuanChat.AppImage.sig",
+				"releases/0.7.1/YuanChat.dmg",
+				"releases/0.7.1/web.tar.gz",
+			} {
+				st.objects = append(st.objects, storage.ObjectInfo{Key: key, Size: 1024, LastModified: old})
+			}
+			const orphan = "files/2026/10/orphan.zip"
+			const similarPrefix = "releases-old/orphan.bin"
+			st.objects = append(st.objects,
+				storage.ObjectInfo{Key: orphan, Size: 32, LastModified: old},
+				storage.ObjectInfo{Key: similarPrefix, Size: 64, LastModified: old})
+			opts := baseOpts(tc.doDelete)
+			opts.prefix = tc.prefix
+			opts.batchSize = 2
+			stats, err := run(context.Background(), st, &fakeRefs{}, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stats.unreferenced != tc.wantOrphans || stats.unreferencedBytes != tc.wantBytes {
+				t.Fatalf("分发附件不能计入孤儿清单：stats=%+v", stats)
+			}
+			if tc.doDelete && tc.wantOrphans == 2 {
+				if len(st.removed) != 2 || !slices.Contains(st.removed, orphan) || !slices.Contains(st.removed, similarPrefix) {
+					t.Fatalf("只应清理真正无引用的普通对象：removed=%v", st.removed)
+				}
+			} else if len(st.removed) != 0 {
+				t.Fatalf("不得删除分发附件或在 dry-run 中删除：removed=%v", st.removed)
+			}
+		})
 	}
 }
 
