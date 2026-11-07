@@ -178,6 +178,7 @@
   "auth.otpSentHint": "Code sent to %{target}, valid for 5 minutes",
   "auth.resetStepAccountHint": "Enter the email you signed up with, the code goes there",
   "auth.accountRequired": "Enter your account",
+  "auth.passwordRequired": "Enter your password",
   "validation.passwordMinLength": "Password must be at least 8 characters",
   "validation.passwordMaxLength": "Password must be at most 64 bytes",
   "validation.passwordUppercase": "Password must include an uppercase letter",

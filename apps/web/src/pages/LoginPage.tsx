@@ -3,9 +3,9 @@ import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { BrandMark, Button, Input, ServerSwitchLink } from "@yuanchat/ui";
 import { useAuthStore } from "@yuanchat/shared";
-import { validatePassword } from "@yuanchat/shared/utils";
 import { QrCode } from "lucide-react";
 
+/** 密码登录页：仅校验凭据非空，已有密码由服务端鉴权。 */
 export function LoginPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -41,9 +41,9 @@ export function LoginPage() {
       setYuanchatIdError(t("auth.accountRequired"));
       valid = false;
     }
-    const pwResult = validatePassword(password);
-    if (!pwResult.valid) {
-      setPasswordError(t(pwResult.errors[0]));
+    // 登录验证已有凭据，不能用新密码的强度规则拦截旧密码。
+    if (!password) {
+      setPasswordError(t("auth.passwordRequired"));
       valid = false;
     }
     if (!valid) return;
