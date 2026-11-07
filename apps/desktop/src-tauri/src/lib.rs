@@ -96,7 +96,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_log::Builder::default().build());
 
-    // 自动更新仅桌面端可用（移动端由应用商店分发）
+    // updater 插件仅桌面端可用，Android 使用自建 APK 更新链路。
     #[cfg(desktop)]
     let builder = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -108,7 +108,9 @@ pub fn run() {
 
     // 安卓的本地文件打开走 gen/android 手写的 LocalFilePlugin（见 local_file 模块注释）
     #[cfg(target_os = "android")]
-    let builder = builder.plugin(local_file::init());
+    let builder = builder
+        .plugin(local_file::init())
+        .plugin(tauri_plugin_http::init());
 
     // Linux 的通话媒体面走进程内 GStreamer（WebKitGTK 没有 RTCPeerConnection），
     // 其余平台的 WebView 自带 WebRTC，不注册这组命令。

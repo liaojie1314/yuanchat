@@ -38,6 +38,7 @@ export function UpdateChecker() {
     try {
       const found = await check({
         headers: { "X-YuanChat-Update-Cohort": String(deviceCohort()) },
+        timeout: 10_000,
       });
       if (found) {
         setUpdate(found);
