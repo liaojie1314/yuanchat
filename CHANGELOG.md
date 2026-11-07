@@ -1,5 +1,15 @@
 # 更新日志
 
+## [0.7.1](https://github.com/liaojie1314/yuanchat/compare/v0.7.0...v0.7.1) (2026-11-07)
+
+### Bug Fixes
+
+- **auth:** allow existing passwords in login forms ([333dcf0](https://github.com/liaojie1314/yuanchat/commit/333dcf0d1cbb59ee4d7c52fca975178674e1fc3b))
+- **gc:** preserve managed release distribution artifacts ([aa62552](https://github.com/liaojie1314/yuanchat/commit/aa62552a0853ae7b2f55a39243778f0a3cd9587c))
+- **ota:** match desktop updates to installer formats ([3596057](https://github.com/liaojie1314/yuanchat/commit/35960572bce570b3a6be2da5fa97bb9f6ddb2e56))
+- **release:** distribute universal Android updates ([abdf107](https://github.com/liaojie1314/yuanchat/commit/abdf10790b2d400d29975dc8e78f19042983e4fe))
+- **updates:** retry primary source before GitHub fallback ([8a941c6](https://github.com/liaojie1314/yuanchat/commit/8a941c685e359de996dff13300979527667dc935))
+
 # [0.7.0](https://github.com/liaojie1314/yuanchat/compare/v0.6.0...v0.7.0) (2026-11-07)
 
 ### Bug Fixes
