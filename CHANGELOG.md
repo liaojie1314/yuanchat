@@ -1,5 +1,47 @@
 # 更新日志
 
+# [0.7.0](https://github.com/liaojie1314/yuanchat/compare/v0.6.0...v0.7.0) (2026-11-07)
+
+### Bug Fixes
+
+- **android:** infer attachment MIME for native file opening ([95f0b95](https://github.com/liaojie1314/yuanchat/commit/95f0b952b513779d7d3e0ea6292e1297ce85c87b))
+- **android:** 同步键盘动画避免内容区提前留白 ([7d8e72c](https://github.com/liaojie1314/yuanchat/commit/7d8e72c63862b6c4f5009329120bf6c61315a2d7))
+- **chat:** 发送前把文件字节落应用私有目录，重试不再死在失效的 blob 上 ([af6f04c](https://github.com/liaojie1314/yuanchat/commit/af6f04c4201379be3948628d9c94884d5142bcbc))
+- **client:** 完善跨端搜索下载与更新交互 ([a21c63d](https://github.com/liaojie1314/yuanchat/commit/a21c63de65a097a0e5ae28c51130c4007cdbef58))
+- **deploy:** 分离证书联系邮箱与管理员账号 ([7afdb27](https://github.com/liaojie1314/yuanchat/commit/7afdb2758b051c91ede58a1ff8140c92dea9efaa))
+- **desktop:** 托盘不再随路由切换重装，官网指向 chat.yuanyuan.blog ([3869610](https://github.com/liaojie1314/yuanchat/commit/38696109529bfafd65e2e27d66b92f95e0d4feaf))
+- **desktop:** 托盘创建移除串行化，StrictMode 双跑不再丢左键激活 ([fbe0653](https://github.com/liaojie1314/yuanchat/commit/fbe065337bde1e5e8292c24d2069b1609d1fbcb6))
+- **desktop:** 托盘唤回逐步兜错，隐藏态窗口不再唤不回 ([a6596a5](https://github.com/liaojie1314/yuanchat/commit/a6596a5759e0e5f9cfa589cecf6865dec0e2ae79))
+- **desktop:** 托盘唤起窗口时短暂置顶再取消，绕过 GNOME 焦点防抢占 ([00ce99e](https://github.com/liaojie1314/yuanchat/commit/00ce99e4b8387e541a7c534b9944ba8959d2e7d7))
+- **desktop:** 托盘改唯一实例 id，卸载乱序不再删掉新装的托盘 ([2205bec](https://github.com/liaojie1314/yuanchat/commit/2205bec3488af20239aa18fb9c48f877878018c4))
+- **desktop:** 托盘直达未读先 setActive 再导航，会话视图随 store 走 ([e3fab67](https://github.com/liaojie1314/yuanchat/commit/e3fab67e2703136ffca25e6e2eb5d471e02eeb06))
+- **download:** bound native file transfers to prevent Android OOM ([97ab133](https://github.com/liaojie1314/yuanchat/commit/97ab133f4d5e4f7c595120e267550b1e586eb236))
+- **outbox:** restore failed attachment drafts across native restarts ([e0181c7](https://github.com/liaojie1314/yuanchat/commit/e0181c79a7a10af969fec9dcf1522060427fc8e9))
+- **palette:** 安卓返回键优先关面板，不再直接退出应用 ([1aae033](https://github.com/liaojie1314/yuanchat/commit/1aae03393a4f3fe75c8afaee5e197a6dd9ef58c3))
+- **server:** 修正搜索可见范围与更新分发校验 ([b555894](https://github.com/liaojie1314/yuanchat/commit/b55589492764af0767220850b812613086067183))
+- **tray:** clear unread state when opening a conversation ([03cd4cb](https://github.com/liaojie1314/yuanchat/commit/03cd4cb1c6391ba2f26496f8d4c779b57eb29cc5))
+- **viewport:** 同步键盘尺寸避免页面高度滞后一帧 ([dba9be6](https://github.com/liaojie1314/yuanchat/commit/dba9be67d48f8188266bc9b39b2096eb5672e3d0))
+
+### Features
+
+- **chat:** 文件下载改为应用内完成并在气泡下方显示确定性进度条 ([f0d1328](https://github.com/liaojie1314/yuanchat/commit/f0d1328aa6ff2cbde59d3a14de20dc0f5f48ae28))
+- **desktop:** 关闭按钮弹窗二选一（最小化到托盘 / 退出），可记住选择 ([686c647](https://github.com/liaojie1314/yuanchat/commit/686c647e7ded5b72fa1d6311c20809f8e9050cd4))
+- **desktop:** 新增 Windows 任务栏叠加角标红点图标（16/32px） ([200ed6c](https://github.com/liaojie1314/yuanchat/commit/200ed6c61ac6e213e4a9903d24a3264fd3f348be))
+- **desktop:** 系统托盘与未读角标，左键直达第一个未读会话 ([aec838d](https://github.com/liaojie1314/yuanchat/commit/aec838d8577cc08816c76907c03d56be174a86af))
+- **download:** 新增下载进度 store，读 Response.body 流累计确定性进度 ([31b878f](https://github.com/liaojie1314/yuanchat/commit/31b878f7a6b35d402891edca6b175d8d33e8b546))
+- **download:** 新增文件落盘抽象与 Web 实现 ([50949ae](https://github.com/liaojie1314/yuanchat/commit/50949aea60c738f8f4c550a77be7c4a8eb622a41))
+- **download:** 桌面与安卓的 fileSink 落盘实现，新增 open_local_file 命令 ([c88d493](https://github.com/liaojie1314/yuanchat/commit/c88d493643e325c46a3ac06b6056b83553adab48))
+- **ota:** app_releases 表与灰度判定，渠道/最低版本/回滚状态就位 ([90e1fcf](https://github.com/liaojie1314/yuanchat/commit/90e1fcfc120652e31302c06cf89f94504ddee360))
+- **ota:** 对外更新端点，无更新返 204、灰度按设备稳定 ([cd218de](https://github.com/liaojie1314/yuanchat/commit/cd218de87a8cac6056033d4465889a7bf0271b52))
+- **ota:** 桌面 endpoint 指向自有域名，新增 Android 自动更新 ([a4d192c](https://github.com/liaojie1314/yuanchat/commit/a4d192c2972ffcf66a623cab671fb65db89e4c15))
+- **ota:** 管理端版本分发，登记与发布分两步、回滚即刻止发 ([e3d9fb2](https://github.com/liaojie1314/yuanchat/commit/e3d9fb2927c7078ac0d47146e8906e9f9a26f095))
+- **palette:** SearchModal 升维为命令面板，空输入走动作注册表、有输入走分组搜索 ([1c6725f](https://github.com/liaojie1314/yuanchat/commit/1c6725f72298383fb1fbb3a72f70a461cc91607e))
+- **palette:** 命令面板接入三端布局，E2E 钉住分组/筛选/键盘与桌面宽度 ([478b8d7](https://github.com/liaojie1314/yuanchat/commit/478b8d732c040de08f670675c117b4a1bcc02e5e))
+- **palette:** 桌面聊天搜索改独立原生窗口承载 ([104542f](https://github.com/liaojie1314/yuanchat/commit/104542f023787f2d16f4767f5700669bd848f28c))
+- **search:** 搜索端点接类型筛选，响应带消息类型与文件名 ([dddf29c](https://github.com/liaojie1314/yuanchat/commit/dddf29c3a649446b5555924a4d895fb368926756))
+- **search:** 检索范围扩到文件名并加类型过滤，LIKE 通配符按字面量匹配 ([10826ff](https://github.com/liaojie1314/yuanchat/commit/10826ff173f8089b0b211fee70715029897c8ff4))
+- **web:** 侧栏加客户端下载入口，按当前系统高亮推荐包 ([49cde68](https://github.com/liaojie1314/yuanchat/commit/49cde68a7c9075f20ca1c43a1f0eaed47f776a35))
+
 # [0.6.0](https://github.com/liaojie1314/yuanchat/compare/v0.5.0...v0.6.0) (2026-10-11)
 
 ### Bug Fixes
