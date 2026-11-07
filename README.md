@@ -2,7 +2,7 @@
 
 即时通讯软件 — 从零构建的现代 IM 解决方案。
 
-**当前代码版本**：v0.6.0（Web + Desktop 三平台 + Android APK 由 GitHub Actions 自动打包）。
+**当前代码版本**：v0.7.0（Web + Desktop 三平台 + Android APK 由 GitHub Actions 自动打包）。
 
 功能清单见 [MASTER_PLAN](docs/MASTER_PLAN.md#五核心功能清单)，验证记录见[实施计划](docs/superpowers/plans/2026-10-11-tray-palette-ota.md#执行进度)。
 
