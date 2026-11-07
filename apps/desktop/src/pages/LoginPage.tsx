@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { BrandMark, Button, Input, ServerSwitchLink } from "@yuanchat/ui";
 import { useAuthStore, useIsDesktop } from "@yuanchat/shared";
-import { validatePassword } from "@yuanchat/shared/utils";
 import { useOpenAuthWindow } from "../hooks/useTauriAuth";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { TitleBar } from "../components/TitleBar";
@@ -61,10 +60,9 @@ export function LoginPage() {
       setYuanchatIdError(t("auth.accountRequired"));
       valid = false;
     }
-    const pwResult = validatePassword(password);
-    if (!pwResult.valid) {
-      // 校验工具返回 i18n key，落地文案在这里翻译
-      setPasswordError(t(pwResult.errors[0]));
+    // 登录验证已有凭据，不能用新密码的强度规则拦截旧密码。
+    if (!password) {
+      setPasswordError(t("auth.passwordRequired"));
       valid = false;
     }
     if (!valid) return;

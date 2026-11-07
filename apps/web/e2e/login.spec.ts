@@ -36,19 +36,25 @@ test.describe("Login Flow", () => {
   test("shows error for empty password", async ({ page }) => {
     await loginPage.yuanchatIdInput.fill("testuser");
     await loginPage.loginButton.click();
-    await expect(page.getByText("密码长度至少 8 位")).toBeVisible();
+    await expect(page.getByText("请输入密码")).toBeVisible();
   });
 
-  test("shows error for weak password (contains whitespace)", async ({ page }) => {
-    await loginPage.yuanchatIdInput.fill("testuser");
-    await loginPage.passwordInput.fill("Abcdef 12");
-    await loginPage.loginButton.click();
-    await expect(page.getByText("密码不能包含空白字符")).toBeVisible();
+  test("existing password with whitespace reaches authentication unchanged", async ({ page }) => {
+    const submitted = page.waitForRequest(
+      (request) => request.url().endsWith("/api/v1/auth/login") && request.method() === "POST",
+    );
+    await loginPage.login("testuser", " legacy password ");
+    expect((await submitted).postDataJSON().password).toBe(" legacy password ");
+    await page.waitForURL("**/chat");
+  });
+
+  test("existing long password without digits can log in", async ({ page }) => {
+    await loginPage.login("testuser", "LegacyPasswordABCxyz");
+    await page.waitForURL("**/chat");
   });
 
   test("shows error for wrong credentials", async ({ page }) => {
-    // 使用满足客户端校验的密码（8-64 字节、含大小写与数字、无空白），
-    // 但 MSW mock 将此密码视为错误凭据
+    // 登录凭据由服务端校验，MSW 将此密码视为错误凭据。
     await loginPage.login("testuser", "Wrong@1234");
     await expect(page.getByText("账号或密码错误")).toBeVisible();
   });

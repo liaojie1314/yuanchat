@@ -23,12 +23,17 @@ it("多次检查均传递相同 FNV 灰度桶，不传唯一设备 ID", async ()
   );
   fireEvent.click(screen.getByRole("button", { name: i18n.t("update.check") }));
   await waitFor(() =>
-    expect(check).toHaveBeenCalledWith({ headers: { "X-YuanChat-Update-Cohort": "23" } }),
+    expect(check).toHaveBeenCalledWith({
+      headers: { "X-YuanChat-Update-Cohort": "23" },
+      timeout: 10_000,
+    }),
   );
   await screen.findByText(i18n.t("update.upToDate"));
   fireEvent.click(screen.getByRole("button", { name: i18n.t("update.check") }));
   await waitFor(() => expect(check).toHaveBeenCalledTimes(2));
-  expect(check.mock.calls[1]).toEqual([{ headers: { "X-YuanChat-Update-Cohort": "23" } }]);
+  expect(check.mock.calls[1]).toEqual([
+    { headers: { "X-YuanChat-Update-Cohort": "23" }, timeout: 10_000 },
+  ]);
 });
 
 it("插件检查失败展示翻译，不展示原始异常", async () => {

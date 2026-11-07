@@ -190,20 +190,30 @@ relay candidate，跨 NAT 的通话就卡在「连接中」。留空时 `install
 
 ### 升级到新版本
 
+先备份配置、数据库与对象存储。以下在服务器构建，也可加载本地从同一 tag 构建并验证的
+Docker 镜像，省去服务器构建步骤。OTA 安装包镜像、精确安装格式登记与旧 Docker 镜像
+清理见 [发版指南](../RELEASE.md#自建-ota-更新源)。
+
 ```bash
 cd /path/to/yuanchat
-git fetch --tags && git checkout v0.6.0        # 换成目标 tag
-sed -i 's/^APP_VERSION=.*/APP_VERSION=0.6.0/' deploy/.env
+git fetch --tags && git checkout vX.Y.Z        # 换成目标 tag
+sed -i 's/^APP_VERSION=.*/APP_VERSION=X.Y.Z/' deploy/.env
 
 cd deploy
 docker compose -f docker-compose.prod.yml build \
   --build-arg GOPROXY=https://goproxy.cn,direct yuanchat-server
 docker compose -f docker-compose.prod.yml build yuanchat-web yuanchat-admin
-docker compose -f docker-compose.prod.yml up -d
+# 旧后端不能与删除字段等不兼容迁移同时运行。
+docker compose -f docker-compose.prod.yml stop yuanchat-server
+docker compose -f docker-compose.prod.yml run --rm --no-deps migrate
+docker compose -f docker-compose.prod.yml up -d --no-deps yuanchat-server yuanchat-web yuanchat-admin
+docker compose -f docker-compose.prod.yml exec nginx nginx -t
+docker compose -f docker-compose.prod.yml exec nginx nginx -s reload
 ```
 
 `APP_VERSION` 一定要跟着改：镜像 tag 用的就是它，不改就会拿旧镜像起新代码的容器。
 前端镜像在 build 时把版本号烤进产物，所以**先 checkout 再 build**，顺序反了产物里是旧版本号。
+迁移成功后才能重建应用；检查健康状态、登录、WebSocket 与 OTA 安装后，再删除旧应用镜像。
 
 > ⚠️ **升级到含迁移 021 的版本必须先改 `.env` 的管理员变量**：`ADMIN_PHONE` 已废弃，
 > 换成 `ADMIN_EMAIL` 且**填同一个管理员注册时用的邮箱**。不改的话 `bootstrap-admin`

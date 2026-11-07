@@ -28,6 +28,8 @@ type ResolveResult struct {
 	Release *model.AppRelease
 	// Mandatory 是否强制更新：记录自身标了强制，或客户端版本低于 MinVersion。
 	Mandatory bool
+	// Platforms 桌面安装器精确键对应的变体；Android 使用基础记录，留空。
+	Platforms map[string]model.AppRelease
 }
 
 // InRollout 判断某设备是否落在灰度范围内。
@@ -104,11 +106,7 @@ func (s *ReleaseService) Resolve(
 		return nil, nil
 	}
 
-	inRollout := InRollout(deviceKey, int(rel.Rollout))
-	if cohort != nil && *cohort >= 0 && *cohort < 100 {
-		inRollout = *cohort < int(rel.Rollout)
-	}
-	if !inRollout {
+	if !releaseInRollout(rel.Rollout, deviceKey, cohort) {
 		return nil, nil
 	}
 
@@ -120,6 +118,75 @@ func (s *ReleaseService) Resolve(
 	return &ResolveResult{Release: rel, Mandatory: mandatory}, nil
 }
 
+// releaseInRollout 让基础记录与格式变体共用同一设备桶与匿名桶优先级。
+func releaseInRollout(rollout int16, deviceKey string, cohort *int) bool {
+	if cohort != nil && *cohort >= 0 && *cohort < 100 {
+		return *cohort < int(rollout)
+	}
+	return InRollout(deviceKey, int(rollout))
+}
+
+// desktopFormats 限定各平台可下发的安装器后缀，不能把一种格式作为另一种的兜底。
+func desktopFormats(platform string) []string {
+	switch platform {
+	case "linux":
+		return []string{"deb", "rpm", "appimage"}
+	case "windows":
+		return []string{"msi", "nsis"}
+	case "darwin":
+		return []string{"app"}
+	default:
+		return nil
+	}
+}
+
+// ResolveDesktop 在基础记录的版本与灰度范围内，构造已发布的桌面安装器清单。
+// 精确格式未登记或未放量时省略；调用方选定请求格式后再检查签名与对象是否完整。
+func (s *ReleaseService) ResolveDesktop(
+	ctx context.Context,
+	platform, arch, channel, currentVersion, deviceKey string,
+	cohort *int,
+) (*ResolveResult, error) {
+	res, err := s.Resolve(ctx, platform, arch, channel, currentVersion, deviceKey, cohort)
+	if err != nil || res == nil {
+		return res, err
+	}
+	formats := desktopFormats(platform)
+	arches := make([]string, 0, len(formats)+1)
+	for _, format := range formats {
+		arches = append(arches, arch+"-"+format)
+	}
+	canUseUniversal := platform == "darwin" && (arch == "x86_64" || arch == "aarch64")
+	if canUseUniversal {
+		arches = append(arches, "universal-app")
+	}
+	rows, err := s.repo.PublishedVariants(ctx, platform, res.Release.Version, res.Release.Channel, arches)
+	if err != nil {
+		return nil, fmt.Errorf("published updater variants: %w", err)
+	}
+	byArch := make(map[string]model.AppRelease, len(rows))
+	for _, row := range rows {
+		byArch[row.Arch] = row
+	}
+	res.Platforms = make(map[string]model.AppRelease, len(formats))
+	for _, format := range formats {
+		targetArch := arch + "-" + format
+		variant, found := byArch[targetArch]
+		// 只有精确格式不存在才回落；其灰度暂停不能被通用包绕过。
+		if !found && canUseUniversal {
+			variant, found = byArch["universal-app"]
+		}
+		if !found || !releaseInRollout(variant.Rollout, deviceKey, cohort) {
+			continue
+		}
+		res.Platforms[platform+"-"+targetArch] = variant
+	}
+	if len(res.Platforms) == 0 {
+		return nil, nil
+	}
+	return res, nil
+}
+
 // CatalogLatest 取某渠道下每个平台/架构的最新已发布版本，供下载页列表用。
 func (s *ReleaseService) CatalogLatest(ctx context.Context, channel string) ([]model.AppRelease, error) {
 	if channel == "" {
@@ -129,5 +196,16 @@ func (s *ReleaseService) CatalogLatest(ctx context.Context, channel string) ([]m
 	if err != nil {
 		return nil, fmt.Errorf("release catalog: %w", err)
 	}
-	return rows, nil
+	// 目录只显示基础记录，安装器后缀属于 OTA 协议，不能变成重复的架构选项。
+	items := rows[:0]
+records:
+	for _, row := range rows {
+		for _, format := range desktopFormats(row.Platform) {
+			if strings.HasSuffix(row.Arch, "-"+format) {
+				continue records
+			}
+		}
+		items = append(items, row)
+	}
+	return items, nil
 }

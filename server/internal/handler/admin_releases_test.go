@@ -103,6 +103,10 @@ func TestAdminReleases_PublishThenRollback(t *testing.T) {
 	db := packTestDB(t)
 	r, _ := newAdminReleaseRouter(t, db)
 	id := createDraft(t, r, db, "linux", "x86_64", "0.8.0")
+	variantID := createDraft(t, r, db, "linux", "x86_64-deb", "0.8.0")
+	if w, resp := doPackJSON(t, r, "POST", "/api/v1/admin/releases/"+variantID+"/publish", nil); w.Code != http.StatusOK {
+		t.Fatalf("publish variant status = %d resp=%v", w.Code, resp)
+	}
 
 	// draft 态不下发
 	if w := doGetNoAuth(t, r, "/api/v1/updates/linux/x86_64?version=0.7.0&device=d1"); w.Code != http.StatusNoContent {

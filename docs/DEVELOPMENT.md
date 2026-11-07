@@ -1073,8 +1073,15 @@ Linux Dock 数字需要已安装 `yuanchat.desktop`，已有桌面条目时无�
 托盘 tooltip 受 libayatana 限制，未读数由菜单显示。Windows/macOS 本批没有真机验收。
 
 OTA 管理页可登记、发布、改灰度与回滚；非法版本号返回 400，重复登记返回 409。
-桌面 updater 自建端点包含 `?version={{current_version}}`，并发送匿名 cohort 桶头，
-204 表示确定无更新，服务错误才尝试 GitHub 兜底；新增头已登记 REST CORS。
+桌面和 Android 检查更新均按「自建服务器最多两次 → 失败后 GitHub 一次」执行，每次
+检查限时 10 秒；任一次自建响应明确无更新（204）立即结束，灰度和回滚不会被后备源绕过。
+桌面在 updater 的 endpoints 中重复自建 URL，包含 `version={{current_version}}` 与
+`bundle_type={{bundle_type}}`，继续发送匿名 cohort 桶头；下载与签名校验仍由 Tauri SDK 完成。
+Android 自建请求保留稳定设备标识，GitHub 请求不带设备标识、JWT 或自建请求头。GitHub
+只接受官方仓库稳定版本的通用 APK，核验 tag、文件名、仓库 URL、大小与 SHA-256。
+GitHub CDN 不提供 CORS，因此 APK 经仅 Android 启用的原生 HTTP 插件下载；插件关闭
+Cookie 功能，并逐跳检查官方 asset API 与该仓库 CDN 的 URL 权限。插件固定为兼容现有
+Tauri 核心的 2.7.0；下载完成后读回磁盘校验大小和 SHA-256，失败即删文件并拒绝安装。
 原生端命令面板的「检查更新」直达关于页并触发检查，Android 复用更新卡和下载器，
 sha256 校验通过后才经 FileProvider 调系统安装器。调试 APK 的签名和包内版本必须与
 目标测试一致；仅改 OTA 登记版本不能证明应用升级成功。接口详见 [CHAT_API](CHAT_API.md#三点六更新分发ota免鉴权)。

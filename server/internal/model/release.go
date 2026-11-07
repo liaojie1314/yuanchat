@@ -10,6 +10,8 @@ import (
 //
 // 一条记录就是「某平台某架构某渠道的某个版本」，对外更新端点按
 // (platform, arch, channel, status) 找最新的 published 下发。
+// 桌面基础记录控制版本与总灰度，arch 带受控安装器后缀的记录提供同版本更新包。
+// 例如 linux/x86_64-deb；这类变体不显示在 Web 下载目录中。
 //
 // Signature 只存 release 流水线产出的 minisign .sig 文本内容 ——
 // 签名私钥不入库也不进管理端进程，管理端只做登记。
