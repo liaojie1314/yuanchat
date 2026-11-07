@@ -1031,11 +1031,11 @@ plan 待写于 `docs/superpowers/plans/<日期>-download-search.md`。
 
 #### 11. O1 — 自建 OTA 更新服务（✅ 已完成，2026-11-07）
 
-> **交付摘要**：`app_releases` 表（迁移 023，渠道/灰度/最低版本/回滚状态）+ 管理端 Releases 页（登记/发布/改灰度/回滚，全留审计日志，重复登记 409）+ 对外免鉴权两端点（无更新/未中灰度/未知平台一律 204 空体；动态格式不带 `platforms`；`pub_date` RFC3339）。桌面 updater endpoints 自有域名在前、GitHub 兜底在后（自建返 204 即确定无更新，只有 5xx 才回落）。Android 自建链路：查端点 → 应用内自绘说明卡 → 下载（复用文件下载进度条）→ **sha256 校验（不过即删文件拒装；服务端没给直接拒装）** → FileProvider `content://` 调系统安装器。签名私钥不入库不进管理端进程。
+> **交付摘要**：`app_releases` 表（迁移 023，渠道/灰度/最低版本/回滚状态）+ 管理端 Releases 页（登记/发布/改灰度/回滚，全留审计日志，重复登记 409）+ 对外免鉴权两端点（无更新/未中灰度/未知平台一律 204 空体，`pub_date` RFC3339）。桌面和 Android 均先尝试服务器两次，检查失败后才尝试一次 GitHub；自建返 204 即停止。桌面返回 `platforms` 精确安装格式键，基础记录控制版本/总灰度，变体独立登记 Deb/RPM/AppImage、MSI/NSIS、macOS app，避免给现有客户端发送不匹配的安装包。Android 返回平面动态格式，使用同一发布密钥签名的通用 APK，链路为查端点 → 应用内自绘说明卡 → 下载进度 → SHA-256 与大小校验 → FileProvider 调系统安装器；校验不通过即删文件拒装。签名私钥不入库不进管理端进程，`releases/` 分发副本由运维管理并排除聊天 GC。部署与产物验收见 [RELEASE](RELEASE.md#自建-ota-更新源)。
 
 本轮补齐匿名灰度桶、macOS 精确架构缺包回落 universal、SemVer 比较与非法登记 400；Android 模拟器已验证坏 SHA 拒装删除、取消未知来源提示后重试，以及系统安装器完成 0.6.0 → 0.6.1 升级；设备与夹具范围见第 14 节。以下保留原始 v1.0.0 立项背景，当前实现与版本归属以上文和第 14 节为准。
 
-现状：桌面端自动更新走 Tauri 内置 updater，端点钉死在
+原始立项时：桌面端自动更新走 Tauri 内置 updater，端点钉死在
 `https://github.com/liaojie1314/yuanchat/releases/latest/download/latest.json`
 （`apps/desktop/src-tauri/tauri.conf.json`），产物签名由 release 流水线的
 `TAURI_SIGNING_PRIVATE_KEY`（minisign 自签）完成。

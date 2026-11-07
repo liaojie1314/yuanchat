@@ -48,7 +48,7 @@ cat ~/.config/yuanchat/updater.key
 
 公钥已写入 `apps/desktop/src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`（可入库，公开无风险）。
 
-- 更新源：`plugins.updater.endpoints` → GitHub Release 的 `latest.json`（tauri-action 自动生成上传）
+- 更新源：自建服务器最多尝试两次，检查失败才尝试一次 GitHub `latest.json`；明确无更新的 `204` 立即停止，保留灰度与回滚决定。部署方式见[自建 OTA 更新源](#自建-ota-更新源)
 - 客户端入口：设置 → 关于 → 「检查更新」（`apps/desktop/src/components/UpdateChecker.tsx`）
 - ⚠️ **私钥丢失** = 已安装的旧版客户端再也无法验证新包，只能让用户手动重装
 
@@ -103,13 +103,14 @@ base64 -w0 release.keystore
 
 ## 二、发版流程（每次发版执行）
 
-### Step 1：确保 dev 已合并到 main
+### Step 1：本地验证通过后合并到 main
+
+先完成下方本地打包门禁及项目完整本地 CI，再合并已验证的开发分支。常规发布从 `dev` 合入；生产补丁可从对应 `fix/*` 分支合入。保留独立提交，不 squash。
 
 ```bash
 git checkout main
-git pull
-git merge --no-ff dev -m "chore: sync dev for release"
-git push origin main
+git pull --ff-only
+git merge --no-ff dev -m "chore(release): merge verified development changes"
 ```
 
 ### Step 2：运行 release-it 打 tag + 创建 GitHub Release
@@ -136,31 +137,32 @@ release-it 会：
 
 tag push 触发 `.github/workflows/release.yml`，并行构建 5 个平台：
 
-| 平台            | Runner         | 产物                                                               |
-| --------------- | -------------- | ------------------------------------------------------------------ |
-| Web             | ubuntu-latest  | `yuanchat-web-vX.Y.Z.tar.gz`（Vite dist）                          |
-| Linux Desktop   | ubuntu-22.04   | `.deb` + `.AppImage` + `.rpm`                                      |
-| Windows Desktop | windows-latest | `.msi` + `.exe`                                                    |
-| macOS Desktop   | macos-latest   | `.dmg`（universal，Intel + Apple Silicon 合一）                    |
-| Android         | ubuntu-22.04   | 按 ABI 分包 4 个签名 APK（arm64-v8a / armeabi-v7a / x86 / x86_64） |
+| 平台            | Runner         | 产物                                                   |
+| --------------- | -------------- | ------------------------------------------------------ |
+| Web             | ubuntu-latest  | `yuanchat-web-vX.Y.Z.tar.gz`（Vite dist）              |
+| Linux Desktop   | ubuntu-22.04   | `.deb` + `.AppImage` + `.rpm`                          |
+| Windows Desktop | windows-latest | `.msi` + `.exe`                                        |
+| macOS Desktop   | macos-latest   | `.dmg`（universal，Intel + Apple Silicon 合一）        |
+| Android         | ubuntu-22.04   | 四个分架构签名 APK + 一个包含全部 ABI 的 universal APK |
 
-除 `.dmg` 外的桌面产物还各带一个 `.sig`（updater 的 minisign 签名），
+macOS 另有 OTA 使用的 `.app.tar.gz`。除 `.dmg` 外的桌面产物还各带一个 `.sig`（updater 的 minisign 签名），
 另有一份 `latest.json` 记录各平台更新地址 —— 它由**每个 desktop job 分别上传**，
 tauri-action 会先读回 Release 上已有的那份再合并自己的平台键，
-所以三端分先后跑完也不会互相覆盖。
+所以三端分先后跑完也不会互相覆盖。验收仍须确认完整的安装格式键：Linux 的 `appimage/deb/rpm`、Windows 的 `msi/nsis`，以及 macOS 两种架构的 `app`；不要仅凭 Release 页面已出现判断打包成功。
 
 Linux runner 钉在 `ubuntu-22.04` 而非 latest：产物的 glibc 下限跟着构建机走，
 换 24.04 会从 2.35 抬到 2.39，老发行版用户直接装不上。
 
 产物自动 attach 到对应的 GitHub Release。全程约 20-30 分钟。
 
-### Step 4：发布 Release
+### Step 4：确认全部产物就绪
 
 到 `https://github.com/liaojie1314/yuanchat/releases` 找到刚创建的 Release：
 
-- 检查所有产物都已上传
+- 确认 Web、桌面三平台、Android 共五个 job 全部成功，20 个产物（含 `latest.json`、签名与通用 APK）齐全
 - 编辑 Release notes（release-it 已按 CHANGELOG 生成）
-- 点 "Publish release"
+- desktop job 配置 `releaseDraft: false`，可能在其他 job 结束前公开 Release；若仍为草稿再点 "Publish release"
+- 检查 `latest.json` 的精确安装格式键与 `.sig`、产物 URL 一一对应，再构建本地 Docker 镜像、镜像安装包并部署
 
 ## 三、部署说明
 
@@ -194,7 +196,53 @@ minisign 公钥校验，签名不匹配则拒绝安装（防篡改）；下载�
 ### Android APK
 
 - 用浏览器/文件管理器安装（首次需在设置里开启"未知来源"）
-- 未签名 = 不能上架 Google Play。上架 Play 需另外配置 Google Play Console upload key
+- 四个分架构 APK 适合首次下载安装；通用 APK 含 arm64-v8a / armeabi-v7a / x86 / x86_64，供现有共用 `android/aarch64` 更新槽的客户端升级
+- 所有 APK 必须使用同一发布 keystore 签名，系统才允许保留数据升级；上架 Play 另需 Google Play Console upload key
+
+### 自建 OTA 更新源
+
+桌面与 Android 的检查顺序固定为「服务器 → 服务器 → GitHub」，每次检查超时 10 秒。
+第一次成功就停止；服务器返回 `204` 表示无更新或未命中灰度，不能再查 GitHub 绕过这个决定。
+只有网络、HTTP 或无效元数据等检查失败才继续。此策略适用于包含该修复的新客户端；
+服务器部署不能改变旧安装包内置的更新地址，也不会新增启动时自动弹窗。
+
+1. 等待该 tag 的全部 GitHub 打包 job 成功，从对应 Release 获取安装包、`.sig` 和 `latest.json`，逐项校验文件大小与 GitHub asset 的 SHA-256。
+2. 将原始文件镜像到现有 MinIO bucket 的 `releases/vX.Y.Z/`，记录实际 object key。保持对象私有，由 `/updates` 端点签发下载 URL，无需开放整个 bucket。聊天文件 GC 始终跳过 `releases/`；历史发行产物由运维单独管理，回滚不删除安装包。
+3. 通过管理端 Releases API 登记相同版本与渠道，先发布安装格式变体，再发布基础记录。`sha256`、`size` 来自已校验的真实文件；桌面 `signature` 必须使用对应文件的 `.sig`，不能将 AppImage 签名用于 Deb。
+
+| 平台    | 基础 `arch`                                | 安装格式变体 `arch`                             | 基础记录的下载包            |
+| ------- | ------------------------------------------ | ----------------------------------------------- | --------------------------- |
+| Linux   | `x86_64`                                   | `x86_64-appimage` / `x86_64-deb` / `x86_64-rpm` | AppImage                    |
+| Windows | `x86_64`                                   | `x86_64-msi` / `x86_64-nsis`                    | MSI                         |
+| macOS   | `universal`（或精确 `aarch64` / `x86_64`） | `universal-app`（或对应精确架构 `*-app`）       | DMG；变体登记 `.app.tar.gz` |
+| Android | `aarch64`                                  | 无                                              | 签名通用 APK                |
+
+基础记录统一控制发布、版本、灰度与回滚。桌面请求附 `bundle_type`，服务器只返回同版、
+已发布且命中灰度的精确安装格式；缺失或不可用时返回 `204`。旧客户端未附格式时返回
+完整精确键 `platforms`，不会拿通用平台键误发另一种安装包。Android 仍返回平面动态 JSON。
+协议与登记字段见 [CHAT_API](CHAT_API.md)。
+
+Android 的 GitHub 兜底只读取官方仓库的稳定版与通用 APK，校验版本、文件名、大小和
+SHA-256 元数据；API/CDN 下载用 Android 原生 HTTP，逐跳限制为官方资源地址，避免
+Release CDN 无 CORS 导致 WebView 下载失败。GitHub 请求不附带服务器登录令牌或设备标识。
+
+部署后需验证：旧版本能获得对应格式的新包、当前版本与灰度排除返回 `204`、下载校验
+通过，以及实际完成安装并在重启后显示新版本。仅看见更新卡片不能算安装验收。
+
+### Docker 镜像与旧版本清理
+
+版本号由 release-it 落定、远端打包成功后，再从该 tag 的干净源码构建
+`yuanchat/{server,web,admin}:X.Y.Z`，推到本地 `localhost:5000` registry。
+Web/Admin 的版本与服务地址在构建时注入，不能把升版前的镜像重新打新 tag 代替构建。
+
+新镜像验证通过后立即清理本机和本地 registry 中上一版的三类应用镜像、别名与无引用
+数据层。只删除本项目的旧版本，不执行会影响其他项目的全局 prune。registry 删除标签
+后还需确认无引用数据已回收，不能只删除 `docker image ls` 可见的本机标签。
+
+服务器先备份配置、数据库与对象存储，再加载新镜像、检出对应 tag、更新 `APP_VERSION`、
+执行迁移并重建应用容器。升级跨越移除手机号的迁移时，先确认 `ADMIN_EMAIL` 指向原管理员，
+停旧后端再迁移。健康检查和 nginx 配置检查通过后重载 nginx；完成部署与 OTA 验证后，
+删除服务器上已不用的旧应用容器及镜像。生产仍在使用的镜像必须等替换完成再清理。
 
 ## 四、代码签名（未来正式发版补充）
 
@@ -243,16 +291,18 @@ Actions 页面 → Release workflow → Run workflow：
 
 ## 六、故障排查
 
-### 发版前本地预检（强烈建议）
+### 发版前本地打包门禁（必须通过）
 
 CI 每轮排队+构建要 20-30 分钟，能本地复现的问题先在本地跑一遍再推 tag：
 
 ```bash
-pnpm --filter @yuanchat/web build                    # web 产物
+pnpm build:pkg                                     # 完整 Web + tsc + 本机桌面打包
 pnpm --filter @yuanchat/web exec tsc --noEmit        # 各 app 独立 typecheck（防幽灵依赖）
 pnpm --filter @yuanchat/desktop exec tsc --noEmit
-cd apps/desktop && pnpm tauri build                  # 桌面端（本机平台）
-cd apps/desktop && pnpm tauri android build --apk --target aarch64   # Android（需 NDK）
+pnpm --filter @yuanchat/desktop exec tauri android build --apk --target aarch64
+# 改动 Android 分发配置时，还要验证四个分包与通用包：
+pnpm --filter @yuanchat/desktop exec tauri android build --apk --split-per-abi
+pnpm --filter @yuanchat/desktop exec tauri android build --apk
 ```
 
 **但要清楚它挡不住什么。** 本地预检验证的是「代码能编译、能打包」，验证不了
