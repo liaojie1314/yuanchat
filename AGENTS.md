@@ -51,9 +51,9 @@ ACK `seq=19`，该 IDB 出站行与原生副本清理。`95f0b95` 的普通附�
 模拟器，`android/aarch64` 为测试目录槽，不证明 ARM 实机或 Windows/macOS 通过。
 夹具已回滚，设备恢复 0.6.0 / 6000 并关闭来源安装权限后停机；统一记录见
 `final-acceptance-20261107/native-acceptance.json`。临时测试版不是正式发版，旧全量测试数不能作为新改动的 CI 结果。
-用户已授权验收完成后合 `dev`、在 `dev` 跑完整本地 CI、全绿后推送并确认远端 CI，
-无需再次询问；Git 合并、本地 CI 和远端 CI 状态以提交及独立验收记录为准，不预报通过。
-合 `main`、打 tag、正式发版不在本次授权范围。
+用户已明确授权本次合 `main`、通过 release-it 发版、验证远端打包、构建并清理本地 Docker
+镜像、部署到既有服务器并验收真实 OTA；后续明确要求不再推送远程 `dev`。无需重复询问。
+Git 合并、本地 CI、打包、远端 CI 与部署结果以提交及独立验收记录为准，不预报通过。
 
 已验证记录（2026-11-06）：搜索/下载/托盘/OTA 的修订已本地提交，用户已确认文件下载实测
 没有问题。追加 Android 切页/键盘闪动修复：视口高度在 resize 同步写入，设置首屏按断点与
@@ -68,7 +68,8 @@ OTA 安装流程。最终 Chromium E2E 119 / 119 全绿（3.7 分钟、无重试
 `docs/superpowers/plans/2026-10-11-tray-palette-ota.md`。当前授权与执行状态以上方 2026-11-07 记录为准。
 
 - 认证：邮箱验证码注册、邮箱或元聊号 + 密码登录、JWT 双 Token、
-  token 静默刷新（滑动会话轮换 + 401 兜底重试，`api/tokenManager.ts`）
+  token 静默刷新（滑动会话轮换 + 401 兜底重试，`api/tokenManager.ts`）；登录只检查密码
+  非空并原样交服务端鉴权，既有密码不套用新密码强度规则；注册、重置与改密仍校验强度
 - 聊天核心闭环：会话列表、文本消息 WebSocket 实时收发、已读回执、
   正在输入、历史游标分页、断线重连、失败重试
 - 好友与关系：精确搜索（邮箱/元聊号）→ 发申请（WS 实时推送）→
@@ -134,10 +135,13 @@ OTA 安装流程。最终 Chromium E2E 119 / 119 全绿（3.7 分钟、无重试
 - 自建 OTA：迁移 023 `app_releases` 表（platform/arch/version/channel 唯一），
   灰度 0-100% 按设备稳定判定、回滚后对外端点即刻止发；管理端 Releases 五端点
   （`/admin/releases`，写操作留审计、重复登记 409）；对外免鉴权
-  `GET /updates/:platform/:arch`（无更新/未中灰度 204，200 为不包 `{data}` 的
-  dynamic 格式）与 `GET /updates/catalog`；桌面 updater endpoints 自有域名在前、
-  GitHub latest.json 兜底在后；Android 自建自动更新（sha256 校验不过即删文件拒装，
-  install_apk 走 FileProvider）
+  `GET /updates/:platform/:arch`（无更新/未中灰度 204，200 不包 `{data}`）与
+  `GET /updates/catalog`。桌面返回 `platforms` 安装格式精确键，基础记录控制版本与总灰度，
+  同版变体区分 Deb/RPM/AppImage、MSI/NSIS 与 macOS app；Android 保留平面动态格式。
+  两端均先尝试服务器两次，检查失败才尝试一次 GitHub，204 立即停止。Android 通过
+  通用 APK 升级，校验大小与 SHA-256 后由 FileProvider 拉起安装器，失败即删文件拒装；
+  GitHub APK 下载使用限定官方仓库与 CDN 的原生 HTTP。Release 保留四个分架构 APK，
+  额外产出通用 APK。`releases/` 镜像文件由运维维护，聊天对象 GC 始终跳过该前缀
 - Web 下载入口：侧栏（桌面 web）+ 设置页（手机 web）的 DownloadPanel，
   按 userAgentData/UA 识别系统与架构推荐包，走 `/updates/catalog`；「当前系统 / 其他平台」
   紧凑行完整展示四个平台，无包保留不可用行，列表内部滚动；
