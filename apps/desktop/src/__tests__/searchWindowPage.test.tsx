@@ -18,6 +18,8 @@ import {
   useContactStore,
   useThemeStore,
 } from "@yuanchat/shared";
+// 模块转换属于测试装配，不能占用首个交互用例的超时预算。
+import { SearchWindowPage } from "../pages/SearchWindowPage";
 
 const emit = vi.fn().mockResolvedValue(undefined);
 const close = vi.fn().mockResolvedValue(undefined);
@@ -44,7 +46,6 @@ beforeEach(() => {
 });
 
 async function mountPage(url = "/search-window") {
-  const { SearchWindowPage } = await import("../pages/SearchWindowPage");
   render(
     <MemoryRouter initialEntries={[url]}>
       <SearchWindowPage />

@@ -10,6 +10,8 @@
  * 失败了应用必须照常用 —— applyBadge 不许向外传播异常。
  */
 import { it, expect, vi, beforeEach } from "vitest";
+// 默认平台在装配阶段加载；更换平台与原生替身的用例仍在 resetModules 后导入。
+import { applyBadge } from "../tray";
 
 const setBadgeCount = vi.fn();
 const setOverlayIcon = vi.fn();
@@ -41,18 +43,15 @@ beforeEach(() => vi.clearAllMocks());
 // Review Focus #4：不支持的平台会抛，角标是增强，失败了应用必须照常用
 it("setBadgeCount 抛错时不向外传播", async () => {
   setBadgeCount.mockRejectedValueOnce(new Error("Unity LauncherEntry unavailable"));
-  const { applyBadge } = await import("../tray");
   await expect(applyBadge(3)).resolves.toBeUndefined();
 });
 
 it("未读为 0 时清角标（传 undefined 而非 0）", async () => {
-  const { applyBadge } = await import("../tray");
   await applyBadge(0);
   expect(setBadgeCount).toHaveBeenCalledWith(undefined);
 });
 
 it("未读大于 0 时传计数", async () => {
-  const { applyBadge } = await import("../tray");
   await applyBadge(7);
   expect(setBadgeCount).toHaveBeenCalledWith(7);
 });
