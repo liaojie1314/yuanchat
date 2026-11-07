@@ -22,12 +22,12 @@ func testDB(t *testing.T) *gorm.DB {
 // newTestUser 建一次性用户，测试结束清理拉黑记录 + 用户本身。
 func newTestUser(t *testing.T, db *gorm.DB, tag string) *model.User {
 	t.Helper()
-	// 用纳秒 + tag 长度做种子，避免同一测试内多用户短号/手机号冲突
+	// 用纳秒 + tag 长度做种子，避免同一测试内多用户短号/邮箱冲突
 	seed := time.Now().UnixNano()
-	phone := fmt.Sprintf("199%08d", seed%100000000)
+	email := fmt.Sprintf("u%d@test.local", seed)
 	user := &model.User{
 		ID:           uuid.New(),
-		Phone:        &phone,
+		Email:        &email,
 		PasswordHash: "x",
 		ShortID:      seed%1_000_000_000 + int64(len(tag)),
 		Nickname:     tag,

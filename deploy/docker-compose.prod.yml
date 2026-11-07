@@ -132,7 +132,7 @@ services:
       YUANCHAT_CODESENDER_API_KEY: ${CODESENDER_API_KEY:-}
       # 首次部署的管理员引导凭据（install.sh 自动生成并写回 .env）。
       # 仅 bootstrap-admin 这条一次性命令会读，且库里已有管理员时直接跳过。
-      YUANCHAT_BOOTSTRAP_ADMIN_PHONE: ${ADMIN_PHONE:-}
+      YUANCHAT_BOOTSTRAP_ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       YUANCHAT_BOOTSTRAP_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       # TURN：与 coturn 容器共用同一套取值，任一项不一致都会让通话在 NAT 后打不通。
       # SECRET/REALM 两边同源（install.sh 用同样的 TURN_SECRET / DOMAIN_CHAT 渲染

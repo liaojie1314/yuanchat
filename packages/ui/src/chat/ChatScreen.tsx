@@ -29,6 +29,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageSquare } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   appointAdmin,
@@ -86,6 +87,17 @@ export function ChatScreen({ scan, cancelScan }: { scan?: ScanFn; cancelScan?: (
   const [members, setMembers] = useState<ConversationMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
   const [groupOpen, setGroupOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const groupRequested = searchParams.get("new") === "group";
+  /** 关闭建群入口时消费路由指令，刷新页面不重复打开。 */
+  const closeGroup = useCallback(() => {
+    setGroupOpen(false);
+    if (groupRequested) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("new");
+      setSearchParams(next, { replace: true });
+    }
+  }, [groupRequested, searchParams, setSearchParams]);
   const [addOpen, setAddOpen] = useState(false);
   const leftPanel = useResizable(300, 240, 380);
   const selfId = useAuthStore((s) => s.user?.id ?? "");
@@ -161,6 +173,10 @@ export function ChatScreen({ scan, cancelScan }: { scan?: ScanFn; cancelScan?: (
   useEffect(() => {
     if (bp !== "mobile") return;
     return registerBackInterceptor(() => {
+      if (groupOpen || groupRequested) {
+        closeGroup();
+        return true;
+      }
       if (profileTarget !== null) {
         setProfileTarget(null);
         if (!detailWasOpen.current) setShowDetail(false);
@@ -180,11 +196,21 @@ export function ChatScreen({ scan, cancelScan }: { scan?: ScanFn; cancelScan?: (
       }
       return false;
     });
-  }, [bp, profileTarget, detailView, showDetail, activeId, setActive]);
+  }, [
+    bp,
+    profileTarget,
+    detailView,
+    showDetail,
+    activeId,
+    setActive,
+    groupOpen,
+    groupRequested,
+    closeGroup,
+  ]);
 
   const modals = (
     <>
-      <CreateGroupModal open={groupOpen} onClose={() => setGroupOpen(false)} />
+      <CreateGroupModal open={groupOpen || groupRequested} onClose={closeGroup} />
       <AddContactModal open={addOpen} onClose={() => setAddOpen(false)} />
       {scan && (
         <ScanQrEntry

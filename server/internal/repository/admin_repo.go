@@ -21,14 +21,14 @@ func NewAdminRepository(db *gorm.DB) *AdminRepository {
 
 // ---------- 用户 ----------
 
-// SearchUsers 按昵称/手机号/邮箱模糊分页检索用户（含封禁用户）。
+// SearchUsers 按昵称/邮箱模糊分页检索用户（含封禁用户）。
 // q 为合法 UUID 时同时按用户 ID 精确匹配：管理端从举报等入口深链跳转
 // 只带得出目标 ID， fuzzy 条件命中不了主键。
 func (r *AdminRepository) SearchUsers(ctx context.Context, q string, offset, limit int) ([]model.User, int64, error) {
 	tx := r.db.WithContext(ctx).Model(&model.User{})
 	if q != "" {
 		like := "%" + q + "%"
-		tx = tx.Where("nickname ILIKE ? OR phone LIKE ? OR email ILIKE ?", like, like, like)
+		tx = tx.Where("nickname ILIKE ? OR email ILIKE ?", like, like)
 		if id, err := uuid.Parse(q); err == nil {
 			tx = tx.Or("id = ?", id)
 		}

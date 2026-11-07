@@ -267,7 +267,7 @@ func TestLoginWritesLastLoginAt(t *testing.T) {
 		t.Fatalf("set password hash: %v", err)
 	}
 
-	if _, err := svc.Login(context.Background(), LoginRequest{Account: *user.Phone, Password: pw}); err != nil {
+	if _, err := svc.Login(context.Background(), LoginRequest{Account: *user.Email, Password: pw}); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
 
@@ -302,13 +302,46 @@ func TestLoginByShortID(t *testing.T) {
 		t.Fatalf("按元聊号登录应成功: %v", err)
 	}
 
-	// 手机号这条老路径不能被顺序调整弄坏
-	if _, err := svc.Login(ctx, LoginRequest{Account: *user.Phone, Password: pw}); err != nil {
-		t.Fatalf("按手机号登录应仍然成功: %v", err)
+	// 邮箱这条路径不能被顺序调整弄坏
+	if _, err := svc.Login(ctx, LoginRequest{Account: *user.Email, Password: pw}); err != nil {
+		t.Fatalf("按邮箱登录应仍然成功: %v", err)
 	}
 
 	// 不存在的短号照旧当凭据错误，不额外泄漏账号是否存在
 	if _, err := svc.Login(ctx, LoginRequest{Account: "999999999", Password: pw}); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("不存在的元聊号应回 ErrUserNotFound，got %v", err)
+	}
+}
+
+// TestLoginPhoneNumberNoLongerAccepted 手机号登录必须失败。
+//
+// 本批已把手机号彻底移除（迁移 021 删列），留一条回归测试钉住：
+// 否则日后有人「顺手」把 FindByPhone 加回来不会被发现。
+// 11 位数字串既不是邮箱也不可能撞上元聊号 —— 元聊号从 10000 起递增。
+func TestLoginPhoneNumberNoLongerAccepted(t *testing.T) {
+	db := testDB(t)
+	user := newTestUser(t, db, "phone-gone")
+	svc, _ := authSvc(t, db)
+	ctx := context.Background()
+
+	const pw = "Abcdef12"
+	hash, err := password.Hash(pw)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if err := db.Model(user).Update("password_hash", hash).Error; err != nil {
+		t.Fatalf("set password hash: %v", err)
+	}
+
+	if _, err := svc.Login(ctx, LoginRequest{Account: "13800138000", Password: pw}); !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("手机号登录应回 ErrUserNotFound，got %v", err)
+	}
+
+	// 邮箱与元聊号两条路径仍然通
+	if _, err := svc.Login(ctx, LoginRequest{Account: *user.Email, Password: pw}); err != nil {
+		t.Fatalf("按邮箱登录应成功: %v", err)
+	}
+	if _, err := svc.Login(ctx, LoginRequest{Account: strconv.FormatInt(user.ShortID, 10), Password: pw}); err != nil {
+		t.Fatalf("按元聊号登录应成功: %v", err)
 	}
 }

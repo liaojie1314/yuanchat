@@ -21,7 +21,6 @@ interface MockUser {
   id: string;
   nickname: string;
   avatar_url: string | null;
-  phone: string;
   email: string;
   short_id: number;
 }
@@ -30,7 +29,6 @@ const MOCK_USER: MockUser = {
   id: "user_001",
   nickname: "元聊用户",
   avatar_url: null,
-  phone: "13800138000",
   email: "user@yuanchat.com",
   short_id: 10001,
 };
@@ -738,6 +736,57 @@ const MOCK_MOMENT_ACTIVITIES = [
 // 处理器
 // ========================================
 
+/** 对外类型名 → message_type，与后端 handler 的 searchTypeNames 同构 */
+const SEARCH_TYPE_IDS: Record<string, number> = {
+  text: 1,
+  image: 2,
+  file: 3,
+  voice: 4,
+  video: 5,
+  sticker: 8,
+};
+
+/**
+ * 搜索结果 mock：至少覆盖 text / file / image 三类。
+ * image 带 object_key，让缩略图那条路径也在 mock 覆盖之内。
+ */
+const MOCK_SEARCH_RESULTS = [
+  {
+    message_id: "msg_search_1",
+    conversation_id: "conv_001",
+    conv_name: "产品讨论组",
+    sender_nickname: "李明",
+    excerpt: "季度报告写完了，下午发群里",
+    created_at: "2026-10-10T08:30:00Z",
+    seq: 128,
+    message_type: 1,
+  },
+  {
+    message_id: "msg_search_2",
+    conversation_id: "conv_001",
+    conv_name: "产品讨论组",
+    sender_nickname: "王芳",
+    excerpt: "季度财报.xlsx",
+    created_at: "2026-10-09T14:05:00Z",
+    seq: 115,
+    message_type: 3,
+    file_name: "季度财报.xlsx",
+    object_key: "files/2026/10/季度财报.xlsx",
+  },
+  {
+    message_id: "msg_search_3",
+    conversation_id: "conv_002",
+    conv_name: "张伟",
+    sender_nickname: "张伟",
+    excerpt: "报告封面.png",
+    created_at: "2026-10-08T03:12:00Z",
+    seq: 42,
+    message_type: 2,
+    file_name: "报告封面.png",
+    object_key: "images/2026/10/cover.png",
+  },
+];
+
 export const handlers = [
   // --------------------------------------------------
   // 认证 — 登录
@@ -1140,6 +1189,60 @@ export const handlers = [
     return apiOk({ message: "removed" });
   }),
 
+  // 全局搜索首次打开会拉好友列表；四态复用已有 scenario 约定，禁止穿透真实后端。
+  http.get("http://localhost:8085/api/v1/contacts", async ({ request }) => {
+    const scenario = new URL(request.url).searchParams.get("scenario");
+    if (scenario === "error") return apiError(500, "mock contacts error");
+    await delay(scenario === "slow" ? 2000 : 150);
+    const friends =
+      scenario === "empty"
+        ? []
+        : DEMO_FRIENDS.map((friend) => ({
+            user_id: friend.id,
+            nickname: friend.nickname,
+            avatar_url: friend.avatarUrl,
+            short_id: friend.shortId,
+            conversation_id: friend.conversationId,
+          }));
+    return apiOk({ friends });
+  }),
+
+  // --------------------------------------------------
+  // 消息搜索 — 全局 / 会话内，带类型筛选
+  // GET /api/v1/messages/search
+  //
+  // 四态开关走关键词，不另开 query 参数：命令面板只有一个输入框，
+  // 用关键词触发才测得到真实链路。
+  //   正常 → 任意关键词；空 → 含 "nomatch"；错误 → 含 "boom"；加载 → 含 "slow"
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/messages/search", async ({ request }) => {
+    const qs = new URL(request.url).searchParams;
+    const q = (qs.get("q") ?? "").trim();
+    if (!q) return apiError(400, "q is required");
+    const types = (qs.get("types") ?? "").split(",").filter(Boolean);
+
+    if (q.includes("boom")) return apiError(500, "search failed");
+    if (q.includes("slow")) await delay(1500);
+    else await delay(150);
+    if (q.includes("nomatch")) return apiOk({ results: [], has_more: false });
+
+    // 未知类型与服务端同口径返 400，否则前端以为筛选生效了。
+    // 这里传 400 而不是 4xxxx 业务码：apiError 用业务码挑 HTTP 状态，
+    // 五位业务码会被判成 >= 500 而映射到 HTTP 500（本文件既有的坑）。
+    const unknown = types.find((t) => !(t in SEARCH_TYPE_IDS));
+    if (unknown) return apiError(400, "unknown message type: " + unknown);
+
+    const wanted = new Set(types.map((t) => SEARCH_TYPE_IDS[t]));
+    // 会话范围与类型同时收敛，避免用全局夹具制造会话内搜索的假阳性。
+    const conversationId = qs.get("conversation_id");
+    const results = MOCK_SEARCH_RESULTS.filter(
+      (r) =>
+        (!conversationId || r.conversation_id === conversationId) &&
+        (!wanted.size || wanted.has(r.message_type)),
+    );
+    return apiOk({ results, has_more: false });
+  }),
+
   // --------------------------------------------------
   // 贴纸 — 我的表情包列表（官方包 + 已添加的包，与服务端扩展后的语义一致）
   // GET /api/v1/sticker-packs
@@ -1232,12 +1335,12 @@ export const handlers = [
   // 改密第 1 步 — 下发验证码
   // POST /api/v1/auth/password/otp
   // 未注册账号与已注册的响应完全一致（同 204、同空体），避免暴露注册状态
-  // 取值顺序与服务端一致：先 account（手机号或邮箱），为空再回落旧字段 phone
+  // 账号形态与服务端一致：只有 account（邮箱），手机号已于迁移 021 移除
   // --------------------------------------------------
   http.post("http://localhost:8085/api/v1/auth/password/otp", async ({ request }) => {
     await delay(300);
-    const body = (await request.json()) as { account?: string; phone?: string };
-    const account = body.account || body.phone;
+    const body = (await request.json()) as { account?: string };
+    const account = body.account;
     if (!account) {
       return apiError(400, "auth.otpRequired");
     }
@@ -1254,8 +1357,8 @@ export const handlers = [
   // --------------------------------------------------
   http.post("http://localhost:8085/api/v1/auth/password/verify", async ({ request }) => {
     await delay(300);
-    const body = (await request.json()) as { account?: string; phone?: string; code?: string };
-    if (!(body.account || body.phone) || !body.code) {
+    const body = (await request.json()) as { account?: string; code?: string };
+    if (!body.account || !body.code) {
       return apiError(400, "auth.otpRequired");
     }
     if (body.code !== MOCK_OTP_CODE) {
@@ -1683,6 +1786,85 @@ export const handlers = [
   http.post("http://localhost:8085/api/v1/moments/activities/read", async () => {
     await delay(100);
     return apiOk({ read: true });
+  }),
+
+  // --------------------------------------------------
+  // OTA — 更新检查（Tauri updater 与 Android 自建链路共用）
+  // GET /api/v1/updates/:platform/:arch
+  // 四态：正常（动态格式更新体）/ 空（204）/ 错误（500）/ 加载（delay）
+  // 注意响应体**不带 {code,data} 信封** —— updater 直接解析根对象
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/updates/:platform/:arch", async ({ request }) => {
+    await delay(300);
+    const url = new URL(request.url);
+    if (url.searchParams.get("error") === "1") {
+      return HttpResponse.json(
+        { code: 500, message: "resolve failed", data: null },
+        { status: 500 },
+      );
+    }
+    if (url.searchParams.get("empty") === "1") {
+      return new HttpResponse(null, { status: 204 });
+    }
+    return HttpResponse.json({
+      version: "9.9.9",
+      notes: "mock：修复若干问题，优化体验。",
+      pub_date: "2026-10-01T08:00:00Z",
+      url: "http://localhost:9002/releases/mock/app.apk",
+      signature: "mock-signature",
+      sha256: "aa".repeat(32),
+      size: 42_000_000,
+      mandatory: false,
+    });
+  }),
+
+  // --------------------------------------------------
+  // OTA — 下载页目录（每个平台/架构的最新已发布版本）
+  // GET /api/v1/updates/catalog
+  // 四态：正常（三桌面 + 安卓）/ 空（[]）/ 错误（500）/ 加载（delay）
+  // --------------------------------------------------
+  http.get("http://localhost:8085/api/v1/updates/catalog", async ({ request }) => {
+    await delay(300);
+    const url = new URL(request.url);
+    if (url.searchParams.get("error") === "1") return apiError(500, "catalog failed");
+    if (url.searchParams.get("empty") === "1") return apiOk({ items: [] });
+    return apiOk({
+      items: [
+        {
+          platform: "linux",
+          arch: "x86_64",
+          version: "0.8.0",
+          size: 78_000_000,
+          notes: "Linux AppImage 安装包",
+          url: "http://localhost:9002/releases/mock/yuanchat-linux.AppImage",
+        },
+        {
+          platform: "windows",
+          arch: "x86_64",
+          version: "0.8.0",
+          size: 64_000_000,
+          notes: "Windows 安装包",
+          url: "http://localhost:9002/releases/mock/yuanchat-setup.exe",
+        },
+        {
+          platform: "darwin",
+          arch: "universal",
+          version: "0.8.0",
+          size: 82_000_000,
+          notes: "macOS 通用安装包",
+          url: "http://localhost:9002/releases/mock/yuanchat.dmg",
+        },
+        {
+          platform: "android",
+          arch: "aarch64",
+          version: "0.8.0",
+          size: 42_000_000,
+          notes: "Android APK",
+          sha256: "bb".repeat(32),
+          url: "http://localhost:9002/releases/mock/yuanchat.apk",
+        },
+      ],
+    });
   }),
 
   // --------------------------------------------------

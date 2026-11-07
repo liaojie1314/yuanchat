@@ -53,7 +53,6 @@ const server = setupServer(
       code?: string;
       password?: string;
       nickname?: string;
-      phone?: string;
     };
     if (!body.email) {
       return HttpResponse.json(
@@ -77,7 +76,6 @@ const server = setupServer(
           id: "new_user",
           nickname: body.nickname || "new",
           email: body.email,
-          phone: body.phone ?? null,
         },
         access_token: "token_access_new",
         refresh_token: "token_refresh_new",
@@ -102,7 +100,6 @@ const server = setupServer(
         short_id: 10001,
         bio: "更新后的签名",
         gender: 2,
-        phone: "13800000001",
         email: null,
       },
     });
@@ -377,7 +374,7 @@ describe("authStore", () => {
   describe("updateProfile", () => {
     it("merges returned profile fields into local user", async () => {
       useAuthStore.setState({
-        user: { id: "test_user", nickname: "老名", phone: "13800000001", shortId: 10001 },
+        user: { id: "test_user", nickname: "老名", email: "keep@test.local", shortId: 10001 },
         accessToken: "token-123",
         refreshToken: "refresh-123",
         isAuthenticated: true,
@@ -389,8 +386,8 @@ describe("authStore", () => {
       expect(user?.nickname).toBe("新名");
       expect(user?.bio).toBe("更新后的签名");
       expect(user?.gender).toBe(2);
-      // 未被更新接口覆盖的字段保持不变
-      expect(user?.phone).toBe("13800000001");
+      // 未被更新接口覆盖的字段保持不变（响应里 email 是 null，合并仍留本地那份）
+      expect(user?.email).toBe("keep@test.local");
       expect(user?.shortId).toBe(10001);
     });
 

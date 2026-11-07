@@ -70,7 +70,7 @@ func allowedHeaders(t *testing.T, w *httptest.ResponseRecorder) map[string]bool 
 // X-Qr-Poll-Secret 曾因此让扫码轮询在真实浏览器里完全不通，而 handler 层单测
 // （httptest 不做预检）与 MSW（在网络层之前拦截）都无法发现。
 func TestCORSAllowsFrontendCustomHeaders(t *testing.T) {
-	w := preflight(t, "authorization, x-qr-poll-secret")
+	w := preflight(t, "authorization, x-qr-poll-secret, x-yuanchat-update-cohort")
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("预检状态码 = %d, want 204", w.Code)
 	}
@@ -81,6 +81,7 @@ func TestCORSAllowsFrontendCustomHeaders(t *testing.T) {
 		"content-type",
 		"x-request-id",
 		"x-qr-poll-secret",
+		"x-yuanchat-update-cohort",
 	} {
 		if !allowed[want] {
 			t.Errorf("Allow-Headers 缺少 %q，该头的请求会在浏览器预检阶段被拦死；实际值 = %q",
@@ -143,7 +144,7 @@ func TestCORSProdWhitelistReflectsOnlyListedOrigins(t *testing.T) {
 // TestCORSProdNeverWildcards 生产环境在任何情况下都不得回 `*`。
 func TestCORSProdNeverWildcards(t *testing.T) {
 	cases := map[string]CORSOptions{
-		"配了白名单":  prodCORS("https://chat.example.com"),
+		"配了白名单": prodCORS("https://chat.example.com"),
 		"未配白名单": prodCORS(),
 	}
 	for name, opts := range cases {

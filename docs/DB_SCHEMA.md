@@ -2,7 +2,7 @@
 
 > **前置阅读**：[ARCHITECTURE.md](./ARCHITECTURE.md)
 >
-> 本文按 `server/internal/database/migrations/` 的实际迁移序（001 → 020）重建，
+> 本文按 `server/internal/database/migrations/` 的实际迁移序（001 → 023）重建，
 > 与代码严格同步；旧文档中的 Elasticsearch / MinIO 章节已过时，不在此保留。
 
 ---
@@ -27,25 +27,25 @@
 
 ---
 
-## 二、迁移明细（001 → 020）
+## 二、迁移明细（001 → 023）
 
 ### 001_baseline — 基准 Schema 快照
 
 合并了最初的 `001_init.sql` 与 `002_contacts.sql`，是全库起点。建立扩展
 `uuid-ossp`、`pg_trgm`，并创建核心表：
 
-| 表                     | 用途      | 关键列 / 约束                                                                                                             |
-| ---------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `users`                | 用户      | `phone`/`email` 唯一、软删 `deleted_at`；昵称 `gin_trgm_ops` GIN 索引（模糊搜索）                                         |
-| `conversations`        | 会话      | `type`（1 单聊 / 2 群聊 / 3 系统）、`last_seq` 游标；软删                                                                 |
-| `conversation_members` | 会话成员  | `role`（0 成员 / 1 管理员 / 2 群主）、`last_read_seq`（已读回执）、`is_muted`（免打扰）；UNIQUE(conversation_id, user_id) |
-| `messages`             | 消息      | `seq` 会话内递增、`content JSONB`、`status`（1 正常 / 2 撤回 / 3 删除）、软删；UNIQUE(conversation_id, seq)               |
-| `message_status`       | 送达/已读 | UNIQUE(message_id, user_id)，`delivered_at` / `read_at`                                                                   |
-| `contacts`             | 好友关系  | `status`（0 待确认 / 1 已添加 / 2 已拒绝 / 3 已删除）；软删；UNIQUE(user_id, contact_user_id)                             |
-| `verification_codes`   | 验证码    | `target` + `expires_at` 索引                                                                                              |
-| `friend_requests`      | 好友申请  | UNIQUE(requester_id, target_id)，`(target_id, status)` 索引                                                               |
+| 表                     | 用途      | 关键列 / 约束                                                                                                                     |
+| ---------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `users`                | 用户      | `email` 唯一、软删 `deleted_at`；昵称 `gin_trgm_ops` GIN 索引（模糊搜索）；基准建表时的 `phone` 列与唯一索引已于迁移 021 整列移除 |
+| `conversations`        | 会话      | `type`（1 单聊 / 2 群聊 / 3 系统）、`last_seq` 游标；软删                                                                         |
+| `conversation_members` | 会话成员  | `role`（0 成员 / 1 管理员 / 2 群主）、`last_read_seq`（已读回执）、`is_muted`（免打扰）；UNIQUE(conversation_id, user_id)         |
+| `messages`             | 消息      | `seq` 会话内递增、`content JSONB`、`status`（1 正常 / 2 撤回 / 3 删除）、软删；UNIQUE(conversation_id, seq)                       |
+| `message_status`       | 送达/已读 | UNIQUE(message_id, user_id)，`delivered_at` / `read_at`                                                                           |
+| `contacts`             | 好友关系  | `status`（0 待确认 / 1 已添加 / 2 已拒绝 / 3 已删除）；软删；UNIQUE(user_id, contact_user_id)                                     |
+| `verification_codes`   | 验证码    | `target` + `expires_at` 索引                                                                                                      |
+| `friend_requests`      | 好友申请  | UNIQUE(requester_id, target_id)，`(target_id, status)` 索引                                                                       |
 
-所有软删表均带 `deleted_at`；部分索引（如 users 的 phone/email）都带 `deleted_at IS NULL` 条件。
+所有软删表均带 `deleted_at`；部分索引（如 users 的 email）都带 `deleted_at IS NULL` 条件。
 
 ### 002_v02_additions — v0.2 表情回应 / 拉黑 / @ 提及
 
@@ -207,6 +207,54 @@
 - 建索引前须先探测存量重复行；有重复时 `CREATE UNIQUE INDEX` 会失败并给出明确报错，
   不会半途留下不一致状态，届时需人工去重后重跑。
 
+### 021_drop_user_phone — 手机号完全移除
+
+- `DROP INDEX idx_users_phone` + `ALTER TABLE users DROP COLUMN phone`：登录只认
+  邮箱/元聊号，好友精确搜索只剩邮箱/元聊号，忘记密码只认邮箱，
+  管理端用户搜索同步去掉手机号。**不做任何兼容**（无保留列、无回落查询）。
+- 为什么可以直接删列而不先让存量用户补邮箱：登录的非 `@` 分支会回落元聊号
+  （`user_service.go` 的 `Login`），「只有手机号、没有邮箱」的账号删列后仍可用
+  元聊号 + 原密码登录，不存在被锁死在门外的账号。
+- `Down` 只恢复结构不恢复数据（回来的是一整列 NULL），形状照 001 原样还原
+  （列上 UNIQUE + partial 索引），保证 Down 后的库与从未升过级的库同一 schema。
+- 配套变更（非迁移内容）：`bootstrap-admin` 的引导账号环境变量由
+  `YUANCHAT_BOOTSTRAP_ADMIN_PHONE` 改为 `YUANCHAT_BOOTSTRAP_ADMIN_EMAIL`，
+  部署配置 `ADMIN_PHONE` → `ADMIN_EMAIL`——升级既有部署必须改 `.env`，
+  否则脚本按新变量取不到值会**再建一个管理员**。
+
+### 022_message_name_search_index — 文件名检索索引
+
+- `-- +goose NO TRANSACTION` + `CREATE INDEX CONCURRENTLY`（同 003 范式）：
+  `idx_messages_name_trgm` — 对 `content->>'name'` 建 `gin_trgm_ops` GIN 索引，
+  部分索引条件 `deleted_at IS NULL AND status = 1`。
+- 动机：图片/文件/视频的原始名字存 `content->>'name'`，而 003 的 trgm 索引只建在
+  `content->>'text'` 上——这就是「搜不到文件名」的根因。partial 条件与 003 保持一致，
+  否则 planner 合并两个索引时会走到不同的可见性口径。
+
+### 023_app_releases — 自建 OTA 更新分发
+
+新表 `app_releases`：一个发布版本一行，`UNIQUE(platform, arch, version, channel)`
+（重复登记同一版是运营误操作，让数据库挡住而非产出互相覆盖的两条记录）。
+
+| 列                    | 说明                                                                    |
+| --------------------- | ----------------------------------------------------------------------- |
+| `platform` / `arch`   | 目标平台（darwin/linux/windows/android）与架构                          |
+| `version` / `channel` | 语义化版本与更新渠道（`channel` 默认 `stable`）                         |
+| `notes`               | 更新说明                                                                |
+| `object_key`          | 安装包在 MinIO 的对象键                                                 |
+| `signature`           | minisign 签名文本（release 流水线产出；**私钥不入库也不进管理端进程**） |
+| `sha256`              | 包摘要（Android 侧下载后校验，不过即删文件拒装）                        |
+| `size`                | 包字节数                                                                |
+| `min_version`         | 最低可升级版本                                                          |
+| `mandatory`           | 是否强制更新                                                            |
+| `rollout`             | 灰度百分比，`CHECK (rollout BETWEEN 0 AND 100)`                         |
+| `status`              | `draft` / `published` / `rolled_back`                                   |
+| `published_at`        | 发布时间                                                                |
+| `created_by`          | 登记者，`REFERENCES users(id) ON DELETE SET NULL`                       |
+
+另有查询热路径索引 `idx_app_releases_lookup(platform, arch, channel, status, published_at DESC)`：
+对外更新检查就是「按平台+架构+渠道找最新的 published」这一种形态。
+
 ---
 
 ## 三、最终态关键表结构
@@ -216,7 +264,7 @@
 ### 用户与关系
 
 ```
-users            id, phone(uniq), email(uniq), password_hash, nickname, avatar_url,
+users            id, email(uniq), password_hash, nickname, avatar_url,
                  bio, gender, birthday, status, role, token_version,
                  last_login_at, deleted_at
 contacts         user_id → users, contact_user_id → users, remark, status, deleted_at
@@ -246,7 +294,9 @@ favorites              user_id, message_id, conversation_id, 快照字段, conte
 ```
 
 关键索引：`idx_messages_conversation(conversation_id, seq DESC)`（历史游标分页，会话媒体
-相册的 `message_type IN (...)` 过滤复用同一条）、`idx_messages_text_trgm`（全文检索）、
+相册的 `message_type IN (...)` 过滤复用同一条）、`idx_messages_text_trgm`（全文检索，
+`content->>'text'`）、`idx_messages_name_trgm`（文件名检索，trgm GIN，
+`content->>'name'`，partial `deleted_at IS NULL AND status=1`）、
 `idx_messages_content_key`（对象反查/授权/GC）。
 
 ### 平台治理
@@ -296,6 +346,19 @@ users(+3 列)        status_emoji, status_text, status_expires_at（过期只在
 
 可见性不落表，按 `contacts` / `blocklists` 实时推导（`VisiblePostsScope`）；
 帖子分页走 `(created_at, id)` 复合游标。
+
+### 更新分发（自建 OTA）
+
+```
+app_releases  platform, arch, version, channel   UNIQUE(platform, arch, version, channel)
+              notes, object_key, signature(minisign), sha256, size,
+              min_version?, mandatory, rollout(0-100),
+              status(draft/published/rolled_back), published_at?,
+              created_by? → users
+```
+
+一个发布版本一行；`status` 只在 draft → published → rolled_back 间单向流转，
+回滚后对外更新端点即刻止发。字段语义见迁移 023 小节。
 
 ---
 

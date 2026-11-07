@@ -14,6 +14,7 @@ import { ConversationsPage } from "./pages/Conversations";
 import { MessageAuditPage } from "./pages/MessageAudit";
 import { ModerationQueuePage } from "./pages/ModerationQueue";
 import { StickerPacksPage } from "./pages/StickerPacks";
+import { ReleasesPage } from "./pages/Releases";
 import { AuditLogsPage } from "./pages/AuditLogs";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="/messages" element={<MessageAuditPage />} />
         <Route path="/moderation" element={<ModerationQueuePage />} />
         <Route path="/sticker-packs" element={<StickerPacksPage />} />
+        <Route path="/releases" element={<ReleasesPage />} />
         <Route path="/audit-logs" element={<AuditLogsPage />} />
         <Route path="*" element={<Navigate to="/overview" replace />} />
       </Route>

@@ -42,4 +42,11 @@ const (
 	// 朋友圈处置：删帖 / 删评论（内容本体软删，本表只记审计）
 	AdminActionDeleteMomentPost    = "delete_moment_post"
 	AdminActionDeleteMomentComment = "delete_moment_comment"
+
+	// OTA 版本分发。权限面比封号还大 —— 它能把任意字节推给全部客户端，
+	// 所以登记/改配/发布/回滚四个动作全部留痕。
+	AdminActionCreateRelease   = "create_release"
+	AdminActionUpdateRelease   = "update_release"
+	AdminActionPublishRelease  = "publish_release"
+	AdminActionRollbackRelease = "rollback_release"
 )

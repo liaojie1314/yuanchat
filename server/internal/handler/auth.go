@@ -30,33 +30,24 @@ func NewAuthHandler(svc *service.AuthService, logger *zap.Logger) *AuthHandler {
 // Account 只能是邮箱 —— 验证码通道是 SMTP，手机号收不到码。
 // 字段名仍叫 account 而不是 email：登录那侧的账号形态确实有三种，
 // 这里保持同名便于客户端复用同一个输入框状态。
-// 保留 Phone 只为兼容已发布的旧客户端（旧版把邮箱也塞在 phone 里发）。
 type SendResetCodeRequest struct {
 	Account string `json:"account"`
-	Phone   string `json:"phone"`
 }
 
-// Target 返回本次要发码的账号，优先取 Account。
+// Target 返回本次要发码的账号。
 func (r SendResetCodeRequest) Target() string {
-	if r.Account != "" {
-		return r.Account
-	}
-	return r.Phone
+	return r.Account
 }
 
 // VerifyResetCodeRequest 是校验改密验证码的请求体。
 type VerifyResetCodeRequest struct {
 	Account string `json:"account"`
-	Phone   string `json:"phone"`
 	Code    string `json:"code" binding:"required"`
 }
 
-// Target 返回本次要校验的账号，优先取 Account。
+// Target 返回本次要校验的账号。
 func (r VerifyResetCodeRequest) Target() string {
-	if r.Account != "" {
-		return r.Account
-	}
-	return r.Phone
+	return r.Account
 }
 
 // SendRegisterCodeRequest 是发送注册验证码的请求体。

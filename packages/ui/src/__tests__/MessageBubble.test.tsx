@@ -2,11 +2,12 @@
  * MessageBubble 贴纸渲染、「添加到表情」菜单项与视频气泡测试
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import i18n from "@yuanchat/design-system/i18n";
 import { MessageBubble } from "../chat/MessageBubble";
 import { setVoiceRate, stopVoice } from "../chat/voicePlayer";
 import type { ChatMessage } from "@yuanchat/shared";
+import * as shared from "@yuanchat/shared";
 
 /**
  * 菜单项文案取当前语言的实际译文，而非正则匹配。
@@ -318,6 +319,43 @@ describe("文件气泡宽度与失败原因", () => {
     const row = bubble.parentElement!;
     expect(row.className).toContain("w-full");
     expect(row.className).toContain("min-w-0");
+  });
+
+  it("Web 已保存文件点击查看位置显示目录与文件名，不触发重下载", async () => {
+    const save = vi.fn();
+    shared.setFileSink({
+      read: async () => new Uint8Array([1]),
+      save,
+      revealTarget: "location",
+      describe: () => "Downloads / a.pdf",
+      exists: async () => true,
+      reveal: async () => "Downloads / a.pdf",
+    });
+    shared.useDownloadStore.setState({
+      entries: {
+        mf1: {
+          phase: "done",
+          received: 1,
+          total: 1,
+          sha256: "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a",
+          savedPath: "browser-download:1",
+        },
+      },
+    });
+    try {
+      render(<MessageBubble msg={fileMsg()} />);
+      vi.mocked(shared.showToast).mockClear();
+      fireEvent.click(screen.getByRole("button", { name: label("chat.file.viewLocation") }));
+      expect(
+        await screen.findByRole("dialog", { name: label("chat.file.viewLocation") }),
+      ).toHaveTextContent("Downloads / a.pdf");
+      fireEvent.click(screen.getByRole("button", { name: label("common.close") }));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(save).not.toHaveBeenCalled();
+    } finally {
+      shared.__resetFileSink();
+      act(() => shared.useDownloadStore.setState({ entries: {} }));
+    }
   });
 
   it("后缀不被省略号吃掉：主干与 .pdf 分成两段渲染", () => {

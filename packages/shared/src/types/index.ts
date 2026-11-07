@@ -20,7 +20,6 @@ export interface User {
   id: string;
   nickname: string;
   avatarUrl?: string | null;
-  phone?: string;
   email?: string;
   /** 账户状态：1=正常, 2=禁用, 3=注销 */
   status: 1 | 2 | 3;

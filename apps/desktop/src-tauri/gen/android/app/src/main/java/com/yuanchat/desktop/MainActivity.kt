@@ -8,6 +8,7 @@ import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsAnimationCompat
 import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
@@ -56,24 +57,64 @@ class MainActivity : TauriActivity() {
     // 左右仍按系统值 padding：刘海屏横屏时那是真正不可绘制的区域，
     // 交给 CSS 反而要多下发两个变量、收益为零。
     val content = findViewById<View>(android.R.id.content)
-    ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
+    val imeAnimations = mutableSetOf<WindowInsetsAnimationCompat>()
+
+    /** 动画帧与静态 inset 共用边距计算；值未变化时不触发布局。 */
+    fun applyContentPadding(insets: WindowInsetsCompat) {
       val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
       val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
       val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
-      view.setPadding(
-        maxOf(bars.left, cutout.left),
-        0,
-        maxOf(bars.right, cutout.right),
-        // 键盘弹起时用键盘高度，否则保留系统栏高度，避免内容被导航栏遮挡
-        maxOf(ime, bars.bottom),
-      )
+      val left = maxOf(bars.left, cutout.left)
+      val right = maxOf(bars.right, cutout.right)
+      val bottom = maxOf(ime, bars.bottom)
+      if (content.paddingLeft != left || content.paddingTop != 0 ||
+        content.paddingRight != right || content.paddingBottom != bottom
+      ) {
+        content.setPadding(left, 0, right, bottom)
+      }
+    }
+
+    ViewCompat.setOnApplyWindowInsetsListener(content) { _, insets ->
+      // onPrepare 后这里先收到动画终态，提前应用会在尚未上来的键盘上方留出白块。
+      if (imeAnimations.isEmpty()) applyContentPadding(insets)
 
       // inset 是物理像素，CSS 像素要除以 density，否则高分屏上会多留出两三倍的空白
+      val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+      val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
       val density = resources.displayMetrics.density
       safeAreaTopCssPx = maxOf(bars.top, cutout.top) / density
       pushSafeAreaTop()
       insets
     }
+    ViewCompat.setWindowInsetsAnimationCallback(
+      content,
+      object : WindowInsetsAnimationCompat.Callback(
+        WindowInsetsAnimationCompat.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE,
+      ) {
+        override fun onPrepare(animation: WindowInsetsAnimationCompat) {
+          if ((animation.typeMask and WindowInsetsCompat.Type.ime()) != 0) {
+            imeAnimations.add(animation)
+          }
+        }
+
+        override fun onProgress(
+          insets: WindowInsetsCompat,
+          runningAnimations: MutableList<WindowInsetsAnimationCompat>,
+        ): WindowInsetsCompat {
+          if (runningAnimations.any { (it.typeMask and WindowInsetsCompat.Type.ime()) != 0 }) {
+            applyContentPadding(insets)
+          }
+          return insets
+        }
+
+        override fun onEnd(animation: WindowInsetsAnimationCompat) {
+          // 结束与取消都重新读取当前 inset；重叠动画未结束时不能套回旧终态。
+          if (imeAnimations.remove(animation) && imeAnimations.isEmpty()) {
+            ViewCompat.requestApplyInsets(content)
+          }
+        }
+      },
+    )
   }
 
   /**

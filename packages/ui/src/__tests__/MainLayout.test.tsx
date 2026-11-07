@@ -9,7 +9,13 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { MainLayout } from "../layout/MainLayout";
 import { TAB_ROOT_PATHS } from "../layout/navItems";
-import { useThemeStore, useAuthStore, useMomentsStore } from "@yuanchat/shared";
+import {
+  useThemeStore,
+  useAuthStore,
+  useMomentsStore,
+  useShortcutStore,
+  DEFAULT_SEARCH_SHORTCUT,
+} from "@yuanchat/shared";
 
 /** jsdom 默认宽度，落在平板/桌面分支（≥768） */
 const WIDE = 1024;
@@ -37,9 +43,22 @@ beforeEach(() => {
     fontScale: "normal",
   });
   useMomentsStore.setState({ unreadCount: 0 });
+  useShortcutStore.setState({ searchShortcut: DEFAULT_SEARCH_SHORTCUT });
 });
 
 describe("MainLayout", () => {
+  it("使用已保存的精确搜索组合，旧组合不再打开面板", () => {
+    useShortcutStore.getState().setSearchShortcut({ key: "k", shift: true, alt: false });
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <MainLayout />
+      </MemoryRouter>,
+    );
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "K", ctrlKey: true, shiftKey: true });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
   it("renders three navigation items", () => {
     render(
       <MemoryRouter initialEntries={["/chat"]}>

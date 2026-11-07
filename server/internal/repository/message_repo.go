@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -316,32 +317,65 @@ type SearchResult struct {
 	ConvName string `json:"conv_name" gorm:"column:conv_name"`
 }
 
-// Search 按关键词搜索当前用户有权访问的消息文本（pg_trgm GIN 加速）。
+// escapeLike 转义 LIKE/ILIKE 的模式元字符，让用户输入按字面量匹配。
+//
+// 不转义的话用户搜一个 "%" 就等于 ILIKE '%%%'，把整张表捞出来；"_" 同理
+// （LIKE 里它匹配任意单字符）。PostgreSQL 的 LIKE 默认转义符就是反斜杠，
+// 所以只需在三个元字符前加反斜杠，无需额外的 ESCAPE 子句。
+func escapeLike(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 8)
+	for _, r := range s {
+		if r == '\\' || r == '%' || r == '_' {
+			b.WriteRune('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// Search 按关键词搜索当前用户有权访问的消息（pg_trgm GIN 加速）。
+//
+// 检索范围是正文（content->>'text'）**与文件名**（content->>'name'）——
+// 图片/文件/视频的名字在后者，先前只查正文，故「搜不到文件」。
+// 两个 ILIKE 走 OR，较长词可利用 003/022 的 GIN 索引；短词可能扫描候选消息。
+//
+// types 非空时限定消息类型（对应前端的「文件/图片/视频/语音」筛选器）；
+// 为空表示不过滤。E2EE 消息无论如何都排除 —— 服务端读不了密文，
+// 加过滤不能顺手放宽这条口径。
+//
+// 所有搜索模式都排除已解散会话，并遵守当前成员的 cleared_before_seq。
 // convID 非 nil 时限定在单个会话内。
 // beforeTime 为翻页游标（created_at < beforeTime），nil 表示从最新开始。
-// 最少 3 个字符时才命中 GIN 索引；更短时后端拒绝（service 层校验）。
 func (r *MessageRepository) Search(
 	ctx context.Context,
 	userID uuid.UUID,
 	query string,
 	convID *uuid.UUID,
+	types []int16,
 	beforeTime *time.Time,
 	limit int,
 ) ([]SearchResult, error) {
+	pattern := "%" + escapeLike(query) + "%"
+
 	q := r.db.WithContext(ctx).
 		Table("messages m").
 		Select("m.*, u.nickname AS sender_nickname, u.avatar_url AS sender_avatar_url, c.name AS conv_name").
 		Joins("JOIN users u ON u.id = m.sender_id").
 		Joins("JOIN conversations c ON c.id = m.conversation_id").
 		Joins("JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = ?", userID).
-		Where("m.deleted_at IS NULL AND m.status = ?", model.MessageStatusNormal).
-		// 端到端加密消息服务端无法解读，显式排除（其 content 本就无 text 字段，
-		// 此处是防御性声明：内容结构若变化也不会意外把密文纳入检索）
+		Where("c.deleted_at IS NULL AND m.deleted_at IS NULL AND m.status = ?", model.MessageStatusNormal).
+		Where("m.seq > cm.cleared_before_seq").
+		// 端到端加密消息服务端无法解读，显式排除。这不是防御性声明而是硬口径：
+		// 新加的文件名分支会命中密文消息 content 里的 name 字段。
 		Where("m.message_type != ?", model.MessageTypeE2EE).
-		Where("(m.content->>'text') ILIKE ?", "%"+query+"%")
+		Where("((m.content->>'text') ILIKE ? OR (m.content->>'name') ILIKE ?)", pattern, pattern)
 
 	if convID != nil {
 		q = q.Where("m.conversation_id = ?", *convID)
+	}
+	if len(types) > 0 {
+		q = q.Where("m.message_type IN ?", types)
 	}
 	if beforeTime != nil {
 		q = q.Where("m.created_at < ?", *beforeTime)

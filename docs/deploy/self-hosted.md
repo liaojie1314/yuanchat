@@ -117,11 +117,42 @@ sudo usermod -aG docker "$USER" && newgrp docker
 
 ## 二、部署
 
+### 不是真正的「一键」——先看清这三件事
+
+`install.sh` 把**首次全新部署**的流程串起来了，但它不是一条命令跑完就能走开的脚本。
+照下面的顺序做没问题，但要知道它在哪儿会停、哪儿需要你手工介入：
+
+1. **必须跑两次。** 第一次只生成 `deploy/.env` 然后**主动退出**，等你填域名；
+   第二次才真正签证书、构建、启动。
+2. **DNS 必须提前解析好。** 证书走 HTTP-01 挑战，Let's Encrypt 要能从公网回连到这台机器。
+   五个子域没全部指向本机 IP，签发就失败，而失败后**重试有频率限制**
+   （同一组域名每周 5 次），踩满了只能等一周。
+3. **`PUBLIC_IP` 脚本探测不出来，只能手填。** 见下文。
+
+**不在 `install.sh` 覆盖范围内的**（这些得自己做）：
+
+| 场景                   | 为什么不行                                                                                                                                         |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **升级到新版本**       | 脚本是按「首次部署」写的。升级要自己 `git fetch && git checkout <tag>` → 改 `.env` 的 `APP_VERSION` → 重新 `build` → `up -d`                       |
+| **重装但保留数据**     | 重新 clone 仓库会丢两样东西：`deploy/.env`（含全部密钥，**先备份**）和 `envsubst` 渲染出的 `nginx/nginx.conf`、`coturn/turnserver.prod.conf`。见下 |
+| **换管理员密码**       | `bootstrap-admin` 在「库里已有管理员」时直接跳过，改 `.env` 的 `ADMIN_PASSWORD` **不会生效**。见「五、管理后台」                                   |
+| 云厂商安全组           | 机器上的 ufw 脚本会配，但云控制台的安全组是**另一道独立的门**，必须自己放行                                                                        |
+| 邮件通道（注册验证码） | `CODESENDER_*` 得自己去邮件服务商申请，脚本只留空位                                                                                                |
+
+> **重装时的一个坑**：Docker 的 bind mount 在宿主机路径不存在时会**自动建一个目录**。
+> 所以如果在渲染 `nginx.conf` / `turnserver.prod.conf` 之前就 `up -d`，
+> 这两个路径会变成空目录，nginx 启动报
+> `not a directory: Are you trying to mount a directory onto a file`。
+> 修法是先 `rmdir` 掉这两个空目录，再按 `install.sh` 第 149-155 行那样 `envsubst` 渲染，
+> 然后重新 `up -d`。**顺序是先渲染后启动**，别反。
+
+### 首次部署
+
 ```bash
 git clone https://github.com/liaojie1314/yuanchat.git
 cd yuanchat
 
-# 首次运行会生成 deploy/.env 并退出，提示你填写域名
+# 第一次运行：只生成 deploy/.env 然后退出，提示你填写域名
 ./deploy/install.sh
 
 # 编辑域名、邮箱与 PUBLIC_IP（密码留空即可，脚本会自动生成随机值）
@@ -131,12 +162,21 @@ vim deploy/.env
 ./deploy/install.sh
 ```
 
-`deploy/.env` 里**必须手工填**的是五个域名、`ADMIN_EMAIL`，以及 `PUBLIC_IP`
+`deploy/.env` 里**必须手工填**的是五个域名、`LE_EMAIL`（证书联系邮箱），以及 `PUBLIC_IP`
 （本机**外网** IP，`curl -s https://api.ipify.org` 可查）。`PUBLIC_IP` 没法由脚本自动探测 ——
 NAT / 云主机里 `ip addr` 看到的是内网地址，填错等于没填：coturn 会把内网地址写进
 relay candidate，跨 NAT 的通话就卡在「连接中」。留空时 `install.sh` 会直接报错退出。
 
 其余凭据（含 `TURN_SECRET`）留空即可，脚本自动生成并写回 `.env`。
+`ADMIN_EMAIL` 独立表示管理后台登录账号，需引导管理员时填写；留空会告警并跳过引导，
+不影响 `LE_EMAIL` 的证书签发。两个邮箱可以相同，但不得再写两条 `ADMIN_EMAIL`。
+
+既有部署重跑新 `install.sh` 前，请在 `.env` 手工新增 `LE_EMAIL=<证书联系邮箱>`，
+并保留原 `ADMIN_EMAIL=<既有管理员邮箱>`；若旧文件含重复 `ADMIN_EMAIL`，合并成唯一的
+管理员账号键。脚本不会推断或覆盖旧配置，也不会重置既有管理员密码。
+
+配置回归可运行 `bash deploy/install.test.sh`：在临时目录执行安装脚本，Docker、证书
+签发与网络均用隔离替身，验证首次生成、重跑读取及管理员留空三种路径，不触碰实际部署。
 
 脚本按序完成：
 
@@ -146,7 +186,61 @@ relay candidate，跨 NAT 的通话就卡在「连接中」。留空时 `install
 4. 临时自签证书让 nginx 起 443 → 走 HTTP-01 签发正式证书 → 每 12h 自动续期
 5. `docker compose up -d --build`（首次构建约 5-10 分钟）
 
-完成后访问 `https://app.your-domain.com`。
+完成后访问 `https://chat.your-domain.com`。
+
+### 升级到新版本
+
+```bash
+cd /path/to/yuanchat
+git fetch --tags && git checkout v0.6.0        # 换成目标 tag
+sed -i 's/^APP_VERSION=.*/APP_VERSION=0.6.0/' deploy/.env
+
+cd deploy
+docker compose -f docker-compose.prod.yml build \
+  --build-arg GOPROXY=https://goproxy.cn,direct yuanchat-server
+docker compose -f docker-compose.prod.yml build yuanchat-web yuanchat-admin
+docker compose -f docker-compose.prod.yml up -d
+```
+
+`APP_VERSION` 一定要跟着改：镜像 tag 用的就是它，不改就会拿旧镜像起新代码的容器。
+前端镜像在 build 时把版本号烤进产物，所以**先 checkout 再 build**，顺序反了产物里是旧版本号。
+
+> ⚠️ **升级到含迁移 021 的版本必须先改 `.env` 的管理员变量**：`ADMIN_PHONE` 已废弃，
+> 换成 `ADMIN_EMAIL` 且**填同一个管理员注册时用的邮箱**。不改的话 `bootstrap-admin`
+> 按新变量取不到值，下次重跑 `install.sh` 会**再建一个管理员**（而旧的还在）。
+
+内存小于 4G 的机器把三个镜像分开构建（如上），别一条命令并行构 ——
+`pnpm install` 加两个 vite build 的峰值会 OOM。`GOPROXY` 那个参数在国内必须带，
+否则 `go mod download` 卡死在 `proxy.golang.org`。
+
+### 重装但保留数据
+
+```bash
+# 1. 先备份 .env（含全部密钥，重新 clone 会丢）
+cp deploy/.env ~/yuanchat-env.backup
+
+# 2. 停容器但保留 volume（不要加 -v！加了数据库和对象存储就没了）
+cd deploy && docker compose -f docker-compose.prod.yml --profile observability down
+
+# 3. 重新 clone 到目标版本，恢复 .env
+cd /www && mv yuanchat yuanchat.old && \
+  git clone --depth 1 --branch v0.6.0 https://github.com/liaojie1314/yuanchat.git yuanchat
+cp ~/yuanchat-env.backup yuanchat/deploy/.env && chmod 600 yuanchat/deploy/.env
+
+# 4. 渲染两个模板（必须在 up -d 之前，见上文的 bind mount 坑）
+cd yuanchat/deploy && set -a && . ./.env && set +a
+envsubst '${DOMAIN_CHAT} ${DOMAIN_API} ${DOMAIN_WS} ${DOMAIN_ADMIN} ${DOMAIN_STORAGE}' \
+  < nginx/nginx.conf.template > nginx/nginx.conf
+envsubst '${TURN_SECRET} ${DOMAIN_CHAT} ${PUBLIC_IP}' \
+  < coturn/turnserver.prod.conf.template > coturn/turnserver.prod.conf
+
+# 5. 构建 + 启动
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+`down` **不要**带 `-v`。带了就是连 `yuanchat_pg_data` / `yuanchat_minio_data` 一起删，
+用户、聊天记录、已上传的图片文件全部永久消失。证书 volume（`yuanchat_certbot_conf`）
+同样要留着 —— 删了得重新签发，而签发有频率限制。
 
 ## 三、服务构成
 
@@ -248,34 +342,74 @@ compose 的镜像 tag 是 `yuanchat/server:${APP_VERSION}`，两者脱节时 com
 ### 管理员账号
 
 **管理后台没有注册入口**，因此第一个管理员必须在部署时引导出来 —— 否则装完谁都登不进
-`admin` 子域。在 `deploy/.env` 里填好手机号即可，密码留空由 `install.sh` 随机生成：
+`admin` 子域。在 `deploy/.env` 里填好邮箱即可，密码留空由 `install.sh` 随机生成：
 
 ```bash
-ADMIN_PHONE=13800138000     # 管理后台的登录账号，必须自己填
-ADMIN_PASSWORD=             # 留空则自动生成并写回 .env
+ADMIN_EMAIL=admin@your-domain.com   # 管理后台的登录账号，必须自己填
+ADMIN_PASSWORD=                     # 留空则自动生成并写回 .env
 ```
 
 `install.sh` 会在服务起好后跑一次 `/app/bootstrap-admin`，建号并打印登录信息。
 这一步**幂等**：库里已存在任一管理员时直接跳过，**不会**把线上密码重置回 `.env` 里的值 ——
 否则每次重跑 `install.sh` 都等于给管理员留一把永久后门（`.env` 常年躺在服务器上）。
 
-手机号已被占用时（常见于先在 Web 端注册了再跑脚本）会**提权该账号而非新建**，密码保持原样 ——
-不这么做会撞 `phone` 唯一索引直接失败。
+邮箱已被占用时（常见于先在 Web 端注册了再跑脚本）会**提权该账号而非新建**，密码保持原样 ——
+不这么做会撞 `email` 唯一索引直接失败。
 
 首次登录后请做两件事：
 
 1. 在应用内改密（改密递增 `token_version`，旧令牌立即失效）
 2. 清空 `.env` 里的 `ADMIN_PASSWORD`
 
-漏填 `ADMIN_PHONE` 时脚本会告警跳过。补救方式是先在 Web 端注册一个账号，再手工提权：
+漏填 `ADMIN_EMAIL` 时脚本会告警跳过。补救方式是先在 Web 端注册一个账号，再手工提权：
 
 ```bash
 COMPOSE="docker compose -f deploy/docker-compose.prod.yml"
 $COMPOSE exec postgres psql -U yuanchat -d yuanchat \
-  -c "UPDATE users SET role = 1 WHERE phone = '你的手机号';"
+  -c "UPDATE users SET role = 1 WHERE email = '你的邮箱';"
 ```
 
-填好 `ADMIN_PHONE` 后重跑 `./deploy/install.sh` 也可以，脚本会补上这一步。
+填好 `ADMIN_EMAIL` 后重跑 `./deploy/install.sh` 也可以，脚本会补上这一步。
+
+### 换管理员密码（改 .env 不生效）
+
+`bootstrap-admin` 在**库里已有管理员**时会直接跳过，什么都不做 ——
+这是刻意的，否则每次重跑 `install.sh` 都会把线上密码重置成 `.env` 里那个值
+（而 `.env` 常年躺在服务器上，等于留了把永久后门）。
+
+代价是：**改 `.env` 的 `ADMIN_PASSWORD` 再重跑脚本，密码不会变**。
+它还有一条「邮箱已被占用则提权」的分支，但那条明确只改 `role`、不碰密码。
+
+正确做法有两条，**都不要自己手写 bcrypt 哈希**（cost 必须与
+`internal/pkg/password` 一致，写错了只会得到一个登不进去的账号）：
+
+```bash
+# 办法一（推荐）：在应用内自己改
+#   用现有管理员账号登录 Web 端 → 设置页改密码。
+#   忘了旧密码就走「忘记密码」，验证码发到该账号绑定的邮箱。
+
+# 办法二：引导账号还没用过，删掉让脚本重新建
+COMPOSE="docker compose -f docker-compose.prod.yml"
+cd deploy && set -a && . ./.env && set +a
+
+# 先确认这个账号没有业务数据，全是 0 才能删
+docker exec yuanchat-postgres psql -U "$DB_USER" -d "$DB_NAME" -t -A -F' | ' -c "
+SELECT (SELECT count(*) FROM messages WHERE sender_id = u.id),
+       (SELECT count(*) FROM conversation_members WHERE user_id = u.id),
+       (SELECT count(*) FROM contacts WHERE user_id = u.id),
+       (SELECT count(*) FROM admin_action_logs WHERE actor_id = u.id)
+FROM users u WHERE u.role = 1;"
+
+# 改成新密码，硬删旧管理员，重新引导
+sed -i 's|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=<新密码>|' .env
+docker exec yuanchat-postgres psql -U "$DB_USER" -d "$DB_NAME" \
+  -c "DELETE FROM users WHERE role = 1;"
+$COMPOSE run --rm --entrypoint /app/bootstrap-admin yuanchat-server
+```
+
+注意是 `DELETE` 而不是软删：软删会留着 `email` 的唯一索引，
+`bootstrap-admin` 新建时仍然撞索引。**只有在那四个计数全是 0 时才能这么干** ——
+若该账号已经发过消息、进过群、办过管理动作，删它会牵连那些数据，这时只能走办法一。
 
 ## 五、备份
 

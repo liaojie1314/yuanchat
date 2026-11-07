@@ -1,6 +1,6 @@
 # 元聊 YuanChat — 开发与打包指南
 
-> **最后更新**：2026-09-14（补 coturn/TURN 的本地依赖与环境变量；后端环境变量表改回真实的 `YUANCHAT_` 前缀名）
+> **最后更新**：2026-11-06（同步下载/设置与 Android 键盘修订；本轮本地检查与截图收尾完成，未发版）
 >
 > ⚠️ **文档维护规则**：任何 `package.json` scripts、Tauri 配置、环境变量、workflow 的变更，**必须同步更新本文档**。此规则对所有会话生效。
 
@@ -32,14 +32,14 @@ yuanchat/
 
 ## 前置条件
 
-| 工具                 | 版本要求 | 用途                     |
-| -------------------- | -------- | ------------------------ |
-| Node.js              | ≥22      | 前端运行时               |
-| pnpm                 | ≥10      | 包管理器                 |
-| Rust                 | ≥1.80    | 桌面/移动端编译（Tauri） |
-| Go                   | ≥1.22    | 后端                     |
-| Docker               | ≥24      | 后端基础设施             |
-| Android SDK + NDK 29 | —        | Android 移动端打包       |
+| 工具                 | 版本要求 | 用途                          |
+| -------------------- | -------- | ----------------------------- |
+| Node.js              | ≥22      | 前端运行时                    |
+| pnpm                 | ≥10      | 包管理器                      |
+| Rust                 | ≥1.80    | 桌面/移动端编译（Tauri）      |
+| Go                   | ≥1.25.7  | 后端，以 `server/go.mod` 为准 |
+| Docker               | ≥24      | 后端基础设施                  |
+| Android SDK + NDK 29 | —        | Android 移动端打包            |
 
 ### 一次性安装
 
@@ -129,6 +129,7 @@ PATH 里遮住系统版本，用 `gst-inspect-1.0` 会得到「元件全部缺�
 - **彻底清理**：`pnpm dev:stop`
 - Go 工具链不在 PATH 时自动兜底 `/home/liaojie1314/env/go/go/bin`
 - 真实模式测试账号见第四章
+- 三端真实验收依次启动；切换 Web / 桌面 / Android 前先 `pnpm dev:stop`，避免复用前一端的开发进程。
 
 以下章节为**分步启动**方式（调试单个环节时使用）。
 
@@ -164,10 +165,9 @@ PATH 里遮住系统版本，用 `gst-inspect-1.0` 会得到「元件全部缺�
 
 **Mock 覆盖的接口**：
 
-- `POST /api/v1/auth/login` — 账号（手机号/邮箱）+ 密码登录（密码 `wrong` 测试错误）
-- `POST /api/v1/auth/register` — 手机号 + 密码 + 验证码 + 昵称注册
+- `POST /api/v1/auth/login` — 账号（邮箱/元聊号）+ 密码登录（密码 `wrong` 测试错误）
+- `POST /api/v1/auth/register/otp` + `POST /api/v1/auth/register` — 邮箱验证码 + 密码 + 昵称注册
 - `POST /api/v1/auth/logout` — 登出（始终返回成功，300ms 延迟）
-- `GET /api/v1/captcha` — SVG 验证码
 
 **聊天数据的 Mock**：会话列表与消息不走 MSW，而是由 `useChatBootstrap` 在
 Mock 模式下直接注入 demo 数据（`packages/shared/src/mocks/demoData.ts`），
@@ -231,6 +231,12 @@ Tauri 2 桌面端同时承担**桌面端**（Windows / macOS / Linux）和**移�
 - 登录页尺寸：540 × 600（固定，不可拉伸）
 - 登录后自动切换为首页尺寸：1200 × 800（可拉伸，最小 900 × 600）
 - 标题栏：自定义（`decorations: false`），含最小化/最大化/关闭按钮
+
+托盘与未读角标（Linux 验证前提）：角标走 `window.setBadgeCount`（macOS/Linux）与
+`window.setOverlayIcon`（Windows 静态红点），Linux 侧数字角标依赖桌面环境能按
+`.desktop` 条目找到应用 —— 即 `yuanchat.desktop` 已安装（装 `.deb`，或复用
+`/usr/share/applications` 里已装的条目）才能生效；`tauri dev` 开发模式下同样可验证，
+但裸跑二进制而没有 desktop 条目时角标静默不显示。
 
 构建产物位置：`apps/desktop/src-tauri/target/release/bundle/`
 
@@ -340,9 +346,11 @@ pnpm --filter @yuanchat/desktop tauri android build
 `apps/desktop/src-tauri/gen/android` **纳入版本控制**（不整体忽略），因为它含手改源码：
 
 - `app/src/main/java/.../MainActivity.kt` — 用户扩展点，Tauri **只生成一次、构建不覆盖**
-  （被覆盖的是 `generated/TauriActivity.kt`）。当前含**软键盘适配**的 `WindowInsets` 监听，
-  软键盘弹起时把 IME 高度作为 padding 应用到内容区（详见 `docs/TROUBLESHOOTING.md`
-  「软键盘遮挡输入框」）。
+  （被覆盖的是 `generated/TauriActivity.kt`）。当前含**软键盘适配**：API 30+ 用 IME inset
+  调整内容区 padding，并通过 `WindowInsetsAnimationCompat` 跟随动画，避免提前套用
+  终态；旧系统保留 `adjustResize`。共享 `useKeyboardAwareViewport` 在 resize 同步写
+  CSS 高度，rAF 仅合并聚焦滚动。原生动画修订已通过本机 Android 35 模拟器复核，详见
+  [TROUBLESHOOTING「软键盘遮挡输入框」](TROUBLESHOOTING.md#软键盘遮挡输入框--点输入框内容不上移)。
 - `app/src/main/AndroidManifest.xml`、`build.gradle.kts`、`res/`、Gradle Wrapper 等。
 
 构建产物（`build/`、`.gradle/`、`.cxx/`、`jniLibs/**/*.so`、`generated/`）由 Tauri 内置于
@@ -374,7 +382,7 @@ pnpm --filter @yuanchat/desktop tauri android build
 # 1. 启动基础设施（PostgreSQL :5434 + Redis :6380）
 docker compose -f deploy/docker-compose.yml up -d
 
-# 2. 灌入测试数据（3 个用户 + 单聊 + 群聊 + 历史消息）
+# 2. 灌入测试数据（4 个账号：Alice/Bob/Carol + Admin 管理员，含单聊 + 群聊 + 历史消息）
 cd server && go run ./cmd/seed
 
 # 3. 启动后端（REST :8085 + WS :8086）
@@ -384,17 +392,18 @@ go run ./cmd/server
 pnpm --filter @yuanchat/web dev:real
 ```
 
-**测试账号**（密码均为 `Test@1234`）：
+**测试账号**（密码均为 `Test@1234`，seed 以邮箱为唯一键——手机号已随迁移 021 移除）：
 
-| 昵称  | 手机号（登录账号） | 说明                                   |
-| ----- | ------------------ | -------------------------------------- |
-| Alice | `13800000001`      | 单聊（Bob）+ 群聊（群主）；好友 Bob    |
-| Bob   | `13800000002`      | 单聊（Alice、Carol）+ 群聊；好友双向   |
-| Carol | `13800000003`      | 单聊（Bob）+ 群聊；有发给 Alice 的申请 |
+| 昵称  | 邮箱（登录账号）    | 说明                                   |
+| ----- | ------------------- | -------------------------------------- |
+| Alice | `alice@example.com` | 单聊（Bob）+ 群聊（群主）；好友 Bob    |
+| Bob   | `bob@example.com`   | 单聊（Alice、Carol）+ 群聊；好友双向   |
+| Carol | `carol@example.com` | 单聊（Bob）+ 群聊；有发给 Alice 的申请 |
+| Admin | `admin@example.com` | 管理员（可登管理后台）                 |
 
 两个浏览器（或普通+隐身窗口）分别登录 Alice / Bob 即可互发消息，验证实时收发、已读回执（双勾变蓝）、正在输入、未读角标。
 
-通讯录联调：登录 Alice → 通讯录「新的朋友」有 Carol 的待处理申请（同意后自动建单聊 + 打招呼消息）；「+」添加联系人支持手机号 / 元聊号 / 邮箱精确搜索。
+通讯录联调：登录 Alice → 通讯录「新的朋友」有 Carol 的待处理申请（同意后自动建单聊 + 打招呼消息）；「+」添加联系人支持邮箱 / 元聊号精确搜索。
 
 > 聊天 REST 端点与 WebSocket 协议详见 [`docs/CHAT_API.md`](./CHAT_API.md)。
 
@@ -417,7 +426,8 @@ go run ./cmd/gc -batch 200            # 引用判定的分批大小（默认 500
 
 判定规则：对象 `LastModified` 早于宽限期，且 key 不被 `messages.content->>'key'` /
 `messages.content->>'thumb_key'`（视频封面）/ `stickers.object_key` / `users.avatar_url` /
-`conversations.avatar_url` / `sticker_packs.cover_url` 任何一处引用 → 可回收。
+`conversations.avatar_url` / `sticker_packs.cover_url` / `app_releases.object_key` 任何一处引用 → 可回收。
+已登记版本的草稿、已发布与回滚包均保留，避免回滚后再次发布时安装包已被回收。
 宽限期是必需的——前端先传字节、后发 WS 帧，刚上传的对象可能"消息还在路上"。
 
 > **调度是独立的运维决策**：本仓不预置 cron/定时任务（改 `deploy/` 生产配置需单独评审）。
@@ -680,6 +690,13 @@ Go 侧**刻意不进钩子**（CI 已覆盖）：把 Go 全量测试塞进 pre-c
 | `YUANCHAT_TURN_STATIC_AUTH_SECRET` | dev 用 `yuanchat-dev-turn-secret` | 与 `turnserver.conf` 的 `static-auth-secret` 同值；**生产只由环境变量下发**，为空则退化为纯 STUN |
 | `YUANCHAT_TURN_CREDENTIAL_TTL`     | `1h`                              | 临时凭据有效期                                                                                   |
 
+### 生产安装脚本
+
+`deploy/.env` 的 `LE_EMAIL` 是证书联系邮箱，`ADMIN_EMAIL` / `ADMIN_PASSWORD` 是首个
+管理员账号，三者不是后端 `YUANCHAT_*` 配置。旧部署重跑安装脚本前新增 `LE_EMAIL`，
+保留唯一的 `ADMIN_EMAIL`；旧 `ADMIN_PHONE` 改为既有管理员的邮箱。账号留空只跳过引导，
+不会阻止证书签发，已有管理员也不会被重置。迁移说明见 [自建部署](deploy/self-hosted.md)。
+
 ### 前端
 
 前端通过 Vite 的 `--mode` 自动加载对应的 `.env.[mode]` 文件：
@@ -753,6 +770,9 @@ packages/shared/coverage/
 覆盖率门禁在 CI 中强制执行（`.github/workflows/ci.yml`）。前端阈值配置在各包的
 `vitest.config.ts`（低于阈值 `pnpm test:coverage` 直接失败）：
 
+当前 CI 临时安装 `@vitest/coverage-v8@2.1.9` 后执行 `LANG=C.UTF-8 pnpm test:coverage`。
+本地若同样临时补装，验证后只撤回该依赖造成的 manifest/lockfile 改动，保留其他工作。
+
 | 包                       | statements | lines | 备注                                                                  |
 | ------------------------ | ---------- | ----- | --------------------------------------------------------------------- |
 | `packages/shared`        | 60%        | 60%   | 另有 branches 50% / functions 60%                                     |
@@ -775,6 +795,9 @@ node scripts/check-coverage.mjs 40 server/coverage.out   # 阈值以 CI 为准
 
 > **排除规则**：`cmd/`（main 入口）、`internal/testutil/`（测试辅助）、
 > `internal/database/`（DB 连接/迁移胶水层）不计入后端覆盖率统计。
+
+使用隔离 Go 安装跑覆盖率时，`PATH`、`GOROOT`、`GOPATH` 必须指向同一套工具链；
+仅替换 `go` 可执行文件会让 `covdata` 等子进程找不到匹配的工具。
 
 CI 会把覆盖率报告上传为 artifact（`backend-coverage`：`server/coverage.out`；
 `frontend-coverage`：`packages/*/coverage/` 含 lcov + HTML），不阻塞 PR 展示。
@@ -822,6 +845,10 @@ CI 会把覆盖率报告上传为 artifact（`backend-coverage`：`server/covera
 **框架**：Playwright（Chromium，headless）
 **环境**：测试自动启动 Vite dev server（Mock 模式，`VITE_ENABLE_MOCK=true`），使用 MSW Service Worker 拦截所有 API 调用，无需真实后端。
 
+运行 CI E2E 前先停止真实后端验收的 Web 实例，让 Playwright 新建 MSW 实例；
+不要复用同在 `:5173` 的 real 模式页面。浏览器目录授权、Tauri 窗口/托盘和 Android 安装器
+仍需真实环境验收，MSW E2E 不能替代这些检查。
+
 **测试文件位置**：`apps/web/e2e/`
 
 > **界面语言被钉在 zh-CN**：`playwright.config.ts` 设了 `use.locale: "zh-CN"`，
@@ -843,7 +870,7 @@ CI 会把覆盖率报告上传为 artifact（`backend-coverage`：`server/covera
 | 测试文件                            | 覆盖内容                                                                        |
 | ----------------------------------- | ------------------------------------------------------------------------------- |
 | `e2e/login.spec.ts`                 | 登录成功/失败、表单校验错误、API 错误、Enter 快捷键                             |
-| `e2e/register.spec.ts`              | 注册成功/失败、表单校验、验证码加载/刷新、Enter 快捷键                          |
+| `e2e/register.spec.ts`              | 注册成功/失败、表单校验、邮箱验证码发送/冷却、Enter 快捷键                      |
 | `e2e/logout.spec.ts`                | 登出跳转、localStorage 清除、登出后路由守卫                                     |
 | `e2e/route-guards.spec.ts`          | 未登录重定向（/ → /login）、已登录重定向（/login → /chat）                      |
 | `e2e/navigation.spec.ts`            | 登录/注册页间跳转、表单状态独立                                                 |
@@ -883,13 +910,13 @@ apps/web/e2e/
 
 ### CI（每次 push / PR 触发）
 
-`.github/workflows/ci.yml`：dev / main 分支的 push + PR 触发，三个 job（`e2e` 依赖 `frontend` 完成后串行，`backend` 独立并行）：
+`.github/workflows/ci.yml`：推送到 dev 或目标为 dev 的 PR 触发，三个 job（`e2e` 依赖 `frontend` 完成后串行，`backend` 独立并行）：
 
-| Job        | 依赖       | 内容                                                                                       |
-| ---------- | ---------- | ------------------------------------------------------------------------------------------ |
-| `frontend` | —          | `pnpm test`（全部 workspace）+ `apps/web` 和 `apps/desktop` 分别 `tsc --noEmit`            |
-| `e2e`      | `frontend` | Playwright headless Chromium，MSW mock 模式（无需后端）；失败时上传 playwright-report 附件 |
-| `backend`  | —          | `go vet ./...` + `go test ./...` + `go test -race ./internal/ws/`                          |
+| Job        | 依赖       | 内容                                                                                        |
+| ---------- | ---------- | ------------------------------------------------------------------------------------------- |
+| `frontend` | —          | i18n 门禁 + `pnpm test` + 前端覆盖率门禁 + `apps/web` 和 `apps/desktop` 分别 `tsc --noEmit` |
+| `e2e`      | `frontend` | Playwright headless Chromium，MSW mock 模式（无需后端）；失败时上传 playwright-report 附件  |
+| `backend`  | —          | `go vet ./...` + 全量 atomic coverage 测试 / 40% 门禁 + `go test -race ./internal/ws/`      |
 
 ### Release（tag `v*` push 触发）
 
@@ -934,7 +961,7 @@ macOS / Windows 代码签名（可选，用 `if` 门控——secrets 存在时�
 
 - `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD` / `APPLE_SIGNING_IDENTITY`
 - `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID`（notarize 用）
-- `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（更新签名，未来做自动更新用）
+- `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（桌面更新产物的 minisign 签名；自建 OTA 管理端只登记 `.sig`）
 
 完整流程、keystore 生成命令、签名策略详见 **[docs/RELEASE.md](RELEASE.md)**。
 
@@ -982,7 +1009,90 @@ Android WebView 会把「滚动时才浮现的覆盖式滚动条」换成**常�
 
 ---
 
-## 十二、文档更新规则
+## 十二、搜索、下载与 OTA 联调
+
+「设置 → 通用设置」集中主题、语言与文件下载目录。搜索快捷键设置只在非手机布局展示，
+`SettingsScreen` 复用 `isMobile` 隐藏手机 Web/Android 的 `ShortcutSection`，桌面/平板
+保留；手机入口副文案使用四语 `settings.generalDescMobile`（中文「外观与下载」），桌面
+沿用原描述，已保存组合不变。桌面端还显示关窗行为。
+原「外观」与独立「文件下载」导航已合并；共享 `DownloadDirectorySection` 用目录名、授权
+状态与操作按钮组成紧凑卡片。默认搜索组合为 Ctrl/Cmd+K，自定义组合在本机持久化，
+保留浏览器/编辑快捷键，不响应 IME 组合输入或重复按键。
+
+全局与会话内搜索共用 `CommandPalette`：Tauri 桌面的全局面板在主窗口内弹出，只有
+会话内搜索使用独立 `search` 窗口；手机 Web / Android 进入 `/search` 路由，Web 大屏
+保留居中弹窗。会话内带 `conversation_id`；
+复测须覆盖返回来源页、结果定位、已有窗口切换范围、登出/换号后关闭旧窗及拒绝旧导航。
+原生窗口权限须包含 `search` label，不能为修搜索另建 WebSocket。
+
+搜索子窗经 `search:ready` / `search:scope` 同步会话范围和 `skinId`，宿主用 `app-screen`
+铺满背景。2026-11-06 的 fresh Linux Tauri 已验证暗色首次开窗、已有窗主题切换、全窗
+背景及会话范围切换；修改跨窗 effect 后须完整重启再复验。开发 HMR 曾未重新执行已挂载
+effect，但这只是此前主题异常的候选原因，历史根因尚未确认。
+
+Web 默认下载目录依赖 **HTTPS 或 localhost 安全上下文 + File System Access API +
+IndexedDB + Web Locks**；缺任一能力时不提供选目录入口，继续浏览器默认保存。
+用户点击选择/重新授权才调用浏览器授权流程，目录句柄单独持久化，刷新后可恢复。
+已授权时直接写盘并以 `close()` 成功作为完成；同名递增避让，失败/取消清理本次产物。
+权限失效提示到「设置 → 通用设置 → 文件下载」重新授权；未设置目录时交浏览器保存，
+应用无法确认或取消浏览器接管后的最终保存。恢复默认只清目录偏好，不删除已有文件。
+授权目录下载完成后可「查看保存位置」：显示目录名和实际文件名，单关闭按钮；不尝试
+打开系统文件夹。已保存文件的句柄另存账号本地库并按服务器隔离，刷新后可恢复。
+旧 WebView 保持 `build.target=es2019` 与上述能力回落，不注入伪造的文件系统支持。
+
+桌面/Android 由 `apps/desktop/src/fileSink.ts` 注入 plugin-fs 落盘，`main.tsx` 必须先
+完成注入再挂载 React，以便设置首屏读取目录能力。桌面通过原生选择器选择目录，取消
+保留原设置；偏好存 Tauri app config 下的 `download-directory.json`（Linux 默认
+`~/.config/com.yuanchat.desktop/download-directory.json`），保存当前目录和历史授权。
+恢复默认只影响后续下载，保留历史授权与已有文件。`open_local_file` 在 canonical 路径
+检查后打开所在文件夹，仅允许应用目录、默认下载目录和已授权目录；不接受前端任意
+指定授权根。Android 保持应用私有 external Download 目录和 FileProvider 打开文件，
+系统文件管理器不可见、卸载即删，不要求广泛存储权限。
+普通附件 MIME 为 `*/*` 时由 `contentResolver.getType(uri)` 识别，显式 APK MIME 保持
+优先。`95f0b95` 已在重启后的 PNG 下载上验证 Google Photos 打开、`image/png` Intent
+和 FileProvider 临时读取授权；合法 OTA 安装记录见下方 Android 验收说明。
+
+原生文件读写（含 outbox 副本）每次 IPC 限制为 1 MiB，避免大字节数组在 Android 桥接中
+被复制放大；JS 仍持有完整文件缓冲，并非恒定总内存。2026-11-07 的 43,866,277 字节
+测试 APK 已完成下载、保存与读回，错误 SHA 被拒绝并删除文件，退出记录无新增 OOM。
+附件上传前须在原生持久化可用时保存字节副本及带 MIME 的 IDB 草稿；`payload=null`
+草稿不能自动发 WS。重启恢复失败气泡，由用户重试上传，真实 ACK 后清理记录及副本。
+
+完成记录按账号/服务器存入本地库，保留每次实际路径（含同名避让后缀）与 SHA-256。
+当前改目录只影响后续保存，不移动旧文件；相关小改进债务统一在 MASTER_PLAN 的
+“未做清单总览”分级登记，不进入核心功能清单。
+恢复、切换目录和点击完成操作时核验当前目录及字节；切回旧目录可复用有效副本。
+原路径改名/丢失或内容改变时可重新下载，仍避让现有文件，不扫描任意重命名。目录读取
+或权限错误须提示处理，不能当成文件丢失。下载产物不随登出、恢复默认或 LRU 清理而删除。
+Web 客户端安装包列表直接使用 catalog URL 交浏览器下载，不经过聊天文件的目录设置。
+
+桌面托盘资源 `icons/badge-dot-32.png` 必须同时登记在 `tauri.conf.json` 的
+`bundle.resources`，Windows 经 `resolveResource` / `Image.fromPath` 加载 overlay。
+Windows 登录/主窗/搜索窗按显示器逻辑工作区限幅；Linux/macOS 保留原尺寸。
+Linux Dock 数字需要已安装 `yuanchat.desktop`，已有桌面条目时无需重打 `.deb`；
+托盘 tooltip 受 libayatana 限制，未读数由菜单显示。Windows/macOS 本批没有真机验收。
+
+OTA 管理页可登记、发布、改灰度与回滚；非法版本号返回 400，重复登记返回 409。
+桌面 updater 自建端点包含 `?version={{current_version}}`，并发送匿名 cohort 桶头，
+204 表示确定无更新，服务错误才尝试 GitHub 兜底；新增头已登记 REST CORS。
+原生端命令面板的「检查更新」直达关于页并触发检查，Android 复用更新卡和下载器，
+sha256 校验通过后才经 FileProvider 调系统安装器。调试 APK 的签名和包内版本必须与
+目标测试一致；仅改 OTA 登记版本不能证明应用升级成功。接口详见 [CHAT_API](CHAT_API.md#三点六更新分发ota免鉴权)。
+
+2026-11-06 Android 35 模拟器已验证命令「检查更新」自动触发检查并消费 `checkUpdate=1`，
+真实本机测试版本 `0.99.0` 出现；该历史结果只覆盖检查入口。
+2026-11-07 已补齐合法 OTA：取消首处未知来源提示后重试，由系统安装器完成 0.6.0 →
+测试版 0.6.1 / 6001 升级；重开打包页面显示新版本，再检查为“已是最新版本”，无新增 OOM。
+范围仅 Android 35/x86_64 模拟器，更新目录的 `android/aarch64` 测试槽不证明 ARM 实机。
+五条测试发布记录已回滚，设备恢复 0.6.0 / 6000 并关闭来源安装权限；APK/生成 icon 与
+本轮 MinIO 对象已清理、编译缓存保留。详见本地 `final-acceptance-20261107/native-acceptance.json`。
+
+2026-11-06 指定链路实测、README 核心截图与本地检查已完成，当时 Chromium E2E 119 / 119
+通过（3.7 分钟、无重试）；运行环境已关闭、开发端口已清。源码已提交至 `a21c63d`，
+这是历史记录，后续 IPC/outbox 修订的真实验证和普通文件打开/OTA 安装进度见
+[实施计划](superpowers/plans/2026-10-11-tray-palette-ota.md#执行进度)，不能沿用旧 CI 结果。
+
+## 十三、文档更新规则
 
 1. 任何 `package.json` scripts 的**增删改**，必须同步更新本文档的对应章节
 2. 任何 Tauri 配置（`tauri.conf.json`、`capabilities/`）的变更，必须同步更新本文档

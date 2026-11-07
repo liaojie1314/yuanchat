@@ -28,6 +28,7 @@ import {
   Phone,
   Plus,
   Send,
+  Search,
   Smile,
   Video,
   X,
@@ -73,6 +74,7 @@ export function Composer({
   onSend,
   compact = false,
   onOpenMedia,
+  onOpenSearch,
   onOpenCall,
   editingMessageId,
   onCancelEdit,
@@ -83,6 +85,8 @@ export function Composer({
   compact?: boolean;
   /** 打开媒体相册（移动端「更多」面板入口；缺省时该项不渲染） */
   onOpenMedia?: () => void;
+  /** 会话内搜索（手机「更多」面板入口，由外层选择独立路由承载）。 */
+  onOpenSearch?: () => void;
   /** 发起通话（移动端「更多」面板入口；缺省时两项不渲染，同 onOpenMedia 范式） */
   onOpenCall?: (media: "audio" | "video") => void;
   /** 非空表示编辑态：显示提示条，发送按钮语义变「保存」 */
@@ -678,6 +682,16 @@ export function Composer({
                   openAnyFilePicker();
                 }}
               />
+              {onOpenSearch && (
+                <MoreItem
+                  icon={<Search size={22} />}
+                  label={t("chat.searchHistory")}
+                  onClick={() => {
+                    setShowMore(false);
+                    onOpenSearch();
+                  }}
+                />
+              )}
               {onOpenMedia && (
                 <MoreItem
                   icon={<Images size={22} />}

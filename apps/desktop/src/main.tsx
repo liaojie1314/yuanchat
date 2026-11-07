@@ -41,6 +41,11 @@ if ("__TAURI_INTERNALS__" in window) {
 }
 
 async function bootstrap() {
+  // 设置页首屏与下载记录恢复都要读取落盘能力，必须在挂载 React 前完成注入。
+  if ("__TAURI_INTERNALS__" in window) {
+    const { installFileSink } = await import("./fileSink");
+    installFileSink();
+  }
   // 开发阶段且 VITE_ENABLE_MOCK=true 时启动 MSW Mock Service Worker
   // 联调真实后端：VITE_ENABLE_MOCK=false pnpm --filter @yuanchat/desktop dev
   // 动态 import 确保 MSW 在 production build 中被 tree-shake

@@ -27,10 +27,10 @@ func adminTestDB(t *testing.T) *gorm.DB {
 
 func newAdminTestUser(t *testing.T, db *gorm.DB, nick string, role int16) *model.User {
 	t.Helper()
-	phone := fmt.Sprintf("198%08d", time.Now().UnixNano()%100000000)
+	email := fmt.Sprintf("admin-u%d@test.local", time.Now().UnixNano())
 	user := &model.User{
 		ID:           uuid.New(),
-		Phone:        &phone,
+		Email:        &email,
 		PasswordHash: "x",
 		ShortID:      time.Now().UnixNano()%1_000_000_000 + int64(len(nick)),
 		Nickname:     nick,
@@ -160,14 +160,14 @@ func TestBannedUserCannotLogin(t *testing.T) {
 		rdb,
 		zap.NewNop(),
 	)
-	_, err = userSvc.Login(ctx, LoginRequest{Account: *user.Phone, Password: plainPwd})
+	_, err = userSvc.Login(ctx, LoginRequest{Account: *user.Email, Password: plainPwd})
 	if !errors.Is(err, ErrUserBanned) {
 		t.Fatalf("Login(banned) = %v, want ErrUserBanned", err)
 	}
 
 	// 解封后可登录
 	db.Model(user).Update("status", model.UserStatusNormal)
-	if _, err := userSvc.Login(ctx, LoginRequest{Account: *user.Phone, Password: plainPwd}); err != nil {
+	if _, err := userSvc.Login(ctx, LoginRequest{Account: *user.Email, Password: plainPwd}); err != nil {
 		t.Fatalf("Login(after unban) = %v, want nil", err)
 	}
 }

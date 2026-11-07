@@ -87,11 +87,11 @@ export function useKeyboardAwareViewport(): void {
       }, 160);
     };
 
-    /** 视口尺寸变化（键盘弹/收）：用 rAF 合并抖动 */
+    /** 同步尺寸以免 WebView 绘制一帧旧高度，聚焦滚动仍用 rAF 合并。 */
     const onResize = () => {
+      apply();
       if (raf) cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
-        apply();
         const active = document.activeElement;
         if (isEditable(active)) scheduleCenter(active as HTMLElement);
       });

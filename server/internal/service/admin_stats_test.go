@@ -36,13 +36,13 @@ func newStatsSvc(db *gorm.DB) *AdminService {
 // seedStatsUser 插入一个用户并按参数累计到 fixture。
 func seedStatsUser(t *testing.T, db *gorm.DB, f *adminStatsFixture, status int16, createdAt time.Time) *model.User {
 	t.Helper()
-	phone := fmt.Sprintf("197%08d", time.Now().UnixNano()%100000000)
+	email := fmt.Sprintf("stats-u%d@test.local", time.Now().UnixNano())
 	u := &model.User{
 		ID:           uuid.New(),
-		Phone:        &phone,
+		Email:        &email,
 		PasswordHash: "x",
-		ShortID:      time.Now().UnixNano()%1_000_000_000 + int64(len(phone)),
-		Nickname:     "stats-" + phone,
+		ShortID:      time.Now().UnixNano()%1_000_000_000 + int64(len(email)),
+		Nickname:     "stats-" + email,
 		Status:       status,
 		CreatedAt:    createdAt,
 	}
