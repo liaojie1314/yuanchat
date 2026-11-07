@@ -19,6 +19,8 @@ export interface ValidationResult {
 /**
  * 密码强度校验
  *
+ * 仅用于注册、重置或修改新密码；登录时已有密码由服务端鉴权，不使用本规则。
+ *
  * 要求（与后端 ValidatePasswordStrength 同一套规则）：
  * - 长度 8-64 **字节**
  * - 至少包含 1 个大写字母 (A-Z)

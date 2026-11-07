@@ -301,6 +301,7 @@ export async function revealDownload(
  * @param messageId 进度条挂在哪个键下（OTA 用 `ota-<version>`）
  * @param url 已签名/公开的下载 URL
  * @param fileName 落盘文件名（同名避让在 fileSink 的 downloads 目录里做）
+ * @param fetcher 请求实现；Android 的 GitHub 安装包使用原生 HTTP 跨过 CDN 的 CORS 限制
  * @remarks 同一 messageId 已在下载中时直接返回（与 startDownload 同一语义）；
  *   inflight/AbortController 同样在同步段就位，取消语义与 startDownload 一致。
  */
@@ -308,6 +309,7 @@ export async function startDownloadFromUrl(
   messageId: string,
   url: string,
   fileName: string,
+  fetcher: typeof fetch = fetch,
 ): Promise<void> {
   if (inflight.has(messageId)) return;
 
@@ -316,7 +318,7 @@ export async function startDownloadFromUrl(
   initEntry(messageId);
 
   try {
-    await streamToSink(messageId, url, fileName, ctrl);
+    await streamToSink(messageId, url, fileName, ctrl, fetcher);
   } catch (err) {
     failDownload(messageId, err, ctrl);
   } finally {
@@ -370,12 +372,13 @@ async function streamToSink(
   url: string,
   fileName: string,
   ctrl: AbortController,
+  fetcher: typeof fetch = fetch,
 ): Promise<void> {
   const db = localDb();
   const update = (next: Partial<DownloadEntry>) => {
     if (inflight.get(messageId) === ctrl) patch(messageId, next);
   };
-  const res = await fetch(url, { signal: ctrl.signal });
+  const res = await fetcher(url, { signal: ctrl.signal });
   // 非 2xx 的响应体是 XML 错误页，存下来等于给用户一个坏文件
   if (!res.ok) throw new Error("http " + res.status);
 

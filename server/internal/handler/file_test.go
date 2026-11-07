@@ -236,7 +236,10 @@ func TestResolveCategory(t *testing.T) {
 		{"application/pdf", "images", "images"},
 		{"image/png", "sticker-covers", "sticker-covers"}, // 封面：仅显式指定，不靠 content-type 推断
 		{"image/png", "bogus", "files"},                   // 非法 query 回落 files
-		{"video/mp4", "", "files"},                        // 视频归 files，不进 images/
+		{"application/pdf", "releases", "files"},          // 普通上传不能进入发布流程管理的命名空间
+		{"image/png", "releases/", "files"},
+		{"image/png", "../releases", "files"},
+		{"video/mp4", "", "files"}, // 视频归 files，不进 images/
 		{"video/webm", "", "files"},
 		{"video/quicktime", "", "files"},
 	}

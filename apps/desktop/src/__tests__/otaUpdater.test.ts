@@ -14,9 +14,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 /** invoke 的调用记录：每条用例断言「install_apk 有没有、带什么参数」 */
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+const nativeFetch = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/plugin-http", () => ({ fetch: nativeFetch }));
 
 import { sha256Hex, downloadAndInstall } from "../android/otaUpdater";
-import { setFileSink, __resetFileSink, useDownloadStore } from "@yuanchat/shared";
+import { setFileSink, __resetFileSink, useDownloadStore, cancelDownload } from "@yuanchat/shared";
 
 /** 造一个 200 响应：按顺序吐 chunk、带 content-length，驱动确定性进度 */
 function okResponse(chunks: Uint8Array[]) {
@@ -40,6 +42,7 @@ function okResponse(chunks: Uint8Array[]) {
 
 beforeEach(() => {
   invoke.mockReset();
+  nativeFetch.mockReset();
   useDownloadStore.setState({ entries: {} });
   __resetFileSink();
 });
@@ -113,6 +116,129 @@ describe("otaUpdater", () => {
         mandatory: false,
       }),
     ).rejects.toThrow();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("GitHub APK 使用原生流式下载，凭据不从自建服务器传播", async () => {
+    const bytes = new TextEncoder().encode("hello");
+    const browserFetch = vi.fn().mockRejectedValue(new Error("CORS blocked"));
+    vi.stubGlobal("fetch", browserFetch);
+    nativeFetch.mockImplementation(okResponse([bytes]));
+    setFileSink({
+      save: vi.fn().mockResolvedValue("a.apk"),
+      remove: vi.fn(),
+      read: vi.fn().mockResolvedValue(bytes),
+    });
+    await downloadAndInstall({
+      version: "0.9.0",
+      notes: "",
+      size: 5,
+      mandatory: false,
+      url: "https://api.github.com/repos/liaojie1314/yuanchat/releases/assets/123",
+      sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+    });
+    expect(browserFetch).not.toHaveBeenCalled();
+    expect(nativeFetch).toHaveBeenCalledWith(
+      "https://api.github.com/repos/liaojie1314/yuanchat/releases/assets/123",
+      {
+        signal: expect.any(AbortSignal),
+        credentials: "omit",
+        headers: { Accept: "application/octet-stream" },
+        connectTimeout: 10_000,
+        maxRedirections: 3,
+      },
+    );
+    expect(invoke).toHaveBeenCalledWith("install_apk", { path: "a.apk" });
+  });
+
+  it("读回 APK 大小与元数据不符时删除且拒绝安装，即使摘要匹配", async () => {
+    const bytes = new TextEncoder().encode("hello");
+    const remove = vi.fn();
+    vi.stubGlobal("fetch", okResponse([bytes]));
+    setFileSink({
+      save: vi.fn().mockResolvedValue("a.apk"),
+      remove,
+      read: vi.fn().mockResolvedValue(bytes),
+    });
+    await expect(
+      downloadAndInstall({
+        version: "0.9.0",
+        notes: "",
+        size: 10,
+        mandatory: false,
+        url: "https://x/a.apk",
+        sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      }),
+    ).rejects.toThrow(/sha256|校验/i);
+    expect(remove).toHaveBeenCalledWith("a.apk", "downloads");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("原生下载取消时不写盘也不启动安装器", async () => {
+    const body = new ReadableStream<Uint8Array>({ pull: () => new Promise(() => {}) });
+    nativeFetch.mockResolvedValue({
+      ok: true,
+      body,
+      headers: new Headers({ "content-length": "5" }),
+    });
+    const save = vi.fn();
+    setFileSink({ save, read: vi.fn(), remove: vi.fn() });
+    const downloading = downloadAndInstall({
+      version: "0.9.0",
+      notes: "",
+      size: 5,
+      mandatory: false,
+      url: "https://api.github.com/repos/liaojie1314/yuanchat/releases/assets/123",
+      sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+    });
+    await vi.waitFor(() => expect(nativeFetch).toHaveBeenCalledOnce());
+    cancelDownload("ota-0.9.0");
+    await expect(downloading).rejects.toThrow("apk download failed");
+    expect(useDownloadStore.getState().entries["ota-0.9.0"].phase).toBe("canceled");
+    expect(save).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("原生下载的内存字节正确但磁盘字节被改动时删除 APK 并拒装", async () => {
+    nativeFetch.mockImplementation(okResponse([new TextEncoder().encode("hello")]));
+    const remove = vi.fn();
+    setFileSink({
+      save: vi.fn().mockResolvedValue("a.apk"),
+      remove,
+      read: vi.fn().mockResolvedValue(new TextEncoder().encode("jello")),
+    });
+    await expect(
+      downloadAndInstall({
+        version: "0.9.0",
+        notes: "",
+        size: 5,
+        mandatory: false,
+        url: "https://api.github.com/repos/liaojie1314/yuanchat/releases/assets/123",
+        sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      }),
+    ).rejects.toThrow(/sha256/);
+    expect(remove).toHaveBeenCalledWith("a.apk", "downloads");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { sha256: "not-a-digest", size: 5 },
+    { sha256: "a".repeat(64), size: 0 },
+    { sha256: "a".repeat(64), size: -1 },
+  ])("安装元数据无效时下载都不开始：%o", async (metadata) => {
+    const browserFetch = vi.fn();
+    vi.stubGlobal("fetch", browserFetch);
+    await expect(
+      downloadAndInstall({
+        version: "0.9.0",
+        notes: "",
+        mandatory: false,
+        url: "https://x/a.apk",
+        ...metadata,
+      }),
+    ).rejects.toThrow();
+    expect(browserFetch).not.toHaveBeenCalled();
+    expect(nativeFetch).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
   });
 });

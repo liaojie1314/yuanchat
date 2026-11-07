@@ -61,6 +61,11 @@ test.describe("Register Flow", () => {
     await expect(page.getByText("密码长度至少 8 位")).toBeVisible();
   });
 
+  test("new password without digits is still rejected", async ({ page }) => {
+    await registerPage.register("新用户", "new@yuanchat.com", OTP, "LegacyPasswordABCxyz");
+    await expect(page.getByText("密码需包含数字")).toBeVisible();
+  });
+
   test("no phone field on the form at all", async ({ page }) => {
     // 注册只收邮箱：手机号输入框整条移除，留着 placeholder 残留就是契约漂了
     await expect(page.getByPlaceholder(/手机号/)).toHaveCount(0);

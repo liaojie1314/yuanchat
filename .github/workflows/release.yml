@@ -472,7 +472,10 @@ jobs:
         env:
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
-        run: pnpm tauri android build --apk --split-per-abi
+        run: |
+          pnpm tauri android build --apk --split-per-abi
+          # 现有 Android 更新入口共用 aarch64 槽，OTA 使用包含全部 ABI 的通用包。
+          pnpm tauri android build --apk
 
       - name: Locate & rename APKs
         env:
@@ -482,6 +485,9 @@ jobs:
           find apps/desktop/src-tauri/gen/android/app/build/outputs -name "*-release.apk" | while read apk; do
             base=$(basename "$apk" .apk)
             cp "$apk" "artifacts/yuanchat-${REF_NAME}-${base}.apk"
+          done
+          for abi in arm arm64 x86 x86_64 universal; do
+            test -s "artifacts/yuanchat-${REF_NAME}-app-${abi}-release.apk"
           done
           ls -la artifacts
 

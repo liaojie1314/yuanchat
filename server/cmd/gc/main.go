@@ -15,6 +15,7 @@
 //   - 默认 dry-run，只报告不删除；真删要显式 -delete
 //   - 只考虑 LastModified 早于宽限期（默认 7 天）的对象，避开"刚上传、消息还在路上"的窗口
 //   - 引用判定分批查库（-batch，默认 500），不把全库 key 装进内存
+//   - releases/ 属于发布流程，安装包及未登记的清单、签名等附件均保留，由发布流程清理
 //
 // 运行：
 //
@@ -27,6 +28,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/yuanchat/server/internal/config"
@@ -160,6 +162,10 @@ func run(ctx context.Context, st objectStore, refs keyRefChecker, opts runOpts) 
 
 	err := st.ListObjects(ctx, opts.prefix, func(obj storage.ObjectInfo) error {
 		stats.scanned++
+		// 普通上传白名单不含 releases/；分发附件不能按聊天引用回收，统一交给发布流程管理。
+		if strings.HasPrefix(obj.Key, "releases/") {
+			return nil
+		}
 		// 宽限期：刚上传的对象可能"消息还在路上"（前端先传字节后发 WS 帧），
 		// 立刻回收会删掉正在发送中的媒体。
 		if obj.LastModified.After(opts.cutoff) {

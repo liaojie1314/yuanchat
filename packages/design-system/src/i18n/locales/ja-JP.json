@@ -178,6 +178,7 @@
   "auth.otpSentHint": "%{target} に認証コードを送信しました。5 分間有効です",
   "auth.resetStepAccountHint": "登録時のメールアドレスを入力してください。認証コードをそこに送信します",
   "auth.accountRequired": "アカウントを入力してください",
+  "auth.passwordRequired": "パスワードを入力してください",
   "validation.passwordMinLength": "パスワードは 8 文字以上にしてください",
   "validation.passwordMaxLength": "パスワードは 64 バイト以内にしてください",
   "validation.passwordUppercase": "パスワードに大文字を含めてください",

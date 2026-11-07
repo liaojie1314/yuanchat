@@ -178,6 +178,7 @@
   "auth.otpSentHint": "%{target}(으)로 코드를 보냈습니다. 5분간 유효합니다",
   "auth.resetStepAccountHint": "가입할 때 사용한 이메일을 입력하면 인증 코드를 보냅니다",
   "auth.accountRequired": "계정을 입력하세요",
+  "auth.passwordRequired": "비밀번호를 입력하세요",
   "validation.passwordMinLength": "비밀번호는 8자 이상이어야 합니다",
   "validation.passwordMaxLength": "비밀번호는 64바이트 이하여야 합니다",
   "validation.passwordUppercase": "비밀번호에 대문자를 포함하세요",

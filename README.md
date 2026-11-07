@@ -2,7 +2,7 @@
 
 即时通讯软件 — 从零构建的现代 IM 解决方案。
 
-**当前代码版本**：v0.7.0（Web + Desktop 三平台 + Android APK 由 GitHub Actions 自动打包）。
+**正式安装包**：[GitHub Releases](https://github.com/liaojie1314/yuanchat/releases/latest)（Web + Desktop 三平台 + Android APK 由 GitHub Actions 自动打包）。
 
 功能清单见 [MASTER_PLAN](docs/MASTER_PLAN.md#五核心功能清单)，验证记录见[实施计划](docs/superpowers/plans/2026-10-11-tray-palette-ota.md#执行进度)。
 
@@ -260,7 +260,7 @@
 - **通用设置**：主题、语言与文件下载目录集中一页，搜索快捷键设置仅在桌面/平板等非手机布局展示；目录卡显示名称和授权状态，支持重新授权及恢复浏览器默认保存
 - **端到端加密 E2EE**：X3DH 协商 + Double Ratchet 棘轮（`packages/shared/src/crypto/`），设置页内按用户开关，仅单聊；对方未启用时自动降级明文，支持密钥备份/恢复
 - **PWA**：生产构建注入自定义 Service Worker（app shell 预缓存 + Web Push 监听），可安装到桌面/主屏
-- **应用内更新（自建 OTA）**：`app_releases` 版本登记 / 灰度（0-100%，按设备稳定判定）/ 回滚，管理端 Releases 页管理；桌面端走 Tauri updater（自有域名在前、GitHub latest.json 兜底），Android 应用内自动更新（自绘更新卡 + 下载进度 + sha256 校验 + FileProvider 拉起系统安装器）
+- **应用内更新（自建 OTA）**：`app_releases` 版本登记 / 灰度（0-100%，按设备稳定判定）/ 回滚，管理端 Releases 页管理；桌面和 Android 在「设置 → 关于」检查更新，服务器最多尝试两次，检查失败才使用一次 GitHub，明确无更新时停止。桌面按当前安装格式匹配并校验签名；Android 使用签名通用 APK，下载后校验 SHA-256，再由系统安装器升级。服务器安装包副本与发布步骤见 [发版指南](docs/RELEASE.md#自建-ota-更新源)
 - **Web 端客户端下载入口**：侧栏（桌面 web）与设置页（手机 web）按系统和架构推荐安装包，走 `/updates/catalog`；「当前系统 / 其他平台」以紧凑行完整展示四个平台，缺包保留不可用行，列表内部滚动；无可用包时给 GitHub Releases 兜底链接
 - **离线本地消息库**：IndexedDB 五 store（`messages`/`conversations`/`media`/`outbox`/`meta`），登录开库、登出清库；冷启动先渲染本地再后台按 `seq` 水位增量对账，撤回/编辑/清空同步回放本地副本；媒体内容寻址 + 配额 LRU 缓存；断网期间文本消息入 `outbox`，上线串行补发（依赖既有幂等索引）。断网整页重载后会话列表与历史消息仍可浏览
 - **网络态反馈**：`useNetworkStatus` 三态（`online`/`connecting`/`offline`）+ 全局顶部横幅，仅在真实断网恢复后提示「已连接」并 2 秒自动收起；七个主列表支持下拉刷新，回前台 30 秒节流静默对账

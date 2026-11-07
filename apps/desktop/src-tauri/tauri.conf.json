@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "yuanchat",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "identifier": "com.yuanchat.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: http://localhost:9002 http://127.0.0.1:* https://storage.yuanyuan.blog; media-src 'self' blob: http://localhost:9002 https://storage.yuanyuan.blog; connect-src 'self' http://localhost:8085 ws://localhost:8086 http://localhost:9002 http://test-api.yuanchat.com ws://test-api.yuanchat.com https://api.yuanchat.com wss://api.yuanchat.com https://api.yuanyuan.blog wss://ws.yuanyuan.blog https://storage.yuanyuan.blog; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: http://localhost:9002 http://127.0.0.1:* https://storage.yuanyuan.blog; media-src 'self' blob: http://localhost:9002 https://storage.yuanyuan.blog; connect-src 'self' http://localhost:8085 ws://localhost:8086 http://localhost:9002 http://test-api.yuanchat.com ws://test-api.yuanchat.com https://api.yuanchat.com wss://api.yuanchat.com https://api.yuanyuan.blog wss://ws.yuanyuan.blog https://storage.yuanyuan.blog https://api.github.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     }
   },
   "bundle": {
@@ -47,10 +47,14 @@
     "createUpdaterArtifacts": true
   },
   "plugins": {
+    "http": {
+      "scopeRedirects": true
+    },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk3NjZENDkwRDIxMDE5M0MKUldROEdSRFNrTlJtbDNPSWJmMmFpcnpjaXZpd2JpanNuekZNVmp1NGlLYlBSaXkwU2JRTkFXTzYK",
       "endpoints": [
-        "https://api.yuanyuan.blog/api/v1/updates/{{target}}/{{arch}}?version={{current_version}}",
+        "https://api.yuanyuan.blog/api/v1/updates/{{target}}/{{arch}}?version={{current_version}}&bundle_type={{bundle_type}}",
+        "https://api.yuanyuan.blog/api/v1/updates/{{target}}/{{arch}}?version={{current_version}}&bundle_type={{bundle_type}}",
         "https://github.com/liaojie1314/yuanchat/releases/latest/download/latest.json"
       ],
       "windows": {

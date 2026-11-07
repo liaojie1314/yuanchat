@@ -178,6 +178,7 @@
   "auth.otpSentHint": "验证码已发送至 %{target}，5 分钟内有效",
   "auth.resetStepAccountHint": "输入注册时的邮箱，验证码会发到这里",
   "auth.accountRequired": "请输入账号",
+  "auth.passwordRequired": "请输入密码",
   "validation.passwordMinLength": "密码长度至少 8 位",
   "validation.passwordMaxLength": "密码长度不能超过 64 字节",
   "validation.passwordUppercase": "密码需包含大写字母",

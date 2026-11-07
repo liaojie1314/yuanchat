@@ -52,6 +52,11 @@ tauri-plugin-process = "2"
 [target."cfg(any(target_os = \"android\", target_os = \"ios\"))".dependencies]
 tauri-plugin-barcode-scanner = "2"
 
+# GitHub APK 的 CDN 不提供 CORS；仅 Android 用原生 HTTP，且不持久化或发送 Cookie。
+[target."cfg(target_os = \"android\")".dependencies]
+# 2.7 支持逐跳 URL 权限，后续版本要求升级 Tauri 核心，单独升级时再放开。
+tauri-plugin-http = { version = "=2.7.0", default-features = false, features = ["rustls-tls", "http2"] }
+
 # WebKitGTK 默认不给 media-stream，也不会弹授权框，语音消息要靠它开权限。
 # 版本与 tauri 自身依赖的一致，保证拿到的是同一个 WebView 类型
 [target."cfg(target_os = \"linux\")".dependencies]

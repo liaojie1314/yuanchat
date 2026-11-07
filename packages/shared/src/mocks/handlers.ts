@@ -1819,6 +1819,52 @@ export const handlers = [
   }),
 
   // --------------------------------------------------
+  // GitHub OTA 后备源：正常 / 空（404）/ 错误 / 延迟加载，不混入自建服务器鉴权。
+  // --------------------------------------------------
+  http.get(
+    "https://api.github.com/repos/liaojie1314/yuanchat/releases/latest",
+    async ({ request }) => {
+      const params = new URL(request.url).searchParams;
+      await delay(params.get("loading") === "1" ? 1500 : 500);
+      if (params.get("error") === "1") return new HttpResponse(null, { status: 503 });
+      if (params.get("empty") === "1") return new HttpResponse(null, { status: 404 });
+      return HttpResponse.json({
+        tag_name: "v9.9.9",
+        draft: false,
+        prerelease: false,
+        html_url: "https://github.com/liaojie1314/yuanchat/releases/tag/v9.9.9",
+        body: "mock：更新分发测试。",
+        published_at: "2026-11-07T00:00:00Z",
+        assets: [
+          {
+            name: "yuanchat-v9.9.9-app-universal-release.apk",
+            size: 5,
+            digest: "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+            browser_download_url:
+              "https://github.com/liaojie1314/yuanchat/releases/download/v9.9.9/yuanchat-v9.9.9-app-universal-release.apk",
+            url: "https://api.github.com/repos/liaojie1314/yuanchat/releases/assets/123",
+          },
+        ],
+      });
+    },
+  ),
+  http.get(
+    "https://api.github.com/repos/liaojie1314/yuanchat/releases/assets/:id",
+    async ({ request }) => {
+      const params = new URL(request.url).searchParams;
+      await delay(params.get("loading") === "1" ? 1500 : 500);
+      if (params.get("error") === "1") return new HttpResponse(null, { status: 503 });
+      if (params.get("empty") === "1") return new HttpResponse(null, { status: 204 });
+      return new HttpResponse("hello", {
+        headers: {
+          "Content-Type": "application/vnd.android.package-archive",
+          "Content-Length": "5",
+        },
+      });
+    },
+  ),
+
+  // --------------------------------------------------
   // OTA — 下载页目录（每个平台/架构的最新已发布版本）
   // GET /api/v1/updates/catalog
   // 四态：正常（三桌面 + 安卓）/ 空（[]）/ 错误（500）/ 加载（delay）
