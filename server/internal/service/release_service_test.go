@@ -364,3 +364,65 @@ func TestResolve_PreReleaseBelowMinimum(t *testing.T) {
 		t.Fatalf("预发布必须低于稳定最低版本: result=%v err=%v", got, err)
 	}
 }
+
+// TestResolveDesktop_BaseAndVariantGates 基础记录控制版本与总灰度，变体不能独立越过暂停或回滚。
+func TestResolveDesktop_BaseAndVariantGates(t *testing.T) {
+	db := testDB(t)
+	svc := newTestReleaseService(t, db)
+	base := seedRelease(t, db, "linux", "x86_64", "0.8.0", "stable", 100, model.ReleaseStatusPublished)
+	deb := seedRelease(t, db, "linux", "x86_64-deb", "0.8.0", "stable", 100, model.ReleaseStatusPublished)
+	seedRelease(t, db, "linux", "x86_64-rpm", "0.7.5", "stable", 100, model.ReleaseStatusPublished)
+	seedRelease(t, db, "linux", "x86_64-appimage", "0.9.0", "stable", 100, model.ReleaseStatusPublished)
+	setMinVersion(t, db, base.ID, "0.7.5")
+	got, err := svc.ResolveDesktop(context.Background(), "linux", "x86_64", "", "0.7.0", "device", nil)
+	if err != nil || got == nil || got.Release.ID != base.ID || !got.Mandatory ||
+		len(got.Platforms) != 1 || got.Platforms["linux-x86_64-deb"].ID != deb.ID {
+		t.Fatalf("只能下发基础版本的 deb，并保留强制更新判定：result=%+v err=%v", got, err)
+	}
+	for _, tc := range []struct {
+		name, version, status, variantStatus string
+		rollout                              int16
+	}{
+		{"same version", "0.8.0", model.ReleaseStatusPublished, model.ReleaseStatusPublished, 100},
+		{"newer client", "0.9.0", model.ReleaseStatusPublished, model.ReleaseStatusPublished, 100},
+		{"base paused", "0.7.0", model.ReleaseStatusPublished, model.ReleaseStatusPublished, 0},
+		{"base draft", "0.7.0", model.ReleaseStatusDraft, model.ReleaseStatusPublished, 100},
+		{"base rollback", "0.7.0", model.ReleaseStatusRolledBack, model.ReleaseStatusPublished, 100},
+		{"variant draft", "0.7.0", model.ReleaseStatusPublished, model.ReleaseStatusDraft, 100},
+		{"variant rollback", "0.7.0", model.ReleaseStatusPublished, model.ReleaseStatusRolledBack, 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := db.Model(base).Updates(map[string]any{"status": tc.status, "rollout": tc.rollout}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(deb).Update("status", tc.variantStatus).Error; err != nil {
+				t.Fatal(err)
+			}
+			got, err := svc.ResolveDesktop(context.Background(), "linux", "x86_64", "stable", tc.version, "device", nil)
+			if err != nil || got != nil {
+				t.Fatalf("没有可装更新时必须返回空结果：result=%+v err=%v", got, err)
+			}
+		})
+	}
+}
+
+// TestResolveDesktop_DarwinKeepsBaseVersion 精确架构基础记录优先，不能借通用 app 混入另一版本。
+func TestResolveDesktop_DarwinKeepsBaseVersion(t *testing.T) {
+	db := testDB(t)
+	svc := newTestReleaseService(t, db)
+	base := seedRelease(t, db, "darwin", "x86_64", "0.8.0", "stable", 100, model.ReleaseStatusPublished)
+	app := seedRelease(t, db, "darwin", "x86_64-app", "0.8.0", "stable", 100, model.ReleaseStatusPublished)
+	seedRelease(t, db, "darwin", "universal", "0.9.0", "stable", 100, model.ReleaseStatusPublished)
+	seedRelease(t, db, "darwin", "universal-app", "0.9.0", "stable", 100, model.ReleaseStatusPublished)
+	got, err := svc.ResolveDesktop(context.Background(), "darwin", "x86_64", "stable", "0.7.0", "device", nil)
+	if err != nil || got == nil || got.Release.ID != base.ID || got.Platforms["darwin-x86_64-app"].ID != app.ID {
+		t.Fatalf("精确架构基础版本必须优先：result=%+v err=%v", got, err)
+	}
+	if err := db.Model(app).Update("status", model.ReleaseStatusRolledBack).Error; err != nil {
+		t.Fatal(err)
+	}
+	got, err = svc.ResolveDesktop(context.Background(), "darwin", "x86_64", "stable", "0.7.0", "device", nil)
+	if err != nil || got != nil {
+		t.Fatalf("缺少同版本 app 不能混入其他版本：result=%+v err=%v", got, err)
+	}
+}

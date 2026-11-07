@@ -1255,10 +1255,13 @@ friend_requests_week, otp_today, otp_week}, "runtime": {online_connections}}`。
 - `POST /api/v1/admin/releases/:id/publish` — 发布：`status → published` 并写
   `published_at`，对外检查端点即刻按灰度百分比放行。审计 action=`publish_release`。
 - `POST /api/v1/admin/releases/:id/rollback` — 回滚：`status → rolled_back`，
-  **对外更新端点即刻止发**（204），已下载到本地的安装包不受影响。审计 action=`rollback_release`。
+  对外更新端点即刻停止下发该记录；若还有此前已发布的基础版本，则重新按客户端版本和
+  灰度判断，否则 `204`。已下载到本地的安装包不受影响。审计 action=`rollback_release`。
 
 管理后台 `apps/admin` 有对应「Releases」页面。签名私钥不入库也不进管理端进程——
 管理端只做登记与状态流转，`signature` 字段存 release 流水线产出的 minisign `.sig` 文本。
+桌面更新需要基础记录及同版本的安装器变体，登记约定见「三点六」；先发布变体，最后发布
+基础记录，可避免向旧客户端开放尚未齐备的格式清单。
 
 #### 对象存储
 
@@ -1426,43 +1429,95 @@ friend_requests_week, otp_today, otp_week}, "runtime": {online_connections}}`。
 
 检查更新（桌面 Tauri updater 与安卓自建更新链路共用）。
 
-| 参数                       | 位置   | 说明                                                               |
-| -------------------------- | ------ | ------------------------------------------------------------------ |
-| `platform`                 | path   | `darwin` / `linux` / `windows` / `android`                         |
-| `arch`                     | path   | `x86_64` / `aarch64` / `universal` / …                             |
-| `version`                  | query  | 客户端当前版本（必填）                                             |
-| `channel`                  | query  | `stable`（默认）/ `beta`                                           |
-| `device`                   | query  | 显式设备标识，优先于匿名桶头；按 FNV-1a 32 位哈希取模 100 判定灰度 |
-| `X-YuanChat-Update-Cohort` | header | 可选匿名灰度桶，十进制整数 `0..99`；仅无显式 `device` 时使用       |
+| 参数                       | 位置   | 说明                                                                |
+| -------------------------- | ------ | ------------------------------------------------------------------- |
+| `platform`                 | path   | `darwin` / `linux` / `windows` / `android`                          |
+| `arch`                     | path   | `x86_64` / `aarch64` / `universal` / …                              |
+| `bundle_type`              | query  | 可选桌面安装器：`deb` / `rpm` / `appimage` / `msi` / `nsis` / `app` |
+| `version`                  | query  | 客户端当前版本（必填）                                              |
+| `channel`                  | query  | `stable`（默认）/ `beta`                                            |
+| `device`                   | query  | 显式设备标识，优先于匿名桶头；按 FNV-1a 32 位哈希取模 100 判定灰度  |
+| `X-YuanChat-Update-Cohort` | header | 可选匿名灰度桶，十进制整数 `0..99`；仅无显式 `device` 时使用        |
 
 - 灰度优先级：非空 `device` 查询参数 → 有效匿名桶头 → ClientIP 的 FNV-1a 哈希桶。
   匿名桶以 `bucket < rollout` 放量，换网不改变结果；客户端同样使用 UTF-8 编码后的
   FNV-1a 32 位哈希 `% 100` 计算桶，只传桶而非设备唯一标识。非法桶（越界、负数、
   非整数等）沿用 IP 路径；`rollout=0` 全部暂停，`rollout=100` 全部放量。
   **匿名桶仅作放量，不作鉴权**：客户端可以自选桶，更新端点仍免 JWT，并保留 IP 限流。
-- macOS（`darwin`）的 `x86_64` / `aarch64` 请求优先选精确架构已发布包，仅不存在时
-  回落同渠道 `universal` 已发布包；其他平台及未知架构不回落。精确包即使发布时间
-  比通用包早也优先，草稿与回滚记录都不下发。
+- 基础记录使用不带安装器后缀的 `arch`，按最近的 `published_at` 选择在线版本。
+  macOS（`darwin`）的 `x86_64` / `aarch64` 请求优先选精确架构已发布基础记录，仅不存在时
+  回落同渠道 `universal`；其他平台及未知架构不回落。精确基础记录即使发布时间
+  比通用记录早也优先，草稿与回滚记录都不下发。
 - 当前版本与候选版本、最低版本均按 SemVer 优先级比较：预发布低于同号稳定版，
   数字预发布标识按数值比较，构建元数据不影响顺序。客户端非法版本按 `0.0.0` 处理；
   管理端登记仍严格拒绝非法版本。
 
-- **无更新 / 未中灰度 / 未知平台一律 `204` 空体**。返 200 带同版本号会让 updater
-  当成有更新、把同一个包再装一遍；204 的语义就是「确定没有」。
+- 无更新、客户端版本不低于在线版本、未中灰度、未知平台一律 `204` 空体。
+  `204` 明确表示本次没有可用更新，不得因此切换备用源绕过灰度或回滚。
 - 服务端自身故障（含对象存储不可达）必须 **5xx**（`503` / `500`），**刻意不降级成 204**：
   Tauri updater 收到 204 会直接认定没有更新、**不再**尝试 endpoints 列表里的下一个，
-  只有 5xx 才会落到 GitHub 兜底。
-- `200` 返回**扁平的 dynamic 格式更新体，不包 `{data}` 外层**——tauri-plugin-updater
-  直接解析响应体根对象，包一层它读不到 `version` 字段；也绝不能带 `platforms` 字段
-  （该字段一出现 updater 就切到 static 格式解析）：
+  网络或 5xx 故障才允许按客户端重试策略使用备用源。
+- 所有 `200` 响应都不包 `{data}` 外层。桌面返回带 `platforms` 的 Tauri static 清单，
+  Android 保留含 `url` / `sha256` / `size` 的 flat dynamic 响应。
+
+桌面安装器登记使用现有 `app_releases`，不另建表。基础记录的 `object_key` 供 Web 手动下载，
+可以指向 DMG、AppImage 等；自动更新只使用同版本、同渠道的独立变体：
+
+| 平台    | 基础 `arch` 示例                   | 变体 `arch`                                         | 安装器对象                                       |
+| ------- | ---------------------------------- | --------------------------------------------------- | ------------------------------------------------ |
+| Linux   | `x86_64`                           | `x86_64-deb` / `x86_64-rpm` / `x86_64-appimage`     | 对应 `.deb` / `.rpm` / `.AppImage` 及各自 `.sig` |
+| Windows | `x86_64`                           | `x86_64-msi` / `x86_64-nsis`                        | 对应 `.msi` / NSIS `.exe` 及各自 `.sig`          |
+| macOS   | `x86_64` / `aarch64` / `universal` | 对应 `x86_64-app` / `aarch64-app` / `universal-app` | `.app.tar.gz` 及对应 `.sig`，不能使用 DMG        |
+| Android | `aarch64`                          | 无变体                                              | 基础记录的 APK 与 SHA-256                        |
+
+- 变体的 `version` 必须与基础记录完全相同，`object_key` 与 `signature` 必须对应同一真实产物。
+  不能从文件名拼出未登记 URL，也不能用旧版或新版变体填补缺项。
+- 基础记录决定版本、说明、发布日期及强制更新条件；变体只有在基础记录和自身都已发布、
+  且同一设备桶同时命中两者 `rollout` 时才下发。回滚基础记录会关闭其整组变体；
+  回滚单个变体会将该记录排除，暂停则停止其下发；macOS 的通用回落仍按下一条规则处理。
+- macOS 同版本精确 `*-app` 不存在时，可使用同版本 `universal-app`，对外键仍是请求架构，
+  如 `darwin-aarch64-app`。精确变体已发布但未命中灰度时，不得绕到通用变体。
+- 桌面响应只含 `{platform}-{arch}-{installer}` 精确键，不含 `linux-x86_64` 等通用键，
+  也不含顶层 `url` / `signature`。Tauri 会按当前安装器选择 `.deb`、`.rpm`、AppImage、MSI、
+  NSIS 或 app，避免把一种格式交给另一种安装器。
+- 未登记、未发布、未命中灰度的变体不加入清单；没有任何可用变体时返回 `204`。
+  新客户端可传 `bundle_type`，服务端只检查并返回该格式；该格式不可用或不属于当前平台时
+  明确返回 `204`，其他格式的配置故障不影响它。Android 忽略此参数。
+  旧客户端未传参数时，部分格式缺失不影响其余格式；Tauri 2.10.1 若找不到自身精确键，会报
+  `TargetsNotFound`。该错误发生在成功解析清单后，不会继续尝试下一个 endpoint；不会改装其他格式。
+- 检查范围内已发布且命中灰度的变体缺 `object_key` / `signature`、实际对象不存在、对象检查或预签名失败，
+  整次检查返回 `500`，不能省略为 `204` 或返回部分成功结果。桌面签发 URL 前会检查对象存在。
+
+桌面 `200` 示例：
+
+```json
+{
+  "version": "0.8.0",
+  "notes": "修复…",
+  "pub_date": "2026-11-07T08:00:00Z",
+  "mandatory": false,
+  "platforms": {
+    "linux-x86_64-deb": {
+      "url": "https://storage.yuanyuan.blog/yuanchat/releases/<deb-object>?X-Amz-...",
+      "signature": "<deb 对应的 minisign 签名文本>"
+    },
+    "linux-x86_64-appimage": {
+      "url": "https://storage.yuanyuan.blog/yuanchat/releases/<appimage-object>?X-Amz-...",
+      "signature": "<AppImage 对应的 minisign 签名文本>"
+    }
+  }
+}
+```
+
+Android `200` 示例（保持原格式，不带 `platforms`）：
 
 ```json
 {
   "version": "0.7.0",
   "notes": "修复…",
   "pub_date": "2026-10-25T08:00:00Z",
-  "url": "https://storage.yuanyuan.blog/yuanchat/releases/<uuid>.AppImage?X-Amz-...",
-  "signature": "<minisign 签名文本>",
+  "url": "https://storage.yuanyuan.blog/yuanchat/releases/<uuid>.apk?X-Amz-...",
+  "signature": "",
   "sha256": "<hex>",
   "size": 94371840,
   "mandatory": false
@@ -1473,7 +1528,8 @@ friend_requests_week, otp_today, otp_week}, "runtime": {online_connections}}`。
 
 ### GET /api/v1/updates/catalog?channel=
 
-列出某渠道下每个平台/架构的最新已发布版本，供 Web 端下载页用。
+列出某渠道下每个平台/架构的最新已发布基础版本，供 Web 端下载页用。
+安装器后缀变体不出现在此目录中，避免同一架构重复列出多个内部记录。
 
 ```json
 {

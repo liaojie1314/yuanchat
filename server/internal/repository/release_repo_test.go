@@ -69,3 +69,34 @@ func TestLatestPublished_DarwinUniversalFallback(t *testing.T) {
 		}
 	}
 }
+
+// TestPublishedVariants_IdentityAndStatus 变体查询必须同时限定平台、版本、渠道、格式与已发布状态。
+func TestPublishedVariants_IdentityAndStatus(t *testing.T) {
+	db := testDB(t)
+	repo := NewReleaseRepository(db)
+	for _, row := range []model.AppRelease{
+		{Platform: "linux", Arch: "x86_64-deb", Version: "0.8.0", Channel: "stable", Status: model.ReleaseStatusPublished},
+		{Platform: "linux", Arch: "x86_64-rpm", Version: "0.8.0", Channel: "stable", Status: model.ReleaseStatusDraft},
+		{Platform: "linux", Arch: "x86_64-appimage", Version: "0.8.0", Channel: "stable", Status: model.ReleaseStatusRolledBack},
+		{Platform: "linux", Arch: "x86_64-deb", Version: "0.9.0", Channel: "stable", Status: model.ReleaseStatusPublished},
+		{Platform: "linux", Arch: "x86_64-deb", Version: "0.7.5", Channel: "stable", Status: model.ReleaseStatusPublished},
+		{Platform: "linux", Arch: "x86_64-deb", Version: "0.8.0", Channel: "beta", Status: model.ReleaseStatusPublished},
+		{Platform: "windows", Arch: "x86_64-deb", Version: "0.8.0", Channel: "stable", Status: model.ReleaseStatusPublished},
+		{Platform: "linux", Arch: "x86_64-nsis", Version: "0.8.0", Channel: "stable", Status: model.ReleaseStatusPublished},
+	} {
+		row.ObjectKey = "releases/" + uuid.NewString()
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := repo.PublishedVariants(context.Background(), "linux", "0.8.0", "stable",
+		[]string{"x86_64-deb", "x86_64-rpm", "x86_64-appimage"})
+	if err != nil || len(rows) != 1 || rows[0].Arch != "x86_64-deb" {
+		t.Fatalf("变体身份或状态过滤失效：rows=%+v err=%v", rows, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := repo.PublishedVariants(ctx, "linux", "0.8.0", "stable", []string{"x86_64-deb"}); err == nil {
+		t.Fatal("查询失败不能伪装成没有变体")
+	}
+}

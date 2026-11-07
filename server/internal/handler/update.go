@@ -4,9 +4,11 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/yuanchat/server/internal/model"
 	"github.com/yuanchat/server/internal/service"
 	"go.uber.org/zap"
 )
@@ -18,7 +20,7 @@ import (
 // 安装包不是隐私内容，放宽 TTL 的代价只是「URL 泄露后能多下几小时」。
 const releaseURLTTL = 6 * time.Hour
 
-// ReleasePresigner 为安装包对象键签发预签名下载 URL，由 storage.Storage 实现。
+// ReleasePresigner 检查安装包对象并签发预签名下载 URL，由 storage.Storage 实现。
 //
 // 抽成接口以便 handler 测试注入桩（对外端点不该在单测里真连 MinIO），
 // 与 ObjectACL 同一种拆法。
@@ -27,6 +29,7 @@ const releaseURLTTL = 6 * time.Hour
 // SigV4 把 host 纳入签名，替换即失效。
 type ReleasePresigner interface {
 	PresignGet(ctx context.Context, objectKey string, expires time.Duration) (string, error)
+	ObjectExists(ctx context.Context, objectKey string) (bool, error)
 }
 
 // UpdateHandler 对外更新端点（免鉴权）。
@@ -115,11 +118,12 @@ func (h *UpdateHandler) Catalog(c *gin.Context) {
 //	@Tags			updates
 //	@Param			platform	path	string	true	"darwin / linux / windows / android"
 //	@Param			arch		path	string	true	"x86_64 / aarch64 / universal / ..."
+//	@Param			bundle_type	query	string	false	"桌面安装器 deb / rpm / appimage / msi / nsis / app"
 //	@Param			version		query	string	true	"客户端当前版本"
 //	@Param			channel		query	string	false	"stable（默认）/ beta"
 //	@Param			device		query	string	false	"设备标识，用于稳定灰度，优先于匿名桶"
 //	@Param			X-YuanChat-Update-Cohort	header	int	false	"匿名灰度桶（0..99），仅无 device 时使用"
-//	@Success		200	"扁平的 dynamic 格式更新体"
+//	@Success		200	"桌面 static 清单；Android dynamic 更新体"
 //	@Success		204	"无可用更新"
 //	@Router			/api/v1/updates/{platform}/{arch} [get]
 func (h *UpdateHandler) Check(c *gin.Context) {
@@ -140,7 +144,12 @@ func (h *UpdateHandler) Check(c *gin.Context) {
 		}
 	}
 
-	res, err := h.svc.Resolve(c.Request.Context(),
+	resolve := h.svc.Resolve
+	switch c.Param("platform") {
+	case "linux", "windows", "darwin":
+		resolve = h.svc.ResolveDesktop
+	}
+	res, err := resolve(c.Request.Context(),
 		c.Param("platform"), c.Param("arch"),
 		c.Query("channel"), c.Query("version"), deviceKey, cohort)
 	if err != nil {
@@ -150,17 +159,9 @@ func (h *UpdateHandler) Check(c *gin.Context) {
 		InternalError(c, "resolve failed")
 		return
 	}
-	// 无更新 / 未中灰度 / 未知平台 一律 204 空体：
-	// 返 200 带同版本号的话 updater 会当成有更新、把同一个包再装一遍。
+	// 无更新 / 未中灰度 / 未知平台一律 204，明确阻止客户端继续询问备用源。
 	if res == nil {
 		c.Status(http.StatusNoContent)
-		return
-	}
-
-	url, err := h.presigner.PresignGet(c.Request.Context(), res.Release.ObjectKey, releaseURLTTL)
-	if err != nil {
-		h.logger.Error("presign release failed", zap.Error(err))
-		InternalError(c, "presign failed")
 		return
 	}
 
@@ -174,15 +175,58 @@ func (h *UpdateHandler) Check(c *gin.Context) {
 
 	// 不走 Success() 包一层 {data:...}：tauri-plugin-updater 直接解析响应体
 	// 根对象，包一层它读不到 version 字段。
-	// 也**绝不能**带 platforms —— 该字段一出现 updater 就切到 static 格式解析。
-	c.JSON(http.StatusOK, gin.H{
+	body := gin.H{
 		"version":   res.Release.Version,
 		"notes":     res.Release.Notes,
 		"pub_date":  pubDate.Format(time.RFC3339),
-		"url":       url,
-		"signature": res.Release.Signature,
-		"sha256":    res.Release.Sha256,
-		"size":      res.Release.Size,
 		"mandatory": res.Mandatory,
-	})
+	}
+	if res.Platforms != nil {
+		if bundle := c.Query("bundle_type"); bundle != "" {
+			target := c.Param("platform") + "-" + c.Param("arch") + "-" + bundle
+			variant, found := res.Platforms[target]
+			if !found {
+				// 已知安装器没有可用变体时明确返回 204，防止客户端重试绕过该格式灰度。
+				c.Status(http.StatusNoContent)
+				return
+			}
+			res.Platforms = map[string]model.AppRelease{target: variant}
+		}
+		platforms := make(map[string]gin.H, len(res.Platforms))
+		for target, variant := range res.Platforms {
+			if strings.TrimSpace(variant.ObjectKey) == "" || strings.TrimSpace(variant.Signature) == "" {
+				h.logger.Error("incomplete updater variant", zap.String("release_id", variant.ID.String()))
+				InternalError(c, "incomplete updater variant")
+				return
+			}
+			// PresignGet 本身不访问对象；已放量对象缺失是故障，不能伪装成没有更新。
+			exists, err := h.presigner.ObjectExists(c.Request.Context(), variant.ObjectKey)
+			if err != nil || !exists {
+				h.logger.Error("release object unavailable", zap.String("object_key", variant.ObjectKey), zap.Error(err))
+				InternalError(c, "release object unavailable")
+				return
+			}
+			url, err := h.presigner.PresignGet(c.Request.Context(), variant.ObjectKey, releaseURLTTL)
+			if err != nil {
+				h.logger.Error("presign release failed", zap.Error(err))
+				InternalError(c, "presign failed")
+				return
+			}
+			platforms[target] = gin.H{"url": url, "signature": variant.Signature}
+		}
+		// 只返回安装器精确键；通用键会让 deb/MSI 客户端误装 AppImage/NSIS。
+		body["platforms"] = platforms
+	} else {
+		url, err := h.presigner.PresignGet(c.Request.Context(), res.Release.ObjectKey, releaseURLTTL)
+		if err != nil {
+			h.logger.Error("presign release failed", zap.Error(err))
+			InternalError(c, "presign failed")
+			return
+		}
+		body["url"] = url
+		body["signature"] = res.Release.Signature
+		body["sha256"] = res.Release.Sha256
+		body["size"] = res.Release.Size
+	}
+	c.JSON(http.StatusOK, body)
 }

@@ -56,6 +56,20 @@ func (r *ReleaseRepository) LatestPublished(
 	return &rel, nil
 }
 
+// PublishedVariants 只取基础记录同版本、同渠道的已发布安装器变体，禁止跨版本拼清单。
+func (r *ReleaseRepository) PublishedVariants(
+	ctx context.Context,
+	platform, version, channel string,
+	arches []string,
+) ([]model.AppRelease, error) {
+	var rows []model.AppRelease
+	err := r.db.WithContext(ctx).
+		Where("platform = ? AND version = ? AND channel = ? AND status = ? AND arch IN ?",
+			platform, version, channel, model.ReleaseStatusPublished, arches).
+		Find(&rows).Error
+	return rows, err
+}
+
 // CatalogLatest 取某渠道下每个 (platform, arch) 的最新已发布版本，供下载页列表用。
 //
 // 用 DISTINCT ON 而不是在应用层去重：平台/架构组合会随新端增加，

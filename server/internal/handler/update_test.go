@@ -21,15 +21,31 @@ import (
 
 // stubPresigner 预签名桩：对外端点不该在单测里真连 MinIO。
 type stubPresigner struct {
-	url  string
-	err  error
-	keys []string
+	url            string
+	err            error
+	keys           []string
+	urls           map[string]string
+	missingObjects map[string]bool
+	statErr        error
 }
 
+// ObjectExists 模拟对象缺失与存储故障；已有夹具默认对象存在。
+func (s *stubPresigner) ObjectExists(_ context.Context, objectKey string) (bool, error) {
+	return !s.missingObjects[objectKey], s.statErr
+}
+
+// PresignGet 按已登记对象返回对应 URL，避免多格式测试把所有包指向同一地址。
 func (s *stubPresigner) PresignGet(_ context.Context, objectKey string, _ time.Duration) (string, error) {
 	s.keys = append(s.keys, objectKey)
 	if s.err != nil {
 		return "", s.err
+	}
+	if s.urls != nil {
+		url, ok := s.urls[objectKey]
+		if !ok {
+			return "", errors.New("unregistered object")
+		}
+		return url, nil
 	}
 	return s.url, nil
 }
@@ -89,6 +105,7 @@ func seedPublished(t *testing.T, db *gorm.DB, platform, arch, version string) *m
 func TestUpdates_204WhenNoNewer(t *testing.T) {
 	db := packTestDB(t)
 	seedPublished(t, db, "linux", "x86_64", "0.7.0")
+	seedPublished(t, db, "linux", "x86_64-deb", "0.7.0")
 	r := newUpdateEngine(db, &stubPresigner{url: "https://cdn.example/app"})
 
 	w := doGetNoAuth(t, r, "/api/v1/updates/linux/x86_64?version=0.7.0")
@@ -100,16 +117,13 @@ func TestUpdates_204WhenNoNewer(t *testing.T) {
 	}
 }
 
-// TestUpdates_200WithFlatBody 更新体是扁平的 dynamic 格式，不包 {data:...} 外层。
-//
-// tauri-plugin-updater 直接解析响应体根对象（RemoteRelease 的手写 Deserialize，
-// 判别依据是 platforms 字段在不在），包一层它读不到 version。
+// TestUpdates_200WithFlatBody Android 保留扁平 dynamic 格式，不包 data 或 platforms。
 func TestUpdates_200WithFlatBody(t *testing.T) {
 	db := packTestDB(t)
-	seedPublished(t, db, "linux", "x86_64", "0.8.0")
+	seedPublished(t, db, "android", "aarch64", "0.8.0")
 	r := newUpdateEngine(db, &stubPresigner{url: "https://cdn.example/app-0.8.0"})
 
-	w := doGetNoAuth(t, r, "/api/v1/updates/linux/x86_64?version=0.7.0&device=d1")
+	w := doGetNoAuth(t, r, "/api/v1/updates/android/aarch64?version=0.7.0&device=d1")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
 	}
@@ -152,6 +166,7 @@ func TestUpdates_204WhenNotInRollout(t *testing.T) {
 		Platform: "linux", Arch: "x86_64", Version: "0.8.0",
 		Status: model.ReleaseStatusPublished, Rollout: 0, Signature: "sig",
 	})
+	seedPublished(t, db, "linux", "x86_64-deb", "0.8.0")
 	r := newUpdateEngine(db, &stubPresigner{url: "https://cdn.example/app"})
 
 	w := doGetNoAuth(t, r, "/api/v1/updates/linux/x86_64?version=0.7.0&device=d1")
@@ -167,6 +182,7 @@ func TestUpdates_RolloutStableAcrossRequests(t *testing.T) {
 		Platform: "linux", Arch: "x86_64", Version: "0.8.0",
 		Status: model.ReleaseStatusPublished, Rollout: 50, Signature: "sig",
 	})
+	seedPublished(t, db, "linux", "x86_64-deb", "0.8.0")
 	r := newUpdateEngine(db, &stubPresigner{url: "https://cdn.example/app"})
 
 	const target = "/api/v1/updates/linux/x86_64?version=0.7.0&device=fixed"
@@ -227,6 +243,7 @@ func TestUpdates_UnknownPlatformIs204(t *testing.T) {
 func TestUpdates_PresignFailureIs500(t *testing.T) {
 	db := packTestDB(t)
 	seedPublished(t, db, "linux", "x86_64", "0.8.0")
+	seedPublished(t, db, "linux", "x86_64-deb", "0.8.0")
 	r := newUpdateEngine(db, &stubPresigner{err: errors.New("minio down")})
 
 	w := doGetNoAuth(t, r, "/api/v1/updates/linux/x86_64?version=0.7.0&device=d1")
@@ -239,6 +256,7 @@ func TestUpdates_PresignFailureIs500(t *testing.T) {
 func TestCatalog_OnlyPublished(t *testing.T) {
 	db := packTestDB(t)
 	seedPublished(t, db, "windows", "x86_64", "0.8.0")
+	seedPublished(t, db, "windows", "x86_64-nsis", "0.8.0")
 	seedRel(t, db, model.AppRelease{
 		Platform: "darwin", Arch: "universal", Version: "0.9.0",
 		Status: model.ReleaseStatusDraft, Rollout: 100,
@@ -255,6 +273,9 @@ func TestCatalog_OnlyPublished(t *testing.T) {
 	}
 	if strings.Contains(body, "darwin") {
 		t.Fatalf("draft 不得出现在下载页: %s", body)
+	}
+	if strings.Contains(body, "x86_64-nsis") {
+		t.Fatalf("安装器变体不得重复出现在下载页: %s", body)
 	}
 }
 
@@ -287,6 +308,7 @@ func TestUpdates_CohortHeaderStableAcrossIPs(t *testing.T) {
 		Platform: "linux", Arch: "x86_64", Version: "0.8.0",
 		Status: model.ReleaseStatusPublished, Rollout: 50, Signature: "sig",
 	})
+	seedPublished(t, db, "linux", "x86_64-deb", "0.8.0")
 	r := newUpdateEngine(db, &stubPresigner{url: "https://cdn.example/app"})
 	const target = "/api/v1/updates/linux/x86_64?version=0.7.0"
 	check := func(ip, header, device string, want int) {
